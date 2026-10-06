@@ -24,6 +24,7 @@ arboard = { version = "3.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+ureq = "3.4"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

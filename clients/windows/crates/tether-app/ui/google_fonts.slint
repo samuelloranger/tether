@@ -1,0 +1,106 @@
+import { Tokens } from "tokens.slint";
+import { Field, PrimaryButton, SecondaryButton } from "components.slint";
+import { GoogleFontRow, GoogleFontsBridge } from "extras_bridge.slint";
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    height: 28px;
+    width: label.preferred-width + 20px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    background: touch.has-hover ? Tokens.surface-hover : Tokens.raised;
+    touch := TouchArea { enabled: !GoogleFontsBridge.busy; mouse-cursor: pointer; clicked => { root.clicked(); } }
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        color: Tokens.text;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component InstalledRow inherits Rectangle {
+    in property <GoogleFontRow> entry;
+    height: 46px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    TouchArea { mouse-cursor: pointer; clicked => { GoogleFontsBridge.choose(root.entry.id); } }
+    HorizontalLayout {
+        spacing: 10px;
+        padding-right: 6px;
+        Text { text: root.entry.name; font-size: 15px; color: Tokens.text; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        if root.entry.active: Text { text: "✓"; color: Tokens.accent; font-weight: 700; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: remove-label.preferred-width + 16px;
+                height: 28px;
+                border-radius: 8px;
+                background: remove-touch.has-hover ? Tokens.danger.with-alpha(0.12) : transparent;
+                remove-touch := TouchArea { mouse-cursor: pointer; clicked => { GoogleFontsBridge.remove(root.entry.id); } }
+                remove-label := Text {
+                    width: 100%;
+                    height: 100%;
+                    text: "Remove";
+                    color: Tokens.danger;
+                    font-size: 13px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+export component GoogleFontsSection inherits VerticalLayout {
+    spacing: 10px;
+    padding-top: 22px;
+    padding-bottom: 28px;
+    Text { text: "Google Fonts"; font-size: 12px; font-weight: 650; color: Tokens.text-faint; }
+    Text {
+        text: "Paste a fonts.google.com link or a family name. Only monospaced families work in a terminal.";
+        wrap: word-wrap;
+        font-size: 13px;
+        color: Tokens.text-secondary;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        Field {
+            placeholder: "Fira Code";
+            text <=> GoogleFontsBridge.input;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: end;
+            if GoogleFontsBridge.input == "" && !GoogleFontsBridge.busy: SecondaryButton { text: "Download"; enabled: false; }
+            if GoogleFontsBridge.input != "" || GoogleFontsBridge.busy: PrimaryButton {
+                text: GoogleFontsBridge.busy ? "Downloading…" : "Download";
+                enabled: !GoogleFontsBridge.busy;
+                clicked => { GoogleFontsBridge.download(GoogleFontsBridge.input); }
+            }
+        }
+    }
+    if GoogleFontsBridge.status != "": Text {
+        text: GoogleFontsBridge.status;
+        wrap: word-wrap;
+        font-size: 13px;
+        color: GoogleFontsBridge.status-error ? Tokens.danger : Tokens.success;
+    }
+    VerticalLayout {
+        spacing: 6px;
+        for row in GoogleFontsBridge.suggestion-rows: HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            for name in row.names: Chip { text: name; clicked => { GoogleFontsBridge.download(name); } }
+        }
+    }
+    if GoogleFontsBridge.installed.length > 0: VerticalLayout {
+        padding-top: 8px;
+        for row in GoogleFontsBridge.installed: InstalledRow { entry: row; }
+    }
+}

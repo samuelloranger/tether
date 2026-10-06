@@ -231,6 +231,7 @@ mod tests {
             port: 22,
             user: "sam".into(),
             auth: Auth::Agent,
+            jump: None,
         };
         let mut form = ServerForm::from_machine(&old, false);
         form.host = "new".into();

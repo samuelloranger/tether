@@ -4,7 +4,9 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::CursorShape as TermCursorShape;
 use tether_core::links::LinkSpan;
 
+use crate::images::{ImageView, is_tag};
 use crate::palette;
+use crate::search::SearchHit;
 use crate::terminal::{Cell, TabTerminal};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +35,7 @@ pub struct Snapshot {
     pub osc8: Vec<Vec<LinkSpan>>,
     pub display_offset: usize,
     pub background: u32,
+    pub images: Vec<ImageView>,
 }
 
 impl Snapshot {
@@ -54,6 +57,7 @@ impl TabTerminal {
             .as_ref()
             .and_then(|s| s.to_range(&self.term));
 
+        let matches = self.visible_matches();
         let mut cells = Vec::with_capacity(cols * rows);
         let mut row_texts = Vec::with_capacity(rows);
         let mut wrapped = Vec::with_capacity(rows);
@@ -83,13 +87,22 @@ impl TabTerminal {
                 let selected = selection
                     .as_ref()
                     .is_some_and(|s| s.contains(Point::new(line, Column(c))));
+                if !matches.is_empty() {
+                    let found = palette::theme_color(theme, 3);
+                    match crate::search::hit_at(&matches, Point::new(line, Column(c))) {
+                        SearchHit::Current => (fg, bg) = (theme.background, found),
+                        SearchHit::Match => bg = palette::mix(found, theme.background, 0.35),
+                        SearchHit::None => {}
+                    }
+                }
                 if selected {
                     match theme.selection {
                         Some(sel) => bg = sel,
                         None => (fg, bg) = (theme.background, theme.foreground),
                     }
                 }
-                let ch = if spacer || cell.c == '\0' {
+                // alacritty keeps a tab as '\t' in the cell it lands on; it draws as blank.
+                let ch = if spacer || cell.c.is_control() {
                     ' '
                 } else {
                     cell.c
@@ -107,7 +120,10 @@ impl TabTerminal {
                 }
                 cells.push(RenderCell {
                     ch,
-                    zerowidth: cell.zerowidth().map(<[char]>::to_vec).unwrap_or_default(),
+                    zerowidth: cell
+                        .zerowidth()
+                        .map(|z| z.iter().copied().filter(|c| !is_tag(*c)).collect())
+                        .unwrap_or_default(),
                     fg,
                     bg,
                     bold: flags.contains(Flags::BOLD),
@@ -145,6 +161,7 @@ impl TabTerminal {
             osc8,
             display_offset: offset,
             background: theme.background,
+            images: self.image_views(),
         }
     }
 }
@@ -238,6 +255,19 @@ mod tests {
         t.feed("x\r\n".repeat(40).as_bytes());
         t.scroll(10);
         assert_eq!(t.snapshot().cursor, None);
+    }
+
+    #[test]
+    fn a_tab_draws_as_a_blank_cell() {
+        let mut t = crate::terminal::tests::term();
+        t.feed(b"a\tb\r\n");
+        let s = t.snapshot();
+        assert!(
+            s.row_texts[0].starts_with("a       b"),
+            "{:?}",
+            s.row_texts[0]
+        );
+        assert!((0..s.cols).all(|c| !s.cell(0, c).ch.is_control()));
     }
 
     #[test]

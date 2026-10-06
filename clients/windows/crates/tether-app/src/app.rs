@@ -13,8 +13,9 @@ use tether_core::{
 use uuid::Uuid;
 
 use crate::{
-    AppBridge, AppWindow, FontRow, HomeBridge, KeyCard, KeyFormBridge, MachineCard, PageKind,
-    PickerBridge, SchemeRow, ServerFormBridge, SettingsBridge, Tokens,
+    AppBridge, AppWindow, FontRow, HomeBridge, ImportRow as ImportRowItem, KeyCard, KeyFormBridge,
+    MachineCard, PageKind, PickerBridge, SchemeRow, ServerFormBridge, SettingsBridge,
+    SshImportBridge, Tokens,
     open_machine::on_open_machine,
     platform,
     preview::Preview,
@@ -26,6 +27,7 @@ use crate::{
         pickers, placement, scene,
         server_form::{ServerFormVm, ServerInput},
         settings,
+        ssh_import::{self, SshImportVm},
     },
 };
 
@@ -41,6 +43,7 @@ pub struct App {
     server_form: RefCell<Option<ServerFormVm>>,
     generate: RefCell<GenerateVm>,
     key_material: RefCell<Option<KeyMaterialVm>>,
+    ssh_import: RefCell<Option<SshImportVm>>,
     preview: RefCell<Preview>,
     cursor_on: Cell<bool>,
     blink_timer: slint::Timer,
@@ -49,6 +52,7 @@ pub struct App {
 fn page_kind(page: &Page) -> PageKind {
     match page {
         Page::Home => PageKind::Home,
+        Page::SshImport => PageKind::SshImport,
         Page::ServerForm { .. } => PageKind::ServerForm,
         Page::KeyGenerate => PageKind::KeyGenerate,
         Page::KeyImport => PageKind::KeyImport,
@@ -59,6 +63,7 @@ fn page_kind(page: &Page) -> PageKind {
         Page::Terminal => PageKind::Terminal,
         Page::HostKeyRefused => PageKind::HostKeyRefused,
         Page::CouldntConnect => PageKind::CouldntConnect,
+        Page::Snippets => PageKind::Snippets,
     }
 }
 
@@ -110,6 +115,7 @@ impl App {
         let secrets = secret_store(&data);
         let hostkeys = Arc::new(JsonHostKeys::new(DataDir::new(data.root()))?);
         let state = AppState::load(data, secrets, hostkeys)?;
+        crate::extras::init(state.data.root());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -125,6 +131,7 @@ impl App {
             server_form: RefCell::new(None),
             generate: RefCell::new(GenerateVm::default()),
             key_material: RefCell::new(None),
+            ssh_import: RefCell::new(None),
             preview: RefCell::new(Preview::new()),
             cursor_on: Cell::new(true),
             blink_timer: slint::Timer::default(),
@@ -179,6 +186,20 @@ impl App {
             }
         });
         home.on_add_machine(on(self, |app| app.open_server_form(None)));
+        home.on_import_ssh_config(on(self, |app| app.open_ssh_import()));
+        let import = self.ui.global::<SshImportBridge>();
+        let weak = Rc::downgrade(self);
+        import.on_toggle(move |i| {
+            if let Some(app) = weak.upgrade() {
+                if let (Some(vm), Ok(i)) =
+                    (app.ssh_import.borrow_mut().as_mut(), usize::try_from(i))
+                {
+                    vm.toggle(i);
+                }
+                app.push_ssh_import();
+            }
+        });
+        import.on_import(on(self, |app| app.commit_ssh_import()));
         home.on_open_settings(on(self, |app| app.open_settings()));
         home.on_open_machine(on_id(self, |app, id| {
             let machine = app.state.borrow().profiles.get(id).cloned();
@@ -302,6 +323,7 @@ impl App {
                 }
             },
         );
+        crate::extras::install(self);
     }
 
     pub fn run(self: &Rc<Self>) -> Result<(), slint::PlatformError> {
@@ -443,6 +465,7 @@ impl App {
                     .keys
                     .get(id)
                     .map(|k| home::delete_key_copy(k, &s.profiles)),
+                Dialog::DeleteSnippet(id) => crate::extras::delete_copy(id),
             }
         });
         bridge.set_dialog_open(copy.is_some());
@@ -460,6 +483,7 @@ impl App {
         self.refresh_scene();
         self.refresh_settings();
         self.refresh_pickers();
+        crate::extras::refresh_fonts(self);
     }
 
     pub fn on_winit_event(self: &Rc<Self>, event: &WindowEvent) -> EventResult {
@@ -574,6 +598,78 @@ impl App {
         self.refresh_router();
     }
 
+    pub fn open_ssh_import(&self) {
+        let rows = {
+            let s = self.state.borrow();
+            let hosts = ssh_import::home_dir()
+                .map(|home| {
+                    tether_core::sshconfig::read_config(&home, &tether_core::sshconfig::DiskFiles)
+                })
+                .unwrap_or_default();
+            tether_core::sshimport::plan(
+                &hosts,
+                &s.profiles.machines,
+                &s.keys,
+                &ssh_import::default_user(),
+                &|p| std::fs::read_to_string(p).ok(),
+            )
+        };
+        *self.ssh_import.borrow_mut() = Some(SshImportVm::new(rows));
+        self.push_ssh_import();
+        self.router.go(Page::SshImport);
+        self.refresh_router();
+    }
+
+    fn push_ssh_import(&self) {
+        let slot = self.ssh_import.borrow();
+        let Some(vm) = slot.as_ref() else {
+            return;
+        };
+        let b = self.ui.global::<SshImportBridge>();
+        let rows: Vec<ImportRowItem> = vm
+            .views()
+            .into_iter()
+            .map(|r| ImportRowItem {
+                label: r.label.into(),
+                detail: r.detail.into(),
+                auth: r.auth.into(),
+                via: r.via.into(),
+                existing: r.existing,
+                checked: r.checked,
+            })
+            .collect();
+        b.set_rows(ModelRc::new(VecModel::from(rows)));
+        b.set_import_label(vm.import_label().into());
+        b.set_can_import(vm.can_import());
+        b.set_hint(vm.hint().into());
+    }
+
+    fn commit_ssh_import(&self) {
+        let result = {
+            let slot = self.ssh_import.borrow();
+            let Some(vm) = slot.as_ref() else {
+                return;
+            };
+            self.state
+                .borrow_mut()
+                .import_hosts(&vm.rows, &vm.picked(), unix_now())
+        };
+        match result {
+            Ok(_) => {
+                *self.ssh_import.borrow_mut() = None;
+                self.router.home();
+                self.refresh_home();
+                self.refresh_router();
+            }
+            Err(e) => {
+                if let Some(vm) = self.ssh_import.borrow_mut().as_mut() {
+                    vm.error = Some(save_failed_hint(&e));
+                }
+                self.push_ssh_import();
+            }
+        }
+    }
+
     fn copy_public_key(&self, id: Uuid) {
         let Some(line) = self
             .state
@@ -598,6 +694,10 @@ impl App {
             match dialog {
                 Dialog::RemoveMachine(id) => state.remove_machine(id),
                 Dialog::DeleteKey(id) => state.delete_key(id),
+                Dialog::DeleteSnippet(id) => {
+                    crate::extras::delete_snippet(id);
+                    Ok(())
+                }
             }
         };
         if let Err(e) = result {
@@ -626,6 +726,14 @@ impl App {
                 .collect();
             b.set_key_names(ModelRc::new(VecModel::from(names)));
             b.set_key_index(vm.key_index(keys));
+            let machines = &self.state.borrow().profiles.machines;
+            let jumps: Vec<SharedString> = vm
+                .jump_options(machines)
+                .into_iter()
+                .map(|(_, name)| name.into())
+                .collect();
+            b.set_jump_names(ModelRc::new(VecModel::from(jumps)));
+            b.set_jump_index(vm.jump_index(machines));
             b.set_password_placeholder(vm.password_placeholder().into());
         }
         b.set_hint(vm.hint().into());
@@ -642,12 +750,15 @@ impl App {
             segment: b.get_auth(),
             key_index: b.get_key_index(),
             password: b.get_password().into(),
+            jump_index: b.get_jump_index(),
         };
         let mut slot = self.server_form.borrow_mut();
         let Some(vm) = slot.as_mut() else {
             return;
         };
-        vm.apply(input, &self.state.borrow().keys);
+        let state = self.state.borrow();
+        vm.apply(input, &state.keys, &state.profiles.machines);
+        drop(state);
         self.push_server_form(vm, false);
     }
 

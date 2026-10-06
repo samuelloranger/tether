@@ -5951,7 +5951,7 @@ dependencies = [
 
 [[package]]
 name = "tether-app"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arboard",
  "chrono",
@@ -5967,6 +5967,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ureq",
  "uuid",
  "velopack",
  "windows",
@@ -5976,7 +5977,7 @@ dependencies = [
 
 [[package]]
 name = "tether-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -6019,6 +6020,9 @@ name = "tether-term"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.22.1",
+ "image",
+ "miniz_oxide 0.8.9",
  "swash",
  "tether-core",
 ]

@@ -18,6 +18,7 @@ pub struct Recorded {
     pub input: HashMap<usize, Vec<u8>>,
     pub execs: Vec<String>,
     pub uploads: HashMap<String, Vec<u8>>,
+    pub tunnels: Vec<String>,
 }
 
 #[derive(Default, Clone)]
@@ -69,6 +70,7 @@ pub async fn start(opts: Options) -> Running {
                 channels: HashMap::new(),
                 order: Vec::new(),
                 scp: HashMap::new(),
+                tunnels: Default::default(),
             };
             let config = config.clone();
             tokio::spawn(async move {
@@ -91,6 +93,7 @@ struct ConnHandler {
     channels: HashMap<ChannelId, Channel<Msg>>,
     order: Vec<ChannelId>,
     scp: HashMap<ChannelId, super::server_scp::ScpSink>,
+    tunnels: std::collections::HashSet<ChannelId>,
 }
 
 impl ConnHandler {
@@ -155,6 +158,36 @@ impl server::Handler for ConnHandler {
         self.order.push(channel.id());
         self.channels.insert(channel.id(), channel);
         reply.accept().await;
+        Ok(())
+    }
+
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: server::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.shared
+            .state
+            .lock()
+            .unwrap()
+            .tunnels
+            .push(format!("{host_to_connect}:{port_to_connect}"));
+        let Ok(mut tcp) =
+            tokio::net::TcpStream::connect((host_to_connect, port_to_connect as u16)).await
+        else {
+            return Ok(());
+        };
+        self.tunnels.insert(channel.id());
+        reply.accept().await;
+        tokio::spawn(async move {
+            let mut stream = channel.into_stream();
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+        });
         Ok(())
     }
 
@@ -297,6 +330,9 @@ impl server::Handler for ConnHandler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if self.tunnels.contains(&channel) {
+            return Ok(());
+        }
         if let Some(sink) = self.scp.get_mut(&channel) {
             sink.feed(channel, data, session, &self.shared.state);
             return Ok(());

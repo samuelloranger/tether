@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::sync::Arc;
 use tether_core::connect::{ConnectError, ConnectRequest, Connection, Transport, connect};
+use tether_core::history::history_command;
 use tether_core::hostkey::HostKeyStore;
 use tether_core::profiles::Machine;
 use tether_core::resize::GridSize;
@@ -49,7 +50,11 @@ pub trait Remote: Send + Sync + 'static {
     ) -> impl Future<Output = Result<broadcast::Receiver<ConnectionEvent>, ConnectError>> + Send;
     fn ls(&self) -> impl Future<Output = Result<Vec<ZmxSession>, ConnectError>> + Send;
     fn kill(&self, name: &str) -> impl Future<Output = Result<(), ConnectError>> + Send;
+    fn history(&self, name: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
     fn uploads_dir(&self) -> impl Future<Output = Option<String>> + Send;
+    /// One command on the control connection; a non-zero exit is an error and loses stdout, so
+    /// callers that need the output of a failing command wrap it (`tether_core::git::wrap`).
+    fn exec(&self, command: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
     fn attach(
         &self,
         name: &str,
@@ -67,7 +72,8 @@ pub trait Remote: Send + Sync + 'static {
 /// connection for exec, and a fresh connection per upload.
 pub struct SshRemote<T: Transport> {
     transport: T,
-    request: ConnectRequest,
+    /// A broken jump chain fails every dial with its error.
+    request: Result<ConnectRequest, ConnectError>,
     hostkeys: Arc<dyn HostKeyStore>,
     secrets: Arc<dyn SecretStore>,
     terminal: Mutex<Option<Arc<T::Conn>>>,
@@ -78,12 +84,13 @@ impl<T: Transport> SshRemote<T> {
     pub fn new(
         transport: T,
         machine: Machine,
+        jumps: Result<Vec<Machine>, ConnectError>,
         hostkeys: Arc<dyn HostKeyStore>,
         secrets: Arc<dyn SecretStore>,
     ) -> Self {
         Self {
             transport,
-            request: ConnectRequest { machine },
+            request: jumps.map(|jumps| ConnectRequest { machine, jumps }),
             hostkeys,
             secrets,
             terminal: Mutex::new(None),
@@ -94,7 +101,7 @@ impl<T: Transport> SshRemote<T> {
     async fn dial(&self) -> Result<T::Conn, ConnectError> {
         connect(
             &self.transport,
-            &self.request,
+            self.request.as_ref().map_err(Clone::clone)?,
             self.hostkeys.as_ref(),
             self.secrets.as_ref(),
         )
@@ -154,6 +161,12 @@ where
         self.control().await?.exec(&command).await.map(|_| ())
     }
 
+    async fn history(&self, name: &str) -> Result<String, ConnectError> {
+        let command = history_command(name)
+            .ok_or_else(|| ConnectError::Transport("invalid session name".into()))?;
+        self.control().await?.exec(&command).await
+    }
+
     async fn uploads_dir(&self) -> Option<String> {
         let out = self
             .control()
@@ -163,6 +176,10 @@ where
             .await
             .ok()?;
         uploads_directory(&out)
+    }
+
+    async fn exec(&self, command: &str) -> Result<String, ConnectError> {
+        self.control().await?.exec(command).await
     }
 
     async fn attach(
@@ -242,6 +259,7 @@ mod tests {
         SshRemote::new(
             t,
             machine(),
+            Ok(Vec::new()),
             Arc::new(MemoryHostKeys::default()),
             Arc::new(secrets),
         )
@@ -259,6 +277,56 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn a_jump_is_dialed_first_and_the_machine_through_it() {
+        let t = FakeTransport::default();
+        let secrets = MemorySecretStore::default();
+        secrets
+            .set(&password_account(machine().id), b"hunter2")
+            .unwrap();
+        let bastion = Machine {
+            id: uuid::Uuid::from_u128(7),
+            name: "bastion".into(),
+            host: "bastion.lan".into(),
+            port: 22,
+            user: "jump".into(),
+            auth: tether_core::profiles::Auth::Agent,
+            jump: None,
+        };
+        let r = SshRemote::new(
+            t.clone(),
+            machine(),
+            Ok(vec![bastion]),
+            Arc::new(MemoryHostKeys::default()),
+            Arc::new(secrets),
+        );
+        r.open().await.unwrap();
+        let log = t.log.lock().unwrap().clone();
+        assert_eq!(
+            log[..4],
+            [
+                "dial bastion.lan:22",
+                "auth jump",
+                "via devbox.lan:22",
+                "dial devbox.lan:22"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_broken_jump_chain_fails_without_dialing() {
+        let t = FakeTransport::default();
+        let r = SshRemote::new(
+            t.clone(),
+            machine(),
+            Err(ConnectError::JumpMissing),
+            Arc::new(MemoryHostKeys::default()),
+            Arc::new(MemorySecretStore::default()),
+        );
+        assert_eq!(r.open().await.err(), Some(ConnectError::JumpMissing));
+        assert!(t.log.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -301,6 +369,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn history_runs_zmx_history_on_control_with_a_quoted_name() {
+        let t = FakeTransport::default();
+        t.exec_replies.lock().unwrap().insert(
+            "~/.local/bin/zmx history".into(),
+            Ok("earlier output\n".into()),
+        );
+        let r = remote(t.clone());
+        r.open().await.unwrap();
+        assert_eq!(r.history("it's $(x)").await.unwrap(), "earlier output\n");
+        assert!(
+            t.log
+                .lock()
+                .unwrap()
+                .contains(&format!("exec {}", history_command("it's $(x)").unwrap()))
+        );
+    }
+
+    #[tokio::test]
+    async fn history_refuses_an_invalid_name_without_running_anything() {
+        let t = FakeTransport::default();
+        let r = remote(t.clone());
+        r.open().await.unwrap();
+        for name in ["a\u{15}b", "a\nb", "-rf"] {
+            assert!(r.history(name).await.is_err(), "{name:?}");
+        }
+        assert!(!t.log.lock().unwrap().iter().any(|l| l.starts_with("exec")));
+    }
+
+    #[tokio::test]
     async fn uploads_dir_requires_the_marker() {
         let t = FakeTransport::default();
         t.exec_replies.lock().unwrap().insert(
@@ -337,7 +434,7 @@ mod tests {
             .unwrap();
         let secrets = Arc::new(MemorySecretStore::default());
         secrets.set(&password_account(machine().id), b"x").unwrap();
-        let r = SshRemote::new(t, machine(), hostkeys, secrets);
+        let r = SshRemote::new(t, machine(), Ok(Vec::new()), hostkeys, secrets);
         assert!(matches!(
             r.open().await,
             Err(ConnectError::HostKeyChanged { .. })

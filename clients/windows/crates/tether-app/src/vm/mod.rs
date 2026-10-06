@@ -6,3 +6,4 @@ pub mod placement;
 pub mod scene;
 pub mod server_form;
 pub mod settings;
+pub mod ssh_import;

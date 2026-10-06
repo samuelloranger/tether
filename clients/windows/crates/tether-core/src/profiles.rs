@@ -26,6 +26,9 @@ pub struct Machine {
     pub port: u16,
     pub user: String,
     pub auth: Auth,
+    /// Another machine to connect through (ProxyJump). That machine may have its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump: Option<Uuid>,
 }
 
 impl Machine {
@@ -154,6 +157,7 @@ mod tests {
             port: 22,
             user: "sam".into(),
             auth,
+            jump: None,
         }
     }
 

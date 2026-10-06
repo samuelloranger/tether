@@ -7,12 +7,12 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/samuelloranger/tether" alt="License: GPL-3.0" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/ci.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/platform-iOS-blue" alt="Platform: iOS" />
+  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Windows-blue" alt="Platform: iOS | Windows" />
 </p>
 
-A native iOS terminal for your own machines. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone. Tether is a pure client: **no server to run, nothing exposed but SSH.**
+A native terminal for your own machines, on iOS and Windows. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone or PC. Tether is a pure client: **no server to run, nothing exposed but SSH.**
 
-> **v5 rewrite.** Earlier Tether ran a Bun server with a custom Noise transport plus desktop and web clients. v5 drops all of it for a single native iOS app over SSH. The only host-side piece is `tether-notify`, a tiny tool for push.
+> **v5 rewrite.** Earlier Tether ran a Bun server with a custom Noise transport plus desktop and web clients. v5 drops all of it for native apps over SSH: iOS, and a Windows desktop client. The only host-side piece is `tether-notify`, a tiny tool for push.
 
 ## What you get
 
@@ -37,6 +37,12 @@ xcodebuild build \
 ```
 
 See [`clients/apple/README.md`](clients/apple/README.md) for signing and on-device install.
+
+## Install (Windows)
+
+**[Download the installer](https://github.com/samuelloranger/tether/releases?q=windows-v&expanded=true)** — take `Tether-<version>-x64-Setup.exe` from the newest `windows-v*` release. It installs per user (no admin) and the app updates itself from then on. `Tether-<version>-x64-portable.zip` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch.
+
+Windows 10 22H2 or Windows 11, x64. One window, one tab per zmx session; on top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), Pageant, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette. Build from source with Rust stable: `cargo build --release -p tether-app` in `clients/windows/` (see [`clients/windows/SPEC.md`](clients/windows/SPEC.md)).
 
 On first launch: add a machine (host, port, user, and a key from the vault), then open it. The app attaches an existing zmx session if the host has one, otherwise it starts `default`.
 
@@ -69,6 +75,7 @@ a locked phone gets its pushes. As a backstop for an app killed while attached, 
 
 ```
 clients/apple/        native iOS app (TetherKit package + TetherIOS + NSE)
+clients/windows/      native Windows app (Rust + Slint workspace)
 apps/tether-notify/   Go host CLI for encrypted push
 install.sh            build + install tether-notify
 scripts/              install-agent-hooks.sh, release.sh
@@ -78,7 +85,7 @@ Architecture, data flow, and conventions: [`CLAUDE.md`](CLAUDE.md).
 
 ## Security
 
-Transport is SSH — there is no shared password and no setup flow that skips host-key verification. Keys live in the iOS Keychain and reach libssh2 in memory only. A host-key mismatch fails loudly. The push relay only ever routes ciphertext it cannot read. Keep hosts reachable over your LAN, a tunnel, or plain SSH as you already do.
+Transport is SSH — there is no shared password and no setup flow that skips host-key verification. Keys live in the iOS Keychain (or DPAPI-protected storage on Windows) and reach the SSH library in memory only. A host-key mismatch fails loudly. The push relay only ever routes ciphertext it cannot read. Keep hosts reachable over your LAN, a tunnel, or plain SSH as you already do.
 
 ## License
 

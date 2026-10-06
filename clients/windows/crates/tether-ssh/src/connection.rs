@@ -47,6 +47,8 @@ pub struct RusshConnection {
     pub(crate) agent: Arc<dyn AgentConnector>,
     pub(crate) dropped: Arc<AtomicBool>,
     pub(crate) keepalive: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The jump host this session is tunnelled through, kept open as long as it is.
+    pub(crate) _via: Option<Box<RusshConnection>>,
 }
 
 impl RusshConnection {

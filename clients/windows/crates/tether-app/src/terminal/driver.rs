@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use tether_core::connect::ConnectError;
 use tether_core::zmx::attach_command;
 use tether_ssh::{ConnectionEvent, PtyEvent};
 use tokio::sync::{broadcast, mpsc};
@@ -323,6 +324,13 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                         let _ = tx.send(DriverMsg::Model(Msg::KillDone));
                     });
                 }
+                Effect::History { name, id } => {
+                    let (r, tx) = (self.remote.clone(), self.tx.clone());
+                    tokio::spawn(async move {
+                        let result = r.history(&name).await;
+                        let _ = tx.send(DriverMsg::Model(Msg::HistoryLoaded { id, result }));
+                    });
+                }
                 Effect::Attach { name, id, size } => {
                     self.wanted.lock().unwrap().insert(name.clone(), id);
                     let (r, tx) = (self.remote.clone(), self.tx.clone());
@@ -385,6 +393,41 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                 Effect::StartSend(job) => {
                     tokio::spawn(crate::terminal::files::run_send(
                         self.remote.clone(),
+                        job,
+                        msg_sink(self.tx.clone()),
+                    ));
+                }
+                Effect::AgentPoll => {
+                    let (r, tx) = (self.remote.clone(), self.tx.clone());
+                    tokio::spawn(async move {
+                        let result = r.exec(&tether_core::agents::status_command()).await;
+                        let now_unix = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64);
+                        let _ = tx.send(DriverMsg::Model(Msg::AgentStatusOut { result, now_unix }));
+                    });
+                }
+                Effect::AgentPending { session } => {
+                    let (r, tx) = (self.remote.clone(), self.tx.clone());
+                    tokio::spawn(async move {
+                        let result = match tether_core::agents::pending_command(&session) {
+                            Some(command) => r.exec(&command).await,
+                            None => Err(ConnectError::Transport("invalid session name".into())),
+                        };
+                        let _ = tx.send(DriverMsg::Model(Msg::AgentPendingOut { session, result }));
+                    });
+                }
+                Effect::AgentAnswer { command } => {
+                    let (r, tx) = (self.remote.clone(), self.tx.clone());
+                    tokio::spawn(async move {
+                        let result = r.exec(&command).await;
+                        let _ = tx.send(DriverMsg::Model(Msg::AgentAnswered { result }));
+                    });
+                }
+                Effect::Git { target, job } => {
+                    tokio::spawn(crate::terminal::gitrun::run(
+                        self.remote.clone(),
+                        target,
                         job,
                         msg_sink(self.tx.clone()),
                     ));
@@ -470,6 +513,27 @@ mod tests {
                 .unwrap()
                 .contains(&"close".to_string())
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn history_asks_the_host_and_shows_the_answer() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        remote
+            .histories
+            .lock()
+            .unwrap()
+            .insert("default".into(), Ok("older\r\nnewer\r\n".into()));
+        let (ui, send, _h) = start(remote.clone()).await;
+        send(Msg::HistoryOpen);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(remote.log().contains(&"history default".to_string()));
+        match ui.last_view().history.unwrap().body {
+            crate::terminal::model::HistoryBody::Text { text, .. } => {
+                assert_eq!(&*text, "older\nnewer")
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -561,6 +625,63 @@ mod tests {
             remote.log()
         );
         assert!(!log.iter().any(|l| l.contains("zmx attach")), "{log:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn agent_status_is_read_on_the_control_connection_and_badges_the_tab() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        remote.exec_replies.lock().unwrap().push((
+            "tether-notify status".into(),
+            Ok(r#"[{"session":"default","state":"working","since":1}]"#.into()),
+        ));
+        let (ui, _send, _h) = start(remote.clone()).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            remote
+                .log()
+                .iter()
+                .any(|l| l.starts_with("exec if [ -x ~/.local/bin/tether-notify ]"))
+        );
+        let tab = ui.last_view().tabs[0].agent.clone().expect("a badge");
+        assert_eq!(tab.label, "working");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failing_status_exec_leaves_the_terminal_connected_with_no_badges() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        remote.exec_replies.lock().unwrap().push((
+            "tether-notify status".into(),
+            Err(tether_core::connect::ConnectError::Timeout),
+        ));
+        let (ui, _send, _h) = start(remote.clone()).await;
+        tokio::time::sleep(Duration::from_secs(25)).await;
+        let v = ui.last_view();
+        assert_eq!(v.header.word, "connected");
+        assert!(v.tabs[0].agent.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn answering_a_held_permission_runs_answer_on_the_control_connection() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        remote.exec_replies.lock().unwrap().push((
+            "tether-notify status".into(),
+            Ok(
+                r#"[{"session":"default","state":"waiting","since":1,"version":"v1","pending":{"kind":"permission"}}]"#
+                    .into(),
+            ),
+        ));
+        let (ui, send, _h) = start(remote.clone()).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(ui.last_view().agent.sheet.is_some());
+        send(Msg::AgentApprove);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(remote.log().iter().any(|l| {
+            l.starts_with("exec ~/.local/bin/tether-notify answer --session 'default' --state 'waiting' --version 'v1' --input")
+        }));
+        assert!(ui.last_view().agent.sheet.is_none());
     }
 
     #[tokio::test(start_paused = true)]

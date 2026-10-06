@@ -1,0 +1,626 @@
+import { Tokens } from "tokens.slint";
+import { IconButton, Segment } from "components.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
+
+export struct GitRowVm {
+    primary: string,
+    secondary: string,
+    badge: string,
+    tone: int,
+    added: int,
+    removed: int,
+    previewable: bool,
+}
+
+// kind: 0 file, 1 hunk, 2 added, 3 removed, 4 context, 5 plain.
+export struct DiffLineVm {
+    kind: int,
+    old-no: string,
+    new-no: string,
+    text: string,
+    stat: string,
+}
+
+export struct CheckVm {
+    name: string,
+    tone: int,
+    linked: bool,
+}
+
+export struct MethodVm {
+    id: int,
+    label: string,
+    selected: bool,
+}
+
+export struct MdLinkVm {
+    label: string,
+    url: string,
+}
+
+// kind: 0 heading, 1 paragraph, 2 bullet, 3 numbered, 4 code, 5 quote, 6 rule.
+export struct MdItemVm {
+    kind: int,
+    level: int,
+    text: string,
+    links: [MdLinkVm],
+}
+
+export global GitVm {
+    in property <bool> open;
+    // Dragged by the panel's left edge; the terminal page clamps it to half its width.
+    in-out property <length> panel-width: 400px;
+    // A viewer covers the terminal: keys must not reach the PTY.
+    in property <bool> modal;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> stat-shown;
+    in property <int> stat-added;
+    in property <int> stat-removed;
+    in property <string> notice;
+    in property <string> toast;
+    in-out property <int> tab;
+    in property <bool> show-tabs;
+    in property <bool> can-back;
+    in property <bool> loading;
+    in property <[GitRowVm]> rows;
+    in property <[DiffLineVm]> diff;
+
+    in property <bool> has-pr;
+    in property <string> pr-title;
+    in property <string> pr-branches;
+    in property <string> pr-state;
+    in property <int> pr-state-tone;
+    in property <[string]> pr-chips;
+    in property <bool> pr-loading;
+    in property <string> checks-headline;
+    in property <int> checks-tone;
+    in property <[CheckVm]> checks;
+    in property <string> gate-text;
+    in property <int> gate-tone;
+    in property <bool> can-merge;
+    in property <string> merge-label;
+    in property <string> pr-status;
+    in property <int> pr-status-tone;
+    in property <string> pr-note;
+
+    in property <bool> dialog-open;
+    in property <string> dialog-title;
+    in property <string> dialog-body;
+    in property <[MethodVm]> dialog-methods;
+
+    in property <bool> md-open;
+    in property <string> md-title;
+    in property <bool> md-loading;
+    in property <string> md-error;
+    in property <bool> md-truncated;
+    in property <[MdItemVm]> md-items;
+
+    callback toggle();
+    callback close();
+    callback refresh();
+    callback set-tab(int);
+    callback back();
+    callback row(int);
+    callback row-alt(int);
+    callback review();
+    callback open-pr();
+    callback open-check(int);
+    callback merge-ask();
+    callback merge-method(int);
+    callback merge-confirm();
+    callback merge-cancel();
+    callback close-md();
+    callback open-link(string);
+}
+
+global GitStyle {
+    // 0 neutral, 1 good, 2 bad, 3 warn, 4 accent.
+    pure public function tone(t: int) -> color {
+        t == 1 ? Tokens.success : t == 2 ? Tokens.danger : t == 3 ? Tokens.warning : t == 4 ? Tokens.accent : Tokens.text-secondary
+    }
+}
+
+component SmallButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    callback clicked();
+    height: 28px;
+    width: label.preferred-width + 20px;
+    border-radius: 8px;
+    border-width: primary ? 0px : 1px;
+    border-color: Tokens.border;
+    background: !enabled ? Tokens.raised : primary ? (touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent) : (touch.has-hover ? Tokens.surface-hover : transparent);
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        font-size: 12.5px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.enabled ? Tokens.text-faint : root.primary ? Tokens.on-accent : Tokens.text;
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Tokens.text-secondary;
+    height: 20px;
+    width: label.preferred-width + 14px;
+    border-radius: 10px;
+    background: root.tint.with-alpha(0.14);
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        font-size: 11px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: root.tint;
+    }
+}
+
+component GitRowItem inherits Rectangle {
+    in property <GitRowVm> data;
+    in property <int> index;
+    height: 52px;
+    background: touch.has-hover ? Tokens.surface-hover : transparent;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { GitVm.row(root.index); } }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.data.primary;
+                color: Tokens.text;
+                font-size: 13px;
+                font-family: root.data.secondary == "" ? Tokens.mono-font : Tokens.ui-font;
+                overflow: elide;
+            }
+            if root.data.secondary != "": Text {
+                text: root.data.secondary;
+                color: Tokens.text-secondary;
+                font-size: 11px;
+                font-family: Tokens.mono-font;
+                overflow: elide;
+            }
+        }
+        if root.data.badge != "": VerticalLayout {
+            alignment: center;
+            Chip { text: root.data.badge; tint: GitStyle.tone(root.data.tone); }
+        }
+        if root.data.added + root.data.removed > 0: VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 5px;
+                Text { text: "+" + root.data.added; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.success; }
+                Text { text: "\u{2212}" + root.data.removed; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.danger; }
+            }
+        }
+        if root.data.previewable: VerticalLayout {
+            alignment: center;
+            IconButton { flat: true; size: 26px; icon: @image-url("icons/eye.svg"); tooltip: "Preview"; clicked => { GitVm.row-alt(root.index); } }
+        }
+    }
+}
+
+component DiffLine inherits Rectangle {
+    in property <DiffLineVm> line;
+    height: max(20px, body.preferred-height + 4px);
+    background: line.kind == 0 ? Tokens.raised : line.kind == 1 ? Tokens.accent.with-alpha(0.10) : line.kind == 2 ? Tokens.success.with-alpha(0.13) : line.kind == 3 ? Tokens.danger.with-alpha(0.13) : transparent;
+    HorizontalLayout {
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 0px;
+        if line.kind != 0: Text {
+            width: 40px;
+            text: line.old-no;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            font-family: Tokens.mono-font;
+            font-size: 11px;
+            color: Tokens.text-faint;
+        }
+        if line.kind != 0: Text {
+            width: 44px;
+            text: line.new-no;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            font-family: Tokens.mono-font;
+            font-size: 11px;
+            color: Tokens.text-faint;
+        }
+        if line.kind != 0: Text {
+            width: 18px;
+            text: line.kind == 2 ? "+" : line.kind == 3 ? "\u{2212}" : "";
+            horizontal-alignment: center;
+            vertical-alignment: top;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+            color: line.kind == 2 ? Tokens.success : Tokens.danger;
+        }
+        if line.kind == 0: Rectangle { width: 10px; }
+        body := Text {
+            horizontal-stretch: 1;
+            text: line.text;
+            vertical-alignment: top;
+            wrap: char-wrap;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+            font-weight: line.kind == 0 ? 700 : 400;
+            color: line.kind == 1 ? Tokens.accent : line.kind == 5 ? Tokens.text-secondary : Tokens.text;
+        }
+        if line.stat != "": Text {
+            width: 90px;
+            text: line.stat;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            font-family: Tokens.mono-font;
+            font-size: 11px;
+            color: Tokens.text-secondary;
+        }
+    }
+}
+
+component Card inherits Rectangle {
+    background: Tokens.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Tokens.border;
+}
+
+component PrPage inherits ScrollView {
+    VerticalLayout {
+        padding: 14px;
+        spacing: 12px;
+        alignment: start;
+        VerticalLayout {
+            spacing: 6px;
+            Text { text: GitVm.pr-title; wrap: word-wrap; font-size: 15px; font-weight: 700; color: Tokens.text; }
+            Text { text: GitVm.pr-branches; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text-secondary; overflow: elide; }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Chip { text: GitVm.pr-state; tint: GitStyle.tone(GitVm.pr-state-tone); }
+                for chip in GitVm.pr-chips: Chip { text: chip; }
+            }
+        }
+        if GitVm.pr-loading: Text { text: "Loading\u{2026}"; font-size: 12px; color: Tokens.text-secondary; }
+        if GitVm.checks-headline != "": Card {
+            height: checks-col.preferred-height + 24px;
+            checks-col := VerticalLayout {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                height: parent.height - 24px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    VerticalLayout { alignment: center; Rectangle { width: 8px; height: 8px; border-radius: 4px; background: GitStyle.tone(GitVm.checks-tone); } }
+                    Text { text: GitVm.checks-headline; font-size: 13px; font-weight: 650; color: Tokens.text; }
+                }
+                for check[i] in GitVm.checks: Rectangle {
+                    height: 22px;
+                    background: check-touch.has-hover && check.linked ? Tokens.surface-hover : transparent;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: GitStyle.tone(check.tone); } }
+                        Text { text: check.name; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text-secondary; vertical-alignment: center; overflow: elide; }
+                    }
+                    check-touch := TouchArea {
+                        enabled: check.linked;
+                        mouse-cursor: check.linked ? pointer : default;
+                        clicked => { GitVm.open-check(i); }
+                    }
+                }
+            }
+        }
+        if GitVm.checks-headline != "": Card {
+            height: merge-col.preferred-height + 24px;
+            merge-col := VerticalLayout {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                height: parent.height - 24px;
+                spacing: 10px;
+                if GitVm.pr-status != "": Text { text: GitVm.pr-status; font-size: 13px; font-weight: 650; color: GitStyle.tone(GitVm.pr-status-tone); }
+                if GitVm.pr-status == "": Text { text: GitVm.gate-text; wrap: word-wrap; font-size: 13px; font-weight: 650; color: GitStyle.tone(GitVm.gate-tone); }
+                if GitVm.pr-status == "": SmallButton {
+                    text: GitVm.merge-label;
+                    primary: true;
+                    enabled: GitVm.can-merge;
+                    width: parent.width;
+                    clicked => { GitVm.merge-ask(); }
+                }
+                if GitVm.pr-note != "": Text { text: GitVm.pr-note; wrap: word-wrap; font-size: 12px; color: Tokens.text-secondary; }
+            }
+        }
+        if GitVm.checks-headline == "" && GitVm.pr-status != "": Text { text: GitVm.pr-status; wrap: word-wrap; font-size: 13px; color: Tokens.text-secondary; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            SmallButton { text: "Review changes"; clicked => { GitVm.review(); } }
+            SmallButton { text: "Open in GitHub"; clicked => { GitVm.open-pr(); } }
+        }
+    }
+}
+
+component DiffList inherits ListView {
+    for line in GitVm.diff: DiffLine {
+        width: root.width;
+        line: line;
+    }
+}
+
+component RowList inherits ListView {
+    for entry[i] in GitVm.rows: GitRowItem {
+        data: entry;
+        index: i;
+    }
+}
+
+export component GitSidePanel inherits Rectangle {
+    in property <length> max-panel-width;
+    property <length> min-panel-width: 300px;
+    width: clamp(GitVm.panel-width, root.min-panel-width, max(root.min-panel-width, root.max-panel-width));
+    background: Tokens.surface;
+    Rectangle { x: 0; width: 1px; background: resize.has-hover || resize.pressed ? Tokens.accent : Tokens.border; }
+    VerticalLayout {
+        Rectangle {
+            height: 48px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 9px;
+                padding-bottom: 9px;
+                spacing: 8px;
+                if GitVm.can-back: VerticalLayout { alignment: center; IconButton { flat: true; size: 28px; icon: @image-url("icons/back.svg"); tooltip: "Back"; clicked => { GitVm.back(); } } }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: GitVm.title;
+                        font-family: Tokens.mono-font;
+                        font-size: 13px;
+                        font-weight: 650;
+                        color: Tokens.text;
+                        overflow: elide;
+                    }
+                    if GitVm.stat-shown: HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        Text { text: "+" + GitVm.stat-added; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.success; }
+                        Text { text: "\u{2212}" + GitVm.stat-removed; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.danger; }
+                    }
+                    if !GitVm.stat-shown && GitVm.subtitle != "": Text {
+                        text: GitVm.subtitle;
+                        font-size: 11.5px;
+                        color: Tokens.text-secondary;
+                    }
+                }
+                VerticalLayout { alignment: center; IconButton { flat: true; size: 28px; icon: @image-url("icons/refresh.svg"); tooltip: GitVm.loading ? "Loading\u{2026}" : "Refresh"; enabled: !GitVm.loading; clicked => { GitVm.refresh(); } } }
+                VerticalLayout { alignment: center; IconButton { flat: true; size: 28px; icon: @image-url("icons/close.svg"); tooltip: "Close"; clicked => { GitVm.close(); } } }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+        }
+        if GitVm.show-tabs: Rectangle {
+            height: 52px;
+            Segment {
+                x: 10px;
+                y: 7px;
+                width: parent.width - 20px;
+                raised-style: true;
+                options: ["Changes", "Commits", "PRs", "Docs"];
+                selected <=> GitVm.tab;
+                changed(i) => { GitVm.set-tab(i); }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            if GitVm.has-pr: PrPage { }
+            if !GitVm.has-pr && GitVm.can-back: DiffList { }
+            if !GitVm.has-pr && !GitVm.can-back: RowList { }
+            if GitVm.notice != "" && !GitVm.has-pr && GitVm.rows.length == 0 && GitVm.diff.length == 0: Text {
+                x: 20px;
+                width: parent.width - 40px;
+                text: GitVm.notice;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 13px;
+                color: Tokens.text-secondary;
+            }
+            if GitVm.toast != "": Rectangle {
+                y: parent.height - 40px;
+                height: 28px;
+                x: 12px;
+                width: parent.width - 24px;
+                border-radius: 8px;
+                background: Tokens.raised;
+                border-width: 1px;
+                border-color: Tokens.border;
+                Text { text: GitVm.toast; font-size: 12px; color: Tokens.text; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+            }
+        }
+    }
+    resize := TouchArea {
+        x: 0;
+        width: 6px;
+        mouse-cursor: ew-resize;
+        // The handle moves with the edge, so pressed-x stays under the pointer.
+        moved => {
+            GitVm.panel-width = clamp(root.width - (self.mouse-x - self.pressed-x), root.min-panel-width, max(root.min-panel-width, root.max-panel-width));
+        }
+    }
+}
+
+component MdBlock inherits VerticalLayout {
+    in property <MdItemVm> item;
+    spacing: 4px;
+    padding-top: item.kind == 0 ? 10px : 2px;
+    if item.kind == 6: Rectangle { height: 1px; background: Tokens.border; }
+    if item.kind == 4: Rectangle {
+        background: Tokens.input;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        height: code.preferred-height + 20px;
+        code := Text {
+            x: 10px;
+            y: 10px;
+            width: parent.width - 20px;
+            height: parent.height - 20px;
+            text: item.text;
+            wrap: no-wrap;
+            overflow: clip;
+            font-family: Tokens.mono-font;
+            font-size: 12.5px;
+            color: Tokens.text;
+        }
+    }
+    if item.kind == 5: HorizontalLayout {
+        spacing: 10px;
+        Rectangle { width: 3px; background: Tokens.accent.with-alpha(0.6); border-radius: 2px; }
+        Text { text: item.text; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
+    }
+    if item.kind == 0: Text {
+        text: item.text;
+        wrap: word-wrap;
+        font-weight: 700;
+        font-size: item.level == 1 ? 26px : item.level == 2 ? 20px : 16px;
+        color: Tokens.text;
+    }
+    if item.kind == 1 || item.kind == 2 || item.kind == 3: Text {
+        text: item.text;
+        wrap: word-wrap;
+        font-size: 14px;
+        color: Tokens.text;
+    }
+    if item.links.length > 0: HorizontalLayout {
+        spacing: 6px;
+        padding-left: item.kind == 2 || item.kind == 3 ? 18px : 0px;
+        alignment: start;
+        for link in item.links: Rectangle {
+            height: 22px;
+            width: min(380px, link-label.preferred-width + 16px);
+            border-radius: 11px;
+            background: link-touch.has-hover ? Tokens.accent.with-alpha(0.2) : Tokens.accent.with-alpha(0.1);
+            link-label := Text {
+                x: 8px;
+                width: parent.width - 16px;
+                text: link.label;
+                overflow: elide;
+                font-size: 11.5px;
+                vertical-alignment: center;
+                color: Tokens.accent;
+            }
+            link-touch := TouchArea { mouse-cursor: pointer; clicked => { GitVm.open-link(link.url); } }
+        }
+    }
+}
+
+export component GitOverlays inherits Rectangle {
+    // Covers the grid under the terminal header (DESIGN.md: overlays cover the grid).
+    if GitVm.md-open: Rectangle {
+        y: 52px;
+        height: parent.height - 52px;
+        background: Tokens.background;
+        TouchArea { }
+        VerticalLayout {
+            Rectangle {
+                height: 48px;
+                background: Tokens.surface;
+                HorizontalLayout {
+                    padding: 9px;
+                    padding-left: 10px;
+                    spacing: 10px;
+                    VerticalLayout { alignment: center; IconButton { flat: true; size: 30px; icon: @image-url("icons/back.svg"); tooltip: "Back"; clicked => { GitVm.close-md(); } } }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text { text: GitVm.md-title; font-size: 14px; font-weight: 600; color: Tokens.text; overflow: elide; }
+                    }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                if GitVm.md-loading: Text { text: "Loading\u{2026}"; horizontal-alignment: center; vertical-alignment: center; color: Tokens.text-secondary; font-size: 13px; }
+                if GitVm.md-error != "": Text { text: GitVm.md-error; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; color: Tokens.danger; font-size: 13px; }
+                if !GitVm.md-loading && GitVm.md-error == "": ScrollView {
+                    VerticalLayout {
+                        padding-left: max(24px, (root.width - 760px) / 2);
+                        padding-right: max(24px, (root.width - 760px) / 2);
+                        padding-top: 20px;
+                        padding-bottom: 28px;
+                        spacing: 6px;
+                        alignment: start;
+                        for item in GitVm.md-items: MdBlock { item: item; }
+                        if GitVm.md-truncated: Text {
+                            text: "The file is longer than Tether shows; the rest was cut.";
+                            font-size: 12px;
+                            color: Tokens.text-secondary;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if GitVm.dialog-open: Rectangle {
+        background: #08080e9e;
+        TouchArea { }
+        Rectangle {
+            width: min(420px, parent.width - 48px);
+            height: dialog-col.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.surface;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            dialog-col := VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text { text: GitVm.dialog-title; font-size: 18px; font-weight: 650; color: Tokens.text; wrap: word-wrap; }
+                Text { text: GitVm.dialog-body; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; wrap: word-wrap; }
+                for method in GitVm.dialog-methods: Rectangle {
+                    height: 36px;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: method.selected ? Tokens.accent : Tokens.border;
+                    background: method.selected ? Tokens.accent.with-alpha(0.12) : (method-touch.has-hover ? Tokens.surface-hover : transparent);
+                    Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text: method.label;
+                        vertical-alignment: center;
+                        font-size: 13px;
+                        font-weight: method.selected ? 650 : 500;
+                        color: Tokens.text;
+                    }
+                    method-touch := TouchArea { mouse-cursor: pointer; clicked => { GitVm.merge-method(method.id); } }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    padding-top: 6px;
+                    SmallButton { text: "Cancel"; clicked => { GitVm.merge-cancel(); } }
+                    SmallButton { text: "Merge"; primary: true; clicked => { GitVm.merge-confirm(); } }
+                }
+            }
+        }
+    }
+}

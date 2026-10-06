@@ -21,6 +21,7 @@ pub fn machine() -> Machine {
         port: 22,
         user: "sam".into(),
         auth: Auth::Password,
+        jump: None,
     }
 }
 
@@ -99,6 +100,16 @@ impl Transport for FakeTransport {
             drops: broadcast::channel(4).0,
         })
     }
+    async fn dial_via(
+        &self,
+        _via: FakeConn,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<FakeConn, ConnectError> {
+        self.log.lock().unwrap().push(format!("via {host}:{port}"));
+        self.dial(host, port, timeout).await
+    }
     async fn sleep(&self, _d: Duration) {}
 }
 
@@ -163,6 +174,11 @@ pub struct FakeRemote {
     pub uploads_dir: Mutex<Option<String>>,
     pub upload_results: Mutex<VecDeque<Result<(), ConnectError>>>,
     pub hold_attach: Mutex<Option<Arc<tokio::sync::Notify>>>,
+    pub histories: Mutex<HashMap<String, Result<String, ConnectError>>>,
+    /// Control-connection exec replies by command substring; anything else answers with nothing.
+    pub exec_replies: Mutex<Vec<(String, Result<String, ConnectError>)>>,
+    /// Answers `exec` in order after `exec_replies`; an empty queue answers with empty output.
+    pub exec_queue: Mutex<VecDeque<Result<String, ConnectError>>>,
 }
 
 impl Default for FakeRemote {
@@ -177,6 +193,9 @@ impl Default for FakeRemote {
             uploads_dir: Mutex::new(Some("/home/sam/.tether/uploads".into())),
             upload_results: Mutex::default(),
             hold_attach: Mutex::default(),
+            histories: Mutex::default(),
+            exec_queue: Mutex::default(),
+            exec_replies: Mutex::default(),
         }
     }
 }
@@ -227,8 +246,28 @@ impl Remote for FakeRemote {
         self.log.lock().unwrap().push(format!("kill {name}"));
         Ok(())
     }
+    async fn history(&self, name: &str) -> Result<String, ConnectError> {
+        self.log.lock().unwrap().push(format!("history {name}"));
+        self.histories
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .unwrap_or(Ok(String::new()))
+    }
     async fn uploads_dir(&self) -> Option<String> {
         self.uploads_dir.lock().unwrap().clone()
+    }
+    async fn exec(&self, command: &str) -> Result<String, ConnectError> {
+        self.log.lock().unwrap().push(format!("exec {command}"));
+        self.exec_replies
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(needle, _)| command.contains(needle.as_str()))
+            .map(|(_, reply)| reply.clone())
+            .or_else(|| self.exec_queue.lock().unwrap().pop_front())
+            .unwrap_or(Ok(String::new()))
     }
     async fn attach(
         &self,

@@ -1,13 +1,18 @@
 import { Palette } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
-import { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
+import { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow, SshImportBridge, ImportRow } from "bridge.slint";
 import { ConfirmDialog } from "components.slint";
 import { HomePage } from "home.slint";
 import { ServerFormPage, KeyGeneratePage, KeyMaterialPage } from "forms.slint";
 import { SettingsPage } from "settings.slint";
+import { SshImportPage } from "ssh_import.slint";
 import { SchemePickerPage, FontPickerPage } from "pickers.slint";
 import { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
+import { AgentVm } from "agents.slint";
 import { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
+import { SnippetsPage } from "snippets_page.slint";
+import { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
+import { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow, ChipRow } from "extras_bridge.slint";
 
 import "../../../assets/fonts/CascadiaMono-Regular.ttf";
 import "../../../assets/fonts/CascadiaMono-Bold.ttf";
@@ -25,9 +30,13 @@ import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/ComicMono.
 import "../../../../apple/TetherKit/Sources/TetherKit/Resources/Fonts/ComicMono-Bold.ttf";
 
 export { Tokens } from "tokens.slint";
-export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
+export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow, SshImportBridge, ImportRow } from "bridge.slint";
 export { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
+export { AgentVm, AgentQuestionRow, AgentOption } from "agents.slint";
+export { GitVm, GitRowVm, DiffLineVm, CheckVm, MethodVm, MdLinkVm, MdItemVm } from "git.slint";
 export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
+export { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
+export { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow, ChipRow } from "extras_bridge.slint";
 
 export component AppWindow inherits Window {
     in property <string> window-title: "Tether";
@@ -57,6 +66,7 @@ export component AppWindow inherits Window {
         Rectangle { background: Tokens.background; }
         if AppBridge.page == PageKind.home: HomePage { }
         if AppBridge.page == PageKind.server-form: ServerFormPage { }
+        if AppBridge.page == PageKind.ssh-import: SshImportPage { }
         if AppBridge.page == PageKind.key-generate: KeyGeneratePage { }
         if AppBridge.page == PageKind.key-import || AppBridge.page == PageKind.key-paste: KeyMaterialPage { }
         if AppBridge.page == PageKind.settings: SettingsPage { }
@@ -65,6 +75,7 @@ export component AppWindow inherits Window {
         if AppBridge.page == PageKind.terminal: TerminalPage { }
         if AppBridge.page == PageKind.host-key-refused: HostKeyRefusedPage { }
         if AppBridge.page == PageKind.couldnt-connect: CouldntConnectPage { }
+        if AppBridge.page == PageKind.snippets: SnippetsPage { }
         if AppBridge.dialog-open: ConfirmDialog {
             title: AppBridge.dialog-title;
             body: AppBridge.dialog-body;

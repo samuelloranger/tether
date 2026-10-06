@@ -22,7 +22,7 @@ v1 is the loop they can do without the phone:
 
 ## Out of scope
 
-Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+Push, notification actions on toasts, the phone key bar as a bar (snippets replace it, see Snippets), and the app-icon picker. Tabs replace the iOS session drawer; there is no drawer. Keyboard-interactive auth is a later slice.
 
 Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
 
@@ -76,13 +76,28 @@ Empty:
 
 Primary action: **Add a server**.
 
+### Import from SSH config
+
+**Import** on Home (and **Import from SSH config** under the empty state) reads `%USERPROFILE%\.ssh\config` with the OpenSSH rules Tether needs: `Host` blocks with `*`, `?` and `!` patterns, first value wins, `Include` (relative to `.ssh`, with globs), and keywords in any case. `Match` blocks are skipped. Every alias written out in a `Host` line becomes a row; wildcard-only blocks only supply defaults.
+
+Each row shows the alias, `user@host:port`, how it authenticates, and `via <jump>`:
+
+- `HostName`, `Port`, and `User` fill the machine; with no `User`, the Windows user name.
+- `IdentityFile` brings that key into the vault (named after the file). A key already in the vault is reused, a key shared by several hosts comes in once, and a key with a passphrase, or a missing file, leaves the machine on the SSH agent; the row says why.
+- `ProxyJump` sets **Connect through**: an alias points at that alias's row, and `[user@]host[:port]` gets a row of its own. With a hop list, the last hop is the machine connected through; a hop that is not an alias passes through the hops before it.
+- A host whose user, host and port are already saved reads "already on Home" and can't be checked; a jump through it points at the saved machine.
+
+New hosts start checked. Unchecking a host that another checked host goes through keeps it checked. **Import N machines** saves the keys first, then the machines, and returns to Home; if saving the machines fails, the keys come back out.
+
 ### Add a server, Edit server
 
 One form, two titles. Add starts empty; Edit starts from the machine and its button reads **Save changes**.
 
 Fields, in order: Name, Host, Port (default `22`), User, then Authentication.
 
-Authentication is a segment: **Private key**, **SSH agent**, or **Password**. Private key is a picker of vault keys. With an empty vault the picker reads: "No keys in the vault — generate or paste one first." SSH agent has no field; its line reads "Uses the keys in the Windows OpenSSH agent, including 1Password's when it serves that agent." Password is a concealed field.
+Authentication is a segment: **Private key**, **SSH agent**, or **Password**. Private key is a picker of vault keys. With an empty vault the picker reads: "No keys in the vault — generate or paste one first." SSH agent has no field; its line reads "Uses the keys in the Windows OpenSSH agent (1Password's too when it serves that agent), or in Pageant when that agent isn't running." Password is a concealed field.
+
+**Connect through** (shown once there is another machine) is a picker: **Direct**, then every other machine by name. Choosing one makes this machine a ProxyJump target: Tether connects to the chosen machine first and opens the session through it. The chosen machine may itself connect through another, up to 4 hops.
 
 On Edit, the password field starts empty and reads "Leave empty to keep the saved password". Switching away from Password deletes the stored password on save. Changing host or port means a different host-key pin: the old pin stays under the old `host:port`, and the new one is pinned on first connect. Edits apply the next time the machine is opened; an open machine keeps its connection.
 
@@ -177,6 +192,8 @@ Rows: Cascadia Mono, Cascadia Code, JetBrains Mono, Monaspace Neon, Monaspace Ra
 
 Every face is bundled in the binary, regular and bold, with the iOS font files and `LICENSES.md`. Cascadia is bundled too: it ships with Windows Terminal, not with every Windows install. Stored ids use the iOS form: `cascadia-mono`, `cascadia-code`, `jetbrains-mono`, `monaspace-neon`, `monaspace-radon`, `maple-mono`, `comic-mono`.
 
+Below the bundled rows, a **Google Fonts** section downloads more families (see Google Fonts).
+
 Glyphs the chosen face lacks fall back to the bundled Symbols Nerd Font Mono (prompt and powerline glyphs), then to Segoe UI Emoji and the system fallback chain. Cascadia Code's ligatures are drawn; the others are drawn without ligatures, as on iOS.
 
 ## Terminal
@@ -186,6 +203,7 @@ The header is a surface bar:
 - **Back**, to Home.
 - A lamp and a status word. The word is always present; the lamp is not the only signal.
 - The machine name, and under it the active session name, a midpoint, and the status word in the lamp color.
+- **Snippets** and **History** (see those sections).
 - **Send file…**
 - **Settings** (the gear).
 
@@ -217,6 +235,27 @@ The grid fills the rest of the window. Its background is the active theme's back
 - The bell flashes the header lamp once in the active tab, marks a background tab, and flashes the taskbar button when the window is not focused. A burst rings once: at most once per 200 ms per session, the iOS `BellThrottle` window. No sound.
 - The window title is `<machine> · <session>`, followed by the active tab's OSC 0/2 title when it set one.
 
+### Inline images
+
+`alacritty_terminal` has no image support, so `tether-core::graphics::Splitter` lifts the sequences out of the PTY stream before the grid sees them, and `tether-term` places them. Everything else reaches the grid unchanged and in order. A byte that might start an image sequence (a trailing `ESC`, `ESC _`, a prefix of `ESC ] 1337 ; File =`) is held until the next read decides it, so a split read never half-feeds the grid.
+
+Supported:
+
+- **Kitty graphics** (`ESC _ G … ESC \`), direct transmission only (`t=d`): `a=t` transmit, `a=T` transmit and display, `a=p` display by `i` or `I`, `a=d` delete, `a=q` query. Formats `f=24`, `f=32` (with `s`/`v`) and `f=100` (PNG), optional `o=z`, chunked `m=1`. Placement keys `c`, `r`, `x`/`y`/`w`/`h` (source rectangle), `X`/`Y` (pixel offset), `C=1` (do not move the cursor), `p` (a repeated placement id replaces the old one), `z` (kept for deletes only), `q`. Deletes: `d=a`/`A` (placements on the live screen), `i`/`I`, `n`/`N`, `c`/`C`, `p`/`P`, `x`/`X`, `y`/`Y`, `z`/`Z`; an uppercase letter also frees the picture data.
+- **iTerm2** `OSC 1337 ; File=…:base64` with `inline=1` (PNG or JPEG), `width`/`height` as cells, `Npx`, `N%` or `auto`, and `preserveAspectRatio`. `inline=0` (a download) is swallowed and not shown.
+
+Answers are honest: `a=q` replies `OK` only when the same command would be accepted. A transmission by file, temp file or shared memory replies `ENOTSUP`, as do animation (`a=f`/`a=a`/`a=c`), Unicode placeholders (`U=1`) and unknown formats. Bad data replies `EINVAL`, a pixel size over the cap `EFBIG`, and a missing image `ENOENT`. Nothing is sent when the command carries no `i`/`I`; `q=1`/`q=2` silence OK/everything.
+
+Placement. The image goes at the cursor. Its box is the picture's natural size in whole cells, scaled down (never clipped) to the room left on the line and `MAX_IMAGE_ROWS` (64) rows. The cursor then moves down `rows - 1` lines (scrolling like a line feed) and to the column after the image, the same as kitty. A pending synchronized update (`?2026`) is flushed first, because the cursor has to be real.
+
+Anchoring. A placement is a set of private-use zero-width characters, one per image row, written into the first column of the image in the grid itself. They scroll into history with their lines, are dropped with them at the 10 000-line limit, reflow on resize, are erased by clear screen and live on the alternate screen only while it does. The anchors are stripped from snapshots and selected text. Text written over a row's cell erases that row's anchor; the image stays while any of its rows keeps one. A tag index is reused only after the grid is scrubbed of the old one.
+
+Drawing. The rasterizer composites each visible image after the text with a box filter, clipped to the viewport (a half-scrolled image is cut, not wrapped), with the scaled copy cached per size. Z-index below zero is not honored: images always draw over text.
+
+Limits. 128 MiB of decoded pixels and 128 pictures per tab, oldest evicted first, and a picture whose placements have all left the grid is freed before any eviction. One picture is at most 16 Mpixel and 8192 px a side; one transmission at most 48 MiB of base64. Over the cap, the sequence is swallowed to its terminator and replied to with an error.
+
+Known gaps: the inactive screen's anchors cannot be scrubbed while the alternate screen is up; text over every anchored row drops the image even where a program meant it to stay; images are not part of search or copy.
+
 ### Keyboard
 
 The iOS map only covers what a phone keyboard can press. Windows needs the whole xterm set. `mod` below is the xterm modifier parameter: 1 + Shift 1 + Alt 2 + Ctrl 4.
@@ -244,7 +283,8 @@ Ctrl and Alt on everything else follow iOS `TerminalKeyMap`: Ctrl folds `@`–`_
 
 **Kept by Windows:** Alt+Tab, Alt+F4 (closes the window, same as the close button), the Windows key and its combos, Ctrl+Alt+Del, Print Screen.
 
-**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+click (open link). Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
+**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+Shift+F (find); Ctrl+click (open link). Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
+**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+Shift+P (snippets); Ctrl+Shift+H (history); Ctrl+click (open link). Ctrl+P and Ctrl+H still reach the PTY; only the Shift forms are taken. Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
 
 Key repeat sends repeats. Dead keys and IME go through text composition, never through this table. The kitty keyboard protocol and `modifyOtherKeys` are not advertised in v1.
 
@@ -280,6 +320,18 @@ Action: **Kill session**. The client switches away first when it is the active t
 
 **Leaving the PC.** An attached client tells the Claude Code mod someone is watching, so it does not hold a prompt for the phone. When Windows locks the workstation, every channel detaches after a 15 s grace (iOS `backgroundGrace`), and re-attaches on unlock. Minimizing does not detach.
 
+### Search
+
+**Find** in the header, or Ctrl+Shift+F, opens a find bar at the top right of the grid and focuses it. Ctrl+F still goes to the shell.
+
+- The query is literal text, not a pattern. It ignores case unless it has an uppercase letter.
+- It searches the active tab's scrollback and screen, including text wrapped across rows.
+- Every visible match is tinted with the theme's yellow; the current match is filled with it.
+- Enter steps to the next older match, Shift+Enter to the next newer one, and the arrows do the same. Stepping wraps around, and scrolls the grid to show the match.
+- The bar reads `2 of 14`, `14 matches`, or `No matches`. The count refreshes at most once a second while output arrives.
+- While the field has focus, keys go to it, not the PTY. Clicking the grid gives the keyboard back to the session, with the bar left open.
+- Switching tabs applies the query to the new tab. Esc in the field, or the close button, closes the bar and clears the highlights.
+
 ### Links
 
 Same rules as iOS `LinkSpans`: an OSC 8 hyperlink wins over text that only looks like one, and plain `http://` and `https://` URLs are detected in the grid, including a URL wrapped across rows and one cut by Claude Code's box characters (`│ ┃ ⎿`).
@@ -304,6 +356,30 @@ Toasts need an app identity, `Tether.Terminal`. The installer's Start menu short
 
 **Progress.** OSC 9;4 sets progress the way iOS reads it (`OSCReports`): state 1 with a percent is normal, 2 is error, 3 is indeterminate, 4 is paused, 0 clears, and a prompt mark (OSC 133;A) clears it too. The active tab's progress draws as a thin bar under the header in the accent (error in danger, paused in warning), and drives the taskbar button through `ITaskbarList3::SetProgressState` / `SetProgressValue`. A background tab's progress shows only on its tab, as a bar under the tab label.
 
+### Agents
+
+The host's `tether-notify` knows each zmx session's agent: `working`, `waiting` or `done`, since when, a message, and whether the Claude Code mod is holding a prompt. Windows reads it the way iOS does and shows it; it adds nothing to the host.
+
+**Reading.** On the control connection, every 10 s while connected (focused or not, unlike the `zmx ls` refresh: a toast for a background window needs the read), one exec: `if [ -x ~/.local/bin/tether-notify ]; then ~/.local/bin/tether-notify status 2>/dev/null; else echo __tether_notify_missing; fi`. The output is a JSON array; a banner ahead of it is ignored, a row that does not parse is skipped, and the rest still count. The first read after every connect is a baseline: nothing toasts for state that was already there.
+
+**Degrading.** Nothing here can break the terminal. A failed exec keeps the last read for 30 s, then shows no badges. A missing binary, or output that is not a status array (an older `tether-notify` without `status`), shows no badges and stops polling until the next connect. No error is shown for either.
+
+**Badges.** Every tab with an agent carries a small pill after its name, in words with colour only reinforcing them: `working` (accent), `needs you` (warning), `done 5m` (faint; the age is `now`, `Nm`, `Nh`, `Nd`, as on iOS). It is not the attention dot, which still means an OSC notification or bell arrived in a background tab. The active session's state and message also read in the header after the connection word: `· needs you · <message>`.
+
+**Held prompts.** When the mod holds a question or a permission request, nobody is attached to that session, so the terminal shows nothing to answer. The active tab's held prompt opens a sheet over the terminal, as the iOS answer sheet does:
+
+- A **question** loads with `tether-notify pending --session <name>` and lists every question with its options (radio for one choice, check for "Pick any") and an "Other" field. A typed answer replaces the pick on a single-choice question and is appended on a multi-select one. Send is enabled once every question has an answer; the answers go out as `tether-notify answer --session <name> --state <state> --version <version> --answers <base64 JSON by question text>`, multi-select labels joined with `, ` in option order. The host refuses the answer if the agent has moved on since the version the sheet names.
+- A **permission** shows the agent's message with **Approve** (Return), **Deny** (Esc) and a one-line reply (typed, then submitted), through `answer --input <base64>` and `--submit`. A reply is one line, at most 2000 characters.
+- Every argument is shell-quoted; typed text only ever travels as base64.
+
+Not now closes the sheet and leaves a bar under the tab strip ("The agent is asking a question" with Answer). Opening a tab again surfaces its held prompt even if it was closed. A prompt answered from another client, or replaced by a newer one, updates or closes the sheet on the next read. A refused answer (exit 3, "the agent has moved on") keeps the sheet open and says so. Keys do not reach the terminal while the sheet is up.
+
+A held prompt on a tab that is not active shows only its `needs you` pill and the toast; it opens when that tab does.
+
+**Toast.** A session entering `waiting` (or getting a new prompt while waiting) raises the usual toast: `<machine> · <session>` over `<Agent>` and the agent's message, under the same rule as OSC notifications (not shown for the focused, active tab), the same 5 s per-session throttle, and the same click: window forward, that tab selected. With the window unfocused the taskbar button also flashes. `working` and `done` never toast; this is narrower than iOS, which also alerts on `done`, because a desktop window left open would fire one for every finished prompt.
+
+**Not ported.** The iOS in-app banner for another session on the same host (the pill and the toast cover it), and Approve/Deny/Reply buttons on the toast itself: Windows toasts here carry no actions.
+
 ### Connect
 
 Opening a card:
@@ -312,7 +388,7 @@ Opening a card:
 2. Read the server host key. Fingerprint is SHA-256 of the host key blob, lowercase hex, colon-separated bytes. The same string format the iOS client pins.
 3. Nothing pinned for this host and port: pin it and continue. Pinning happens before auth, as on iOS.
 4. Pinned and different: stop. Do not offer a way to replace the pin.
-5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; the private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
+5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; when that pipe does not exist it tries Pageant instead. The private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
 6. Run `~/.local/bin/zmx ls` on a control connection (see below) to build the tab strip and choose the first tab (see Sessions). The binary path is `~/.local/bin/zmx`, same as iOS.
 7. For the chosen tab, open a PTY channel sized to the grid on the terminal connection, start the login shell, and push the current size.
 8. Type `~/.local/bin/zmx attach '<name>'` plus newline into that shell, name shell-quoted. Tether attaches by typing into the login shell, not by exec, exactly as iOS does, so the user lands in their shell if they detach.
@@ -320,6 +396,8 @@ Opening a card:
 Transport failures retry up to three attempts, 500 ms apart. Auth failures and a host-key mismatch never retry.
 
 The connecting screen is the terminal header on an empty well, status `connecting`.
+
+**Through a jump host.** With **Connect through** set, steps 1–5 run for each hop in turn, first hop first: dial it (directly, or through a `direct-tcpip` channel on the previous hop), pin or check its host key under its own `host:port`, and authenticate it with its own key, agent, or password. A refused key on any hop stops the chain there, before anything is sent to the next. The target's connection holds the chain open, and keepalive runs on the target only: its packets cross every hop, so a dead jump host drops the session like a dead network.
 
 ### Reconnect
 
@@ -351,12 +429,57 @@ Same chrome. One sentence, then **Retry** and **Back to Home**.
 |---|---|
 | Auth rejected | Authentication failed. Check the key or password. |
 | Key deleted | This machine's key was deleted. Edit the machine and choose another key. |
-| Agent not running | The Windows SSH agent isn't running. Start the OpenSSH Authentication Agent service, or choose a key. |
+| Agent not running | No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key. |
+| The machine to connect through was removed, or the jumps loop | The machine this one connects through is gone. Edit the machine and choose another, or Direct. |
 | Agent has no key the host accepts | The SSH agent has no key this host accepts. |
 | Connect timeout, or no reply after the handshake | The host stopped answering. |
 | TCP, handshake, or other transport | Could not connect: \<detail\> |
 
 `zmx ls` failing is not a connect failure: the client opens one `default` tab as if the list were empty of matches, and the next refresh fills the strip.
+
+## History
+
+A tab attached late shows only what arrives after the attach: `zmx` runs the program on an alternate screen, so the local scrollback never holds the session's earlier output. iOS reads it with `zmx history` into a read-only, selectable text view. Windows does the same, and for the same reason it does not try to prefill the live grid: replaying a transcript into the terminal would put text where the program's own screen is about to be redrawn, and the two would interleave.
+
+**History** (header button, or Ctrl+Shift+H) opens a read-only page over the terminal area, tab strip included, so the session it shows cannot change underneath it. The title names the session. The text is monospaced in the terminal theme's foreground on its background, wraps, opens scrolled to the newest line, and is selectable with the mouse; Ctrl+C copies a selection. **Copy all** puts the whole text on the clipboard. **Reload** asks again. **Done** or Esc closes it. Keys do not reach the PTY while it is open.
+
+The command is `~/.local/bin/zmx history '<session>'` (the iOS binary path, no flags), run with `exec` on the control connection, so a slow answer never holds up PTY output. The session name goes through `valid_session_name` and `shell_quote`; an invalid name runs nothing. Only the newest answer is used: a reply for an older request is dropped.
+
+The text is cleaned before it is shown: escape sequences and other control bytes are removed, CRLF becomes LF, trailing spaces and blank lines at either end go. It is capped at 256 KiB, keeping the newest whole lines, with a note when the start was cut: a text view that lays out the whole transcript stalls well before a terminal's 10,000-line scrollback fills it. iOS has no cap; it does not need one because its text view is native.
+
+When the host answers with nothing, fails, or the tab is not attached, the page falls back to this window's own scrollback for that tab (the iOS fallback), and says so. With nothing in either, it reads "Nothing in this session's scrollback yet." with Reload.
+
+Search inside the history is the scrollback search's job, not this page's.
+
+## Snippets
+
+iOS has a customizable key bar of macro keys for the keys a phone keyboard lacks. A PC keyboard has them, so Windows keeps the part that still matters: saved text you send with one action. A snippet is a name and a text. The text uses the iOS `MacroText` escapes, byte for byte: `\r` and `\n` send Return (terminals expect CR), `\t` Tab, `\e` Esc, `\cX` Ctrl-X (`\c?` is DEL), `\xHH` one ASCII byte below 0x80, `\\` a backslash. Any other backslash stays as typed.
+
+**Palette.** **Snippets** (header button) or Ctrl+Shift+P opens a centered list with a search field focused. Typing filters it: names that start with the query, names that contain it, names with its letters in order, then snippets whose text contains it. Up and Down move, Enter or a click sends, Esc or a click outside closes. Each row shows the name and the text with control bytes made visible (`⏎`, `⇥`, `⎋`, `^C`). With no snippets the palette says so and links to Settings. It opens only on a tab whose channel is up.
+
+Ctrl+Shift+P is free in terminals: Ctrl+P (previous history entry) is untouched, because only the Shift form is taken.
+
+**Sending.** The expanded text is written to the active tab as typed input, not as a bracketed paste. Bracketed paste turns a newline into text the shell edits, so a snippet ending in `\n` would never run. That is also the iOS behaviour for macro keys. A snippet without a trailing `\n` types its text and waits. The view snaps to the bottom first, as for any typed key.
+
+**Settings → Terminal → Snippets** is its own page: a name field, a text field with the escape table under it, **Add snippet** (**Save changes** while editing, with **Cancel**), and the list in saved order with move up, move down, Edit, and Delete. Delete asks first. The form says why a snippet can't be saved: no name, no text, a name over 48 characters, a text over 2048, more than 100 snippets.
+
+Stored in `snippets.json` next to `preferences.json`, in saved order. A file that exists but cannot be read is never overwritten: the page says nothing is saved. Snippets are per PC, not per machine.
+
+## Google Fonts
+
+The Font page gets the iOS "download a family" flow under the bundled rows. A field takes a `fonts.google.com/specimen/…` link, a `fonts.googleapis.com/css2?family=…` link, a share link, or just a family name; **Download** starts it, and one-tap chips offer the iOS list of monospaced families. Only those link forms and plain names are accepted, and only `https://fonts.googleapis.com` and `https://fonts.gstatic.com` are ever requested.
+
+1. The CSS API is asked for the family with weights 400 and 700 (400 alone when it answers "no such weight"). A client that is not a browser gets TrueType URLs, which the rasterizer reads; WOFF2 is never requested.
+2. The face closest to 400 is the regular, and a 700 is the bold when the family has one. A family without a bold draws bold text with its regular face.
+3. Each file must be at most 12 MiB, must start like a font file, and is written with the other into a staging folder that is moved to `fonts\<slug>\` under `%LOCALAPPDATA%\Tether\` only when both are complete. A failure leaves nothing behind.
+4. The rasterizer parses it and refuses a face that is not monospaced (narrow and wide glyphs have different advances), with a message that says so.
+5. The family joins the Font page's list, is selected at once, and is saved in `fonts\fonts.json` with its stored id `gf-<slug>` (the iOS form). At launch each stored family is read and registered before the first frame; one whose files are gone or no longer parse is dropped from the list. Folders the list does not name, and staging folders, are deleted at launch.
+
+**Remove** deletes the files and the entry; if that font was selected, the selection falls back to Cascadia Mono. A family cannot be downloaded twice; remove it first. Fonts are drawn by the Tether rasterizer, so the Font page's own rows, which Slint draws, show a downloaded family's name in the UI face rather than in itself.
+
+Offline or blocked: the status line under the field says Google Fonts could not be reached, and the form keeps the text. HTTP errors say the status. An unknown family says so by name. Redirects are not followed, so a download can never be sent to another host. Everything runs off the UI thread. Up to 24 families.
+
+Re-adding a removed family with different bytes in the same session asks for a restart, because the glyph cache is keyed by font id for the life of the process. The bundled faces are unchanged and remain first.
 
 ## Files and images
 
@@ -402,6 +525,51 @@ Each file that arrives is pasted, into the tab that was active when the send beg
 
 While a send is in flight the header stays, and a capsule at the bottom of the grid reads `Sending paste-1791082819.png (2/3)`. On success it reads `Sent ~/.tether/uploads/paste-1791082819.png`. A failure stops the queue: files already sent stay on the host and stay pasted, and the capsule names the file that failed and why. The capsule leaves on the next keystroke, or after 4 seconds.
 
+## Repository and documents
+
+A **Git** button in the terminal header opens a side panel next to the grid (the grid resizes to what is left; the panel is at most 440 px or half the window). It follows the active tab: switching tabs reloads it for that session. There is no iOS sheet here because a desktop window has the room, and the terminal stays usable beside it.
+
+The directory is the session shell's live cwd, `readlink /proc/<pid>/cwd` on the control connection, with the OSC 7 report and then the `zmx ls` cwd as fallbacks (the iOS order, plus OSC 7). Nothing else is read from the host than what these commands print; there is no server component.
+
+### Panel
+
+Header: a Back button when a diff or pull request is open, the branch in mono (the title of the open page otherwise), a `+n −m` line, Refresh, Close. Four tabs, as an iOS segment:
+
+- **Changes.** `git diff HEAD` (staged and unstaged, tracked files; `git diff` in a repository with no commit yet), listed per file with `+n −m`, followed by untracked files marked `new`. iOS lists `git diff` only; staged work vanishing from the list is wrong on a desktop where you stage in the terminal. A file opens its diff. A `.md` file has a Preview button.
+- **Commits.** The last 50, `<subject>` over `<hash> · <author>`. A commit opens its message and diff (`git show --patch`, message split from the patch at an `0x1e` marker so git's `---` is never read as a deletion).
+- **PRs.** `gh pr list --state all --limit 50`, closed-without-merge dropped, badge Open / Draft / Merged. `gh` missing prints a sentinel: the tab says GitHub CLI isn't installed on this host, which is different from `gh` refusing (its first line is shown) and from an empty list ("No pull requests").
+- **Docs.** `.md` and `.markdown` files of the repository (`git ls-files --cached --others --exclude-standard`, 300 at most). Selecting one opens the markdown viewer. iOS has no equivalent; this is the desktop's way in to a file without a path-detection hook in the grid.
+
+The list refreshes every 15 s (60 s on PRs) while it is the visible page, never under an open diff. A refresh in flight is never stacked, and an answer for a superseded request is dropped.
+
+### Diff
+
+One mono list, 20 px rows: a bold row per file with its stat, the hunk's full `@@ -a,b +c,d @@ context` line, old and new line numbers, `+` or `−` in the gutter, green and red row tints, context in the text colour. Git's own headers (`index`, `---`, `+++`, mode lines) are not rows. `Binary files … differ` and `\ No newline at end of file` are plain rows that take no line number. The list scrolls both ways (the width follows the longest of the first 400 columns). More than 20 000 rows are cut with a note; the host cuts a patch at 2 MB.
+
+The parsing is the iOS `DiffFile`, `GitDiffModel` and `GitRepositoryModel` rules ported to `tether-core` with their test cases: a file is named by its new path, a hunk keeps only its context in `text`, a preamble before the first file (commit message) is kept as plain rows, and a patch with no marker is all patch.
+
+### Pull request
+
+Title, `head → base`, state chip, file count and review decision. A checks card: the rollup headline (`No checks`, `n failing`, `x of n running`, `n checks passed`; failing outranks running) and one row per check, a link when it has a URL. A merge card shows the gate. **Review changes** opens the PR diff (`gh pr diff`), **Open in GitHub** the page.
+
+The gate is the iOS one, from `gh pr view --json mergeable,mergeStateStatus,isDraft`: a draft wins over everything, a conflict wins over `BLOCKED`, `UNKNOWN` is "Checking mergeability…", then `BEHIND`, `BLOCKED`, otherwise ready. Only a ready, open pull request enables the button, and only when `gh repo view` allows at least one method (`mergeCommitAllowed`, `squashMergeAllowed`, `rebaseMergeAllowed`; an unreadable answer allows none). The button is labelled with the default method, squash if allowed.
+
+**Merge** opens a confirm dialog titled `Merge #n?` with the allowed methods as options (squash preselected) and Cancel / Merge. Confirming checks the gate again against the latest answer and refuses silently if the pull request stopped being mergeable while the dialog was open. Then `gh pr merge n --squash|--merge|--rebase`. On success the page flips to Merged without waiting for GitHub to propagate; on failure `gh`'s first line is shown and the detail is fetched again. While checks are running or the gate is being computed, the page re-reads every 10 s.
+
+iOS also offers Close, Checkout and Update branch on a pull request, and streams `gh pr checks --watch` over a second connection. Those are not here: Checkout and Update change the working tree under the running shell, Close is one click from GitHub, and polling at 10 s needs no second connection.
+
+### Markdown viewer
+
+Opened from a Preview button (Changes, Docs) and covering the page, Close returns. It is read-only: headings (three sizes), paragraphs, bullet and numbered lists (nested items are flattened), block quotes, rules, fenced code and pipe tables in a mono block. Inline emphasis and code markers are dropped and `[label](url)` is kept as its label with a link chip under the block; bare URLs also become chips. A chip opens through the same safe-link rule as links in the grid (`http`, `https`, `mailto` only); `javascript:`, `file:` and relative links are plain text. Images show their alt text. The viewer is the iOS `MarkdownDocument` parser (pull request bodies there) plus tables, `+` bullets, `~~~` fences and the `3.14 is not a list` rule.
+
+The file is read with `head -c 524289 -- <path>`, so a file over 512 KiB shows its start and a note. The path is always the repository root joined to a path the panel itself listed: it must be relative, free of control characters and of `..`, and is quoted as one argument.
+
+Ctrl+click on a detected `.md` path in the grid is not implemented: it needs path detection across wrapped rows, and the Docs tab and the Changes list reach the same files.
+
+### Remote commands
+
+Every command is built in `tether-core` (`git`), passed through `shell_quote`, and run as `sh -c '<script>'` so it does not depend on the login shell (fish does not parse `{ }`). The script ends in `printf '\n__TETHER_RC__%s' "$?"`: the exec channel reports a non-zero exit as a failure and drops stdout, which would hide `gh`'s reason. Directories must be absolute with no control character, commit ids hexadecimal, pull request numbers are integers, repository paths are validated as above.
+
 ## How it is built
 
 A Cargo workspace under `clients/windows/`:
@@ -431,6 +599,8 @@ The client keeps iOS's connection split: one terminal connection for the PTYs (o
 | `keys.json` | Key records: id, name, algorithm, public line, fingerprint, origin, created. |
 | `preferences.json` | Appearance, terminal settings, window placement. |
 | `hostkeys.json` | `host:port` → fingerprint. Public host identity, same role as iOS UserDefaults. |
+| `snippets.json` | Saved snippets: id, name, text, in order. |
+| `fonts\fonts.json`, `fonts\<slug>\` | Downloaded Google Fonts families and their font files. |
 | `secrets\<account>.bin` | One DPAPI blob per secret. |
 
 Writes go to a temp file and then rename, so a crash never leaves half a JSON file.
@@ -478,6 +648,10 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 - Key table: every row above in normal and application cursor/keypad mode, each modifier parameter, Ctrl folding, Alt as `ESC` prefix, AltGr text on a Canadian French layout, Shift+Enter as `ESC CR`, and the keys Tether keeps never reaching the PTY.
 - Secret store: DPAPI round-trip and delete (Windows job only), and an in-memory store for the rest.
 - Rasterizer: a known cell buffer produces a buffer of the expected size at 1× and 2×, the theme background is the well color, and a missing glyph falls back to the symbols font.
+- Macros: `\r \n \t \e \cX \c? \xHH \\` expand as on iOS; an unknown or unfinished escape stays as typed; `\x80` is not a byte; control bytes show as `⏎ ⇥ ⎋ ^C`.
+- Snippets: validation messages and caps, trimmed names, replace in place, move clamps at the ends, palette ranking (name prefix, name contains, letters in order, text), a snippet sends typed bytes with no bracketed paste, the palette needs a live tab, Esc closes it, and the selection stays in range when the list changes.
+- History: the command quotes the name and refuses an invalid one; escapes, CRLF, and control bytes are cleaned; the 256 KiB cap keeps whole newest lines and never splits a character; an empty or failed host answer falls back to the tab's own scrollback; an older answer is dropped; Copy all sends the text; the driver runs it on the control connection.
+- Google Fonts: link and name parsing (specimen, css2, share, `|`-lists, junk and other hosts refused); only gstatic TrueType sources are taken; regular nearest 400 and a distinct 700; install writes both files or nothing; a missing 700 retries unweighted; unknown family, HTTP error, offline, and a non-font file each give their own message; an installed family is refused without a request; the stored list drops unsafe slugs; launch cleanup removes staging and unlisted folders; registration refuses garbage and a changed font under a known id; bundled faces all pass the monospace check.
 - `tether-ssh` against an in-process `russh` server: pin, auth by key, by agent (a fake agent pipe), and by password; several PTY channels on one connection, each with its own data; exec; SCP sink.
 
 Live SSH tests against a real host stay off unless an env var opts in, same policy as the iOS suite.
@@ -497,3 +671,6 @@ Live SSH tests against a real host stay off unless an env var opts in, same poli
 - Auth is a vault key, the Windows OpenSSH agent, or a password. Machines can be edited.
 - Files and images come in by drop, picker, or clipboard paste; go to `~/.tether/uploads`, 200 MB each, own SSH connection per file; and come back as one paste per file, so a TUI attaches images. Non-attachable images are re-encoded to JPEG, clipboard images are PNG.
 - A changed host key cannot be accepted from this app.
+- History is `zmx history` on the control connection shown read-only, not a prefill of the live grid.
+- Snippets are typed, not pasted, and use the iOS macro escapes; Ctrl+Shift+P opens them and Ctrl+Shift+H opens History.
+- Google Fonts install per user under `%LOCALAPPDATA%\Tether\fonts`, TrueType only, monospace only, no redirects.

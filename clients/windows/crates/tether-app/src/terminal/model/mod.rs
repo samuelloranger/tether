@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tether_core::connect::ConnectError;
+use tether_core::gitpanel::{GitJob, GitMsg, GitPanel, GitTarget, GitView};
 use tether_core::keymap::{KeyInput, Mods, TetherCommand};
 use tether_core::lock::LockGrace;
 use tether_core::osc::Progress;
@@ -17,13 +18,20 @@ use tether_term::TabTerminal;
 use crate::terminal::geometry::{Layout, TermStyle};
 use crate::terminal::status::{ConnStatus, Lamp};
 
+mod agents;
 mod events;
+pub(crate) mod extras;
+mod gitpanel;
 mod input;
 mod pointer;
 mod reconnect;
+mod search;
 pub(crate) mod send;
 mod tabs;
 
+pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
+pub use extras::{HistoryBody, HistoryView, PaletteView};
+pub use search::SearchView;
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -98,6 +106,12 @@ pub enum Msg {
     TabShortcut(TabJump),
     NewSessionBegin,
     NewSessionCommit(String),
+    SearchOpen,
+    SearchQuery(String),
+    SearchStep {
+        older: bool,
+    },
+    SearchClose,
     NewSessionCancel,
     KillRequested(String),
     KillConfirmed,
@@ -159,6 +173,46 @@ pub enum Msg {
     },
     CopySelection,
     PasteClipboard,
+    HistoryOpen,
+    HistoryClose,
+    HistoryCopy,
+    HistoryLoaded {
+        id: u64,
+        result: Result<String, ConnectError>,
+    },
+    SnippetsChanged(Vec<tether_core::snippets::Snippet>),
+    PaletteOpen,
+    PaletteClose,
+    PaletteQuery(String),
+    PaletteMove(i32),
+    /// A clicked row, or `None` for Enter on the highlighted one.
+    PaletteChoose(Option<usize>),
+    AgentStatusOut {
+        result: Result<String, ConnectError>,
+        now_unix: i64,
+    },
+    AgentPendingOut {
+        session: String,
+        result: Result<String, ConnectError>,
+    },
+    AgentAnswered {
+        result: Result<String, ConnectError>,
+    },
+    AgentOpen,
+    AgentDismiss,
+    AgentToggle {
+        question: usize,
+        option: usize,
+    },
+    AgentOther {
+        question: usize,
+        text: String,
+    },
+    AgentSubmit,
+    AgentApprove,
+    AgentDeny,
+    AgentReply(String),
+    Git(GitMsg),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -188,6 +242,21 @@ pub enum Effect {
         generation: u64,
     },
     StartSend(SendJob),
+    History {
+        name: String,
+        id: u64,
+    },
+    AgentPoll,
+    AgentPending {
+        session: String,
+    },
+    AgentAnswer {
+        command: String,
+    },
+    Git {
+        target: GitTarget,
+        job: GitJob,
+    },
     Redraw,
     Ui(UiEffect),
 }
@@ -217,6 +286,8 @@ pub enum UiEffect {
     #[allow(dead_code)] // send-file dialog path (platform::pick_files in glue)
     PickFiles,
     AllowIme,
+    FocusSearch,
+    Git(Box<GitView>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -233,6 +304,7 @@ pub struct TabView {
     pub active: bool,
     pub attention: bool,
     pub progress: Option<Progress>,
+    pub agent: Option<AgentBadge>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmptyView {
@@ -252,12 +324,16 @@ pub struct TerminalView {
     pub tabs: Vec<TabView>,
     pub empty: Option<EmptyView>,
     pub naming: Option<String>,
+    pub search: Option<SearchView>,
     pub kill_prompt: Option<String>,
     pub capsule: Option<CapsuleView>,
     pub progress: Option<Progress>,
     pub session_error: Option<String>,
     pub app_keypad: bool,
     pub title: String,
+    pub history: Option<HistoryView>,
+    pub palette: Option<PaletteView>,
+    pub agent: AgentView,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,6 +367,7 @@ pub struct TerminalModel {
     /// Sessions created from this window: their first attach is followed by a refresh.
     created_here: HashSet<String>,
     naming: Option<String>,
+    search: Option<search::SearchBar>,
     kill_prompt: Option<String>,
     opening: bool,
     attempt: usize,
@@ -310,6 +387,11 @@ pub struct TerminalModel {
     pub(crate) hover: Option<(usize, usize, usize)>,
     blink_on: bool,
     blink_at: Duration,
+    extras: extras::Extras,
+    agents: agents::AgentsState,
+    git: GitPanel,
+    git_shown: GitView,
+    session_pids: HashMap<String, i64>,
 }
 
 impl TerminalModel {
@@ -330,6 +412,7 @@ impl TerminalModel {
             last_refresh: Duration::ZERO,
             created_here: HashSet::new(),
             naming: None,
+            search: None,
             kill_prompt: None,
             opening: true,
             attempt: 0,
@@ -348,6 +431,11 @@ impl TerminalModel {
             hover: None,
             blink_on: true,
             blink_at: Duration::ZERO,
+            extras: extras::Extras::default(),
+            agents: agents::AgentsState::default(),
+            git: GitPanel::default(),
+            git_shown: GitView::default(),
+            session_pids: HashMap::new(),
         };
         (m, vec![Effect::Open])
     }
@@ -373,7 +461,10 @@ impl TerminalModel {
                 fx.push(Effect::Ls);
             }
             Msg::Dropped => self.on_dropped(&mut fx),
-            Msg::Tick => self.on_tick(now, &mut fx),
+            Msg::Tick => {
+                self.on_tick(now, &mut fx);
+                self.git_tick(now, &mut fx);
+            }
             Msg::Focus(f) => self.on_focus(f, now, &mut fx),
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
             Msg::SelectTab(name) => self.activate(&name, &mut fx),
@@ -442,7 +533,44 @@ impl TerminalModel {
                 &mut fx,
             ),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
+            Msg::SearchOpen => self.on_search_open(&mut fx),
+            Msg::SearchQuery(q) => self.on_search_query(q, now, &mut fx),
+            Msg::SearchStep { older } => self.on_search_step(older, now, &mut fx),
+            Msg::SearchClose => self.on_search_close(&mut fx),
+            Msg::HistoryOpen => self.on_history_open(&mut fx),
+            Msg::HistoryClose => self.on_history_close(&mut fx),
+            Msg::HistoryCopy => self.on_history_copy(&mut fx),
+            Msg::HistoryLoaded { id, result } => self.on_history_loaded(id, result),
+            Msg::SnippetsChanged(list) => self.on_snippets_changed(list),
+            Msg::PaletteOpen => self.on_palette_open(),
+            Msg::PaletteClose => self.on_palette_close(&mut fx),
+            Msg::PaletteQuery(q) => self.on_palette_query(q),
+            Msg::PaletteMove(d) => self.on_palette_move(d),
+            Msg::PaletteChoose(i) => self.on_palette_choose(i, &mut fx),
+            Msg::AgentStatusOut { result, now_unix } => {
+                self.on_agent_status(result, now_unix, now, &mut fx);
+            }
+            Msg::AgentPendingOut { session, result } => {
+                self.on_agent_pending(&session, result, &mut fx);
+            }
+            Msg::AgentAnswered { result } => self.on_agent_answered(result, &mut fx),
+            Msg::AgentOpen => self.on_agent_open(&mut fx),
+            Msg::AgentDismiss => self.on_agent_dismiss(&mut fx),
+            Msg::AgentToggle { question, option } => self.on_agent_toggle(question, option),
+            Msg::AgentOther { question, text } => self.on_agent_other(question, &text),
+            Msg::AgentSubmit => self.on_agent_answer(None, &mut fx),
+            Msg::AgentApprove => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Approve), &mut fx);
+            }
+            Msg::AgentDeny => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Deny), &mut fx);
+            }
+            Msg::AgentReply(text) => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Reply(text)), &mut fx);
+            }
+            Msg::Git(m) => self.on_git(m, now, &mut fx),
         }
+        self.sync_search(now);
         fx
     }
 
@@ -455,6 +583,7 @@ impl TerminalModel {
         self.status = ConnStatus::Connected;
         self.attempt = 0;
         self.last_refresh = now;
+        self.agents_on_opened();
         fx.push(Effect::Ls);
         if was_reconnect && !self.lock_detached {
             self.reattach_all(fx);
@@ -500,6 +629,7 @@ impl TerminalModel {
                 .iter()
                 .map(|s| (s.name.clone(), s.display_cwd().to_string()))
                 .collect();
+            self.session_pids = sessions.iter().map(|s| (s.name.clone(), s.pid)).collect();
         }
         if self.strip.is_none() {
             let strip = match result {
@@ -641,13 +771,27 @@ impl TerminalModel {
                     .iter()
                     .map(|t| TabView {
                         name: t.name.clone(),
-                        cwd_leaf: t.cwd_leaf.clone(),
+                        // OSC 7 follows `cd`; zmx ls only knows where the session started.
+                        cwd_leaf: self
+                            .tabs
+                            .get(&t.name)
+                            .and_then(|x| x.term.reports().cwd.clone())
+                            .and_then(|cwd| {
+                                ZmxSession {
+                                    cwd,
+                                    ..ZmxSession::default()
+                                }
+                                .cwd_leaf()
+                                .map(str::to_string)
+                            })
+                            .or_else(|| t.cwd_leaf.clone()),
                         active: s.active.as_deref() == Some(&t.name),
                         attention: t.attention,
                         progress: self
                             .tabs
                             .get(&t.name)
                             .and_then(|x| x.term.reports().progress),
+                        agent: self.agent_badge(&t.name),
                     })
                     .collect()
             })
@@ -684,6 +828,7 @@ impl TerminalModel {
             tabs,
             empty,
             naming: self.naming.clone(),
+            search: self.search_view(),
             kill_prompt: self.kill_prompt.clone(),
             capsule,
             progress: self
@@ -693,6 +838,9 @@ impl TerminalModel {
             session_error,
             app_keypad,
             title: self.window_title(),
+            history: self.history_view(),
+            palette: self.palette_view(),
+            agent: self.agent_view(),
         }
     }
 
@@ -784,6 +932,19 @@ pub(crate) mod tests {
             }
         }
         m
+    }
+
+    #[test]
+    fn a_tab_label_follows_osc_7_after_cd() {
+        let mut m = live(vec![crate::terminal::testkit::session("default", 1)]);
+        m.handle(
+            Msg::PtyData {
+                name: "default".into(),
+                bytes: b"\x1b]7;file://box/home/dev/proj\x07".to_vec(),
+            },
+            t(3),
+        );
+        assert_eq!(m.view().tabs[0].cwd_leaf.as_deref(), Some("proj"));
     }
 
     #[test]

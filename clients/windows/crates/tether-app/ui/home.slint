@@ -1,7 +1,7 @@
 import { ListView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { HomeBridge, MachineCard, KeyCard } from "bridge.slint";
-import { Aurora, IconButton, Lamp, OriginTag, Pill, PrimaryButton, SecondaryButton, Segment } from "components.slint";
+import { Aurora, GhostButton, IconButton, Lamp, OriginTag, Pill, PrimaryButton, SecondaryButton, Segment } from "components.slint";
 
 component MachineCardView inherits Rectangle {
     in property <MachineCard> card;
@@ -164,6 +164,10 @@ component MachinesEmpty inherits VerticalLayout {
         padding-top: 8px;
         PrimaryButton { text: "Add a server"; clicked => { HomeBridge.add-machine(); } }
     }
+    HorizontalLayout {
+        alignment: center;
+        GhostButton { text: "Import from SSH config"; clicked => { HomeBridge.import-ssh-config(); } }
+    }
 }
 
 export component HomePage inherits Rectangle {
@@ -187,11 +191,15 @@ export component HomePage inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
                 VerticalLayout {
                     alignment: end;
-                    IconButton { icon: @image-url("icons/gear.svg"); clicked => { HomeBridge.open-settings(); } }
+                    IconButton { icon: @image-url("icons/gear.svg"); tooltip: "Settings"; clicked => { HomeBridge.open-settings(); } }
                 }
                 VerticalLayout {
                     alignment: end;
-                    IconButton { icon: @image-url("icons/plus.svg"); clicked => { HomeBridge.add-machine(); } }
+                    IconButton { icon: @image-url("icons/import.svg"); tooltip: "Import from SSH config"; clicked => { HomeBridge.import-ssh-config(); } }
+                }
+                VerticalLayout {
+                    alignment: end;
+                    IconButton { icon: @image-url("icons/plus.svg"); tooltip: "Add a server"; clicked => { HomeBridge.add-machine(); } }
                 }
             }
             VerticalLayout {

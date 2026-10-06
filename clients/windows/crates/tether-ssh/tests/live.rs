@@ -47,11 +47,15 @@ async fn live_host_lists_sessions_and_opens_a_shell() {
         port,
         user,
         auth,
+        jump: None,
     };
 
     let mut conn = connect(
         &support::transport(),
-        &ConnectRequest { machine },
+        &ConnectRequest {
+            machine,
+            jumps: Vec::new(),
+        },
         &MemoryHostKeys::default(),
         &secrets,
     )

@@ -19,7 +19,7 @@ use crate::terminal::model::{
 use crate::terminal::remote::SshRemote;
 use crate::terminal::ui_port::SlintUi;
 use crate::win32::Platform;
-use crate::{AppWindow, ConnectVm, TerminalVm};
+use crate::{AgentVm, AppWindow, ConnectVm, TerminalVm};
 
 thread_local! {
     static CURRENT: RefCell<Option<MsgSink>> = const { RefCell::new(None) };
@@ -59,12 +59,13 @@ fn platform() -> Arc<dyn Platform> {
 
 /// The body of M5's `open_machine::on_open_machine`.
 pub fn open_machine(app: &Rc<App>, machine: Machine) {
-    let (style, hostkeys, secrets) = {
+    let (style, hostkeys, secrets, jumps) = {
         let s = app.state.borrow();
         (
             TermStyle::from_prefs(&s.prefs.terminal),
             s.hostkeys.clone(),
             s.secrets.clone(),
+            tether_core::connect::jump_chain(&s.profiles.machines, &machine),
         )
     };
     let rt = app.runtime.handle().clone();
@@ -79,6 +80,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     let remote = Arc::new(SshRemote::new(
         transport,
         machine.clone(),
+        jumps,
         hostkeys,
         secrets,
     ));
@@ -92,6 +94,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(windows)]
     let network_target = (machine.host.clone(), machine.port);
     set_well_color(&app.ui, style.theme.background);
+    crate::extras::set_foreground(&app.ui, style.theme.foreground);
     app.ui.global::<ConnectVm>().set_who(
         format!(
             "{} · {}@{}:{}",
@@ -105,6 +108,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(windows)]
     crate::win32::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    crate::extras::send_snippets();
     if !WIRED.replace(true) {
         wire_callbacks(&app.ui);
     }
@@ -124,9 +128,14 @@ fn wire_callbacks(ui: &AppWindow) {
     vm.on_home(|| send(Msg::Back));
     vm.on_reconnect(|| send(Msg::Reconnect));
     vm.on_select_tab(|n| send(Msg::SelectTab(n.into())));
+    vm.on_kill_tab(|n| send(Msg::KillRequested(n.into())));
     vm.on_new_session(|| send(Msg::NewSessionBegin));
     vm.on_commit_name(|n| send(Msg::NewSessionCommit(n.into())));
     vm.on_cancel_name(|| send(Msg::NewSessionCancel));
+    vm.on_find(|| send(Msg::SearchOpen));
+    vm.on_search_edited(|q| send(Msg::SearchQuery(q.into())));
+    vm.on_search_step(|older| send(Msg::SearchStep { older }));
+    vm.on_search_close(|| send(Msg::SearchClose));
     vm.on_kill_confirmed(|| send(Msg::KillConfirmed));
     vm.on_kill_cancelled(|| send(Msg::KillCancelled));
     let weak = ui.as_weak();
@@ -158,10 +167,10 @@ fn wire_callbacks(ui: &AppWindow) {
             send(Msg::SendFiles(files));
         }
     });
+    // The same path as Home's gear: it fills the page before showing it.
     vm.on_settings(|| {
         if let Some(app) = app() {
-            app.router.go(Page::Settings);
-            app.refresh_router();
+            app.open_settings();
         }
     });
     let weak = ui.as_weak();
@@ -175,10 +184,31 @@ fn wire_callbacks(ui: &AppWindow) {
             scale,
         });
     });
+    let agents = ui.global::<AgentVm>();
+    agents.on_show(|| send(Msg::AgentOpen));
+    agents.on_dismiss(|| send(Msg::AgentDismiss));
+    agents.on_toggle(|question, option| {
+        if let (Ok(question), Ok(option)) = (usize::try_from(question), usize::try_from(option)) {
+            send(Msg::AgentToggle { question, option });
+        }
+    });
+    agents.on_other(|question, text| {
+        if let Ok(question) = usize::try_from(question) {
+            send(Msg::AgentOther {
+                question,
+                text: text.into(),
+            });
+        }
+    });
+    agents.on_submit(|| send(Msg::AgentSubmit));
+    agents.on_approve(|| send(Msg::AgentApprove));
+    agents.on_deny(|| send(Msg::AgentDeny));
+    agents.on_reply(|text| send(Msg::AgentReply(text.into())));
     let cv = ui.global::<ConnectVm>();
     cv.on_retry(|| send(Msg::Retry));
     cv.on_back_home(|| send(Msg::Back));
     vm.on_retry_session(|| send(Msg::RetrySession));
+    crate::terminal::gitview::wire(ui);
 
     use crate::terminal::mouse::{Button, MouseKind, MouseMsg};
     let started = std::time::Instant::now();
@@ -259,9 +289,13 @@ fn keys_to_pty(app: &App) -> bool {
     current().is_some()
         && app.router.current() == Page::Terminal
         && !vm.get_naming()
+        && !vm.get_search_focused()
         && vm.get_kill_name().is_empty()
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
+        && !crate::extras::overlay_open(&app.ui)
+        && !app.ui.global::<AgentVm>().get_open()
+        && !app.ui.global::<crate::GitVm>().get_modal()
 }
 
 pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
@@ -410,6 +444,8 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         | UiEffect::SetClipboard(_)
         | UiEffect::BringToFront
         | UiEffect::PickFiles => {}
+        UiEffect::FocusSearch => vm.set_search_focus_seq(vm.get_search_focus_seq() + 1),
+        UiEffect::Git(view) => crate::terminal::gitview::apply(w, *view),
         UiEffect::AllowIme => {
             app.ui
                 .window()
@@ -423,6 +459,7 @@ pub fn prefs_changed(prefs: &tether_core::prefs::TerminalPrefs) {
     let style = TermStyle::from_prefs(prefs);
     if let Some(app) = app() {
         set_well_color(&app.ui, style.theme.background);
+        crate::extras::set_foreground(&app.ui, style.theme.foreground);
     }
     send(Msg::StyleChanged(style));
 }
