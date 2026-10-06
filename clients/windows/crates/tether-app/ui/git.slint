@@ -48,6 +48,8 @@ export struct MdItemVm {
 
 export global GitVm {
     in property <bool> open;
+    // Dragged by the panel's left edge; the terminal page clamps it to half its width.
+    in-out property <length> panel-width: 400px;
     // A viewer covers the terminal: keys must not reach the PTY.
     in property <bool> modal;
     in property <string> title;
@@ -63,7 +65,6 @@ export global GitVm {
     in property <bool> loading;
     in property <[GitRowVm]> rows;
     in property <[DiffLineVm]> diff;
-    in property <length> diff-width;
 
     in property <bool> has-pr;
     in property <string> pr-title;
@@ -218,15 +219,17 @@ component GitRowItem inherits Rectangle {
 
 component DiffLine inherits Rectangle {
     in property <DiffLineVm> line;
-    height: 20px;
+    height: max(20px, body.preferred-height + 4px);
     background: line.kind == 0 ? Tokens.raised : line.kind == 1 ? Tokens.accent.with-alpha(0.10) : line.kind == 2 ? Tokens.success.with-alpha(0.13) : line.kind == 3 ? Tokens.danger.with-alpha(0.13) : transparent;
     HorizontalLayout {
+        padding-top: 2px;
+        padding-bottom: 2px;
         spacing: 0px;
         if line.kind != 0: Text {
             width: 40px;
             text: line.old-no;
             horizontal-alignment: right;
-            vertical-alignment: center;
+            vertical-alignment: top;
             font-family: Tokens.mono-font;
             font-size: 11px;
             color: Tokens.text-faint;
@@ -235,7 +238,7 @@ component DiffLine inherits Rectangle {
             width: 44px;
             text: line.new-no;
             horizontal-alignment: right;
-            vertical-alignment: center;
+            vertical-alignment: top;
             font-family: Tokens.mono-font;
             font-size: 11px;
             color: Tokens.text-faint;
@@ -244,17 +247,17 @@ component DiffLine inherits Rectangle {
             width: 18px;
             text: line.kind == 2 ? "+" : line.kind == 3 ? "\u{2212}" : "";
             horizontal-alignment: center;
-            vertical-alignment: center;
+            vertical-alignment: top;
             font-family: Tokens.mono-font;
             font-size: 12px;
             color: line.kind == 2 ? Tokens.success : Tokens.danger;
         }
         if line.kind == 0: Rectangle { width: 10px; }
-        Text {
+        body := Text {
+            horizontal-stretch: 1;
             text: line.text;
-            vertical-alignment: center;
-            overflow: clip;
-            wrap: no-wrap;
+            vertical-alignment: top;
+            wrap: char-wrap;
             font-family: Tokens.mono-font;
             font-size: 12px;
             font-weight: line.kind == 0 ? 700 : 400;
@@ -264,7 +267,7 @@ component DiffLine inherits Rectangle {
             width: 90px;
             text: line.stat;
             horizontal-alignment: right;
-            vertical-alignment: center;
+            vertical-alignment: top;
             font-family: Tokens.mono-font;
             font-size: 11px;
             color: Tokens.text-secondary;
@@ -302,6 +305,7 @@ component PrPage inherits ScrollView {
                 x: 12px;
                 y: 12px;
                 width: parent.width - 24px;
+                height: parent.height - 24px;
                 spacing: 8px;
                 HorizontalLayout {
                     spacing: 8px;
@@ -330,6 +334,7 @@ component PrPage inherits ScrollView {
                 x: 12px;
                 y: 12px;
                 width: parent.width - 24px;
+                height: parent.height - 24px;
                 spacing: 10px;
                 if GitVm.pr-status != "": Text { text: GitVm.pr-status; font-size: 13px; font-weight: 650; color: GitStyle.tone(GitVm.pr-status-tone); }
                 if GitVm.pr-status == "": Text { text: GitVm.gate-text; wrap: word-wrap; font-size: 13px; font-weight: 650; color: GitStyle.tone(GitVm.gate-tone); }
@@ -354,9 +359,8 @@ component PrPage inherits ScrollView {
 }
 
 component DiffList inherits ListView {
-    content-width: max(root.width, GitVm.diff-width);
     for line in GitVm.diff: DiffLine {
-        width: max(root.width, GitVm.diff-width);
+        width: root.width;
         line: line;
     }
 }
@@ -369,11 +373,11 @@ component RowList inherits ListView {
 }
 
 export component GitSidePanel inherits Rectangle {
-    preferred-width: 400px;
-    min-width: 300px;
-    max-width: 440px;
+    in property <length> max-panel-width;
+    property <length> min-panel-width: 300px;
+    width: clamp(GitVm.panel-width, root.min-panel-width, max(root.min-panel-width, root.max-panel-width));
     background: Tokens.surface;
-    Rectangle { x: 0; width: 1px; background: Tokens.border; }
+    Rectangle { x: 0; width: 1px; background: resize.has-hover || resize.pressed ? Tokens.accent : Tokens.border; }
     VerticalLayout {
         Rectangle {
             height: 48px;
@@ -452,6 +456,15 @@ export component GitSidePanel inherits Rectangle {
             }
         }
     }
+    resize := TouchArea {
+        x: 0;
+        width: 6px;
+        mouse-cursor: ew-resize;
+        // The handle moves with the edge, so pressed-x stays under the pointer.
+        moved => {
+            GitVm.panel-width = clamp(root.width - (self.mouse-x - self.pressed-x), root.min-panel-width, max(root.min-panel-width, root.max-panel-width));
+        }
+    }
 }
 
 component MdBlock inherits VerticalLayout {
@@ -469,6 +482,7 @@ component MdBlock inherits VerticalLayout {
             x: 10px;
             y: 10px;
             width: parent.width - 20px;
+            height: parent.height - 20px;
             text: item.text;
             wrap: no-wrap;
             overflow: clip;

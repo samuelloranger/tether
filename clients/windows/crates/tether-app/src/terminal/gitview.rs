@@ -2,16 +2,11 @@
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tether_core::git::MergeMethod;
-use tether_core::gitpanel::{DiffLine, DiffLineKind, GitMsg, GitTab, GitView, PrView, Tone};
+use tether_core::gitpanel::{DiffLineKind, GitMsg, GitTab, GitView, PrView, Tone};
 use tether_core::markdown::ItemKind;
 
 use crate::terminal::model::Msg;
 use crate::{AppWindow, CheckVm, DiffLineVm, GitRowVm, GitVm, MdItemVm, MdLinkVm, MethodVm};
-
-/// A mono glyph at the diff's 12px size, plus the gutters.
-const GLYPH_PX: f32 = 7.4;
-const GUTTER_PX: f32 = 40.0 + 44.0 + 18.0 + 100.0;
-const WIDTH_SCAN_CAP: usize = 400;
 
 pub fn tone_index(t: Tone) -> i32 {
     match t {
@@ -78,16 +73,6 @@ fn item_kind(k: ItemKind) -> i32 {
         ItemKind::Quote => 5,
         ItemKind::Rule => 6,
     }
-}
-
-/// Logical pixels the widest line needs, so the list can scroll sideways.
-pub fn diff_width(lines: &[DiffLine]) -> f32 {
-    let widest = lines
-        .iter()
-        .map(|l| l.text.chars().take(WIDTH_SCAN_CAP).count())
-        .max()
-        .unwrap_or(0);
-    widest as f32 * GLYPH_PX + GUTTER_PX
 }
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
@@ -180,7 +165,6 @@ pub fn apply(w: &AppWindow, v: GitView) {
             })
             .collect(),
     ));
-    vm.set_diff_width(diff_width(&v.diff));
     vm.set_diff(model(
         v.diff
             .iter()
@@ -256,16 +240,6 @@ pub fn wire(ui: &AppWindow) {
 mod tests {
     use super::*;
 
-    fn line(text: &str) -> DiffLine {
-        DiffLine {
-            kind: DiffLineKind::Context,
-            old: String::new(),
-            new: String::new(),
-            text: text.into(),
-            stat: String::new(),
-        }
-    }
-
     #[test]
     fn tabs_round_trip_through_their_indices() {
         for tab in [
@@ -285,14 +259,5 @@ mod tests {
             assert_eq!(method_from_id(method_id(m)), m);
         }
         assert_eq!(method_from_id(-4), MergeMethod::Squash);
-    }
-
-    #[test]
-    fn the_diff_is_as_wide_as_its_longest_line_and_never_narrower_than_the_gutters() {
-        assert_eq!(diff_width(&[]), GUTTER_PX);
-        let wide = diff_width(&[line("ab"), line(&"x".repeat(100))]);
-        assert!((wide - (100.0 * GLYPH_PX + GUTTER_PX)).abs() < 0.01);
-        let capped = diff_width(&[line(&"x".repeat(10_000))]);
-        assert!((capped - (WIDTH_SCAN_CAP as f32 * GLYPH_PX + GUTTER_PX)).abs() < 0.01);
     }
 }

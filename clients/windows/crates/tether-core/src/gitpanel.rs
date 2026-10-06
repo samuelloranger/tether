@@ -187,6 +187,8 @@ pub struct GitPanel {
     error: Option<String>,
     docs: Option<Vec<String>>,
     docs_req: Option<u64>,
+    // Set by a refresh: the list stays shown until its replacement arrives.
+    docs_stale: bool,
     docs_error: Option<String>,
     doc: Option<Doc>,
     toast: Option<String>,
@@ -321,13 +323,16 @@ impl GitPanel {
         self.workspace_req = Some(req);
         fx.push(GitFx::Run(GitJob::Workspace { req }));
         if self.tab == GitTab::Docs {
-            self.docs = None;
+            self.docs_stale = true;
             self.docs_req = None;
         }
     }
 
     fn ensure_docs(&mut self, fx: &mut Vec<GitFx>) {
-        if self.tab != GitTab::Docs || self.docs.is_some() || self.docs_req.is_some() {
+        if self.tab != GitTab::Docs
+            || self.docs_req.is_some()
+            || (self.docs.is_some() && !self.docs_stale)
+        {
             return;
         }
         let Some(top) = self.workspace.as_ref().map(|w| w.top.clone()) else {
@@ -335,6 +340,7 @@ impl GitPanel {
         };
         let req = self.req();
         self.docs_req = Some(req);
+        self.docs_stale = false;
         self.docs_error = None;
         fx.push(GitFx::Run(GitJob::Docs { req, top }));
     }
@@ -1439,6 +1445,42 @@ mod tests {
             &fx[0],
             GitFx::Run(GitJob::Markdown { path, .. }) if path == "/repo/docs/a.md"
         ));
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_docs_listed_until_the_new_list_arrives() {
+        let mut p = opened();
+        let fx = run(&mut p, GitMsg::SetTab(GitTab::Docs), T0);
+        let GitFx::Run(GitJob::Docs { req, .. }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        let docs = |req, list: &[&str]| {
+            GitMsg::Done(GitDone::Docs {
+                req,
+                result: Ok(list.iter().map(|s| (*s).into()).collect()),
+            })
+        };
+        run(&mut p, docs(req, &["a.md"]), T0);
+        let fx = run(&mut p, GitMsg::Tick, sec(15));
+        let GitFx::Run(GitJob::Workspace { req }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        assert_eq!(p.view().rows[0].primary, "a.md");
+        let fx = run(
+            &mut p,
+            GitMsg::Done(GitDone::Workspace {
+                req,
+                result: Ok(workspace()),
+            }),
+            sec(15),
+        );
+        let GitFx::Run(GitJob::Docs { req, .. }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        assert!(!p.view().loading);
+        assert_eq!(p.view().rows[0].primary, "a.md");
+        run(&mut p, docs(req, &["a.md", "b.md"]), sec(15));
+        assert_eq!(p.view().rows.len(), 2);
     }
 
     #[test]
