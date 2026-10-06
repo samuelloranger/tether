@@ -19,7 +19,7 @@ use crate::terminal::model::{
 use crate::terminal::remote::SshRemote;
 use crate::terminal::ui_port::SlintUi;
 use crate::win32::Platform;
-use crate::{AppWindow, ConnectVm, TerminalVm};
+use crate::{AgentVm, AppWindow, ConnectVm, TerminalVm};
 
 thread_local! {
     static CURRENT: RefCell<Option<MsgSink>> = const { RefCell::new(None) };
@@ -183,6 +183,26 @@ fn wire_callbacks(ui: &AppWindow) {
             scale,
         });
     });
+    let agents = ui.global::<AgentVm>();
+    agents.on_show(|| send(Msg::AgentOpen));
+    agents.on_dismiss(|| send(Msg::AgentDismiss));
+    agents.on_toggle(|question, option| {
+        if let (Ok(question), Ok(option)) = (usize::try_from(question), usize::try_from(option)) {
+            send(Msg::AgentToggle { question, option });
+        }
+    });
+    agents.on_other(|question, text| {
+        if let Ok(question) = usize::try_from(question) {
+            send(Msg::AgentOther {
+                question,
+                text: text.into(),
+            });
+        }
+    });
+    agents.on_submit(|| send(Msg::AgentSubmit));
+    agents.on_approve(|| send(Msg::AgentApprove));
+    agents.on_deny(|| send(Msg::AgentDeny));
+    agents.on_reply(|text| send(Msg::AgentReply(text.into())));
     let cv = ui.global::<ConnectVm>();
     cv.on_retry(|| send(Msg::Retry));
     cv.on_back_home(|| send(Msg::Back));
@@ -272,6 +292,7 @@ fn keys_to_pty(app: &App) -> bool {
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
         && !crate::extras::overlay_open(&app.ui)
+        && !app.ui.global::<AgentVm>().get_open()
 }
 
 pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {

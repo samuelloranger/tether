@@ -17,6 +17,7 @@ use tether_term::TabTerminal;
 use crate::terminal::geometry::{Layout, TermStyle};
 use crate::terminal::status::{ConnStatus, Lamp};
 
+mod agents;
 mod events;
 pub(crate) mod extras;
 mod input;
@@ -28,6 +29,7 @@ mod tabs;
 
 pub use extras::{HistoryBody, HistoryView, PaletteView};
 pub use search::SearchView;
+pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -183,6 +185,31 @@ pub enum Msg {
     PaletteMove(i32),
     /// A clicked row, or `None` for Enter on the highlighted one.
     PaletteChoose(Option<usize>),
+    AgentStatusOut {
+        result: Result<String, ConnectError>,
+        now_unix: i64,
+    },
+    AgentPendingOut {
+        session: String,
+        result: Result<String, ConnectError>,
+    },
+    AgentAnswered {
+        result: Result<String, ConnectError>,
+    },
+    AgentOpen,
+    AgentDismiss,
+    AgentToggle {
+        question: usize,
+        option: usize,
+    },
+    AgentOther {
+        question: usize,
+        text: String,
+    },
+    AgentSubmit,
+    AgentApprove,
+    AgentDeny,
+    AgentReply(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,6 +242,13 @@ pub enum Effect {
     History {
         name: String,
         id: u64,
+    },
+    AgentPoll,
+    AgentPending {
+        session: String,
+    },
+    AgentAnswer {
+        command: String,
     },
     Redraw,
     Ui(UiEffect),
@@ -262,6 +296,7 @@ pub struct TabView {
     pub active: bool,
     pub attention: bool,
     pub progress: Option<Progress>,
+    pub agent: Option<AgentBadge>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmptyView {
@@ -290,6 +325,7 @@ pub struct TerminalView {
     pub title: String,
     pub history: Option<HistoryView>,
     pub palette: Option<PaletteView>,
+    pub agent: AgentView,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +380,7 @@ pub struct TerminalModel {
     blink_on: bool,
     blink_at: Duration,
     extras: extras::Extras,
+    agents: agents::AgentsState,
 }
 
 impl TerminalModel {
@@ -384,6 +421,7 @@ impl TerminalModel {
             blink_on: true,
             blink_at: Duration::ZERO,
             extras: extras::Extras::default(),
+            agents: agents::AgentsState::default(),
         };
         (m, vec![Effect::Open])
     }
@@ -492,6 +530,27 @@ impl TerminalModel {
             Msg::PaletteQuery(q) => self.on_palette_query(q),
             Msg::PaletteMove(d) => self.on_palette_move(d),
             Msg::PaletteChoose(i) => self.on_palette_choose(i, &mut fx),
+            Msg::AgentStatusOut { result, now_unix } => {
+                self.on_agent_status(result, now_unix, now, &mut fx);
+            }
+            Msg::AgentPendingOut { session, result } => {
+                self.on_agent_pending(&session, result, &mut fx);
+            }
+            Msg::AgentAnswered { result } => self.on_agent_answered(result, &mut fx),
+            Msg::AgentOpen => self.on_agent_open(&mut fx),
+            Msg::AgentDismiss => self.on_agent_dismiss(&mut fx),
+            Msg::AgentToggle { question, option } => self.on_agent_toggle(question, option),
+            Msg::AgentOther { question, text } => self.on_agent_other(question, &text),
+            Msg::AgentSubmit => self.on_agent_answer(None, &mut fx),
+            Msg::AgentApprove => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Approve), &mut fx);
+            }
+            Msg::AgentDeny => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Deny), &mut fx);
+            }
+            Msg::AgentReply(text) => {
+                self.on_agent_answer(Some(tether_core::agents::Answer::Reply(text)), &mut fx);
+            }
         }
         self.sync_search(now);
         fx
@@ -506,6 +565,7 @@ impl TerminalModel {
         self.status = ConnStatus::Connected;
         self.attempt = 0;
         self.last_refresh = now;
+        self.agents_on_opened();
         fx.push(Effect::Ls);
         if was_reconnect && !self.lock_detached {
             self.reattach_all(fx);
@@ -699,6 +759,7 @@ impl TerminalModel {
                             .tabs
                             .get(&t.name)
                             .and_then(|x| x.term.reports().progress),
+                        agent: self.agent_badge(&t.name),
                     })
                     .collect()
             })
@@ -747,6 +808,7 @@ impl TerminalModel {
             title: self.window_title(),
             history: self.history_view(),
             palette: self.palette_view(),
+            agent: self.agent_view(),
         }
     }
 

@@ -1,0 +1,167 @@
+import { Tokens } from "tokens.slint";
+import { Field, GhostButton, PrimaryButton, SecondaryButton, DangerButton } from "components.slint";
+
+export struct AgentOption { label: string, description: string, selected: bool }
+export struct AgentQuestionRow { header: string, text: string, multi: bool, options: [AgentOption], other: string }
+
+export global AgentVm {
+    in property <string> line;
+    in property <int> line-state;            // -1 none, 0 working, 1 waiting, 2 done
+    in property <string> banner;
+    in property <bool> open;
+    in property <int> phase;                 // 0 loading, 1 failed, 2 questions, 3 permission
+    in property <string> title;
+    in property <string> body;
+    in property <string> error;
+    in property <bool> sending;
+    in property <bool> can-send;
+    in property <[AgentQuestionRow]> questions;
+    callback show();
+    callback dismiss();
+    callback toggle(int, int);
+    callback other(int, string);
+    callback submit();
+    callback approve();
+    callback deny();
+    callback reply(string);
+}
+
+export component AgentChip inherits Rectangle {
+    in property <int> state;                 // 0 working, 1 waiting, 2 done
+    in property <string> label;
+    property <color> ink: state == 0 ? Tokens.accent : state == 1 ? Tokens.warning : Tokens.text-faint;
+    height: 16px;
+    width: text.preferred-width + 12px;
+    border-radius: 8px;
+    background: root.ink.with-alpha(0.14);
+    text := Text {
+        x: 6px;
+        height: parent.height;
+        text: root.label;
+        color: root.ink;
+        font-size: 10px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+}
+
+component OptionRow inherits Rectangle {
+    in property <AgentOption> option;
+    in property <bool> multi;
+    callback clicked();
+    height: col.preferred-height + 14px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.option.selected ? Tokens.accent : Tokens.border;
+    background: root.option.selected ? Tokens.accent.with-alpha(0.12) : touch.has-hover ? Tokens.surface-hover : transparent;
+    HorizontalLayout {
+        padding: 7px;
+        padding-left: 12px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: start;
+            padding-top: 2px;
+            Rectangle {
+                width: 14px; height: 14px;
+                border-radius: root.multi ? 3px : 7px;
+                border-width: 1.5px;
+                border-color: root.option.selected ? Tokens.accent : Tokens.text-faint;
+                background: root.option.selected ? Tokens.accent : transparent;
+            }
+        }
+        col := VerticalLayout {
+            spacing: 2px;
+            Text { text: root.option.label; color: Tokens.text; font-size: 13px; font-weight: 600; wrap: word-wrap; }
+            if root.option.description != "": Text { text: root.option.description; color: Tokens.text-secondary; font-size: 12px; wrap: word-wrap; }
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component QuestionBlock inherits VerticalLayout {
+    in property <AgentQuestionRow> data;
+    in property <int> index;
+    spacing: 6px;
+    if root.data.header != "": Text { text: root.data.header; color: Tokens.accent; font-size: 11px; font-weight: 650; }
+    Text { text: root.data.text; color: Tokens.text; font-size: 14px; font-weight: 600; wrap: word-wrap; }
+    if root.data.multi: Text { text: "Pick any"; color: Tokens.text-secondary; font-size: 12px; }
+    for option[o] in root.data.options: OptionRow {
+        option: option;
+        multi: root.data.multi;
+        clicked => { AgentVm.toggle(root.index, o); }
+    }
+    Field {
+        placeholder: "Other";
+        text: root.data.other;
+        edited(t) => { AgentVm.other(root.index, t); }
+    }
+}
+
+// Reminder under the tab strip while the active session holds a prompt the user closed.
+export component AgentBanner inherits Rectangle {
+    height: 34px;
+    background: Tokens.warning.with-alpha(0.12);
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    HorizontalLayout {
+        padding-left: 14px; padding-right: 8px; spacing: 8px;
+        Text { text: AgentVm.banner; color: Tokens.text; font-size: 12.5px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        VerticalLayout { alignment: center; GhostButton { text: "Answer"; clicked => { AgentVm.show(); } } }
+    }
+}
+
+export component AgentSheet inherits Rectangle {
+    background: #08080e9e;
+    TouchArea { }
+    card := Rectangle {
+        width: min(520px, root.width - 48px);
+        height: min(root.height - 48px, col.preferred-height);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Tokens.surface;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        drop-shadow-blur: 50px;
+        drop-shadow-offset-y: 18px;
+        drop-shadow-color: #00000059;
+        col := VerticalLayout {
+            padding: 20px;
+            padding-bottom: 16px;
+            spacing: 10px;
+            Text { text: AgentVm.title; wrap: word-wrap; font-size: 18px; font-weight: 650; color: Tokens.text; }
+            if AgentVm.phase == 0: Text { text: "Loading the question…"; color: Tokens.text-secondary; font-size: 13px; }
+            if AgentVm.phase == 1: Text { text: AgentVm.error; wrap: word-wrap; color: Tokens.text-secondary; font-size: 13px; }
+            if AgentVm.phase == 2: Flickable {
+                preferred-height: min(questions.preferred-height, 380px);
+                content-height: questions.preferred-height;
+                questions := VerticalLayout {
+                    width: parent.width;
+                    spacing: 16px;
+                    for q[i] in AgentVm.questions: QuestionBlock { data: q; index: i; }
+                }
+            }
+            if AgentVm.phase == 3: VerticalLayout {
+                spacing: 10px;
+                Text { text: AgentVm.body != "" ? AgentVm.body : "The agent is asking for permission."; wrap: word-wrap; color: Tokens.text; font-size: 14px; }
+                reply := Field { placeholder: "Reply instead"; }
+                SecondaryButton {
+                    text: "Send reply";
+                    enabled: reply.text != "" && !AgentVm.sending;
+                    clicked => { AgentVm.reply(reply.text); }
+                }
+            }
+            if AgentVm.phase == 2 && AgentVm.error != "": Text { text: AgentVm.error; wrap: word-wrap; color: Tokens.danger; font-size: 13px; }
+            if AgentVm.phase == 3 && AgentVm.error != "": Text { text: AgentVm.error; wrap: word-wrap; color: Tokens.danger; font-size: 13px; }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                padding-top: 6px;
+                SecondaryButton { text: AgentVm.phase == 1 ? "Close" : "Not now"; clicked => { AgentVm.dismiss(); } }
+                if AgentVm.phase == 1: PrimaryButton { text: "Try again"; clicked => { AgentVm.show(); } }
+                if AgentVm.phase == 2: PrimaryButton { text: AgentVm.sending ? "Sending…" : "Send"; enabled: AgentVm.can-send; clicked => { AgentVm.submit(); } }
+                if AgentVm.phase == 3: DangerButton { text: "Deny"; enabled: !AgentVm.sending; clicked => { AgentVm.deny(); } }
+                if AgentVm.phase == 3: PrimaryButton { text: "Approve"; enabled: !AgentVm.sending; clicked => { AgentVm.approve(); } }
+            }
+        }
+    }
+}

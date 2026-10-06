@@ -19,6 +19,7 @@ impl TerminalModel {
         let progress = self.tabs.get(name).and_then(|t| t.term.reports().progress);
         fx.push(Effect::Ui(UiEffect::Taskbar(progress)));
         fx.push(Effect::Ui(UiEffect::SetTitle(self.window_title())));
+        self.agents_on_activate(name, fx);
         fx.push(Effect::Redraw);
     }
 

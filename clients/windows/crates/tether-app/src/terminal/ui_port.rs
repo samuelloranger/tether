@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use tether_core::osc::ProgressState;
 
 use crate::terminal::driver::MsgSink;
 use crate::terminal::frame::FrameJob;
-use crate::terminal::model::{CapsuleView, Msg, TabView, TerminalView, UiEffect};
+use crate::terminal::model::{
+    AgentView, CapsuleView, Msg, QuestionView, SheetPhase, TabView, TerminalView, UiEffect,
+};
 use crate::terminal::status::Lamp;
 use crate::win32::Platform;
-use crate::{AppWindow, TermTab, TerminalVm};
+use crate::{AgentOption, AgentQuestionRow, AgentVm, AppWindow, TermTab, TerminalVm};
 
 pub trait UiPort: Send + 'static {
     fn apply(&self, fx: UiEffect);
@@ -51,8 +53,94 @@ pub fn tab_items_from(tabs: &[TabView]) -> Vec<TermTab> {
                 .as_ref()
                 .map(|p| progress_index(&p.state))
                 .unwrap_or(0),
+            agent_state: t.agent.as_ref().map_or(-1, |a| agent_index(a.state)),
+            agent_label: t
+                .agent
+                .as_ref()
+                .map(|a| a.label.as_str())
+                .unwrap_or("")
+                .into(),
         })
         .collect()
+}
+
+pub fn agent_index(s: tether_core::agents::AgentState) -> i32 {
+    use tether_core::agents::AgentState;
+    match s {
+        AgentState::Working => 0,
+        AgentState::Waiting => 1,
+        AgentState::Done => 2,
+    }
+}
+
+fn question_row(q: &QuestionView) -> AgentQuestionRow {
+    AgentQuestionRow {
+        header: q.header.as_str().into(),
+        text: q.text.as_str().into(),
+        multi: q.multi,
+        options: ModelRc::new(VecModel::from(
+            q.options
+                .iter()
+                .map(|o| AgentOption {
+                    label: o.label.as_str().into(),
+                    description: o.description.as_str().into(),
+                    selected: o.selected,
+                })
+                .collect::<Vec<_>>(),
+        )),
+        other: q.other.as_str().into(),
+    }
+}
+
+thread_local! {
+    static SHOWN_QUESTIONS: std::cell::RefCell<Vec<QuestionView>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Rows change in place while the sheet is up: replacing the model would rebuild the
+/// "Other" field under the cursor on every keystroke.
+fn show_questions(vm: &AgentVm<'_>, questions: &[QuestionView]) {
+    let model = vm.get_questions();
+    let same_shape = SHOWN_QUESTIONS.with(|shown| shown.borrow().len() == questions.len());
+    let vec = model.as_any().downcast_ref::<VecModel<AgentQuestionRow>>();
+    match vec {
+        Some(vec) if same_shape && vec.row_count() == questions.len() => {
+            SHOWN_QUESTIONS.with(|shown| {
+                let shown = shown.borrow();
+                for (i, q) in questions.iter().enumerate() {
+                    if shown[i] != *q {
+                        vec.set_row_data(i, question_row(q));
+                    }
+                }
+            });
+        }
+        _ => vm.set_questions(ModelRc::new(VecModel::from(
+            questions.iter().map(question_row).collect::<Vec<_>>(),
+        ))),
+    }
+    SHOWN_QUESTIONS.with(|shown| *shown.borrow_mut() = questions.to_vec());
+}
+
+fn show_agents(vm: &AgentVm<'_>, a: &AgentView) {
+    vm.set_line(a.line.as_str().into());
+    vm.set_line_state(a.state.map_or(-1, agent_index));
+    vm.set_banner(a.banner.clone().unwrap_or_default().into());
+    let Some(sheet) = &a.sheet else {
+        vm.set_open(false);
+        return;
+    };
+    vm.set_open(true);
+    vm.set_phase(match sheet.phase {
+        SheetPhase::Loading => 0,
+        SheetPhase::Failed => 1,
+        SheetPhase::Questions => 2,
+        SheetPhase::Permission => 3,
+    });
+    vm.set_title(sheet.title.as_str().into());
+    vm.set_body(sheet.body.as_str().into());
+    vm.set_error(sheet.error.as_str().into());
+    vm.set_sending(sheet.sending);
+    vm.set_can_send(sheet.can_send);
+    show_questions(vm, &sheet.questions);
 }
 
 pub struct SlintUi {
@@ -148,6 +236,7 @@ impl UiPort for SlintUi {
                     .map(|p| progress_index(&p.state))
                     .unwrap_or(0),
             );
+            show_agents(&w.global::<AgentVm>(), &view.agent);
             w.set_window_title(view.title.as_str().into());
             crate::extras::push_view(&w, &view);
             crate::terminal::keys::set_app_keypad(view.app_keypad);
@@ -213,6 +302,7 @@ mod mapping_tests {
                 state: ProgressState::Error,
                 percent: 40,
             }),
+            agent: None,
         };
         let items = tab_items_from(&[tab]);
         assert_eq!(items[0].name, "build");
