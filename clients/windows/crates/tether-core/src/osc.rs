@@ -304,7 +304,7 @@ fn clipboard_text(body: &[u8]) -> Option<String> {
     if payload.is_empty() || payload == "?" {
         return None;
     }
-    while payload.len() % 4 != 0 {
+    while !payload.len().is_multiple_of(4) {
         payload.push('=');
     }
     let data = STANDARD.decode(payload).ok()?;

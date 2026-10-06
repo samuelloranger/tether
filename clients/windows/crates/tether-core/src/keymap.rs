@@ -251,15 +251,17 @@ fn encode_char(
     ctx: &KeyContext,
 ) -> KeyAction {
     // AltGr arrives as Ctrl+Alt: a character the layout made from it is text.
-    if mods.ctrl && mods.alt {
-        if let Some(text) = produced.filter(|t| is_printable(t)) {
-            return KeyAction::Send(text.as_bytes().to_vec());
-        }
+    if mods.ctrl
+        && mods.alt
+        && let Some(text) = produced.filter(|t| is_printable(t))
+    {
+        return KeyAction::Send(text.as_bytes().to_vec());
     }
-    if mods.ctrl && !mods.alt {
-        if let Some(cmd) = shortcut(unmodified, digit, mods.shift, ctx) {
-            return KeyAction::Tether(cmd);
-        }
+    if mods.ctrl
+        && !mods.alt
+        && let Some(cmd) = shortcut(unmodified, digit, mods.shift, ctx)
+    {
+        return KeyAction::Tether(cmd);
     }
     if mods.ctrl {
         let folded = ctrl_fold(unmodified)
