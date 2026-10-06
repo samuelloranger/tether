@@ -1,5 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
+import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
 
 export struct TermTab {
     name: string, cwd: string, active: bool, attention: bool,
@@ -40,6 +41,8 @@ export global TerminalVm {
     callback back();
     callback send-file();
     callback settings();
+    callback history();
+    callback snippets();
     callback select-tab(string);
     callback tab-menu(string, length, length);
     callback new-session();
@@ -94,6 +97,8 @@ component Header inherits Rectangle {
             }
         }
         Rectangle { horizontal-stretch: 1; }
+        VerticalLayout { alignment: center; GhostButton { text: "Snippets"; clicked => { TerminalVm.snippets(); } } }
+        VerticalLayout { alignment: center; GhostButton { text: "History"; clicked => { TerminalVm.history(); } } }
         VerticalLayout { alignment: center; GhostButton { text: "Send file…"; clicked => { TerminalVm.send-file(); } } }
         IconButton { icon: @image-url("icons/gear.svg"); clicked => { TerminalVm.settings(); } }
     }
@@ -296,6 +301,16 @@ export component TerminalPage inherits Rectangle {
                 if TerminalVm.menu-link != "": SecondaryButton { text: TerminalVm.menu-copy ? "Copy" : "Paste"; clicked => { TerminalVm.menu-primary(); } }
             }
         }
+    }
+    if HistoryVm.open: HistoryOverlay {
+        y: 52px;
+        width: parent.width;
+        height: parent.height - 52px;
+        well: TerminalVm.well-color;
+    }
+    if PaletteVm.open: PaletteOverlay {
+        width: parent.width;
+        height: parent.height;
     }
     if TerminalVm.kill-name != "": ConfirmDialog {
         title: "Kill session " + TerminalVm.kill-name + "?";

@@ -5967,6 +5967,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ureq",
  "uuid",
  "velopack",
  "windows",

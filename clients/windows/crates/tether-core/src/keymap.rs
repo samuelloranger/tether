@@ -81,6 +81,8 @@ pub enum TetherCommand {
     NewTab,
     ScrollPageUp,
     ScrollPageDown,
+    Snippets,
+    History,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,7 +210,7 @@ fn is_printable(text: &str) -> bool {
     !text.is_empty() && !text.chars().any(char::is_control)
 }
 
-fn ctrl_fold(c: char) -> Option<u8> {
+pub(crate) fn ctrl_fold(c: char) -> Option<u8> {
     match c.to_ascii_uppercase() {
         u @ '@'..='_' => Some(u as u8 & 0x1f),
         '/' => Some(0x1f),
@@ -234,6 +236,8 @@ fn shortcut(
         ('c', _, true) => Some(TetherCommand::Copy),
         ('c', _, false) if ctx.has_selection => Some(TetherCommand::Copy),
         ('t', _, true) => Some(TetherCommand::NewTab),
+        ('p', _, true) => Some(TetherCommand::Snippets),
+        ('h', _, true) => Some(TetherCommand::History),
         (_, Some(d @ 1..=8), true) => Some(TetherCommand::TabAt(d)),
         (_, Some(9), true) => Some(TetherCommand::LastTab),
         ('=' | '+', _, false) => Some(TetherCommand::FontBigger),
@@ -678,5 +682,20 @@ mod char_tests {
             assert!(matches!(enc(input, ctrl), KeyAction::Tether(_)));
         }
         assert_ne!(enc(ch('v', None), ctrl), sent(b"\x16"));
+    }
+    #[test]
+    fn snippets_and_history_take_ctrl_shift_only() {
+        let ctrl = m(false, false, true);
+        let ctrl_shift = m(true, false, true);
+        assert_eq!(
+            enc(ch('p', None), ctrl_shift),
+            KeyAction::Tether(TetherCommand::Snippets)
+        );
+        assert_eq!(
+            enc(ch('h', None), ctrl_shift),
+            KeyAction::Tether(TetherCommand::History)
+        );
+        assert_eq!(enc(ch('p', None), ctrl), sent(b"\x10"));
+        assert_eq!(enc(ch('h', None), ctrl), sent(b"\x08"));
     }
 }

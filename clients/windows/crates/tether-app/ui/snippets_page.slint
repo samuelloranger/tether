@@ -1,0 +1,102 @@
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { AppBridge } from "bridge.slint";
+import { Field, PageChrome, PrimaryButton, SecondaryButton } from "components.slint";
+import { SnippetRow, SnippetsBridge } from "extras_bridge.slint";
+
+component RowAction inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <color> ink: Tokens.accent;
+    callback clicked();
+    width: label.preferred-width + 16px;
+    height: 28px;
+    border-radius: 8px;
+    background: root.enabled && touch.has-hover ? root.ink.with-alpha(0.12) : transparent;
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: root.enabled ? pointer : default; clicked => { root.clicked(); } }
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        color: root.enabled ? root.ink : Tokens.placeholder;
+        font-size: 13px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component SnippetItem inherits Rectangle {
+    in property <SnippetRow> entry;
+    height: 58px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    HorizontalLayout {
+        spacing: 4px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: root.entry.name; color: Tokens.text; font-weight: 600; overflow: elide; }
+            Text {
+                text: root.entry.preview;
+                color: Tokens.text-secondary;
+                font-family: Tokens.mono-font;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+        VerticalLayout { alignment: center; RowAction { text: "↑"; enabled: !root.entry.first; clicked => { SnippetsBridge.move(root.entry.id, -1); } } }
+        VerticalLayout { alignment: center; RowAction { text: "↓"; enabled: !root.entry.last; clicked => { SnippetsBridge.move(root.entry.id, 1); } } }
+        VerticalLayout { alignment: center; RowAction { text: "Edit"; clicked => { SnippetsBridge.edit(root.entry.id); } } }
+        VerticalLayout { alignment: center; RowAction { text: "Delete"; ink: Tokens.danger; clicked => { SnippetsBridge.remove(root.entry.id); } } }
+    }
+}
+
+export component SnippetsPage inherits PageChrome {
+    title: "Snippets";
+    column-width: 640px;
+    back => { AppBridge.back(); }
+    scroll := ScrollView {
+        content-width: self.visible-width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: scroll.visible-width;
+            spacing: 12px;
+            padding-bottom: 28px;
+            Text {
+                text: "Text you send to the active session from the Snippets button or Ctrl+Shift+P. It is typed as if you had entered it, so end it with \\n to run it.";
+                wrap: word-wrap;
+                font-size: 13px;
+                color: Tokens.text-secondary;
+            }
+            Field { label: "Name"; text <=> SnippetsBridge.name; edited => { SnippetsBridge.edited(); } }
+            Field {
+                label: "Text";
+                mono: true;
+                placeholder: "git status\\n";
+                text <=> SnippetsBridge.text;
+                edited => { SnippetsBridge.edited(); }
+            }
+            Text {
+                text: "\\n Return   \\t Tab   \\e Esc   \\cC Ctrl-C   \\xHH one byte   \\\\ a backslash";
+                font-family: Tokens.mono-font;
+                font-size: 11.5px;
+                color: Tokens.text-faint;
+                wrap: word-wrap;
+            }
+            if SnippetsBridge.hint != "": Text {
+                text: SnippetsBridge.hint;
+                wrap: word-wrap;
+                font-size: 13px;
+                color: Tokens.danger;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                PrimaryButton { text: SnippetsBridge.save-label; enabled: SnippetsBridge.can-save; clicked => { SnippetsBridge.save(); } }
+                if SnippetsBridge.editing: SecondaryButton { text: "Cancel"; clicked => { SnippetsBridge.cancel-edit(); } }
+            }
+            Text { text: SnippetsBridge.count-label; font-size: 12px; font-weight: 650; color: Tokens.text-faint; }
+            for row in SnippetsBridge.rows: SnippetItem { entry: row; }
+        }
+    }
+}

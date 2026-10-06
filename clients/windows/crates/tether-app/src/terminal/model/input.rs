@@ -17,6 +17,9 @@ impl TerminalModel {
         now: Duration,
         fx: &mut Vec<Effect>,
     ) {
+        if self.overlay_open() {
+            return;
+        }
         self.dismiss_finished_capsule();
         let ctx = self
             .active_name()
@@ -67,6 +70,8 @@ impl TerminalModel {
             TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), fx),
             TetherCommand::LastTab => self.on_jump(TabJump::Last, fx),
             TetherCommand::NewTab => self.on_new_begin(),
+            TetherCommand::Snippets => self.on_palette_open(),
+            TetherCommand::History => self.on_history_open(fx),
             TetherCommand::ScrollPageUp | TetherCommand::ScrollPageDown => {
                 let rows = self.size.rows as i32;
                 let Some(tab) = active.and_then(|n| self.tabs.get_mut(&n)) else {

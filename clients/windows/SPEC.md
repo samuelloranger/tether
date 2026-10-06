@@ -22,7 +22,7 @@ v1 is the loop they can do without the phone:
 
 ## Out of scope
 
-Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+Push, notification actions, agent questions, agent status, git, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar as a bar (snippets replace it, see Snippets), and the app-icon picker. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
 
 Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
 
@@ -177,6 +177,8 @@ Rows: Cascadia Mono, Cascadia Code, JetBrains Mono, Monaspace Neon, Monaspace Ra
 
 Every face is bundled in the binary, regular and bold, with the iOS font files and `LICENSES.md`. Cascadia is bundled too: it ships with Windows Terminal, not with every Windows install. Stored ids use the iOS form: `cascadia-mono`, `cascadia-code`, `jetbrains-mono`, `monaspace-neon`, `monaspace-radon`, `maple-mono`, `comic-mono`.
 
+Below the bundled rows, a **Google Fonts** section downloads more families (see Google Fonts).
+
 Glyphs the chosen face lacks fall back to the bundled Symbols Nerd Font Mono (prompt and powerline glyphs), then to Segoe UI Emoji and the system fallback chain. Cascadia Code's ligatures are drawn; the others are drawn without ligatures, as on iOS.
 
 ## Terminal
@@ -186,6 +188,7 @@ The header is a surface bar:
 - **Back**, to Home.
 - A lamp and a status word. The word is always present; the lamp is not the only signal.
 - The machine name, and under it the active session name, a midpoint, and the status word in the lamp color.
+- **Snippets** and **History** (see those sections).
 - **Send file…**
 - **Settings** (the gear).
 
@@ -244,7 +247,7 @@ Ctrl and Alt on everything else follow iOS `TerminalKeyMap`: Ctrl folds `@`–`_
 
 **Kept by Windows:** Alt+Tab, Alt+F4 (closes the window, same as the close button), the Windows key and its combos, Ctrl+Alt+Del, Print Screen.
 
-**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+click (open link). Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
+**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+Shift+P (snippets); Ctrl+Shift+H (history); Ctrl+click (open link). Ctrl+P and Ctrl+H still reach the PTY; only the Shift forms are taken. Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
 
 Key repeat sends repeats. Dead keys and IME go through text composition, never through this table. The kitty keyboard protocol and `modifyOtherKeys` are not advertised in v1.
 
@@ -358,6 +361,50 @@ Same chrome. One sentence, then **Retry** and **Back to Home**.
 
 `zmx ls` failing is not a connect failure: the client opens one `default` tab as if the list were empty of matches, and the next refresh fills the strip.
 
+## History
+
+A tab attached late shows only what arrives after the attach: `zmx` runs the program on an alternate screen, so the local scrollback never holds the session's earlier output. iOS reads it with `zmx history` into a read-only, selectable text view. Windows does the same, and for the same reason it does not try to prefill the live grid: replaying a transcript into the terminal would put text where the program's own screen is about to be redrawn, and the two would interleave.
+
+**History** (header button, or Ctrl+Shift+H) opens a read-only page over the terminal area, tab strip included, so the session it shows cannot change underneath it. The title names the session. The text is monospaced in the terminal theme's foreground on its background, wraps, opens scrolled to the newest line, and is selectable with the mouse; Ctrl+C copies a selection. **Copy all** puts the whole text on the clipboard. **Reload** asks again. **Done** or Esc closes it. Keys do not reach the PTY while it is open.
+
+The command is `~/.local/bin/zmx history '<session>'` (the iOS binary path, no flags), run with `exec` on the control connection, so a slow answer never holds up PTY output. The session name goes through `valid_session_name` and `shell_quote`; an invalid name runs nothing. Only the newest answer is used: a reply for an older request is dropped.
+
+The text is cleaned before it is shown: escape sequences and other control bytes are removed, CRLF becomes LF, trailing spaces and blank lines at either end go. It is capped at 256 KiB, keeping the newest whole lines, with a note when the start was cut: a text view that lays out the whole transcript stalls well before a terminal's 10,000-line scrollback fills it. iOS has no cap; it does not need one because its text view is native.
+
+When the host answers with nothing, fails, or the tab is not attached, the page falls back to this window's own scrollback for that tab (the iOS fallback), and says so. With nothing in either, it reads "Nothing in this session's scrollback yet." with Reload.
+
+Search inside the history is the scrollback search's job, not this page's.
+
+## Snippets
+
+iOS has a customizable key bar of macro keys for the keys a phone keyboard lacks. A PC keyboard has them, so Windows keeps the part that still matters: saved text you send with one action. A snippet is a name and a text. The text uses the iOS `MacroText` escapes, byte for byte: `\r` and `\n` send Return (terminals expect CR), `\t` Tab, `\e` Esc, `\cX` Ctrl-X (`\c?` is DEL), `\xHH` one ASCII byte below 0x80, `\\` a backslash. Any other backslash stays as typed.
+
+**Palette.** **Snippets** (header button) or Ctrl+Shift+P opens a centered list with a search field focused. Typing filters it: names that start with the query, names that contain it, names with its letters in order, then snippets whose text contains it. Up and Down move, Enter or a click sends, Esc or a click outside closes. Each row shows the name and the text with control bytes made visible (`⏎`, `⇥`, `⎋`, `^C`). With no snippets the palette says so and links to Settings. It opens only on a tab whose channel is up.
+
+Ctrl+Shift+P is free in terminals: Ctrl+P (previous history entry) is untouched, because only the Shift form is taken.
+
+**Sending.** The expanded text is written to the active tab as typed input, not as a bracketed paste. Bracketed paste turns a newline into text the shell edits, so a snippet ending in `\n` would never run. That is also the iOS behaviour for macro keys. A snippet without a trailing `\n` types its text and waits. The view snaps to the bottom first, as for any typed key.
+
+**Settings → Terminal → Snippets** is its own page: a name field, a text field with the escape table under it, **Add snippet** (**Save changes** while editing, with **Cancel**), and the list in saved order with move up, move down, Edit, and Delete. Delete asks first. The form says why a snippet can't be saved: no name, no text, a name over 48 characters, a text over 2048, more than 100 snippets.
+
+Stored in `snippets.json` next to `preferences.json`, in saved order. A file that exists but cannot be read is never overwritten: the page says nothing is saved. Snippets are per PC, not per machine.
+
+## Google Fonts
+
+The Font page gets the iOS "download a family" flow under the bundled rows. A field takes a `fonts.google.com/specimen/…` link, a `fonts.googleapis.com/css2?family=…` link, a share link, or just a family name; **Download** starts it, and one-tap chips offer the iOS list of monospaced families. Only those link forms and plain names are accepted, and only `https://fonts.googleapis.com` and `https://fonts.gstatic.com` are ever requested.
+
+1. The CSS API is asked for the family with weights 400 and 700 (400 alone when it answers "no such weight"). A client that is not a browser gets TrueType URLs, which the rasterizer reads; WOFF2 is never requested.
+2. The face closest to 400 is the regular, and a 700 is the bold when the family has one. A family without a bold draws bold text with its regular face.
+3. Each file must be at most 12 MiB, must start like a font file, and is written with the other into a staging folder that is moved to `fonts\<slug>\` under `%LOCALAPPDATA%\Tether\` only when both are complete. A failure leaves nothing behind.
+4. The rasterizer parses it and refuses a face that is not monospaced (narrow and wide glyphs have different advances), with a message that says so.
+5. The family joins the Font page's list, is selected at once, and is saved in `fonts\fonts.json` with its stored id `gf-<slug>` (the iOS form). At launch each stored family is read and registered before the first frame; one whose files are gone or no longer parse is dropped from the list. Folders the list does not name, and staging folders, are deleted at launch.
+
+**Remove** deletes the files and the entry; if that font was selected, the selection falls back to Cascadia Mono. A family cannot be downloaded twice; remove it first. Fonts are drawn by the Tether rasterizer, so the Font page's own rows, which Slint draws, show a downloaded family's name in the UI face rather than in itself.
+
+Offline or blocked: the status line under the field says Google Fonts could not be reached, and the form keeps the text. HTTP errors say the status. An unknown family says so by name. Redirects are not followed, so a download can never be sent to another host. Everything runs off the UI thread. Up to 24 families.
+
+Re-adding a removed family with different bytes in the same session asks for a restart, because the glyph cache is keyed by font id for the life of the process. The bundled faces are unchanged and remain first.
+
 ## Files and images
 
 Three ways in, one path out: drop on the grid, **Send file…** (system picker, multi-select), and paste an image from the Windows clipboard. All three upload to the host and then paste the remote path into the session, the iOS photo trick: a TUI like Claude Code attaches an image when its path arrives as a paste, and leaves it as plain text when the same characters are typed.
@@ -431,6 +478,8 @@ The client keeps iOS's connection split: one terminal connection for the PTYs (o
 | `keys.json` | Key records: id, name, algorithm, public line, fingerprint, origin, created. |
 | `preferences.json` | Appearance, terminal settings, window placement. |
 | `hostkeys.json` | `host:port` → fingerprint. Public host identity, same role as iOS UserDefaults. |
+| `snippets.json` | Saved snippets: id, name, text, in order. |
+| `fonts\fonts.json`, `fonts\<slug>\` | Downloaded Google Fonts families and their font files. |
 | `secrets\<account>.bin` | One DPAPI blob per secret. |
 
 Writes go to a temp file and then rename, so a crash never leaves half a JSON file.
@@ -478,6 +527,10 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 - Key table: every row above in normal and application cursor/keypad mode, each modifier parameter, Ctrl folding, Alt as `ESC` prefix, AltGr text on a Canadian French layout, Shift+Enter as `ESC CR`, and the keys Tether keeps never reaching the PTY.
 - Secret store: DPAPI round-trip and delete (Windows job only), and an in-memory store for the rest.
 - Rasterizer: a known cell buffer produces a buffer of the expected size at 1× and 2×, the theme background is the well color, and a missing glyph falls back to the symbols font.
+- Macros: `\r \n \t \e \cX \c? \xHH \\` expand as on iOS; an unknown or unfinished escape stays as typed; `\x80` is not a byte; control bytes show as `⏎ ⇥ ⎋ ^C`.
+- Snippets: validation messages and caps, trimmed names, replace in place, move clamps at the ends, palette ranking (name prefix, name contains, letters in order, text), a snippet sends typed bytes with no bracketed paste, the palette needs a live tab, Esc closes it, and the selection stays in range when the list changes.
+- History: the command quotes the name and refuses an invalid one; escapes, CRLF, and control bytes are cleaned; the 256 KiB cap keeps whole newest lines and never splits a character; an empty or failed host answer falls back to the tab's own scrollback; an older answer is dropped; Copy all sends the text; the driver runs it on the control connection.
+- Google Fonts: link and name parsing (specimen, css2, share, `|`-lists, junk and other hosts refused); only gstatic TrueType sources are taken; regular nearest 400 and a distinct 700; install writes both files or nothing; a missing 700 retries unweighted; unknown family, HTTP error, offline, and a non-font file each give their own message; an installed family is refused without a request; the stored list drops unsafe slugs; launch cleanup removes staging and unlisted folders; registration refuses garbage and a changed font under a known id; bundled faces all pass the monospace check.
 - `tether-ssh` against an in-process `russh` server: pin, auth by key, by agent (a fake agent pipe), and by password; several PTY channels on one connection, each with its own data; exec; SCP sink.
 
 Live SSH tests against a real host stay off unless an env var opts in, same policy as the iOS suite.
@@ -497,3 +550,6 @@ Live SSH tests against a real host stay off unless an env var opts in, same poli
 - Auth is a vault key, the Windows OpenSSH agent, or a password. Machines can be edited.
 - Files and images come in by drop, picker, or clipboard paste; go to `~/.tether/uploads`, 200 MB each, own SSH connection per file; and come back as one paste per file, so a TUI attaches images. Non-attachable images are re-encoded to JPEG, clipboard images are PNG.
 - A changed host key cannot be accepted from this app.
+- History is `zmx history` on the control connection shown read-only, not a prefill of the live grid.
+- Snippets are typed, not pasted, and use the iOS macro escapes; Ctrl+Shift+P opens them and Ctrl+Shift+H opens History.
+- Google Fonts install per user under `%LOCALAPPDATA%\Tether\fonts`, TrueType only, monospace only, no redirects.

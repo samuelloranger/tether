@@ -1,0 +1,43 @@
+export struct SnippetRow {
+    id: string,
+    name: string,
+    preview: string,
+    first: bool,
+    last: bool,
+}
+
+export global SnippetsBridge {
+    in property <[SnippetRow]> rows;
+    in property <string> count-label;
+    in-out property <string> name;
+    in-out property <string> text;
+    in property <string> hint;
+    in property <bool> editing;
+    in property <bool> can-save;
+    in property <string> save-label: "Add snippet";
+    callback open();
+    callback edited();
+    callback save();
+    callback cancel-edit();
+    callback edit(string);
+    callback remove(string);
+    callback move(string, int);
+}
+
+export struct GoogleFontRow {
+    id: string,
+    name: string,
+    active: bool,
+}
+
+export global GoogleFontsBridge {
+    in-out property <string> input;
+    in property <string> status;
+    in property <bool> status-error;
+    in property <bool> busy;
+    in property <[string]> suggestions;
+    in property <[GoogleFontRow]> installed;
+    callback download(string);
+    callback remove(string);
+    callback choose(string);
+}

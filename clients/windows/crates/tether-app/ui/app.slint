@@ -8,6 +8,9 @@ import { SettingsPage } from "settings.slint";
 import { SchemePickerPage, FontPickerPage } from "pickers.slint";
 import { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
 import { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
+import { SnippetsPage } from "snippets_page.slint";
+import { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
+import { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow } from "extras_bridge.slint";
 
 import "../../../assets/fonts/CascadiaMono-Regular.ttf";
 import "../../../assets/fonts/CascadiaMono-Bold.ttf";
@@ -28,6 +31,8 @@ export { Tokens } from "tokens.slint";
 export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
 export { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
 export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
+export { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
+export { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow } from "extras_bridge.slint";
 
 export component AppWindow inherits Window {
     in property <string> window-title: "Tether";
@@ -65,6 +70,7 @@ export component AppWindow inherits Window {
         if AppBridge.page == PageKind.terminal: TerminalPage { }
         if AppBridge.page == PageKind.host-key-refused: HostKeyRefusedPage { }
         if AppBridge.page == PageKind.couldnt-connect: CouldntConnectPage { }
+        if AppBridge.page == PageKind.snippets: SnippetsPage { }
         if AppBridge.dialog-open: ConfirmDialog {
             title: AppBridge.dialog-title;
             body: AppBridge.dialog-body;

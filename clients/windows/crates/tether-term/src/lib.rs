@@ -3,6 +3,7 @@ mod glyphs;
 pub mod metrics;
 mod palette;
 pub mod raster;
+mod scrollback_text;
 pub mod snapshot;
 pub mod terminal;
 

@@ -15,12 +15,14 @@ pub enum Page {
     Terminal,
     HostKeyRefused,
     CouldntConnect,
+    Snippets,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialog {
     RemoveMachine(Uuid),
     DeleteKey(Uuid),
+    DeleteSnippet(Uuid),
 }
 
 /// Pages that Esc leaves. Terminal and connect pages handle Esc themselves.

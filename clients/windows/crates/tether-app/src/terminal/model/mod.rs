@@ -18,12 +18,14 @@ use crate::terminal::geometry::{Layout, TermStyle};
 use crate::terminal::status::{ConnStatus, Lamp};
 
 mod events;
+pub(crate) mod extras;
 mod input;
 mod pointer;
 mod reconnect;
 pub(crate) mod send;
 mod tabs;
 
+pub use extras::{HistoryBody, HistoryView, PaletteView};
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -159,6 +161,20 @@ pub enum Msg {
     },
     CopySelection,
     PasteClipboard,
+    HistoryOpen,
+    HistoryClose,
+    HistoryCopy,
+    HistoryLoaded {
+        id: u64,
+        result: Result<String, ConnectError>,
+    },
+    SnippetsChanged(Vec<tether_core::snippets::Snippet>),
+    PaletteOpen,
+    PaletteClose,
+    PaletteQuery(String),
+    PaletteMove(i32),
+    /// A clicked row, or `None` for Enter on the highlighted one.
+    PaletteChoose(Option<usize>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -188,6 +204,10 @@ pub enum Effect {
         generation: u64,
     },
     StartSend(SendJob),
+    History {
+        name: String,
+        id: u64,
+    },
     Redraw,
     Ui(UiEffect),
 }
@@ -258,6 +278,8 @@ pub struct TerminalView {
     pub session_error: Option<String>,
     pub app_keypad: bool,
     pub title: String,
+    pub history: Option<HistoryView>,
+    pub palette: Option<PaletteView>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +332,7 @@ pub struct TerminalModel {
     pub(crate) hover: Option<(usize, usize, usize)>,
     blink_on: bool,
     blink_at: Duration,
+    extras: extras::Extras,
 }
 
 impl TerminalModel {
@@ -348,6 +371,7 @@ impl TerminalModel {
             hover: None,
             blink_on: true,
             blink_at: Duration::ZERO,
+            extras: extras::Extras::default(),
         };
         (m, vec![Effect::Open])
     }
@@ -442,6 +466,16 @@ impl TerminalModel {
                 &mut fx,
             ),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
+            Msg::HistoryOpen => self.on_history_open(&mut fx),
+            Msg::HistoryClose => self.on_history_close(&mut fx),
+            Msg::HistoryCopy => self.on_history_copy(&mut fx),
+            Msg::HistoryLoaded { id, result } => self.on_history_loaded(id, result),
+            Msg::SnippetsChanged(list) => self.on_snippets_changed(list),
+            Msg::PaletteOpen => self.on_palette_open(),
+            Msg::PaletteClose => self.on_palette_close(&mut fx),
+            Msg::PaletteQuery(q) => self.on_palette_query(q),
+            Msg::PaletteMove(d) => self.on_palette_move(d),
+            Msg::PaletteChoose(i) => self.on_palette_choose(i, &mut fx),
         }
         fx
     }
@@ -693,6 +727,8 @@ impl TerminalModel {
             session_error,
             app_keypad,
             title: self.window_title(),
+            history: self.history_view(),
+            palette: self.palette_view(),
         }
     }
 

@@ -3,6 +3,7 @@
 slint::include_modules!();
 
 mod app;
+mod extras;
 mod open_machine;
 mod platform;
 mod preview;

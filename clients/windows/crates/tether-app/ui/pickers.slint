@@ -1,7 +1,8 @@
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { AppBridge, PickerBridge, SchemeRow, FontRow } from "bridge.slint";
 import { Field, PageChrome } from "components.slint";
+import { GoogleFontsSection } from "google_fonts.slint";
 
 component PickRow inherits Rectangle {
     callback chosen();
@@ -102,11 +103,16 @@ export component FontPickerPage inherits PageChrome {
     title: "Font";
     column-width: 520px;
     back => { AppBridge.back(); }
-    ListView {
-        vertical-stretch: 1;
-        for row in PickerBridge.fonts: FontRowView {
-            entry: row;
-            chosen => { PickerBridge.choose-font(row.id); }
+    scroll := ScrollView {
+        content-width: self.visible-width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: scroll.visible-width;
+            for row in PickerBridge.fonts: FontRowView {
+                entry: row;
+                chosen => { PickerBridge.choose-font(row.id); }
+            }
+            GoogleFontsSection { }
         }
     }
 }
