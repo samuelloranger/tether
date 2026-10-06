@@ -182,7 +182,7 @@ impl server::Handler for ConnHandler {
             .push(command.clone());
         session.channel_success(channel)?;
         let handle = session.handle();
-        if let Some(target) = command.strip_prefix("scp -t ") {
+        if let Some(target) = command.strip_prefix("scp -t -- ") {
             self.scp.insert(
                 channel,
                 super::server_scp::ScpSink::new(super::server_scp::unquote(target)),
@@ -200,7 +200,19 @@ impl server::Handler for ConnHandler {
                     .extended_data(channel, 1, b"noise on stderr\n".to_vec())
                     .await;
                 let _ = handle.data(channel, out.into_bytes()).await;
-                let _ = handle.exit_status_request(channel, 3).await;
+                let _ = handle.exit_status_request(channel, 0).await;
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+            return Ok(());
+        }
+        if command == "tether-fail" || command == "tether-drop" {
+            let drop_without_status = command == "tether-drop";
+            tokio::spawn(async move {
+                let _ = handle.data(channel, b"partial\n".to_vec()).await;
+                if !drop_without_status {
+                    let _ = handle.exit_status_request(channel, 3).await;
+                }
                 let _ = handle.eof(channel).await;
                 let _ = handle.close(channel).await;
             });

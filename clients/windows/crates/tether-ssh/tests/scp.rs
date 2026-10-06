@@ -35,7 +35,7 @@ async fn sends_bytes_to_the_quoted_path() {
     let state = server.state.lock().unwrap();
     assert_eq!(
         state.execs.last().unwrap(),
-        "scp -t '/home/me/.tether/uploads/paste-1791082819.png'"
+        "scp -t -- '/home/me/.tether/uploads/paste-1791082819.png'"
     );
     assert_eq!(
         state.uploads["/home/me/.tether/uploads/paste-1791082819.png"],
@@ -75,6 +75,6 @@ async fn a_bare_filename_is_sent_as_given() {
     conn.scp_send("photo.jpg", b"j").await.unwrap();
     assert_eq!(
         server.state.lock().unwrap().execs.last().unwrap(),
-        "scp -t 'photo.jpg'"
+        "scp -t -- 'photo.jpg'"
     );
 }

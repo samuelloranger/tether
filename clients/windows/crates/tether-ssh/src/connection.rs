@@ -192,9 +192,11 @@ impl Connection for RusshConnection {
             };
             channel.exec(true, command).await.map_err(transport)?;
             let mut stdout = Vec::new();
+            let mut status = None;
             while let Some(msg) = channel.wait().await {
                 match msg {
                     russh::ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                    russh::ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
                     russh::ChannelMsg::Failure => {
                         return Err(ConnectError::Transport(
                             "the host refused the command".into(),
@@ -204,7 +206,15 @@ impl Connection for RusshConnection {
                     _ => {}
                 }
             }
-            Ok(String::from_utf8_lossy(&stdout).into_owned())
+            match status {
+                Some(0) => Ok(String::from_utf8_lossy(&stdout).into_owned()),
+                Some(code) => Err(ConnectError::Transport(format!(
+                    "the command exited with status {code}"
+                ))),
+                None => Err(ConnectError::Transport(
+                    "the connection closed before the command finished".into(),
+                )),
+            }
         };
         match tokio::time::timeout(Duration::from_secs(15), run).await {
             Ok(result) => result,
