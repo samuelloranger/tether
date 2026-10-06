@@ -1,7 +1,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { AppBridge, SettingsBridge } from "bridge.slint";
-import { PageChrome, Segment, TetherSlider, TetherSwitch } from "components.slint";
+import { PageChrome, PrimaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
 
 component Section inherits Text {
     font-size: 12px;
@@ -142,6 +142,16 @@ component SettingsForm inherits VerticalLayout {
         VerticalLayout {
             alignment: center;
             TetherSwitch { checked <=> SettingsBridge.blink; toggled => { SettingsBridge.blink-changed(self.checked); } }
+        }
+    }
+    VerticalLayout { padding-top: 20px; Section { text: "About"; } }
+    Row { label: "Version"; Value { text: SettingsBridge.version-label; } }
+    Row {
+        label: "Updates";
+        Value { text: SettingsBridge.update-label; }
+        if SettingsBridge.update-ready: VerticalLayout {
+            alignment: center;
+            PrimaryButton { min-height: 32px; text: "Restart"; clicked => { SettingsBridge.restart-to-update(); } }
         }
     }
 }

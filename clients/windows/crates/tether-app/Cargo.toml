@@ -36,6 +36,7 @@ windows = { version = "0.62.2", features = [
   "Win32_Networking_WinSock", "Win32_UI_Input_KeyboardAndMouse",
   "Data_Xml_Dom", "UI_Notifications", "Networking_Connectivity", "Foundation",
 ] }
+velopack = "1.2.161"
 
 [build-dependencies]
 slint-build = "1.18.1"

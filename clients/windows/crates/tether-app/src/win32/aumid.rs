@@ -6,6 +6,17 @@ pub enum ToastIdentity {
     Portable,
 }
 
+/// Velopack installs the app as `<root>\current\Tether.exe` next to `<root>\Update.exe`.
+pub fn is_installed(exe: &std::path::Path) -> bool {
+    let Some(dir) = exe.parent() else {
+        return false;
+    };
+    dir.file_name().is_some_and(|n| n == "current")
+        && dir
+            .parent()
+            .is_some_and(|root| root.join("Update.exe").is_file())
+}
+
 pub fn toast_identity(packaged: bool, shortcut_ok: bool) -> Option<ToastIdentity> {
     if packaged {
         Some(ToastIdentity::Packaged)
@@ -25,6 +36,18 @@ mod tests {
         assert_eq!(toast_identity(true, false), Some(ToastIdentity::Packaged));
         assert_eq!(toast_identity(false, true), Some(ToastIdentity::Portable));
         assert_eq!(toast_identity(false, false), None);
+    }
+
+    #[test]
+    fn an_installed_exe_sits_in_current_beside_the_updater() {
+        let root = tempfile::tempdir().unwrap();
+        let current = root.path().join("current");
+        std::fs::create_dir(&current).unwrap();
+        let exe = current.join("Tether.exe");
+        assert!(!is_installed(&exe));
+        std::fs::write(root.path().join("Update.exe"), b"").unwrap();
+        assert!(is_installed(&exe));
+        assert!(!is_installed(&root.path().join("Tether.exe")));
     }
 }
 
@@ -56,14 +79,19 @@ mod win {
             if cfg!(debug_assertions) {
                 return true;
             }
+            let Ok(exe) = std::env::current_exe() else {
+                return false;
+            };
+            // The installer made `Tether.lnk` with the same AUMID and removes it on uninstall; the
+            // portable build keeps its own name so it never retargets that one.
+            if is_installed(&exe) {
+                return true;
+            }
             let Some(appdata) = std::env::var_os("APPDATA") else {
                 return false;
             };
             let lnk = std::path::Path::new(&appdata)
-                .join(r"Microsoft\Windows\Start Menu\Programs\Tether.lnk");
-            let Ok(exe) = std::env::current_exe() else {
-                return false;
-            };
+                .join(r"Microsoft\Windows\Start Menu\Programs\Tether (portable).lnk");
             let made = (|| -> windows::core::Result<()> {
                 let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
                 link.SetPath(&HSTRING::from(exe.as_os_str()))?;

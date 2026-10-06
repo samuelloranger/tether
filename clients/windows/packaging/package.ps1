@@ -1,5 +1,5 @@
 param(
-    [string]$Version = (Select-String -Path "$PSScriptRoot/../crates/tether-app/Cargo.toml" -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value,
+    [string]$Version = (Select-String -Path "$PSScriptRoot/../Cargo.toml" -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value,
     [switch]$SkipBuild
 )
 $ErrorActionPreference = 'Stop'

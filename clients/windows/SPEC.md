@@ -300,7 +300,7 @@ Push stays out of scope; what reaches the window directly does not.
 
 **Notifications.** OSC 9 (`ESC ] 9 ; <text> BEL`, but not `9;4`) and OSC 777 (`ESC ] 777 ; notify ; <title> ; <body> BEL`) become a Windows toast when the window is not focused or the session is not the active tab. The toast reads `<machine> · <session>` over the text. Clicking it brings the window forward and selects that tab. At most one toast per session per 5 s; later ones in the window replace the pending one. With the window focused on that very tab, nothing shows: the user is looking at it. Focus Assist and the Windows notification settings apply as they do to any app.
 
-Toasts need an app identity. The MSIX install has one. The portable zip registers a Start menu shortcut with an AppUserModelID on first run; without it, toasts are skipped and only the taskbar flash remains.
+Toasts need an app identity, `Tether.Terminal`. The installer's Start menu shortcut carries it. The portable zip registers its own `Tether (portable)` shortcut with it on first run, never the installer's; without one, toasts are skipped and only the taskbar flash remains.
 
 **Progress.** OSC 9;4 sets progress the way iOS reads it (`OSCReports`): state 1 with a percent is normal, 2 is error, 3 is indeterminate, 4 is paused, 0 clears, and a prompt mark (OSC 133;A) clears it too. The active tab's progress draws as a thin bar under the header in the accent (error in danger, paused in warning), and drives the taskbar button through `ITaskbarList3::SetProgressState` / `SetProgressValue`. A background tab's progress shows only on its tab, as a bar under the tab label.
 
@@ -448,7 +448,8 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 
 - `ci.yml` gains a `windows-latest` job: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` for the workspace, and a release build of `tether-app`.
 - The `tether-core`, `tether-ssh`, and `tether-term` tests also run on Linux in CI. Only `tether-app` needs Windows.
-- Release ships a signed MSIX (per-user install, no admin) and a portable zip. Signing identity and SmartScreen reputation are decided in the release slice, not here.
+- `windows-release.yml` releases on a `windows-vX.Y.Z` tag, whose version must equal the workspace version. It ships a Velopack installer (per-user, no admin, installed to `%LOCALAPPDATA%\TetherTerminal`, never the data folder) and a portable zip. Neither is code-signed yet; the MSIX is built but not shipped until it is.
+- Installed apps update themselves: at launch they read the rolling `windows-feed` release, download a newer version in the background, and apply it on the next launch or from **Settings → About → Restart**. The portable zip does not update.
 - Slint is used under GPLv3, which matches this repo's license.
 
 ## Tests

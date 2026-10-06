@@ -97,6 +97,10 @@ export global SettingsBridge {
     in-out property <bool> blink;
     in property <image> preview;
     in property <color> preview-background: #1e1e2e;
+    in property <string> version-label;
+    in property <string> update-label;
+    in property <bool> update-ready;
+    callback restart-to-update();
     callback theme-mode-changed(int);
     callback size-step(int);
     callback spacing-changed(float);
