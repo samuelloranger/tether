@@ -46,9 +46,10 @@ component ImportRowView inherits Rectangle {
             horizontal-stretch: 1;
             HorizontalLayout {
                 spacing: 8px;
-                Text { text: root.entry.label; color: Tokens.text; font-weight: 600; overflow: elide; }
-                if root.entry.via != "": Text { text: root.entry.via; color: Tokens.text-secondary; font-size: 12px; vertical-alignment: center; }
-                if root.entry.existing: Text { text: "already on Home"; color: Tokens.text-faint; font-size: 12px; vertical-alignment: center; }
+                Text { text: root.entry.label; color: Tokens.text; font-weight: 600; overflow: elide; horizontal-stretch: 0; }
+                if root.entry.via != "": Text { text: root.entry.via; color: Tokens.text-secondary; font-size: 12px; vertical-alignment: center; horizontal-stretch: 0; }
+                if root.entry.existing: Text { text: "already on Home"; color: Tokens.text-faint; font-size: 12px; vertical-alignment: center; horizontal-stretch: 0; }
+                Rectangle { horizontal-stretch: 1; }
             }
             Text { text: root.entry.detail + " · " + root.entry.auth; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; overflow: elide; }
         }

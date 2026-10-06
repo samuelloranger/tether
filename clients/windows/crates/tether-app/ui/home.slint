@@ -191,15 +191,15 @@ export component HomePage inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
                 VerticalLayout {
                     alignment: end;
-                    IconButton { icon: @image-url("icons/gear.svg"); clicked => { HomeBridge.open-settings(); } }
+                    IconButton { icon: @image-url("icons/gear.svg"); tooltip: "Settings"; clicked => { HomeBridge.open-settings(); } }
                 }
                 VerticalLayout {
                     alignment: end;
-                    GhostButton { text: "Import"; clicked => { HomeBridge.import-ssh-config(); } }
+                    IconButton { icon: @image-url("icons/import.svg"); tooltip: "Import from SSH config"; clicked => { HomeBridge.import-ssh-config(); } }
                 }
                 VerticalLayout {
                     alignment: end;
-                    IconButton { icon: @image-url("icons/plus.svg"); clicked => { HomeBridge.add-machine(); } }
+                    IconButton { icon: @image-url("icons/plus.svg"); tooltip: "Add a server"; clicked => { HomeBridge.add-machine(); } }
                 }
             }
             VerticalLayout {

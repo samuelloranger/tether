@@ -53,7 +53,15 @@ pub fn machine_cards(profiles: &Profiles, keys: &KeyRecords) -> Vec<MachineCardV
             id: m.id,
             name: m.name.clone(),
             address: format!("{}@{}:{}", m.user, m.host, m.port),
-            auth: m.auth_label(keys),
+            auth: match m.jump {
+                None => m.auth_label(keys),
+                Some(j) => {
+                    let via = profiles
+                        .get(j)
+                        .map_or("a removed machine", |h| h.name.as_str());
+                    format!("{} · via {via}", m.auth_label(keys))
+                }
+            },
             key_missing: m.key_missing(keys),
         })
         .collect()
@@ -190,6 +198,23 @@ pub fn randomart_rgba(public_line: &str, dark: bool) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_machine_reached_through_another_names_it() {
+        let mut bastion = machine(1, "bastion", Auth::Agent);
+        bastion.jump = None;
+        let mut inner = machine(2, "inner", Auth::Agent);
+        inner.jump = Some(bastion.id);
+        let mut orphan = machine(3, "orphan", Auth::Agent);
+        orphan.jump = Some(Uuid::from_u128(99));
+        let profiles = Profiles {
+            machines: vec![bastion, inner, orphan],
+        };
+        let cards = machine_cards(&profiles, &KeyRecords::default());
+        assert_eq!(cards[0].auth, "agent");
+        assert_eq!(cards[1].auth, "agent · via bastion");
+        assert_eq!(cards[2].auth, "agent · via a removed machine");
+    }
+
     use super::*;
     use tether_core::{Auth, KeyOrigin};
 
