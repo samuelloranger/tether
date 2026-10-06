@@ -111,7 +111,9 @@ private struct MacSessionTab: View {
     .contextMenu {
       Button(role: .destructive) { onKill(name) } label: { MenuLabel("Kill session…", systemImage: "xmark.circle") }
     }
-    .onChange(of: controller?.bellRings) { tabs.noteBell(name) }
+    .onChange(of: controller?.bellRings) { old, new in
+      if old != nil, new != nil { tabs.noteBell(name) }
+    }
     .accessibilityLabel(accessibilityText(agent: agent, attention: attention))
     .accessibilityAddTraits(selected ? .isSelected : [])
     .accessibilityIdentifier("zmxSession_\(name)")

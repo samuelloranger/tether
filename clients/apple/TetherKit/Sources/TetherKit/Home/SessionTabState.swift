@@ -15,6 +15,7 @@ struct SessionTabState: Equatable {
   private var lastViewed: [String: Int] = [:]
   private var unconfirmed: [String: Int] = [:]
   private var clock = 0
+  private var killed: Set<String> = []
 
   struct Change: Equatable {
     var removed: [String] = []
@@ -97,9 +98,15 @@ struct SessionTabState: Equatable {
     return next
   }
 
+  /// A killed session can still show in a listing that was already in flight; its tab must not return.
+  mutating func markKilled(_ name: String) { killed.insert(name) }
+
   /// Folds a fresh `zmx ls` into the strip.
-  mutating func reconcile(listed: [ZmxSession]) -> Change {
+  mutating func reconcile(listed rawListed: [ZmxSession]) -> Change {
     var change = Change()
+    let rawNames = Set(rawListed.map(\.name))
+    killed.formIntersection(rawNames)
+    let listed = rawListed.filter { !killed.contains($0.name) }
     let listedOrder = Self.ordered(listed)
     let listedSet = Set(listedOrder)
     for name in unconfirmed.keys {
@@ -109,14 +116,19 @@ struct SessionTabState: Equatable {
         unconfirmed[name] = left - 1
       }
     }
-    let gone = names.filter { !listedSet.contains($0) && (unconfirmed[$0] ?? -1) < 0 }
-    for name in gone {
-      let next = remove(name)
+    let gone = Set(names.filter { !listedSet.contains($0) && (unconfirmed[$0] ?? -1) < 0 })
+    var next: String?
+    if let active, gone.contains(active), let index = names.firstIndex(of: active) {
+      next = names[..<index].last { !gone.contains($0) } ?? names[(index + 1)...].first { !gone.contains($0) }
+    }
+    let activeGone = active.map(gone.contains) ?? false
+    for name in names where gone.contains(name) {
+      remove(name)
       change.removed.append(name)
-      if active == nil, let next {
-        change.evicted += select(next)
-        change.newActive = next
-      }
+    }
+    if activeGone, let next {
+      change.evicted += select(next)
+      change.newActive = next
     }
     let pending = names.filter { !listedSet.contains($0) }
     names = listedOrder + pending
