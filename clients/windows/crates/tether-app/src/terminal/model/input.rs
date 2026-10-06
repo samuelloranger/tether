@@ -90,10 +90,10 @@ impl TerminalModel {
     }
 
     pub(crate) fn snap_active_to_bottom(&mut self) {
-        if let Some(name) = self.active_name().map(str::to_string) {
-            if let Some(tab) = self.tabs.get_mut(&name) {
-                tab.term.scroll_to_bottom();
-            }
+        if let Some(name) = self.active_name().map(str::to_string)
+            && let Some(tab) = self.tabs.get_mut(&name)
+        {
+            tab.term.scroll_to_bottom();
         }
     }
 

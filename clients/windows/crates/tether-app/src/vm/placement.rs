@@ -21,13 +21,13 @@ pub fn capture(
     if minimized {
         return previous.copied();
     }
-    if bounds.maximized {
-        if let Some(prev) = previous {
-            return Some(WindowPlacement {
-                maximized: true,
-                ..*prev
-            });
-        }
+    if bounds.maximized
+        && let Some(prev) = previous
+    {
+        return Some(WindowPlacement {
+            maximized: true,
+            ..*prev
+        });
     }
     Some(bounds)
 }

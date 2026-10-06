@@ -28,10 +28,10 @@ impl ServerFormVm {
 
     pub fn edit(m: &Machine, has_saved_password: bool, keys: &KeyRecords) -> Self {
         let mut form = ServerForm::from_machine(m, has_saved_password);
-        if let AuthChoice::Key(Some(id)) = form.auth {
-            if keys.get(id).is_none() {
-                form.auth = AuthChoice::Key(None);
-            }
+        if let AuthChoice::Key(Some(id)) = form.auth
+            && keys.get(id).is_none()
+        {
+            form.auth = AuthChoice::Key(None);
         }
         Self {
             editing: Some(m.id),

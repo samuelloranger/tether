@@ -787,11 +787,11 @@ impl App {
             .state
             .borrow_mut()
             .save_imported_key(&form, origin, unix_now());
-        if let Some(error) = self.finish_key_save(result) {
-            if let Some(vm) = self.key_material.borrow_mut().as_mut() {
-                vm.error = Some(error);
-                self.push_key_material(vm, false);
-            }
+        if let Some(error) = self.finish_key_save(result)
+            && let Some(vm) = self.key_material.borrow_mut().as_mut()
+        {
+            vm.error = Some(error);
+            self.push_key_material(vm, false);
         }
     }
 

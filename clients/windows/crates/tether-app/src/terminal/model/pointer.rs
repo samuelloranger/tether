@@ -67,10 +67,11 @@ impl TerminalModel {
         if m.mods.ctrl {
             let link = self.link_under(cell);
             self.set_hover(link.clone().map(|(s, e)| (s, e, cell.row)), fx);
-            if m.kind == MouseKind::Down && m.button == Button::Left {
-                if let Some((span, _)) = link.filter(|(s, _)| is_openable(&s.url)) {
-                    fx.push(Effect::Ui(UiEffect::OpenUrl(span.url)));
-                }
+            if m.kind == MouseKind::Down
+                && m.button == Button::Left
+                && let Some((span, _)) = link.filter(|(s, _)| is_openable(&s.url))
+            {
+                fx.push(Effect::Ui(UiEffect::OpenUrl(span.url)));
             }
             return;
         } else if self.hover.is_some() {

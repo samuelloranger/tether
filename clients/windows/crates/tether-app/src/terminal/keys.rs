@@ -127,10 +127,11 @@ pub fn translate(
     };
     let unmodified = base.chars().next()?;
     let named_numpad = app_keypad || !(mods.ctrl || mods.alt);
-    if location == KeyLocation::Numpad && named_numpad {
-        if let Some(k) = numpad(unmodified) {
-            return Some(KeyInput::Named(NamedKey::Numpad(k)));
-        }
+    if location == KeyLocation::Numpad
+        && named_numpad
+        && let Some(k) = numpad(unmodified)
+    {
+        return Some(KeyInput::Named(NamedKey::Numpad(k)));
     }
     let produced = text
         .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))

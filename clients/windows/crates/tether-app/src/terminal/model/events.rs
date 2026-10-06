@@ -87,15 +87,13 @@ impl TerminalModel {
                 }
             }
             TermEvent::Notify(n) => {
-                if !active {
-                    if let Some(strip) = self.strip.as_mut() {
-                        strip.mark_attention(name);
-                    }
+                if !active && let Some(strip) = self.strip.as_mut() {
+                    strip.mark_attention(name);
                 }
-                if wants_toast(self.focused, active) {
-                    if let ToastDecision::Show(n) = self.toasts.offer(name, n, now) {
-                        self.push_toast(name, n, fx);
-                    }
+                if wants_toast(self.focused, active)
+                    && let ToastDecision::Show(n) = self.toasts.offer(name, n, now)
+                {
+                    self.push_toast(name, n, fx);
                 }
             }
             TermEvent::ProgressChanged => {

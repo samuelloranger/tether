@@ -42,10 +42,10 @@ pub fn load_key_file(path: &Path) -> Option<LoadedKeyFile> {
 
 pub fn apply_loaded(form: &mut KeyForm, loaded: LoadedKeyFile) {
     form.private = loaded.private;
-    if form.name.trim().is_empty() {
-        if let Some(name) = loaded.name {
-            form.name = name;
-        }
+    if form.name.trim().is_empty()
+        && let Some(name) = loaded.name
+    {
+        form.name = name;
     }
     if let Some(public) = loaded.public {
         form.public = public;
