@@ -9,6 +9,7 @@ use crate::profiles::{Auth, Machine};
 use crate::secrets::{SecretStore, key_account, password_account};
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 pub const KEEPALIVE_EVERY: Duration = Duration::from_secs(15);
 pub const TRANSPORT_ATTEMPTS: usize = 3;
 pub const RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -132,6 +133,30 @@ pub fn load_credential(
     }
 }
 
+/// `None` when the deadline completes first. The deadline is only started once `work`
+/// is found pending, and `work` wins a tie.
+async fn within<F: Future, D: Future<Output = ()>>(
+    work: F,
+    deadline: impl FnOnce() -> D,
+) -> Option<F::Output> {
+    let mut work = std::pin::pin!(work);
+    let mut deadline = Some(deadline);
+    let mut timer = None;
+    std::future::poll_fn(|cx| {
+        if let std::task::Poll::Ready(out) = work.as_mut().poll(cx) {
+            return std::task::Poll::Ready(Some(out));
+        }
+        if timer.is_none() {
+            timer = deadline.take().map(|start| Box::pin(start()));
+        }
+        match timer.as_mut() {
+            Some(t) => t.as_mut().poll(cx).map(|()| None),
+            None => std::task::Poll::Pending,
+        }
+    })
+    .await
+}
+
 async fn attempt<T: Transport>(
     t: &T,
     m: &Machine,
@@ -141,12 +166,15 @@ async fn attempt<T: Transport>(
     let cred = load_credential(m, secrets)?;
     let mut conn = t.dial(&m.host, m.port, CONNECT_TIMEOUT).await?;
     let fingerprint = hex_fingerprint(&conn.host_key_sha256());
-    if let HostKeyDecision::Mismatch { expected, got } =
-        verify_host_key(&fingerprint, &m.host, m.port, hostkeys)
-    {
+    let decision = verify_host_key(&fingerprint, &m.host, m.port, hostkeys)
+        .map_err(|e| ConnectError::Transport(format!("could not save the host key: {e}")))?;
+    if let HostKeyDecision::Mismatch { expected, got } = decision {
         return Err(ConnectError::HostKeyChanged { expected, got });
     }
-    conn.authenticate(&m.user, cred).await?;
+    match within(conn.authenticate(&m.user, cred), || t.sleep(AUTH_TIMEOUT)).await {
+        Some(result) => result?,
+        None => return Err(ConnectError::Timeout),
+    }
     conn.start_keepalive(KEEPALIVE_EVERY);
     Ok(conn)
 }
@@ -184,12 +212,14 @@ mod tests {
         log: Log,
         dials: Mutex<VecDeque<Result<[u8; 32], ConnectError>>>,
         auths: Mutex<VecDeque<Result<(), ConnectError>>>,
+        hang_auth: bool,
     }
 
     struct FakeConn {
         log: Log,
         key: [u8; 32],
         auth: Result<(), ConnectError>,
+        hang_auth: bool,
     }
 
     impl Transport for FakeTransport {
@@ -213,7 +243,15 @@ mod tests {
                 .expect("unexpected dial");
             let auth = self.auths.lock().unwrap().pop_front().unwrap_or(Ok(()));
             let log = self.log.clone();
-            async move { next.map(|key| FakeConn { log, key, auth }) }
+            let hang_auth = self.hang_auth;
+            async move {
+                next.map(|key| FakeConn {
+                    log,
+                    key,
+                    auth,
+                    hang_auth,
+                })
+            }
         }
 
         fn sleep(&self, d: Duration) -> impl Future<Output = ()> + Send {
@@ -240,7 +278,13 @@ mod tests {
                 .unwrap()
                 .push(format!("auth {user} {}", cred.kind()));
             let result = self.auth.clone();
-            async move { result }
+            let hang = self.hang_auth;
+            async move {
+                if hang {
+                    std::future::pending::<()>().await;
+                }
+                result
+            }
         }
 
         fn start_keepalive(&mut self, every: Duration) {
@@ -259,6 +303,7 @@ mod tests {
     struct Pins {
         log: Log,
         map: Mutex<HashMap<String, String>>,
+        fail: std::sync::atomic::AtomicBool,
     }
 
     impl HostKeyStore for Pins {
@@ -269,12 +314,16 @@ mod tests {
                 .get(&format!("{host}:{port}"))
                 .cloned()
         }
-        fn pin(&self, host: &str, port: u16, fingerprint: &str) {
+        fn pin(&self, host: &str, port: u16, fingerprint: &str) -> std::io::Result<()> {
             self.log.lock().unwrap().push("pin".into());
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(std::io::Error::other("disk full"));
+            }
             self.map
                 .lock()
                 .unwrap()
                 .insert(format!("{host}:{port}"), fingerprint.into());
+            Ok(())
         }
     }
 
@@ -326,10 +375,12 @@ mod tests {
                 log: log.clone(),
                 dials: Mutex::new(dials.into()),
                 auths: Mutex::new(auths.into()),
+                hang_auth: false,
             },
             pins: Pins {
                 log: log.clone(),
                 map: Mutex::default(),
+                fail: Default::default(),
             },
             secrets,
             log,
@@ -404,6 +455,28 @@ mod tests {
         assert_eq!(log(&w), ["dial h:22 10s"]);
         assert_eq!(w.pins.pinned("h", 22), Some(hex_fingerprint(&KEY_A)));
         assert!(!err.retryable());
+    }
+
+    #[test]
+    fn an_auth_that_never_answers_times_out_and_is_retried() {
+        let mut w = world(vec![Ok(KEY_A), Ok(KEY_A), Ok(KEY_A)], vec![]);
+        w.transport.hang_auth = true;
+        let req = machine(Auth::Key { id: w.key_id });
+        assert_eq!(run(&w, &req).err(), Some(ConnectError::Timeout));
+        let dials = log(&w).iter().filter(|l| l.starts_with("dial")).count();
+        assert_eq!(dials, TRANSPORT_ATTEMPTS);
+    }
+
+    #[test]
+    fn a_failed_pin_save_stops_before_auth() {
+        let w = world(vec![Ok(KEY_A); 3], vec![]);
+        w.pins.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let req = machine(Auth::Key { id: w.key_id });
+        assert!(matches!(
+            run(&w, &req).err(),
+            Some(ConnectError::Transport(m)) if m.contains("host key")
+        ));
+        assert!(!log(&w).iter().any(|l| l.starts_with("auth")));
     }
 
     #[test]

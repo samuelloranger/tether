@@ -229,7 +229,7 @@ mod tests {
         let a = s
             .save_server(None, &form(AuthChoice::Password, "pw"))
             .unwrap();
-        hostkeys.pin("192.0.2.10", 22, "aa:bb");
+        hostkeys.pin("192.0.2.10", 22, "aa:bb").unwrap();
         s.remove_machine(a).unwrap();
         assert!(s.profiles.machines.is_empty());
         assert!(secrets.get(&password_account(a)).unwrap().is_none());

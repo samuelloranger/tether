@@ -59,7 +59,7 @@ async fn mismatch_is_refused_before_any_auth_packet() {
     secrets.set(&password_account(m.id), b"hunter2").unwrap();
     let pins = MemoryHostKeys::default();
     let wrong = hex_fingerprint(&[0xaa; 32]);
-    pins.pin("127.0.0.1", m.port, &wrong);
+    pins.pin("127.0.0.1", m.port, &wrong).unwrap();
 
     let err = connect(
         &support::transport(),
