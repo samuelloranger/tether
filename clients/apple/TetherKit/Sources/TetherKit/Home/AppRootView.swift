@@ -6,6 +6,8 @@ public struct AppRootView: View {
   @State private var model: HomeModel
   @State private var preferences = AppPreferences()
   @State private var controller: SSHTerminalController?
+  /// Mac only: stands in for `controller`, one connection per session tab.
+  @State private var tabs: MacSessionTabs?
   @State private var didAutoConnect = false
   @State private var openProfileID: String?
   @State private var question: AgentQuestionTarget?
@@ -38,18 +40,18 @@ public struct AppRootView: View {
 
   public var body: some View {
     ZStack {
-      if let controller {
-        SSHTerminalView(controller: controller, preferences: preferences, questionRunner: questionRunner, onHome: leaveTerminal)
+      if let active = tabs?.activeController ?? controller {
+        SSHTerminalView(controller: active, preferences: preferences, questionRunner: questionRunner, tabs: tabs, onHome: leaveTerminal)
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       } else {
         HomeView(model: model, onOpen: { open($0) })
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       }
     }
-    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller == nil)
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen)
     .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
     .onOpenURL { handle($0) }
-    .sheet(item: $question, onDismiss: { Task { await controller?.finishAnsweringQuestion() } }) { target in
+    .sheet(item: $question, onDismiss: { Task { for each in allControllers { await each.finishAnsweringQuestion() } } }) { target in
       if let questionRunner {
         AgentQuestionSheet(target: target, runner: questionRunner) { question = nil }
       }
@@ -64,11 +66,19 @@ public struct AppRootView: View {
       if autoOpenFirst, let first = model.profiles.first { open(first) }
       else if let last = model.lastHostProfile { open(last) }
     }
+    .focusedSceneValue(\.appPreferences, preferences)
+    .environment(preferences)
   }
+
+  private var terminalOpen: Bool { tabs != nil || controller != nil }
+
+  private var activeController: SSHTerminalController? { tabs?.activeController ?? controller }
+
+  private var allControllers: [SSHTerminalController] { tabs?.allControllers ?? controller.map { [$0] } ?? [] }
 
   private func openQuestion(_ target: AgentQuestionTarget) {
     question = target
-    guard let controller else { return }
+    guard let controller = tabs?.controller(for: target.link.sessionId) ?? activeController else { return }
     let label = target.link.identityName
     let open = model.profiles.filter { $0.id == openProfileID }
     guard controller.answers(toHostLabel: label) || !NotificationActionRunner.candidates(for: label, in: open).isEmpty
@@ -79,13 +89,13 @@ public struct AppRootView: View {
   private func handle(_ url: URL) {
     guard let link = DeepLinkCoordinator.parse(url.absoluteString) else { return }
     didAutoConnect = true
-    let labels: Set<String> = controller?.answers(toHostLabel: link.identityName) == true ? [link.identityName] : []
+    let labels: Set<String> = activeController?.answers(toHostLabel: link.identityName) == true ? [link.identityName] : []
     switch link.route(profiles: model.profiles, currentProfileID: openProfileID, currentHostLabels: labels) {
     case let .switchSession(session):
-      Task { await controller?.switchSession(to: session) }
+      if let tabs { tabs.select(session) } else { Task { await controller?.switchSession(to: session) } }
     case let .open(profileID, session):
       guard let profile = model.profiles.first(where: { $0.id == profileID }) else { return }
-      if controller != nil { leaveTerminal() }
+      if terminalOpen { leaveTerminal() }
       open(profile, attach: session)
     case .none:
       break
@@ -99,24 +109,45 @@ public struct AppRootView: View {
     }
     let attach = explicitAttach
       ?? ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] ?? SSHTerminalController.defaultAttach
-    controller = SSHTerminalController(
-      title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
-      attach: attach, pushIdentity: pushIdentityProvider(), theme: preferences.terminalTheme
-    )
+    if TetherPlatform.isMac {
+      let theme = preferences.terminalTheme
+      let created = MacSessionTabs(
+        attach: explicitAttach ?? ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"],
+        pushIdentity: pushIdentityProvider()
+      ) { name, choosesInitial, identity in
+        SSHTerminalController(
+          title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
+          attach: name, pushIdentity: identity, theme: theme, choosesInitialSession: choosesInitial
+        )
+      }
+      tabs = created
+      Task { await created.start() }
+    } else {
+      controller = SSHTerminalController(
+        title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
+        attach: attach, pushIdentity: pushIdentityProvider(), theme: preferences.terminalTheme
+      )
+    }
     model.rememberLastHost(profile.id)
     openProfileID = profile.id
-    let opened = controller
-    notificationRouter?.coversForegroundPush = { [weak opened] link in
-      await opened?.coversPush(link) ?? false
+    let opened = tabs
+    let single = controller
+    notificationRouter?.coversForegroundPush = { [weak opened, weak single] link in
+      if let opened { return await opened.activeController?.coversPush(link) ?? false }
+      return await single?.coversPush(link) ?? false
     }
   }
 
   private func leaveTerminal() {
     notificationRouter?.coversForegroundPush = nil
     let leaving = controller
+    let leavingTabs = tabs
     controller = nil
+    tabs = nil
     openProfileID = nil
     model.reload()
+    if TetherPlatform.isMac { MacWindowTitle.set("Tether") }
+    leavingTabs?.leaveAll()
     Task { await leaving?.leave() }
   }
 }

@@ -8,6 +8,8 @@ public struct HomeView: View {
   @State private var tab: Tab
   @State private var showAdd = false
   @State private var keyEntry: KeyEntry?
+  @State private var showSettings = false
+  @Environment(AppPreferences.self) private var preferences: AppPreferences?
   /// Removing a machine or a key is unrecoverable, so both route through a
   /// confirmation instead of firing straight off a context menu.
   @State private var pendingServerRemoval: SSHHostProfile?
@@ -40,13 +42,23 @@ public struct HomeView: View {
         ZStack { content.id(tab).transition(TetherMotion.screenTransition(reduceMotion: reduceMotion)) }
           .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: tab)
       }
+      .macReadableWidth()
     }
     .sheet(isPresented: $showAdd) {
       AddServerSheet(model: model) { showAdd = false }
+        .macSheetSize(width: 520, height: 620)
     }
     .sheet(item: $keyEntry) { entry in
       KeyEntrySheet(model: model, mode: entry.mode) { keyEntry = nil }
+        .macSheetSize(width: 520, height: 560)
     }
+    .sheet(isPresented: $showSettings) {
+      if let preferences {
+        TerminalSettingsSheet(preferences: preferences) { showSettings = false }
+          .macSheetSize(width: 560, height: 680)
+      }
+    }
+    .focusedSceneValue(\.homeMenuActions, menuActions)
     .alert(
       "Something went wrong",
       isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
@@ -67,6 +79,13 @@ public struct HomeView: View {
       actionLabel: "Delete key",
       message: "The private key leaves the Keychain and cannot be recovered."
     ) { model.deleteKey(id: $0.id) }
+  }
+
+  private var menuActions: HomeMenuActions {
+    var actions = HomeMenuActions()
+    actions.addMachine = { showAdd = true }
+    if preferences != nil { actions.openSettings = { showSettings = true } }
+    return actions
   }
 
   private var auroraGlow: some View {
@@ -97,6 +116,19 @@ public struct HomeView: View {
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.trailing, 6)
         .accessibilityLabel("Close home")
+      }
+      if TetherPlatform.isMac, preferences != nil {
+        Button { showSettings = true } label: {
+          Image(systemName: "gearshape").font(.title3.weight(.medium))
+            .frame(width: addButtonSize, height: addButtonSize)
+            .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
+        }
+        .foregroundStyle(TetherColors.textSecondary)
+        .buttonStyle(TetherPressStyle())
+        .accessibilityIdentifier("homeSettings")
+        .accessibilityLabel("Settings")
+        .padding(.trailing, 6)
       }
       Button { showAdd = true } label: {
         Image(systemName: "plus").font(.title3.weight(.medium))
@@ -198,9 +230,18 @@ public struct HomeView: View {
         ForEach(model.profiles) { profile in
           MachineCardView(profile: profile, authLabel: model.authLabel(for: profile), onOpen: { onOpen(profile) })
             .contextMenu {
-              Button(role: .destructive) { pendingServerRemoval = profile } label: {
-                Label("Remove", systemImage: "trash")
+              Group {
+                if TetherPlatform.isMac {
+                  Button { onOpen(profile) } label: { MenuLabel("Open", systemImage: "terminal") }
+                  Button { UIPasteboard.general.string = "\(profile.username)@\(profile.host):\(profile.port)" } label: {
+                    MenuLabel("Copy address", systemImage: "doc.on.doc")
+                  }
+                }
+                Button(role: .destructive) { pendingServerRemoval = profile } label: {
+                  MenuLabel("Remove", systemImage: "trash")
+                }
               }
+              .macMenuIcons()
             }
         }
       }
@@ -215,12 +256,15 @@ public struct HomeView: View {
           ForEach(model.keys) { key in
             KeyCardView(record: key, usedBy: model.machinesUsing(keyId: key.id))
               .contextMenu {
-                Button { UIPasteboard.general.string = key.publicKey } label: {
-                  Label("Copy public key", systemImage: "doc.on.doc")
+                Group {
+                  Button { UIPasteboard.general.string = key.publicKey } label: {
+                    MenuLabel("Copy public key", systemImage: "doc.on.doc")
+                  }
+                  Button(role: .destructive) { pendingKeyDeletion = key } label: {
+                    MenuLabel("Delete key", systemImage: "trash")
+                  }
                 }
-                Button(role: .destructive) { pendingKeyDeletion = key } label: {
-                  Label("Delete key", systemImage: "trash")
-                }
+                .macMenuIcons()
               }
           }
           if model.keys.isEmpty {

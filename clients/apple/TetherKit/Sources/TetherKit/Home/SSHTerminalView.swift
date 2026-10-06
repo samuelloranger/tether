@@ -9,6 +9,8 @@ public struct SSHTerminalView: View {
   @Bindable var controller: SSHTerminalController
   var preferences: AppPreferences
   var onHome: () -> Void
+  /// Set on Mac: `controller` is then the active tab's.
+  private let tabs: MacSessionTabs?
   private let questionRunner: NotificationActionRunner?
   @State private var answering: AgentQuestionTarget?
 
@@ -43,8 +45,9 @@ public struct SSHTerminalView: View {
 
   public init(
     controller: SSHTerminalController, preferences: AppPreferences,
-    questionRunner: NotificationActionRunner? = nil, onHome: @escaping () -> Void
+    questionRunner: NotificationActionRunner? = nil, tabs: MacSessionTabs? = nil, onHome: @escaping () -> Void
   ) {
+    self.tabs = tabs
     self.controller = controller
     self.preferences = preferences
     self.questionRunner = questionRunner
@@ -83,7 +86,9 @@ public struct SSHTerminalView: View {
           }
       }
     }
-    .overlay { drawerGestures }
+    .overlay {
+      if tabs == nil { drawerGestures }
+    }
     .sensoryFeedback(trigger: controller.status) {
       switch controller.status {
       case .connected: .success
@@ -116,9 +121,11 @@ public struct SSHTerminalView: View {
         await send(item)
       }
     }
-    .task {
-      controller.startNetworkWatch()
-      await controller.connect()
+    .task(id: ObjectIdentifier(controller)) {
+      if tabs == nil {
+        controller.startNetworkWatch()
+        await controller.connect()
+      }
       #if DEBUG
       if ProcessInfo.processInfo.environment["TETHER_SSH_DRAWER"] != nil { drawerOpen = true }
       if ProcessInfo.processInfo.environment["TETHER_SSH_GIT"] != nil { showGit = true }
@@ -127,7 +134,7 @@ public struct SSHTerminalView: View {
       }
       #endif
     }
-    .task(id: scenePhase == .active && controller.status == .connected) {
+    .task(id: "\(ObjectIdentifier(controller).hashValue)-\(scenePhase == .active && controller.status == .connected)") {
       while !Task.isCancelled, scenePhase == .active, controller.status == .connected {
         await controller.refreshAgentStatus()
         try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -136,39 +143,77 @@ public struct SSHTerminalView: View {
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .active:
-        backgroundDetach.end(controller: controller)
-        Task { await controller.enterForeground() }
+        if let tabs {
+          tabs.enterForeground()
+          refocusOnMac()
+        } else {
+          backgroundDetach.end(controller: controller)
+          Task { await controller.enterForeground() }
+        }
       case .background:
-        backgroundDetach.begin(controller: controller)
+        // A hidden or minimized Mac window is still a desktop terminal: nothing detaches.
+        if tabs == nil { backgroundDetach.begin(controller: controller) }
       default:
         break
       }
     }
+    .task(id: scenePhase == .active) {
+      guard let tabs, scenePhase == .active else { return }
+      while !Task.isCancelled {
+        await tabs.refresh()
+        try? await Task.sleep(nanoseconds: 10_000_000_000)
+      }
+    }
+    .onChange(of: controller.status) { _, status in
+      if status == .connected, let tabs { Task { await tabs.refresh() } }
+    }
+    .onChange(of: windowTitle, initial: true) { _, title in
+      if tabs != nil { MacWindowTitle.set(title) }
+    }
+    .onChange(of: modalOpen) { _, open in
+      guard tabs != nil else { return }
+      if open { focused = false } else { refocusOnMac() }
+    }
+    .onChange(of: ObjectIdentifier(controller)) { refocusOnMac() }
+    .onAppear { refocusOnMac() }
+    .focusedSceneValue(\.terminalMenuActions, menuActions)
     .sheet(item: $answering, onDismiss: { Task { await controller.refreshAgentStatus() } }) { target in
       if let questionRunner {
         AgentQuestionSheet(target: target, runner: questionRunner) { answering = nil }
       }
     }
-    .sheet(isPresented: $showSettings) { TerminalSettingsSheet(preferences: preferences) { showSettings = false } }
-    .sheet(isPresented: $showGit) { GitDiffView(controller: controller) { showGit = false } }
+    .sheet(isPresented: $showSettings) {
+      TerminalSettingsSheet(preferences: preferences) { showSettings = false }
+        .macSheetSize(width: 560, height: 680)
+    }
+    .sheet(isPresented: $showGit) {
+      GitDiffView(controller: controller) { showGit = false }
+        .macSheetSize(width: 900, height: 640, large: true)
+    }
     .sheet(isPresented: $showHistory) {
       TerminalHistoryView(controller: controller, preferences: preferences) { showHistory = false }
+        .macSheetSize(width: 900, height: 640, large: true)
     }
     .destructiveConfirmation(
       $pendingKill,
       title: { "Kill \($0)?" },
       actionLabel: "Kill session",
       message: "Everything running in this session stops."
-    ) { name in Task { await controller.killSession(name) } }
+    ) { name in
+      if let tabs { tabs.kill(name) } else { Task { await controller.killSession(name) } }
+    }
   }
 
   private var terminalStack: some View {
     VStack(spacing: 0) {
       header
+      if let tabs {
+        MacSessionStrip(tabs: tabs, onKill: { pendingKill = $0 })
+      }
       if let alert = controller.agentAlert {
         AgentAlertBanner(
           alert: alert,
-          onOpen: { Task { await controller.switchSession(to: alert.session) } },
+          onOpen: { goToSession(alert.session) },
           onDismiss: { controller.dismissAgentAlert() }
         )
         .transition(.opacity)
@@ -209,6 +254,7 @@ public struct SSHTerminalView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(preferences.terminalTheme.backgroundColor)
         .onChange(of: preferences.terminalTheme.id) { controller.requestTheme(preferences.terminalTheme) }
+        .id(ObjectIdentifier(controller))
         statusOverlay
         emptyStateOverlay
         bellFlashOverlay
@@ -219,7 +265,7 @@ public struct SSHTerminalView: View {
       .onChange(of: preferences.keyBar, initial: true) { accessory.layout = preferences.keyBar }
       .onChange(of: preferences.compactKeys, initial: true) { accessory.compact = preferences.compactKeys }
       TerminalInputBridge(
-        accessory: AnyView(
+        accessory: TetherPlatform.isMac ? AnyView(EmptyView()) : AnyView(
           TerminalAccessoryBar(
             model: accessory,
             onKey: { controller.sendInput($0) },
@@ -228,11 +274,12 @@ public struct SSHTerminalView: View {
             onHideKeyboard: { focused = false }
           )
         ),
-        showsAccessory: !drawerOpen,
+        showsAccessory: !drawerOpen && !TetherPlatform.isMac,
         compactAccessory: preferences.compactKeys,
         onSubmitBytes: submit,
         isFocused: $focused
       )
+      .id(ObjectIdentifier(controller))
       .frame(height: 1)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -243,17 +290,19 @@ public struct SSHTerminalView: View {
 
   private var header: some View {
     HStack(spacing: 4) {
-      headerButton("line.3.horizontal", id: "sshTerminalDrawer",
-                   label: controller.othersWaiting ? "Open session list, a session needs you" : "Open session list") {
-        setDrawer(open: true)
-      }
-      .overlay(alignment: .topTrailing) {
-        if controller.othersWaiting {
-          Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: -8, y: 8)
-            .accessibilityHidden(true)
+      if tabs == nil {
+        headerButton("line.3.horizontal", id: "sshTerminalDrawer",
+                     label: controller.othersWaiting ? "Open session list, a session needs you" : "Open session list") {
+          setDrawer(open: true)
+        }
+        .overlay(alignment: .topTrailing) {
+          if controller.othersWaiting {
+            Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: -8, y: 8)
+              .accessibilityHidden(true)
+          }
         }
       }
-      Circle().fill(lampColor).frame(width: lampSize, height: lampSize).padding(.leading, 4)
+      Circle().fill(lampColor).frame(width: lampSize, height: lampSize).padding(.leading, tabs == nil ? 4 : 8)
         .shadow(color: lampColor.opacity(0.55), radius: 4)
         .scaleEffect(controller.status == .connected ? 1 : 1.12)
         .accessibilityHidden(true)
@@ -278,22 +327,26 @@ public struct SSHTerminalView: View {
       headerButton("arrow.triangle.branch", id: "sshTerminalGit", label: "Git changes") { showGit = true }
       headerButton("gearshape", id: "sshTerminalSettings", label: "Terminal settings") { showSettings = true }
       Menu {
-        Button { Task { await controller.switchSession(to: nextSessionName()) } } label: { Label("New session", systemImage: "plus") }
-        Button { showFileImporter = true } label: { Label("Send file…", systemImage: "square.and.arrow.up") }
-        Button { showPhotoPicker = true } label: { Label("Send photo or video…", systemImage: "photo") }
-        Button(action: copySelection) { Label("Copy selection", systemImage: "doc.on.doc") }
-          .disabled(selectionText?.isEmpty ?? true)
-        Button { showHistory = true } label: { Label("Terminal history", systemImage: "clock.arrow.circlepath") }
-        Divider()
-        Button { jump(.previous) } label: { Label("Previous prompt", systemImage: "chevron.up") }
-        Button { jump(.next) } label: { Label("Next prompt", systemImage: "chevron.down") }
-        Button(action: copyLastOutput) { Label("Copy last output", systemImage: "text.badge.checkmark") }
-        Divider()
-        Button(role: .destructive) { pendingKill = controller.attach } label: { Label("Kill \(controller.attach)", systemImage: "xmark.circle") }
+        Group {
+          Button(action: newSession) { MenuLabel("New session", systemImage: "plus") }
+          Button { showFileImporter = true } label: { MenuLabel("Send file…", systemImage: "square.and.arrow.up") }
+          Button { showPhotoPicker = true } label: { MenuLabel("Send photo or video…", systemImage: "photo") }
+          Button(action: copySelection) { MenuLabel("Copy selection", systemImage: "doc.on.doc") }
+            .disabled(selectionText?.isEmpty ?? true)
+          Button { showHistory = true } label: { MenuLabel("Terminal history", systemImage: "clock.arrow.circlepath") }
+          Divider()
+          Button { jump(.previous) } label: { MenuLabel("Previous prompt", systemImage: "chevron.up") }
+          Button { jump(.next) } label: { MenuLabel("Next prompt", systemImage: "chevron.down") }
+          Button(action: copyLastOutput) { MenuLabel("Copy last output", systemImage: "text.badge.checkmark") }
+          Divider()
+          Button(role: .destructive) { pendingKill = controller.attach } label: { MenuLabel("Kill \(controller.attach)", systemImage: "xmark.circle") }
+        }
+        .macMenuIcons()
       } label: {
         Image(systemName: "ellipsis").font(.title3.weight(.semibold))
           .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
       }
+      .macPlainMenu()
       .accessibilityIdentifier("sshTerminalOverflow")
       .accessibilityLabel("More terminal actions")
     }
@@ -503,6 +556,50 @@ public struct SSHTerminalView: View {
     controller.sendInput(TerminalKeyMap.modified(text, ctrl: ctrl, alt: alt))
   }
 
+  private func newSession() {
+    if let tabs { tabs.beginNewSession() } else {
+      Task { await controller.switchSession(to: nextSessionName()) }
+    }
+  }
+
+  private func goToSession(_ name: String) {
+    if let tabs { tabs.select(name) } else { Task { await controller.switchSession(to: name) } }
+  }
+
+  private var windowTitle: String { "\(controller.title) · \(controller.attach)" }
+
+  private var modalOpen: Bool {
+    showSettings || showGit || showHistory || showFileImporter || showPhotoPicker
+      || pendingKill != nil || answering != nil || tabs?.draftName != nil
+  }
+
+  /// A desktop terminal takes typing without a click. Flipped off and on because the
+  /// bridge only reacts to a change of the binding.
+  private func refocusOnMac() {
+    guard tabs != nil, !modalOpen else { return }
+    focused = false
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+      if !modalOpen { focused = true }
+    }
+  }
+
+  private var menuActions: TerminalMenuActions? {
+    guard let tabs else { return nil }
+    var actions = TerminalMenuActions()
+    actions.newSession = { tabs.beginNewSession() }
+    actions.selectSession = { tabs.selectIndex($0) }
+    actions.nextSession = { tabs.step(1) }
+    actions.previousSession = { tabs.step(-1) }
+    actions.killSession = { pendingKill = tabs.state.active }
+    actions.showHistory = { showHistory = true }
+    actions.showGit = { showGit = true }
+    actions.sendFile = { showFileImporter = true }
+    actions.openSettings = { showSettings = true }
+    actions.backToMachines = onHome
+    actions.sessionCount = tabs.state.names.count
+    return actions
+  }
+
   private func nextSessionName() -> String {
     var n = controller.sessions.count + 1
     let names = Set(controller.sessions.map(\.name))
@@ -709,7 +806,9 @@ public struct SSHTerminalView: View {
         Text("Nothing runs until you start one.")
           .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
         Button("New session") {
-          withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = true }
+          if let tabs { tabs.beginNewSession() } else {
+            withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = true }
+          }
         }
         .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
         .padding(.horizontal, 20).padding(.vertical, 10)

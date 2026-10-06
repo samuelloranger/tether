@@ -76,8 +76,16 @@ public final class TetherSurfaceView: UIView {
   public var selection: TerminalSelection? {
     didSet {
       guard selection != oldValue else { return }
+      if selection != nil { TerminalCopySource.shared.surface = self }
       updateSelectionLayers()
     }
+  }
+
+  /// The selected cells' text, nil when nothing is selected.
+  var selectedText: String? {
+    guard let selection else { return nil }
+    let text = selection.text(from: cachedRowTexts)
+    return text.isEmpty ? nil : text
   }
 
   /// Size the LOCAL emulator was last told — updated on every reported change.
@@ -96,7 +104,16 @@ public final class TetherSurfaceView: UIView {
 
   private var scrollRemainder: CGFloat = 0
   private var lastPanY: CGFloat = 0
+  private var lastScrollY: CGFloat = 0
   private var selectionAnchor: (row: Int, col: Int)?
+  /// Where the mouse went down: a pan only begins once the pointer has travelled a few
+  /// points, so its own start would anchor the selection a cell late.
+  private var pressOrigin: CGPoint?
+
+  public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    pressOrigin = touches.first?.location(in: self)
+    super.touchesBegan(touches, with: event)
+  }
 
   // MARK: - Layers
 
@@ -201,9 +218,12 @@ public final class TetherSurfaceView: UIView {
     pan.maximumNumberOfTouches = 1
     addGestureRecognizer(pan)
 
-    let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-    longPress.minimumPressDuration = 0.45
-    addGestureRecognizer(longPress)
+    // A mouse selects by click-drag; a long press would leave a one-cell selection behind.
+    if !TetherPlatform.isMac {
+      let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+      longPress.minimumPressDuration = 0.45
+      addGestureRecognizer(longPress)
+    }
 
     let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
     doubleTap.numberOfTapsRequired = 2
@@ -214,7 +234,22 @@ public final class TetherSurfaceView: UIView {
     tap.require(toFail: doubleTap)
     addGestureRecognizer(tap)
 
-    addInteraction(UIEditMenuInteraction(delegate: self))
+    // On the Mac a secondary click belongs to the native context menu; the edit menu
+    // would claim it first and show the phone's bubble instead.
+    if !TetherPlatform.isMac { addInteraction(UIEditMenuInteraction(delegate: self)) }
+    installPointerBehaviour()
+  }
+
+  /// Wheel and trackpad scrolling, the I-beam, and the right-click menu.
+  private func installPointerBehaviour() {
+    #if targetEnvironment(macCatalyst)
+    let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+    scroll.allowedScrollTypesMask = .all
+    scroll.allowedTouchTypes = []
+    addGestureRecognizer(scroll)
+    addInteraction(UIPointerInteraction(delegate: self))
+    addInteraction(UIContextMenuInteraction(delegate: self))
+    #endif
   }
 
   // MARK: - Snapshot intake
@@ -445,8 +480,8 @@ public final class TetherSurfaceView: UIView {
       selectionLayer.frame = bounds
       selectionLayer.path = path
       selectionLayer.isHidden = path.isEmpty
-      startHandleLayer.isHidden = false
-      endHandleLayer.isHidden = false
+      startHandleLayer.isHidden = TetherPlatform.isMac
+      endHandleLayer.isHidden = TetherPlatform.isMac
       startHandleLayer.position = CGPoint(
         x: CGFloat(normalized.startCol) * cellWidth + gridOriginX,
         y: CGFloat(normalized.startRow) * cellHeight + originY
@@ -583,6 +618,11 @@ public final class TetherSurfaceView: UIView {
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
     let point = gesture.location(in: self)
+    if TetherPlatform.isMac {
+      // Wheel scrolling is `handleScroll`; a click-drag over a mouse-mode TUI is left alone.
+      if mouseMode == .off { handleDragSelect(gesture, point: point) }
+      return
+    }
     if mouseMode != .off {
       handleMousePan(gesture, point: point)
       return
@@ -608,6 +648,72 @@ public final class TetherSurfaceView: UIView {
     case .ended, .cancelled, .failed:
       scrollRemainder = 0
       applyScrollOffset()
+    default:
+      break
+    }
+  }
+
+  /// Click-drag selection: anchored where the press landed, clamped to the grid.
+  private func handleDragSelect(_ gesture: UIPanGestureRecognizer, point: CGPoint) {
+    switch gesture.state {
+    case .began:
+      let translation = gesture.translation(in: self)
+      let origin = pressOrigin ?? CGPoint(x: point.x - translation.x, y: point.y - translation.y)
+      guard let cell = clampedCell(at: origin) else { return }
+      selectionAnchor = cell
+      selection = TerminalSelection(startRow: cell.row, startCol: cell.col, endRow: cell.row, endCol: cell.col)
+      onSelectionChanged?(selection)
+    case .changed:
+      guard let anchor = selectionAnchor, let cell = clampedCell(at: point) else { return }
+      selection = TerminalSelection(startRow: anchor.row, startCol: anchor.col, endRow: cell.row, endCol: cell.col)
+      onSelectionChanged?(selection)
+    case .ended, .cancelled, .failed:
+      selectionAnchor = nil
+      onSelectionChanged?(selection)
+    default:
+      break
+    }
+  }
+
+  private func clampedCell(at point: CGPoint) -> (row: Int, col: Int)? {
+    guard let header, cellWidth > 0, cellHeight > 0 else { return nil }
+    let col = Int(((point.x - gridOriginX) / cellWidth).rounded(.down))
+    let row = Int(((point.y - gridOriginY) / cellHeight).rounded(.down))
+    return (min(max(row, 0), Int(header.rows) - 1), min(max(col, 0), Int(header.cols) - 1))
+  }
+
+  /// Mouse wheel and trackpad scrolling: history when the shell owns the screen, wheel
+  /// events when a TUI has asked for the mouse. Scroll events carry a translation, not a location.
+  @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
+    let y = gesture.translation(in: self).y
+    switch gesture.state {
+    case .began:
+      // A mouse wheel tick arrives as a `.began` that already carries its whole movement.
+      lastScrollY = 0
+      scrollRemainder = 0
+      fallthrough
+    case .changed:
+      let delta = lastScrollY - y
+      lastScrollY = y
+      let result = TouchScrollModel.lines(deltaPixels: delta, remainder: scrollRemainder, rowHeight: cellHeight)
+      scrollRemainder = result.remainder
+      guard result.lines != 0 else { return }
+      if mouseMode != .off, let header {
+        let point = gesture.location(in: self)
+        let cell = MouseSeq.cellFromPoint(
+          x: point.x - gridOriginX, y: point.y, bounds: bounds,
+          cols: Int(header.cols), rows: Int(header.rows),
+          cellWidth: cellWidth, cellHeight: cellHeight
+        )
+        let up = result.lines < 0
+        for _ in 0..<abs(result.lines) {
+          onMouseBytes?(MouseSeq.wheelSeq(up: up, col: cell.col, row: cell.row, sgr: mouseSgr))
+        }
+      } else {
+        onScrollLines?(Int32(-result.lines))
+      }
+    case .ended, .cancelled, .failed:
+      scrollRemainder = 0
     default:
       break
     }
@@ -693,7 +799,10 @@ public final class TetherSurfaceView: UIView {
 
     // Ahead of mouse reporting: a phone has no modifier-click, and a mouse-mode TUI
     // (Claude Code's fullscreen one among them) would otherwise swallow every link.
-    if let target = LinkSpans.target(atColumn: cell.col, row: cell.row, spans: linkSpans) {
+    // A mouse can modifier-click, so on the Mac only ⌘-click opens: a plain click on a
+    // link stays a click (and reaches a mouse-mode TUI).
+    if let target = LinkSpans.target(atColumn: cell.col, row: cell.row, spans: linkSpans),
+       !TetherPlatform.isMac || gesture.modifierFlags.contains(.command) {
       onOpenLink?(target)
       return
     }
@@ -765,6 +874,58 @@ extension TetherSurfaceView: UIEditMenuInteractionDelegate {
   ) {
     menuLink = nil
   }
+}
+
+#if targetEnvironment(macCatalyst)
+extension TetherSurfaceView: UIPointerInteractionDelegate {
+  public func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? {
+    // A mouse-mode TUI draws its own pointer targets; the I-beam would lie about them.
+    guard mouseMode == .off else { return nil }
+    return UIPointerStyle(shape: .verticalBeam(length: cellHeight))
+  }
+}
+
+extension TetherSurfaceView: UIContextMenuInteractionDelegate {
+  public func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    let target = cellAt(location).flatMap { LinkSpans.target(atColumn: $0.col, row: $0.row, spans: linkSpans) }
+    let text = selectedText
+    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+      var items: [UIMenuElement] = []
+      if let text {
+        items.append(MenuIcon.action("Copy", systemImage: "doc.on.doc") { _ in
+          UIPasteboard.general.string = text
+        })
+      }
+      items.append(MenuIcon.action("Paste", systemImage: "doc.on.clipboard") { _ in
+        // Down the responder chain from the focused input view, which owns bracketed paste.
+        UIApplication.shared.sendAction(#selector(UIResponder.paste(_:)), to: nil, from: self, for: nil)
+      })
+      if let target {
+        if case .external = target {
+          items.append(MenuIcon.action("Open Link", systemImage: "safari") { _ in
+            self?.onOpenLink?(target)
+          })
+        }
+        items.append(MenuIcon.action("Copy Link", systemImage: "link") { _ in
+          self?.onCopyLink?(target)
+        })
+      }
+      return UIMenu(children: items)
+    }
+  }
+}
+#endif
+
+/// ⌘C reaches the hidden input view, which has no selection of its own; this is how it
+/// finds the text the user selected on the surface.
+@MainActor
+final class TerminalCopySource {
+  static let shared = TerminalCopySource()
+  weak var surface: TetherSurfaceView?
+  var text: String? { surface?.selectedText }
 }
 
 private extension UIFont {

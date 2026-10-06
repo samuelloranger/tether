@@ -12,8 +12,26 @@ struct TetherIOSApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   #endif
 
+  @Environment(\.scenePhase) private var scenePhase
+
+  init() {
+    TetherMacWindow.applyBarAppearance()
+  }
+
   var body: some Scene {
     WindowGroup {
+      content
+        .onAppear { TetherMacWindow.configureScenes() }
+        .onChange(of: scenePhase) { _, phase in
+          if phase == .active { TetherMacWindow.configureScenes() }
+        }
+    }
+    #if targetEnvironment(macCatalyst)
+    .commands { TetherCommands() }
+    #endif
+  }
+
+  @ViewBuilder private var content: some View {
       #if DEBUG
       if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
         AppRootView(demoModel: .liveDemoFromEnv())
@@ -37,7 +55,6 @@ struct TetherIOSApp: App {
       #else
       appRoot
       #endif
-    }
   }
 
   @ViewBuilder private var appRoot: some View {
@@ -54,7 +71,7 @@ struct TetherIOSApp: App {
 }
 
 #if canImport(UIKit)
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: UIResponder, UIApplicationDelegate {
   let pushRegistrar = PushRegistrar()
   let tapRouter = NotificationTapRouter()
   lazy var actionRunner = NotificationActionRunner.live()
@@ -71,6 +88,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     tapRouter.onAction = { [weak self] attempt in await self?.actionRunner.perform(attempt) }
     return true
   }
+
+  #if targetEnvironment(macCatalyst)
+  override func buildMenu(with builder: any UIMenuBuilder) {
+    super.buildMenu(with: builder)
+    TetherMacWindow.removeDeadMenus(from: builder)
+  }
+  #endif
 
   func application(
     _ application: UIApplication,

@@ -5,6 +5,7 @@ let package = Package(
   name: "TetherKit",
   platforms: [
     .iOS(.v17),
+    .macCatalyst(.v17),
   ],
   products: [
     .library(name: "TetherKit", targets: ["TetherKit"]),

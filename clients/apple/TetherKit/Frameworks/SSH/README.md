@@ -1,6 +1,6 @@
 # SSH transport dependencies
 
-Prebuilt iOS XCFrameworks for the libssh2 transport. They are vendored build
+Prebuilt iOS and Mac Catalyst XCFrameworks for the libssh2 transport. They are vendored build
 inputs, rebuilt with `scripts/build-ssh-xcframeworks.sh` (macOS + Xcode +
 cmake). The script also refreshes `Sources/CLibSSH2/include/libssh2.h` so the
 header always matches the binary.
@@ -13,9 +13,11 @@ header always matches the binary.
 | `crypto.xcframework` (`libcrypto.a`) | OpenSSL 4.0.2 | https://github.com/openssl/openssl | Apache-2.0 (`LICENSE-openssl`) |
 | `ssl.xcframework` (`libssl.a`) | OpenSSL 4.0.2 | https://github.com/openssl/openssl | Apache-2.0 (`LICENSE-openssl`) |
 
-Slices: `ios-arm64` and `ios-arm64_x86_64-simulator`, minimum iOS 17.0. No
-macOS slice — `swift test` cannot link these; run `TetherKitTests` through the
-package's `TetherKit` scheme on an iOS simulator.
+Slices: `ios-arm64`, `ios-arm64_x86_64-simulator` and
+`ios-arm64_x86_64-maccatalyst`, minimum iOS 17.0. The Mac Catalyst slice is
+built with the macOS SDK for the `<arch>-apple-ios17.0-macabi` target. There is
+no plain macOS slice, so `swift test` cannot link these; run `TetherKitTests`
+through the package's `TetherKit` scheme on an iOS simulator.
 
 ## Why libssh2 is built from `master`
 

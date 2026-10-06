@@ -85,6 +85,7 @@ struct MachineCardView: View {
       .tetherCard()
     }
     .buttonStyle(TetherPressStyle())
+    .macHoverHighlight()
     .accessibilityIdentifier("homeMachine_\(profile.name)")
     .accessibilityLabel("\(profile.name), \(profile.username) at \(profile.host) port \(profile.port), \(authLabel)")
     .accessibilityHint("Opens a terminal on this machine")
@@ -135,6 +136,7 @@ struct KeyCardView: View {
     }
     .padding(.horizontal, 14).padding(.vertical, 13)
     .tetherCard()
+    .macHoverHighlight()
     .accessibilityIdentifier("homeKeyCard_\(record.name)")
   }
 
@@ -152,6 +154,39 @@ struct KeyCardView: View {
 
 /// One radius for background and border, so the two halves of a card can never disagree.
 extension View {
+  /// Desktop width: Home reads as a centred column instead of stretching edge to edge.
+  @ViewBuilder func macReadableWidth(_ width: CGFloat = 760) -> some View {
+    if TetherPlatform.isMac { frame(maxWidth: width) } else { self }
+  }
+
+  /// A pointer lights the row it would click.
+  @ViewBuilder func macHoverHighlight(cornerRadius: CGFloat = 16) -> some View {
+    if TetherPlatform.isMac { modifier(HoverHighlight(cornerRadius: cornerRadius)) } else { self }
+  }
+
+  /// Return / Esc on the Mac; the phone's sheets keep their touch-only controls.
+  @ViewBuilder func macShortcut(_ shortcut: KeyboardShortcut) -> some View {
+    if TetherPlatform.isMac { keyboardShortcut(shortcut) } else { self }
+  }
+
+  /// Sheets on the Mac are floating panels; the phone's full-height sizing is left alone there.
+  /// `large` is for browsers like Git, which want most of the window rather than a form's width.
+  @ViewBuilder func macSheetSize(width: CGFloat, height: CGFloat, large: Bool = false) -> some View {
+    if TetherPlatform.isMac {
+      if #available(iOS 18.0, macCatalyst 18.0, *) {
+        if large {
+          frame(minWidth: width, minHeight: height).presentationSizing(.page)
+        } else {
+          frame(minWidth: width, minHeight: height).presentationSizing(.form)
+        }
+      } else {
+        frame(minWidth: width, minHeight: height)
+      }
+    } else {
+      self
+    }
+  }
+
   func tetherCard(cornerRadius: CGFloat = 16) -> some View {
     background(TetherColors.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
       .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(TetherColors.border))
@@ -225,5 +260,21 @@ func acknowledgeCopy(_ text: String, announce: String = "Copied", into isPresent
     try? await Task.sleep(for: .seconds(1.2))
     guard !Task.isCancelled else { return }
     withAnimation { isPresented.wrappedValue = false }
+  }
+}
+
+private struct HoverHighlight: ViewModifier {
+  let cornerRadius: CGFloat
+  @State private var hovering = false
+
+  func body(content: Content) -> some View {
+    content
+      .overlay {
+        RoundedRectangle(cornerRadius: cornerRadius)
+          .strokeBorder(TetherColors.accent.opacity(hovering ? 0.55 : 0))
+          .allowsHitTesting(false)
+      }
+      .onHover { hovering = $0 }
+      .animation(.easeOut(duration: 0.12), value: hovering)
   }
 }

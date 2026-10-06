@@ -1,8 +1,8 @@
 name: Release builds
 
 # scripts/release.sh pushes the tag vX.Y.Z, which starts this workflow. The
-# `draft` job opens a DRAFT release, `ios` attaches the build to it, and only
-# when it succeeds does `publish` take it out of draft. A failed build therefore
+# `draft` job opens a DRAFT release, `ios` and `mac` upload their builds, and
+# only when the iOS one succeeds does `publish` take it out of draft. A failed build therefore
 # never becomes the public `releases/latest`. Manual runs are build-only: they
 # upload workflow artifacts without touching a release.
 #
@@ -20,6 +20,8 @@ on:
         options:
           - ios
           - testflight
+          - mac
+          - mac-testflight
         default: ios
 
 permissions:
@@ -328,12 +330,205 @@ jobs:
           name: tether-ios-${{ github.sha }}
           path: build/export/*.ipa
 
-  # The gate: the ios build must succeed before the release leaves draft.
+  # The same app as a Mac Catalyst build, uploaded to the same App Store Connect
+  # record (macOS platform) with the same build number. Signed with the iOS job's
+  # Apple Distribution identity; the Mac-only pieces are the Catalyst App Store
+  # profiles and a Mac Installer Distribution certificate for the .pkg:
+  #
+  #   MAC_PROVISIONING_PROFILE_BASE64      Mac Catalyst App Store profile, app
+  #   MAC_NSE_PROVISIONING_PROFILE_BASE64  Mac Catalyst App Store profile, NSE
+  #   MAC_INSTALLER_CERT_P12_BASE64        3rd Party Mac Developer Installer, .p12
+  #   MAC_INSTALLER_CERT_PASSWORD          its export password
+  #
+  # Without them the job says so and builds nothing, so a release still cuts.
+  # `xcodebuild -exportArchive` is not used: for a Mac app it checks the installer
+  # certificate against the app profile and fails. productbuild packages the
+  # already signed .app instead.
+  mac:
+    needs: draft
+    if: github.event_name == 'push' || inputs.scope == 'mac' || inputs.scope == 'mac-testflight'
+    runs-on: macos-26
+    # The Mac app rides along with the iOS release; a Mac failure never holds the
+    # GitHub release in draft.
+    continue-on-error: true
+    steps:
+      - name: Check signing secrets
+        id: signing
+        env:
+          READY: ${{ secrets.IOS_DIST_CERT_P12_BASE64 != '' && secrets.MAC_PROVISIONING_PROFILE_BASE64 != '' && secrets.MAC_NSE_PROVISIONING_PROFILE_BASE64 != '' && secrets.MAC_INSTALLER_CERT_P12_BASE64 != '' }}
+        run: |
+          if [ "$READY" = "true" ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Mac signing secrets are not set; skipping the Mac build.'
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.signing.outputs.ready == 'true'
+
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        if: steps.signing.outputs.ready == 'true'
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve version and build number
+        if: steps.signing.outputs.ready == 'true'
+        id: ver
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            V="${TAG#v}"
+          else
+            V="$(jq -r .version package.json)"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "build=$RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Building $V ($RUN_NUMBER)"
+
+      - name: Install App Store Connect API key
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          KEY_B64: ${{ secrets.APP_STORE_CONNECT_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$KEY_B64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+
+      - name: Install signing identities
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          CERT_B64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          INSTALLER_B64: ${{ secrets.MAC_INSTALLER_CERT_P12_BASE64 }}
+          INSTALLER_PASSWORD: ${{ secrets.MAC_INSTALLER_CERT_PASSWORD }}
+          PROFILE_B64: ${{ secrets.MAC_PROVISIONING_PROFILE_BASE64 }}
+          NSE_PROFILE_B64: ${{ secrets.MAC_NSE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          KEYCHAIN=~/Library/Keychains/tether-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          import_p12() {
+            printf '%s' "$1" | base64 --decode > /tmp/identity.p12
+            security import /tmp/identity.p12 -k "$KEYCHAIN" -P "$2" \
+              -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/security -f pkcs12
+            rm -f /tmp/identity.p12
+          }
+          import_p12 "$CERT_B64" "$CERT_PASSWORD"
+          import_p12 "$INSTALLER_B64" "$INSTALLER_PASSWORD"
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productbuild: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+          # Xcode 16+ reads UserData; older tools read MobileDevice.
+          install_profile() {
+            printf '%s' "$1" | base64 --decode > /tmp/profile.provisionprofile
+            security cms -D -i /tmp/profile.provisionprofile > /tmp/profile.plist
+            UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)"
+            NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)"
+            for dir in ~/Library/MobileDevice/Provisioning\ Profiles ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles; do
+              mkdir -p "$dir"
+              cp /tmp/profile.provisionprofile "$dir/$UUID.provisionprofile"
+            done
+            rm -f /tmp/profile.plist /tmp/profile.provisionprofile
+            echo "$2=$NAME" >> "$GITHUB_ENV"
+            echo "Installed profile '$NAME' ($UUID) → $2"
+          }
+          install_profile "$PROFILE_B64" APP_PROVISIONING_PROFILE_SPECIFIER
+          install_profile "$NSE_PROFILE_B64" NSE_PROVISIONING_PROFILE_SPECIFIER
+
+          INSTALLER_IDENTITY="$(security find-identity -v "$KEYCHAIN" | sed -n 's/.*"\(3rd Party Mac Developer Installer[^"]*\)".*/\1/p' | head -1)"
+          [ -n "$INSTALLER_IDENTITY" ] || { echo "::error::No installer identity in the keychain"; exit 1; }
+          echo "INSTALLER_IDENTITY=$INSTALLER_IDENTITY" >> "$GITHUB_ENV"
+          security find-identity -v "$KEYCHAIN" | sed 's/([0-9A-F]*)/(…)/'
+
+      # A signed Release build, not an archive: archiving the Catalyst app with
+      # Xcode 26 produces SwiftTerm's build-tool plugin executable twice under
+      # UninstalledProducts/macosx and fails. The built .app is what productbuild needs.
+      - name: Build signed app
+        if: steps.signing.outputs.ready == 'true'
+        timeout-minutes: 45
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MARKETING_VERSION: ${{ steps.ver.outputs.version }}
+          CURRENT_PROJECT_VERSION: ${{ steps.ver.outputs.build }}
+        run: |
+          set -euo pipefail
+          xcodebuild -project clients/apple/Tether.xcodeproj \
+            -scheme TetherIOS \
+            -configuration Release -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath build/dd build \
+            -skipPackagePluginValidation \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            APP_PROVISIONING_PROFILE_SPECIFIER="$APP_PROVISIONING_PROFILE_SPECIFIER" \
+            NSE_PROVISIONING_PROFILE_SPECIFIER="$NSE_PROVISIONING_PROFILE_SPECIFIER" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+
+      - name: Package installer
+        if: steps.signing.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          APP=build/dd/Build/Products/Release-maccatalyst/TetherIOS.app
+          codesign --verify --deep --strict "$APP"
+          codesign -d --entitlements - --xml "$APP" > build/entitlements.plist 2>/dev/null
+          grep -q com.apple.security.app-sandbox build/entitlements.plist \
+            || { echo "::error::The Mac app is not sandboxed"; exit 1; }
+          mkdir -p build/export
+          xcrun productbuild --sign "$INSTALLER_IDENTITY" --component "$APP" /Applications build/export/Tether.pkg
+
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.ready == 'true'
+        run: |
+          security list-keychains -d user -s login.keychain-db || true
+          security delete-keychain ~/Library/Keychains/tether-signing.keychain-db || true
+          rm -f ~/Library/MobileDevice/Provisioning\ Profiles/*.provisionprofile \
+            ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.provisionprofile || true
+
+      - name: Validate build
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          xcrun altool --validate-app -f build/export/Tether.pkg -t macos \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      # continue-on-error for the same reason as the iOS upload.
+      - name: Upload to TestFlight
+        if: steps.signing.outputs.ready == 'true' && (github.event_name == 'push' || inputs.scope == 'mac-testflight')
+        continue-on-error: true
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app -f build/export/Tether.pkg -t macos \
+            --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      - name: Upload pkg workflow artifact (manual runs)
+        if: steps.signing.outputs.ready == 'true' && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tether-mac-${{ github.sha }}
+          path: build/export/Tether.pkg
+
+  # The gate: the ios build must succeed before the release leaves draft. It also
+  # waits for mac, which is continue-on-error, so the Mac upload lands first.
   # Publishing is also what makes the tag public; until then `releases/latest`
   # still points at the previous good release.
   publish:
     if: github.event_name == 'push'
-    needs: [ios]
+    needs: [ios, mac]
     runs-on: ubuntu-latest
     steps:
       - name: Publish the release
