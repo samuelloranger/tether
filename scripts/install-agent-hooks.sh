@@ -1,5 +1,5 @@
 #!/bin/sh
-# Wire Claude Code, Codex and Cursor notifications to tether-notify via one hook wrapper.
+# Wire Claude Code, Codex, Gemini CLI and Cursor notifications to tether-notify via one hook wrapper.
 # Usage: install-agent-hooks.sh [host-label]  (label shown in notifications and deep links)
 set -eu
 
@@ -27,12 +27,17 @@ host="${TETHER_NOTIFY_HOST:-$TETHER_HOOK_HOST_DEFAULT}"
 sess="${ZMX_SESSION:-}"
 case "$state" in working|waiting|done|failed|clear) ;; *) state=done ;; esac
 
-# Codex parses stdout as a decision ({} = accept); Cursor's beforeSubmitPrompt needs
-# an explicit continue. Claude ignores stdout on these events.
+# Codex and Gemini parse stdout as a decision ({} = accept); Cursor's beforeSubmitPrompt
+# needs an explicit continue. Claude ignores stdout on these events.
 reply() {
   case "$agent:$state" in
-    codex:*) echo '{}' ;;
-    cursor:working) echo '{"continue": true}' ;;
+    codex:*|gemini:*) echo '{}' ;;
+    cursor:working)
+      case "$input" in
+        *'"hook_event_name":"postToolUse"'*) echo '{}' ;;
+        *) echo '{"continue": true}' ;;
+      esac
+      ;;
     cursor:*) echo '{}' ;;
   esac
 }
@@ -42,6 +47,12 @@ notify_bin="$(dirname "$0")/tether-notify"
 
 input="$(cat 2>/dev/null || true)"
 field() { printf '%s' "$input" | jq -r "$1" 2>/dev/null || true; }
+
+# Cursor also runs the Claude hooks from ~/.claude/settings.json; its own entries report it.
+# An escaped "cursor_version" inside a prompt string carries a backslash, so it doesn't match.
+if [ "$agent" = claude ]; then
+  case "$input" in *'"cursor_version"'*) exit 0 ;; esac
+fi
 
 # Hot path (every tool call): no jq, no push.
 if [ "$state" = working ] || [ "$state" = clear ]; then

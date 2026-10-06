@@ -5,10 +5,10 @@ import path from 'node:path';
 
 // Installs the hooks into a throwaway $HOME and drives the real wrapper with recorded hook
 // JSON; a stub tether-notify records each call so the mapping itself is what gets tested.
-function install(): { home: string; log: string } {
+function install(setup?: (home: string) => void): { home: string; log: string } {
   const home = mkdtempSync(path.join(tmpdir(), 'agent-hooks-'));
-  mkdirSync(path.join(home, '.codex'));
-  mkdirSync(path.join(home, '.cursor'));
+  for (const dir of ['.codex', '.cursor', '.gemini']) mkdirSync(path.join(home, dir));
+  setup?.(home);
   const run = Bun.spawnSync(['sh', 'scripts/install-agent-hooks.sh', 'devbox'], {
     env: { ...process.env, HOME: home },
   });
@@ -20,9 +20,23 @@ function install(): { home: string; log: string } {
   return { home, log };
 }
 
-function hook(env: { home: string }, agent: string, state: string, input: object, session: string | null = 'work') {
+function reinstall(env: { home: string }) {
+  const run = Bun.spawnSync(['sh', 'scripts/install-agent-hooks.sh', 'devbox'], {
+    env: { ...process.env, HOME: env.home },
+  });
+  return { exitCode: run.exitCode, stdout: run.stdout.toString(), stderr: run.stderr.toString() };
+}
+
+function hook(
+  env: { home: string },
+  agent: string,
+  state: string,
+  input: object,
+  session: string | null = 'work',
+  extraEnv: Record<string, string> = {},
+) {
   const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
-  const vars: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: env.home };
+  const vars: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: env.home, ...extraEnv };
   if (session) vars.ZMX_SESSION = session;
   const run = Bun.spawnSync(['sh', wrapper, agent, state], { env: vars, stdin: Buffer.from(JSON.stringify(input)) });
   expect(run.exitCode).toBe(0);
@@ -88,7 +102,7 @@ test('clear records clear', () => {
 
 test('installer registers every event once, and re-running does not duplicate', () => {
   const env = install();
-  Bun.spawnSync(['sh', 'scripts/install-agent-hooks.sh', 'devbox'], { env: { ...process.env, HOME: env.home } });
+  reinstall(env);
   const claude = JSON.parse(readFileSync(path.join(env.home, '.claude/settings.json'), 'utf8')).hooks;
   for (const event of [
     'UserPromptSubmit',
@@ -108,4 +122,35 @@ test('installer registers every event once, and re-running does not duplicate', 
   const cursor = JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8')).hooks;
   expect(cursor.beforeSubmitPrompt).toHaveLength(1);
   expect(cursor.stop).toHaveLength(1);
+});
+
+test('claude hooks that Cursor runs from the Claude settings stay silent', () => {
+  const env = install();
+  const cursorPayload = { cursor_version: '2026.10.01', workspace_roots: ['/src/proj'] };
+  expect(hook(env, 'claude', 'working', { ...cursorPayload, hook_event_name: 'postToolUse' })).toBe('');
+  expect(hook(env, 'claude', 'done', { ...cursorPayload, hook_event_name: 'stop', status: 'completed' })).toBe('');
+  expect(calls(env.log)).toHaveLength(0);
+});
+
+test('a claude prompt that merely mentions "cursor_version" is still recorded', () => {
+  const env = install();
+  hook(env, 'claude', 'working', {
+    cwd: '/src/proj',
+    hook_event_name: 'UserPromptSubmit',
+    prompt: 'rename "cursor_version"',
+  });
+  expect(calls(env.log)[0]).toStartWith('state --session work --agent claude --state working');
+});
+
+test('cursor postToolUse answers {} while beforeSubmitPrompt continues; gemini answers {}', () => {
+  const env = install();
+  const base = { cursor_version: '2026.10.01', workspace_roots: ['/src/proj'] };
+  expect(hook(env, 'cursor', 'working', { ...base, hook_event_name: 'postToolUse', tool_name: 'Shell' }).trim()).toBe(
+    '{}',
+  );
+  expect(JSON.parse(hook(env, 'cursor', 'working', { ...base, hook_event_name: 'beforeSubmitPrompt' }))).toEqual({
+    continue: true,
+  });
+  expect(hook(env, 'gemini', 'working', { cwd: '/src/proj', hook_event_name: 'BeforeAgent' }).trim()).toBe('{}');
+  expect(hook(env, 'gemini', 'clear', { cwd: '/src/proj', hook_event_name: 'SessionEnd' }).trim()).toBe('{}');
 });
