@@ -67,6 +67,7 @@ impl TerminalModel {
             TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), fx),
             TetherCommand::LastTab => self.on_jump(TabJump::Last, fx),
             TetherCommand::NewTab => self.on_new_begin(),
+            TetherCommand::Find => self.on_search_open(fx),
             TetherCommand::ScrollPageUp | TetherCommand::ScrollPageDown => {
                 let rows = self.size.rows as i32;
                 let Some(tab) = active.and_then(|n| self.tabs.get_mut(&n)) else {

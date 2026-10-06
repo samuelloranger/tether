@@ -79,6 +79,7 @@ pub enum TetherCommand {
     TabAt(u8),
     LastTab,
     NewTab,
+    Find,
     ScrollPageUp,
     ScrollPageDown,
 }
@@ -234,6 +235,7 @@ fn shortcut(
         ('c', _, true) => Some(TetherCommand::Copy),
         ('c', _, false) if ctx.has_selection => Some(TetherCommand::Copy),
         ('t', _, true) => Some(TetherCommand::NewTab),
+        ('f', _, true) => Some(TetherCommand::Find),
         (_, Some(d @ 1..=8), true) => Some(TetherCommand::TabAt(d)),
         (_, Some(9), true) => Some(TetherCommand::LastTab),
         ('=' | '+', _, false) => Some(TetherCommand::FontBigger),
@@ -651,6 +653,15 @@ mod char_tests {
         assert_eq!(
             enc(ch('t', None), ctrl_shift),
             KeyAction::Tether(TetherCommand::NewTab)
+        );
+        assert_eq!(
+            enc(ch('f', None), ctrl_shift),
+            KeyAction::Tether(TetherCommand::Find)
+        );
+        assert_ne!(
+            enc(ch('f', None), ctrl),
+            KeyAction::Tether(TetherCommand::Find),
+            "Ctrl+F stays with the shell"
         );
         assert_eq!(
             enc(digit(1, '&', None), ctrl_shift),

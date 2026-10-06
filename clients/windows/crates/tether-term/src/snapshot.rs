@@ -5,6 +5,7 @@ use alacritty_terminal::vte::ansi::CursorShape as TermCursorShape;
 use tether_core::links::LinkSpan;
 
 use crate::palette;
+use crate::search::SearchHit;
 use crate::terminal::{Cell, TabTerminal};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +55,7 @@ impl TabTerminal {
             .as_ref()
             .and_then(|s| s.to_range(&self.term));
 
+        let matches = self.visible_matches();
         let mut cells = Vec::with_capacity(cols * rows);
         let mut row_texts = Vec::with_capacity(rows);
         let mut wrapped = Vec::with_capacity(rows);
@@ -83,6 +85,14 @@ impl TabTerminal {
                 let selected = selection
                     .as_ref()
                     .is_some_and(|s| s.contains(Point::new(line, Column(c))));
+                if !matches.is_empty() {
+                    let found = palette::theme_color(theme, 3);
+                    match crate::search::hit_at(&matches, Point::new(line, Column(c))) {
+                        SearchHit::Current => (fg, bg) = (theme.background, found),
+                        SearchHit::Match => bg = palette::mix(found, theme.background, 0.35),
+                        SearchHit::None => {}
+                    }
+                }
                 if selected {
                     match theme.selection {
                         Some(sel) => bg = sel,

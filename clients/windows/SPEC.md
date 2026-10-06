@@ -244,7 +244,7 @@ Ctrl and Alt on everything else follow iOS `TerminalKeyMap`: Ctrl folds `@`–`_
 
 **Kept by Windows:** Alt+Tab, Alt+F4 (closes the window, same as the close button), the Windows key and its combos, Ctrl+Alt+Del, Print Screen.
 
-**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+click (open link). Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
+**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+Shift+F (find); Ctrl+click (open link). Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
 
 Key repeat sends repeats. Dead keys and IME go through text composition, never through this table. The kitty keyboard protocol and `modifyOtherKeys` are not advertised in v1.
 
@@ -279,6 +279,18 @@ Action: **Kill session**. The client switches away first when it is the active t
 **Attention.** A background tab that rang the bell or sent a notification shows a dot in the warning color until it is viewed. Plain output does not mark a tab: a clock or a spinner would mark it forever.
 
 **Leaving the PC.** An attached client tells the Claude Code mod someone is watching, so it does not hold a prompt for the phone. When Windows locks the workstation, every channel detaches after a 15 s grace (iOS `backgroundGrace`), and re-attaches on unlock. Minimizing does not detach.
+
+### Search
+
+**Find** in the header, or Ctrl+Shift+F, opens a find bar at the top right of the grid and focuses it. Ctrl+F still goes to the shell.
+
+- The query is literal text, not a pattern. It ignores case unless it has an uppercase letter.
+- It searches the active tab's scrollback and screen, including text wrapped across rows.
+- Every visible match is tinted with the theme's yellow; the current match is filled with it.
+- Enter steps to the next older match, Shift+Enter to the next newer one, and the arrows do the same. Stepping wraps around, and scrolls the grid to show the match.
+- The bar reads `2 of 14`, `14 matches`, or `No matches`. The count refreshes at most once a second while output arrives.
+- While the field has focus, keys go to it, not the PTY. Clicking the grid gives the keyboard back to the session, with the bar left open.
+- Switching tabs applies the query to the new tab. Esc in the field, or the close button, closes the bar and clears the highlights.
 
 ### Links
 

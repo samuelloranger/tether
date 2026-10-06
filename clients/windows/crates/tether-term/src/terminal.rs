@@ -97,6 +97,7 @@ pub struct TabTerminal {
     size: GridSize,
     scanner: OscScanner,
     reports: TabReports,
+    pub(crate) search: Option<crate::search::Search>,
 }
 
 impl TabTerminal {
@@ -116,12 +117,15 @@ impl TabTerminal {
             size,
             scanner: OscScanner::new(),
             reports: TabReports::default(),
+            search: None,
         }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<TermEvent> {
         let osc = self.scanner.feed(bytes);
+        let history = self.term.grid().history_size();
         self.parser.advance(&mut self.term, bytes);
+        self.search_follow_output(self.term.grid().history_size() as i32 - history as i32);
         let mut out = self.drain();
         for event in &osc {
             out.extend(self.apply_report(event));

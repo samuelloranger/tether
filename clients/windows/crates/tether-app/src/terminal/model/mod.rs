@@ -21,9 +21,11 @@ mod events;
 mod input;
 mod pointer;
 mod reconnect;
+mod search;
 pub(crate) mod send;
 mod tabs;
 
+pub use search::SearchView;
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -98,6 +100,12 @@ pub enum Msg {
     TabShortcut(TabJump),
     NewSessionBegin,
     NewSessionCommit(String),
+    SearchOpen,
+    SearchQuery(String),
+    SearchStep {
+        older: bool,
+    },
+    SearchClose,
     NewSessionCancel,
     KillRequested(String),
     KillConfirmed,
@@ -217,6 +225,7 @@ pub enum UiEffect {
     #[allow(dead_code)] // send-file dialog path (platform::pick_files in glue)
     PickFiles,
     AllowIme,
+    FocusSearch,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -252,6 +261,7 @@ pub struct TerminalView {
     pub tabs: Vec<TabView>,
     pub empty: Option<EmptyView>,
     pub naming: Option<String>,
+    pub search: Option<SearchView>,
     pub kill_prompt: Option<String>,
     pub capsule: Option<CapsuleView>,
     pub progress: Option<Progress>,
@@ -291,6 +301,7 @@ pub struct TerminalModel {
     /// Sessions created from this window: their first attach is followed by a refresh.
     created_here: HashSet<String>,
     naming: Option<String>,
+    search: Option<search::SearchBar>,
     kill_prompt: Option<String>,
     opening: bool,
     attempt: usize,
@@ -330,6 +341,7 @@ impl TerminalModel {
             last_refresh: Duration::ZERO,
             created_here: HashSet::new(),
             naming: None,
+            search: None,
             kill_prompt: None,
             opening: true,
             attempt: 0,
@@ -442,7 +454,12 @@ impl TerminalModel {
                 &mut fx,
             ),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
+            Msg::SearchOpen => self.on_search_open(&mut fx),
+            Msg::SearchQuery(q) => self.on_search_query(q, now, &mut fx),
+            Msg::SearchStep { older } => self.on_search_step(older, now, &mut fx),
+            Msg::SearchClose => self.on_search_close(&mut fx),
         }
+        self.sync_search(now);
         fx
     }
 
@@ -684,6 +701,7 @@ impl TerminalModel {
             tabs,
             empty,
             naming: self.naming.clone(),
+            search: self.search_view(),
             kill_prompt: self.kill_prompt.clone(),
             capsule,
             progress: self

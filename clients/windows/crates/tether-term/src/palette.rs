@@ -19,6 +19,15 @@ pub(crate) fn dim(v: u32) -> u32 {
     f(16) | f(8) | f(0)
 }
 
+/// `a` over `b` at `t` (0..=1), per channel.
+pub(crate) fn mix(a: u32, b: u32, t: f32) -> u32 {
+    let ch = |shift: u32| {
+        let (x, y) = (((a >> shift) & 0xff) as f32, ((b >> shift) & 0xff) as f32);
+        ((x * t + y * (1.0 - t)).round() as u32) << shift
+    };
+    (a & 0xff00_0000) | ch(16) | ch(8) | ch(0)
+}
+
 pub(crate) fn theme_color(theme: &TerminalTheme, index: usize) -> u32 {
     match index {
         0..16 => theme.ansi[index],
