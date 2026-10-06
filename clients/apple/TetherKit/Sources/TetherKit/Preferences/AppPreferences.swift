@@ -3,6 +3,13 @@ import SwiftUI
 @Observable
 @MainActor
 public final class AppPreferences {
+  /// A phone reads 11pt at arm's length; a Mac window sits further away at 1:1 scale.
+  #if targetEnvironment(macCatalyst)
+  static let defaultTerminalFontSize: Double = 13
+  #else
+  static let defaultTerminalFontSize: Double = 11
+  #endif
+
   public enum ColorSchemePreference: String, CaseIterable, Identifiable, Sendable {
     case system
     case dark
@@ -213,7 +220,7 @@ public final class AppPreferences {
     }
     terminalFontID = fontID
     let size = defaults.double(forKey: Key.terminalFontSize)
-    terminalFontSize = size > 0 ? size : 11
+    terminalFontSize = size > 0 ? size : Self.defaultTerminalFontSize
     let spacing = defaults.double(forKey: Key.terminalLineSpacing)
     terminalLineSpacing = spacing > 0 ? TerminalLineSpacing.clamped(spacing) : 1
     terminalPadding = defaults.object(forKey: Key.terminalPadding) == nil
