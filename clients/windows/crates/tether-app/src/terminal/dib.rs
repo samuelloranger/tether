@@ -113,8 +113,8 @@ pub fn dib_to_png(d: &[u8]) -> Result<Vec<u8>, DibError> {
             }
         }
     }
-    if bpp == 32 && (masks[3] == 0 || rgba.chunks_exact(4).all(|p| p[3] == 0)) {
-        for p in rgba.chunks_exact_mut(4) {
+    if bpp == 32 && (masks[3] == 0 || rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0)) {
+        for p in rgba.as_chunks_mut::<4>().0 {
             p[3] = 255;
         }
     }
