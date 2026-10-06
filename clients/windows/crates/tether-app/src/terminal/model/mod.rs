@@ -723,13 +723,12 @@ impl TerminalModel {
                 background: self.style.theme.background,
             });
         };
-        let scale = l.size_px / tether_term::pt_to_px(self.style.size_pt, 1.0);
         let style = tether_term::RenderStyle {
             theme: self.style.theme,
             font: self.style.font,
             size_px: l.size_px,
             line_spacing: self.style.line_spacing,
-            padding_px: tether_term::pt_to_px(self.style.padding_pt, scale).round() as u32,
+            padding_px: l.padding_px,
             cursor: self.style.cursor,
             cursor_on: self.focused && (!self.style.blink || self.blink_on),
             hover_link: self.hover,

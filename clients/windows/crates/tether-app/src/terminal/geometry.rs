@@ -41,13 +41,11 @@ pub struct Layout {
 }
 
 /// Points convert at the monitor's scale, so 14 pt is the same physical size at 100 % and 200 %.
+/// Cell size and padding are rounded at the scaled pixel size, exactly as the rasterizer draws them.
 pub fn layout(width_px: u32, height_px: u32, scale: f32, style: &TermStyle) -> Layout {
     let size_px = pt_to_px(style.size_pt, scale);
-    let padding_px = (pt_to_px(style.padding_pt, 1.0).round() * scale).round() as u32;
-    let (base_w, base_h) =
-        cell_metrics(style.font, pt_to_px(style.size_pt, 1.0), style.line_spacing);
-    let cell_w = base_w * scale;
-    let cell_h = base_h * scale;
+    let padding_px = pt_to_px(style.padding_pt, scale).round() as u32;
+    let (cell_w, cell_h) = cell_metrics(style.font, size_px, style.line_spacing);
     let size = grid_size(width_px, height_px, padding_px, (cell_w, cell_h));
     Layout {
         size,
@@ -101,11 +99,6 @@ mod tests {
         let one = layout(1600, 1000, 1.0, &s);
         let two = layout(3200, 2000, 2.0, &s);
         assert!((two.size_px - 2.0 * one.size_px).abs() < 0.01);
-        assert_eq!(two.padding_px, 2 * one.padding_px);
-        assert_eq!(
-            (one.size.cols, one.size.rows),
-            (two.size.cols, two.size.rows)
-        );
         assert_ne!(one.size.width_px, two.size.width_px);
     }
 
@@ -131,5 +124,49 @@ mod tests {
         // Points outside the grid clamp onto its edge cells.
         assert_eq!(cell_at(&l, 0.0, 0.0), Cell { row: 0, col: 0 });
         assert_eq!(cell_at(&l, 999.0, 999.0), Cell { row: 4, col: 9 });
+    }
+
+    #[test]
+    fn the_grid_fits_the_well_and_hit_testing_matches_the_rasterizer() {
+        for (font, pt, scale) in [
+            ("cascadia-mono", 17.0, 1.25),
+            ("jetbrains-mono", 14.0, 1.5),
+            ("cascadia-mono", 14.0, 1.0),
+            ("jetbrains-mono", 11.0, 1.75),
+            ("cascadia-mono", 14.0, 2.0),
+        ] {
+            let style = TermStyle {
+                font: font_named(font),
+                size_pt: pt,
+                ..TermStyle::default()
+            };
+            let (w, h) = ((1280.0 * scale) as u32, (800.0 * scale) as u32);
+            let l = layout(w, h, scale, &style);
+            let (rw, rh) = cell_metrics(style.font, l.size_px, style.line_spacing);
+            assert_eq!((l.cell_w, l.cell_h), (rw, rh), "{font} {pt} @{scale}");
+            let pad = l.padding_px;
+            assert!(l.size.cols as f32 * l.cell_w <= (w - 2 * pad) as f32);
+            assert!(l.size.rows as f32 * l.cell_h <= (h - 2 * pad) as f32);
+            let top = h as i32 - pad as i32 - (l.size.rows as f32 * rh) as i32;
+            for col in [
+                0usize,
+                1,
+                l.size.cols as usize / 2,
+                l.size.cols as usize - 1,
+            ] {
+                let x0 = pad as i32 + (col as f32 * rw) as i32;
+                for (x, c) in [(x0, col), (x0 + rw as i32 - 1, col)] {
+                    let cell = cell_at(&l, x as f32, top as f32);
+                    assert_eq!(cell.col, c, "{font} {pt} @{scale} x={x}");
+                }
+            }
+            for row in [0usize, 1, l.size.rows as usize - 1] {
+                let y0 = top + (row as f32 * rh) as i32;
+                for y in [y0, y0 + rh as i32 - 1] {
+                    let cell = cell_at(&l, pad as f32, y as f32);
+                    assert_eq!(cell.row, row, "{font} {pt} @{scale} y={y}");
+                }
+            }
+        }
     }
 }
