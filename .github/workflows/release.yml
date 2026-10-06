@@ -343,7 +343,7 @@ jobs:
   # Without them the job says so and builds nothing, so a release still cuts.
   # `xcodebuild -exportArchive` is not used: for a Mac app it checks the installer
   # certificate against the app profile and fails. productbuild packages the
-  # archived, already signed .app instead.
+  # already signed .app instead.
   mac:
     needs: draft
     if: github.event_name == 'push' || inputs.scope == 'mac' || inputs.scope == 'mac-testflight'
@@ -447,7 +447,10 @@ jobs:
           echo "INSTALLER_ID=$INSTALLER_ID" >> "$GITHUB_ENV"
           security find-identity -v "$KEYCHAIN" | sed 's/([0-9A-F]*)/(…)/'
 
-      - name: Build signed archive
+      # A signed Release build, not an archive: archiving the Catalyst app with
+      # Xcode 26 produces SwiftTerm's build-tool plugin executable twice under
+      # UninstalledProducts/macosx and fails. The built .app is what productbuild needs.
+      - name: Build signed app
         if: steps.signing.outputs.ready == 'true'
         timeout-minutes: 45
         env:
@@ -459,7 +462,7 @@ jobs:
           xcodebuild -project clients/apple/Tether.xcodeproj \
             -scheme TetherIOS \
             -configuration Release -destination 'generic/platform=macOS,variant=Mac Catalyst' \
-            -archivePath build/TetherMac.xcarchive archive \
+            -derivedDataPath build/dd build \
             -skipPackagePluginValidation \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CODE_SIGN_STYLE=Manual \
@@ -473,7 +476,7 @@ jobs:
         if: steps.signing.outputs.ready == 'true'
         run: |
           set -euo pipefail
-          APP="$(ls -d build/TetherMac.xcarchive/Products/Applications/*.app | head -1)"
+          APP=build/dd/Build/Products/Release-maccatalyst/TetherIOS.app
           codesign --verify --deep --strict "$APP"
           codesign -d --entitlements - "$APP" 2>/dev/null | grep -q com.apple.security.app-sandbox \
             || { echo "::error::The Mac app is not sandboxed"; exit 1; }
