@@ -69,6 +69,17 @@ if [ "$agent:$state" = claude:waiting ]; then
   esac
 fi
 
+if [ "$agent:$state" = gemini:waiting ]; then
+  case "$(field '.notification_type // empty')" in
+    ""|ToolPermission) ;;
+    *) reply; exit 0 ;;
+  esac
+fi
+
+if [ "$agent:$state" = cursor:done ] && [ "$(field '.status // empty')" = error ]; then
+  state=failed
+fi
+
 project="$host"
 if [ -n "$input" ]; then
   cwd="$(field '.cwd // (.workspace_roots[0]?) // empty')"
@@ -78,25 +89,40 @@ fi
 verb="done"
 [ "$state" = waiting ] && verb="needs you"
 
+# Last assistant text in a JSONL transcript, flattened to one line. Per-line fromjson? so one
+# bad line doesn't blank the read; whole file, not a tail, since a turn can end with a long
+# run of tool calls after the final prose. $1 is the jq test that picks an assistant line.
+last_reply() { # <transcript> <jq select>
+  jq -R -r "fromjson? | select($2)
+    | (.message.content? // []) | map(select(.type==\"text\") | .text) | join(\" \")
+    | gsub(\"[\\\\n\\\\r\\\\t]+\"; \" \") | select(length > 0)" "$1" 2>/dev/null | tail -1 || true
+}
+
 body=""
 if [ -n "$input" ]; then
   case "$agent:$state" in
     claude:waiting) body="$(field '.message // empty')" ;;
     claude:done)
       tp="$(field '.transcript_path // empty')"
-      if [ -n "$tp" ] && [ -f "$tp" ]; then
-        # Per-line fromjson? so one bad line doesn't blank the read; whole file, not a tail,
-        # since a turn can end with a long run of tool calls after the final prose.
-        body="$(jq -R -r '
-          fromjson? | select(.type=="assistant")
-          | (.message.content? // []) | map(select(.type=="text") | .text) | join(" ")
-          | select(length > 0)' "$tp" 2>/dev/null | tail -1 || true)"
-      fi
+      [ -n "$tp" ] && [ -f "$tp" ] && body="$(last_reply "$tp" '.type=="assistant"')"
       ;;
     codex:done)    body="$(field '.last_assistant_message // empty')" ;;
-    codex:waiting) body="$(field '.tool_name // .command // .reason // empty')" ;;
-    cursor:done)   body="$(field '.Text // .text // .last_assistant_message // .status // empty')" ;;
-    cursor:waiting) body="$(field '.command // .message // empty')" ;;
+    codex:waiting)
+      body="$(field '.tool_input.description // (.tool_input.command | if type == "array" then join(" ") else . end) // .tool_name // empty')"
+      ;;
+    gemini:waiting)
+      if [ "$(field '.details.type // empty')" = ask_user ]; then
+        body="Has a question for you"
+      else
+        body="$(field '.details.command // .details.filePath // .message // empty')"
+      fi
+      ;;
+    gemini:done) body="$(field '.prompt_response // empty')" ;;
+    cursor:done)
+      tp="$(field '.transcript_path // empty')"
+      [ -n "$tp" ] || tp="${CURSOR_TRANSCRIPT_PATH:-}"
+      [ -n "$tp" ] && [ -f "$tp" ] && body="$(last_reply "$tp" '.role=="assistant"')"
+      ;;
   esac
 fi
 if [ "$state" = failed ]; then

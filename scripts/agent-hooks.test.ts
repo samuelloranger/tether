@@ -154,3 +154,126 @@ test('cursor postToolUse answers {} while beforeSubmitPrompt continues; gemini a
   expect(hook(env, 'gemini', 'working', { cwd: '/src/proj', hook_event_name: 'BeforeAgent' }).trim()).toBe('{}');
   expect(hook(env, 'gemini', 'clear', { cwd: '/src/proj', hook_event_name: 'SessionEnd' }).trim()).toBe('{}');
 });
+
+test('codex permission body: description, else the command, argv joined', () => {
+  const env = install();
+  const ask = (tool_input: object) =>
+    hook(env, 'codex', 'waiting', {
+      cwd: '/src/proj',
+      hook_event_name: 'PermissionRequest',
+      tool_name: 'Bash',
+      tool_input,
+    });
+  ask({ command: 'npm test', description: 'Run the test suite' });
+  ask({ command: 'npm test' });
+  ask({ command: ['npm', 'run', 'build'] });
+  const log = calls(env.log);
+  expect(log[0]).toContain('--body Run the test suite');
+  expect(log[1]).toContain('--body npm test');
+  expect(log[2]).toContain('--body npm run build');
+});
+
+test('gemini maps its events and always answers {}', () => {
+  const env = install();
+  const base = { cwd: '/src/proj', session_id: 's1', transcript_path: '' };
+  const note = (details: object, message: string, notification_type = 'ToolPermission') =>
+    hook(env, 'gemini', 'waiting', { ...base, hook_event_name: 'Notification', notification_type, message, details });
+  const outs = [
+    hook(env, 'gemini', 'working', { ...base, hook_event_name: 'BeforeAgent', prompt: 'go' }),
+    note({ type: 'exec', title: 'Shell', command: 'npm test', rootCommand: 'npm' }, 'Tool Shell requires execution'),
+    note(
+      { type: 'edit', title: 'WriteFile', filePath: '/src/proj/a.ts', fileName: 'a.ts' },
+      'Tool WriteFile requires editing',
+    ),
+    note({ type: 'ask_user', title: 'Ask User' }, 'Tool requires confirmation'),
+    note({ type: 'exec', title: 'Shell' }, 'Something else', 'SomethingElse'),
+    hook(env, 'gemini', 'done', {
+      ...base,
+      hook_event_name: 'AfterAgent',
+      prompt: 'go',
+      prompt_response: 'All tests pass.',
+    }),
+    hook(env, 'gemini', 'clear', { ...base, hook_event_name: 'SessionEnd', reason: 'exit' }),
+  ];
+  for (const out of outs) expect(out.trim()).toBe('{}');
+  const log = calls(env.log);
+  expect(log).toHaveLength(6);
+  expect(log[0]).toStartWith('state --session work --agent gemini --state working');
+  expect(log[1]).toContain('--state waiting');
+  expect(log[1]).toContain('--title proj · needs you');
+  expect(log[1]).toContain('--body npm test');
+  expect(log[2]).toContain('--body /src/proj/a.ts');
+  expect(log[3]).toContain('--body Has a question for you');
+  expect(log[4]).toContain('--state done');
+  expect(log[4]).toContain('--body All tests pass.');
+  expect(log[5]).toStartWith('state --session work --agent gemini --state clear');
+});
+
+function writeTranscript(file: string, lines: object[]) {
+  writeFileSync(file, `${lines.map((l) => JSON.stringify(l)).join('\n')}\nnot json\n`);
+}
+
+const cursorTranscript = [
+  { role: 'user', message: { content: [{ type: 'text', text: '<user_query>run tests</user_query>' }] } },
+  {
+    role: 'assistant',
+    message: {
+      content: [
+        { type: 'text', text: 'Running them.' },
+        { type: 'tool_use', name: 'Shell', input: { command: 'npm test' } },
+      ],
+    },
+  },
+  { role: 'assistant', message: { content: [{ type: 'text', text: 'All tests pass.\nNothing else changed.' }] } },
+  { type: 'summary', status: null },
+];
+
+test('cursor stop reads the whole last reply, error is a failure, sessionEnd clears', () => {
+  const env = install();
+  const transcript = path.join(env.home, 'c1.jsonl');
+  writeTranscript(transcript, cursorTranscript);
+  const base = { conversation_id: 'c1', cursor_version: '2026.10.01', workspace_roots: ['/src/proj'] };
+  expect(
+    hook(env, 'cursor', 'done', {
+      ...base,
+      hook_event_name: 'stop',
+      status: 'completed',
+      transcript_path: transcript,
+    }).trim(),
+  ).toBe('{}');
+  hook(env, 'cursor', 'done', { ...base, hook_event_name: 'stop', status: 'error', transcript_path: transcript });
+  hook(env, 'cursor', 'clear', { ...base, hook_event_name: 'sessionEnd', reason: 'completed' });
+  const log = calls(env.log);
+  expect(log[0]).toContain('--state done');
+  expect(log[0]).toContain('--title proj · done');
+  expect(log[0]).toContain('--body All tests pass. Nothing else changed.');
+  expect(log[1]).toContain('--state done');
+  expect(log[1]).toContain('--body Stopped with an error');
+  expect(log[2]).toStartWith('state --session work --agent cursor --state clear');
+});
+
+test('cursor stop falls back to CURSOR_TRANSCRIPT_PATH', () => {
+  const env = install();
+  const transcript = path.join(env.home, 'c2.jsonl');
+  writeTranscript(transcript, cursorTranscript);
+  hook(
+    env,
+    'cursor',
+    'done',
+    { cursor_version: '2026.10.01', workspace_roots: ['/src/proj'], hook_event_name: 'stop', status: 'completed' },
+    'work',
+    { CURSOR_TRANSCRIPT_PATH: transcript },
+  );
+  expect(calls(env.log)[0]).toContain('--body All tests pass. Nothing else changed.');
+});
+
+test('claude done keeps a multi-line last reply whole', () => {
+  const env = install();
+  const transcript = path.join(env.home, 't.jsonl');
+  writeTranscript(transcript, [
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'First.' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Done here.\nTwo files changed.' }] } },
+  ]);
+  hook(env, 'claude', 'done', { cwd: '/src/proj', transcript_path: transcript });
+  expect(calls(env.log)[0]).toContain('--body Done here. Two files changed.');
+});
