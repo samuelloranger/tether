@@ -19,10 +19,14 @@ WORK="${WORK:-$(mktemp -d -t tether-ssh-build)}"
 JOBS="$(sysctl -n hw.ncpu)"
 
 # slice : OpenSSL Configure target : SDK : arch : clang min-version flag
+# Mac Catalyst has no OpenSSL or CMake platform of its own: it is the macOS
+# SDK compiled for the macabi target triple, marked "macabi" here.
 SLICES=(
   "ios-arm64:ios64-xcrun:iphoneos:arm64:-mios-version-min"
   "sim-arm64:iossimulator-arm64-xcrun:iphonesimulator:arm64:-mios-simulator-version-min"
   "sim-x86_64:iossimulator-x86_64-xcrun:iphonesimulator:x86_64:-mios-simulator-version-min"
+  "mac-arm64:darwin64-arm64-cc:macosx:arm64:macabi"
+  "mac-x86_64:darwin64-x86_64-cc:macosx:x86_64:macabi"
 )
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -51,6 +55,13 @@ LIBSSH2_SHA="$(git -C libssh2 rev-parse HEAD)"
 for spec in "${SLICES[@]}"; do
   IFS=: read -r slice target sdk arch minflag <<<"$spec"
   prefix="$WORK/prefix/$slice"
+  if [[ "$minflag" == macabi ]]; then
+    versionflag="--target=$arch-apple-ios$MIN_IOS-macabi"
+    platform=(-DCMAKE_OSX_DEPLOYMENT_TARGET= "-DCMAKE_C_FLAGS=$versionflag")
+  else
+    versionflag="$minflag=$MIN_IOS"
+    platform=(-DCMAKE_SYSTEM_NAME=iOS "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MIN_IOS")
+  fi
 
   log "OpenSSL $slice ($target)"
   rm -rf "openssl-$slice"
@@ -59,7 +70,7 @@ for spec in "${SLICES[@]}"; do
   (
     cd "openssl-$slice"
     ./Configure "$target" no-shared no-tests no-apps no-docs \
-      "$minflag=$MIN_IOS" --prefix="$prefix" --libdir=lib >/dev/null 2>&1
+      "$versionflag" --prefix="$prefix" --libdir=lib >/dev/null 2>&1
     make -j"$JOBS" build_libs >/dev/null
     make install_dev >/dev/null 2>&1
   )
@@ -67,10 +78,9 @@ for spec in "${SLICES[@]}"; do
   log "libssh2 $slice"
   rm -rf "build-libssh2-$slice"
   cmake -S libssh2 -B "build-libssh2-$slice" \
-    -DCMAKE_SYSTEM_NAME=iOS \
+    "${platform[@]}" \
     -DCMAKE_OSX_SYSROOT="$sdk" \
     -DCMAKE_OSX_ARCHITECTURES="$arch" \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET="$MIN_IOS" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$prefix" \
     -DCMAKE_FIND_ROOT_PATH="$prefix" \
@@ -98,16 +108,19 @@ for spec in "${SLICES[@]}"; do
 done
 
 log "XCFrameworks"
-mkdir -p "$WORK/fat"
+mkdir -p "$WORK/fat-sim" "$WORK/fat-mac"
 for lib in ssh2 crypto ssl; do
-  lipo -create \
-    "$WORK/prefix/sim-arm64/lib/lib$lib.a" \
-    "$WORK/prefix/sim-x86_64/lib/lib$lib.a" \
-    -output "$WORK/fat/lib$lib.a"
+  for variant in sim mac; do
+    lipo -create \
+      "$WORK/prefix/$variant-arm64/lib/lib$lib.a" \
+      "$WORK/prefix/$variant-x86_64/lib/lib$lib.a" \
+      -output "$WORK/fat-$variant/lib$lib.a"
+  done
   rm -rf "$WORK/$lib.xcframework"
   xcodebuild -create-xcframework \
     -library "$WORK/prefix/ios-arm64/lib/lib$lib.a" \
-    -library "$WORK/fat/lib$lib.a" \
+    -library "$WORK/fat-sim/lib$lib.a" \
+    -library "$WORK/fat-mac/lib$lib.a" \
     -output "$WORK/$lib.xcframework" >/dev/null
 done
 
