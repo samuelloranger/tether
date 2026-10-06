@@ -27,6 +27,8 @@ pub enum DriverMsg<S> {
     Presented,
 }
 
+const WRITER_CLOSE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 enum ChanOp {
     Resize(tether_core::resize::GridSize),
     Write(Vec<u8>),
@@ -249,9 +251,20 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             reader.abort();
         }
         let writers = std::mem::take(&mut self.writers);
+        let deadline = Instant::now() + WRITER_CLOSE_GRACE;
+        let mut pending = Vec::new();
         for (tx, handle) in writers.into_values() {
             let _ = tx.send(ChanOp::Close);
-            let _ = handle.await;
+            pending.push(handle);
+        }
+        // A writer blocked in `sink.write` (full SSH window) never reaches Close.
+        for mut handle in pending {
+            if tokio::time::timeout_at(deadline, &mut handle)
+                .await
+                .is_err()
+            {
+                handle.abort();
+            }
         }
     }
 
@@ -453,6 +466,26 @@ mod tests {
         let (ui, send, handle) = start(remote.clone()).await;
         send(Msg::Back);
         handle.await.unwrap();
+        assert!(remote.log().contains(&"close".to_string()));
+        assert!(ui.effects.lock().unwrap().contains(&UiEffect::Home));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn back_does_not_wait_for_a_stuck_writer() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        let (ui, send, handle) = start(remote.clone()).await;
+        remote
+            .sink("default")
+            .hang_writes
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        send(Msg::Ime("x".into()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        send(Msg::Back);
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("driver hung on a stuck writer")
+            .unwrap();
         assert!(remote.log().contains(&"close".to_string()));
         assert!(ui.effects.lock().unwrap().contains(&UiEffect::Home));
     }
