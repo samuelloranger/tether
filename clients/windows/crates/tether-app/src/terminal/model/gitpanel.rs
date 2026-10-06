@@ -131,7 +131,12 @@ mod tests {
     fn switching_tabs_reloads_for_the_new_session() {
         let mut m = live(vec![session("a", 1), session("b", 2)]);
         m.handle(Msg::Git(GitMsg::Toggle), t(10));
-        m.handle(Msg::SelectTab("b".into()), t(20));
+        let other = if m.active_name() == Some("a") {
+            "b"
+        } else {
+            "a"
+        };
+        m.handle(Msg::SelectTab(other.into()), t(20));
         let fx = m.handle(Msg::Tick, t(70));
         assert_eq!(jobs(&fx).len(), 1);
     }
