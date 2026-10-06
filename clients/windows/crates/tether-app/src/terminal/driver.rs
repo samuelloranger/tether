@@ -323,6 +323,13 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                         let _ = tx.send(DriverMsg::Model(Msg::KillDone));
                     });
                 }
+                Effect::History { name, id } => {
+                    let (r, tx) = (self.remote.clone(), self.tx.clone());
+                    tokio::spawn(async move {
+                        let result = r.history(&name).await;
+                        let _ = tx.send(DriverMsg::Model(Msg::HistoryLoaded { id, result }));
+                    });
+                }
                 Effect::Attach { name, id, size } => {
                     self.wanted.lock().unwrap().insert(name.clone(), id);
                     let (r, tx) = (self.remote.clone(), self.tx.clone());
@@ -470,6 +477,27 @@ mod tests {
                 .unwrap()
                 .contains(&"close".to_string())
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn history_asks_the_host_and_shows_the_answer() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        remote
+            .histories
+            .lock()
+            .unwrap()
+            .insert("default".into(), Ok("older\r\nnewer\r\n".into()));
+        let (ui, send, _h) = start(remote.clone()).await;
+        send(Msg::HistoryOpen);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(remote.log().contains(&"history default".to_string()));
+        match ui.last_view().history.unwrap().body {
+            crate::terminal::model::HistoryBody::Text { text, .. } => {
+                assert_eq!(&*text, "older\nnewer")
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[tokio::test(start_paused = true)]

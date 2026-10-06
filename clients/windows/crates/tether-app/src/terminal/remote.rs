@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::sync::Arc;
 use tether_core::connect::{ConnectError, ConnectRequest, Connection, Transport, connect};
+use tether_core::history::history_command;
 use tether_core::hostkey::HostKeyStore;
 use tether_core::profiles::Machine;
 use tether_core::resize::GridSize;
@@ -49,6 +50,7 @@ pub trait Remote: Send + Sync + 'static {
     ) -> impl Future<Output = Result<broadcast::Receiver<ConnectionEvent>, ConnectError>> + Send;
     fn ls(&self) -> impl Future<Output = Result<Vec<ZmxSession>, ConnectError>> + Send;
     fn kill(&self, name: &str) -> impl Future<Output = Result<(), ConnectError>> + Send;
+    fn history(&self, name: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
     fn uploads_dir(&self) -> impl Future<Output = Option<String>> + Send;
     fn attach(
         &self,
@@ -154,6 +156,12 @@ where
         let command = kill_command(name)
             .ok_or_else(|| ConnectError::Transport("invalid session name".into()))?;
         self.control().await?.exec(&command).await.map(|_| ())
+    }
+
+    async fn history(&self, name: &str) -> Result<String, ConnectError> {
+        let command = history_command(name)
+            .ok_or_else(|| ConnectError::Transport("invalid session name".into()))?;
+        self.control().await?.exec(&command).await
     }
 
     async fn uploads_dir(&self) -> Option<String> {
@@ -349,6 +357,35 @@ mod tests {
         r.open().await.unwrap();
         for name in ["a\u{15}b", "a\nb", "-rf"] {
             assert!(r.kill(name).await.is_err(), "{name:?}");
+        }
+        assert!(!t.log.lock().unwrap().iter().any(|l| l.starts_with("exec")));
+    }
+
+    #[tokio::test]
+    async fn history_runs_zmx_history_on_control_with_a_quoted_name() {
+        let t = FakeTransport::default();
+        t.exec_replies.lock().unwrap().insert(
+            "~/.local/bin/zmx history".into(),
+            Ok("earlier output\n".into()),
+        );
+        let r = remote(t.clone());
+        r.open().await.unwrap();
+        assert_eq!(r.history("it's $(x)").await.unwrap(), "earlier output\n");
+        assert!(
+            t.log
+                .lock()
+                .unwrap()
+                .contains(&format!("exec {}", history_command("it's $(x)").unwrap()))
+        );
+    }
+
+    #[tokio::test]
+    async fn history_refuses_an_invalid_name_without_running_anything() {
+        let t = FakeTransport::default();
+        let r = remote(t.clone());
+        r.open().await.unwrap();
+        for name in ["a\u{15}b", "a\nb", "-rf"] {
+            assert!(r.history(name).await.is_err(), "{name:?}");
         }
         assert!(!t.log.lock().unwrap().iter().any(|l| l.starts_with("exec")));
     }

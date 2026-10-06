@@ -63,6 +63,7 @@ fn page_kind(page: &Page) -> PageKind {
         Page::Terminal => PageKind::Terminal,
         Page::HostKeyRefused => PageKind::HostKeyRefused,
         Page::CouldntConnect => PageKind::CouldntConnect,
+        Page::Snippets => PageKind::Snippets,
     }
 }
 
@@ -114,6 +115,7 @@ impl App {
         let secrets = secret_store(&data);
         let hostkeys = Arc::new(JsonHostKeys::new(DataDir::new(data.root()))?);
         let state = AppState::load(data, secrets, hostkeys)?;
+        crate::extras::init(state.data.root());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -321,6 +323,7 @@ impl App {
                 }
             },
         );
+        crate::extras::install(self);
     }
 
     pub fn run(self: &Rc<Self>) -> Result<(), slint::PlatformError> {
@@ -462,6 +465,7 @@ impl App {
                     .keys
                     .get(id)
                     .map(|k| home::delete_key_copy(k, &s.profiles)),
+                Dialog::DeleteSnippet(id) => crate::extras::delete_copy(id),
             }
         });
         bridge.set_dialog_open(copy.is_some());
@@ -479,6 +483,7 @@ impl App {
         self.refresh_scene();
         self.refresh_settings();
         self.refresh_pickers();
+        crate::extras::refresh_fonts(self);
     }
 
     pub fn on_winit_event(self: &Rc<Self>, event: &WindowEvent) -> EventResult {
@@ -689,6 +694,10 @@ impl App {
             match dialog {
                 Dialog::RemoveMachine(id) => state.remove_machine(id),
                 Dialog::DeleteKey(id) => state.delete_key(id),
+                Dialog::DeleteSnippet(id) => {
+                    crate::extras::delete_snippet(id);
+                    Ok(())
+                }
             }
         };
         if let Err(e) = result {

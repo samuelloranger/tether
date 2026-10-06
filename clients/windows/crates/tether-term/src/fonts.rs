@@ -1,6 +1,8 @@
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
-use tether_core::fonts::font_named;
+use tether_core::fonts::{add_downloaded, font_named, remove_downloaded};
+use tether_core::googlefonts::DownloadedFont;
 
 macro_rules! apple_font {
     ($file:literal) => {
@@ -53,8 +55,112 @@ static COMIC_MONO: (&[u8], &[u8]) = (
 
 pub static SYMBOLS: &[u8] = apple_font!("SymbolsNerdFontMono-Regular.ttf");
 
+struct Downloaded {
+    regular: &'static [u8],
+    bold: &'static [u8],
+    fingerprint: u64,
+}
+
+/// Every downloaded family this process has registered, removed ones included: the glyph
+/// cache is keyed by id, so an id may only ever mean one set of bytes.
+static DOWNLOADED: RwLock<Option<HashMap<String, Downloaded>>> = RwLock::new(None);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontError {
+    Unreadable,
+    NotMonospace,
+    NeedsRestart,
+}
+
+impl std::fmt::Display for FontError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Unreadable => "The downloaded file isn't a font Tether can use.",
+            Self::NotMonospace => "This font isn't monospaced, so it can't draw a terminal grid.",
+            Self::NeedsRestart => "Restart Tether to use the updated font.",
+        })
+    }
+}
+
+fn fingerprint(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325u64 ^ bytes.len() as u64, |h, b| {
+            (h ^ *b as u64).wrapping_mul(0x100_0000_01b3)
+        })
+}
+
+fn uniform(advances: &[f32]) -> bool {
+    advances.windows(2).all(|w| (w[0] - w[1]).abs() < 0.5)
+}
+
+fn check(data: &[u8]) -> Result<(), FontError> {
+    let font = swash::FontRef::from_index(data, 0).ok_or(FontError::Unreadable)?;
+    let charmap = font.charmap();
+    if charmap.map('A') == 0 {
+        return Err(FontError::Unreadable);
+    }
+    let metrics = font.glyph_metrics(&[]);
+    let advances: Vec<f32> = ['i', 'M', 'W', '.']
+        .iter()
+        .map(|c| metrics.advance_width(charmap.map(*c)))
+        .collect();
+    if uniform(&advances) {
+        Ok(())
+    } else {
+        Err(FontError::NotMonospace)
+    }
+}
+
+/// Makes a stored family selectable and drawable. Bytes are kept for the life of the process.
+pub fn register_downloaded(
+    font: &DownloadedFont,
+    regular: Vec<u8>,
+    bold: Option<Vec<u8>>,
+) -> Result<(), FontError> {
+    check(&regular)?;
+    let bold = match bold {
+        Some(b) if check(&b).is_ok() => b,
+        _ => regular.clone(),
+    };
+    let id = font.id();
+    let print = fingerprint(&regular) ^ fingerprint(&bold).rotate_left(1);
+    let mut guard = DOWNLOADED.write().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(HashMap::new);
+    match map.get(&id) {
+        Some(known) if known.fingerprint != print => return Err(FontError::NeedsRestart),
+        Some(_) => {}
+        None => {
+            map.insert(
+                id.clone(),
+                Downloaded {
+                    regular: Box::leak(regular.into_boxed_slice()),
+                    bold: Box::leak(bold.into_boxed_slice()),
+                    fingerprint: print,
+                },
+            );
+        }
+    }
+    add_downloaded(&id, &font.family);
+    Ok(())
+}
+
+/// Stops offering the family; a font id that was removed falls back like any unknown id.
+pub fn unregister_downloaded(id: &str) {
+    remove_downloaded(id);
+}
+
 pub fn face_bytes(id: &str) -> (&'static [u8], &'static [u8]) {
-    match font_named(id).id {
+    let id = font_named(id).id;
+    if let Some(d) = DOWNLOADED
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|m| m.get(id))
+    {
+        return (d.regular, d.bold);
+    }
+    match id {
         "cascadia-code" => CASCADIA_CODE,
         "jetbrains-mono" => JETBRAINS_MONO,
         "monaspace-neon" => MONASPACE_NEON,
@@ -136,6 +242,83 @@ mod tests {
     #[test]
     fn cascadia_mono_lacks_nerd_icons_so_fallback_matters() {
         assert!(!maps(face_bytes("cascadia-mono").0, '\u{f121}'));
+    }
+
+    fn family(slug: &str) -> DownloadedFont {
+        DownloadedFont {
+            family: "Test Mono".into(),
+            slug: slug.into(),
+            regular: "regular.ttf".into(),
+            bold: Some("bold.ttf".into()),
+        }
+    }
+
+    #[test]
+    fn a_downloaded_family_draws_and_stops_when_removed() {
+        let (regular, bold) = face_bytes("jetbrains-mono");
+        let font = family("test-mono-a");
+        register_downloaded(&font, regular.to_vec(), Some(bold.to_vec())).unwrap();
+        let id = font.id();
+        assert_eq!(font_named(&id).name, "Test Mono");
+        let (r, b) = face_bytes(&id);
+        assert_eq!((r, b), (regular, bold));
+        // The same bytes again are fine; a family is not offered twice.
+        register_downloaded(&font, regular.to_vec(), Some(bold.to_vec())).unwrap();
+        assert_eq!(
+            tether_core::fonts::all_fonts()
+                .iter()
+                .filter(|f| f.id == id)
+                .count(),
+            1
+        );
+        unregister_downloaded(&id);
+        assert_eq!(font_named(&id).id, "cascadia-mono");
+        assert_eq!(
+            face_bytes(&id).0.as_ptr(),
+            face_bytes("cascadia-mono").0.as_ptr()
+        );
+    }
+
+    #[test]
+    fn a_missing_bold_reuses_the_regular_face() {
+        let font = family("test-mono-b");
+        let (regular, _) = face_bytes("maple-mono");
+        register_downloaded(&font, regular.to_vec(), None).unwrap();
+        let (r, b) = face_bytes(&font.id());
+        assert_eq!(r, b);
+        unregister_downloaded(&font.id());
+    }
+
+    #[test]
+    fn different_bytes_for_a_known_id_wait_for_a_restart() {
+        let font = family("test-mono-c");
+        register_downloaded(&font, face_bytes("jetbrains-mono").0.to_vec(), None).unwrap();
+        assert_eq!(
+            register_downloaded(&font, face_bytes("maple-mono").0.to_vec(), None),
+            Err(FontError::NeedsRestart)
+        );
+        unregister_downloaded(&font.id());
+    }
+
+    #[test]
+    fn garbage_is_not_a_font() {
+        assert_eq!(
+            register_downloaded(&family("test-mono-d"), b"not a font".to_vec(), None),
+            Err(FontError::Unreadable)
+        );
+    }
+
+    #[test]
+    fn every_bundled_face_passes_the_monospace_check() {
+        for face in tether_core::fonts::FONTS.iter() {
+            assert_eq!(check(face_bytes(face.id).0), Ok(()), "{}", face.id);
+        }
+    }
+
+    #[test]
+    fn uneven_advances_are_not_monospace() {
+        assert!(uniform(&[600.0, 600.0, 600.2]));
+        assert!(!uniform(&[300.0, 600.0, 800.0]));
     }
 
     #[cfg(not(windows))]

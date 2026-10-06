@@ -94,6 +94,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(windows)]
     let network_target = (machine.host.clone(), machine.port);
     set_well_color(&app.ui, style.theme.background);
+    crate::extras::set_foreground(&app.ui, style.theme.foreground);
     app.ui.global::<ConnectVm>().set_who(
         format!(
             "{} · {}@{}:{}",
@@ -107,6 +108,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(windows)]
     crate::win32::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    crate::extras::send_snippets();
     if !WIRED.replace(true) {
         wire_callbacks(&app.ui);
     }
@@ -269,6 +271,7 @@ fn keys_to_pty(app: &App) -> bool {
         && vm.get_kill_name().is_empty()
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
+        && !crate::extras::overlay_open(&app.ui)
 }
 
 pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
@@ -431,6 +434,7 @@ pub fn prefs_changed(prefs: &tether_core::prefs::TerminalPrefs) {
     let style = TermStyle::from_prefs(prefs);
     if let Some(app) = app() {
         set_well_color(&app.ui, style.theme.background);
+        crate::extras::set_foreground(&app.ui, style.theme.foreground);
     }
     send(Msg::StyleChanged(style));
 }

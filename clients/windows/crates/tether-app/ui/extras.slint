@@ -1,0 +1,244 @@
+import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "tokens.slint";
+import { GhostButton, SecondaryButton } from "components.slint";
+
+export struct PaletteRowData {
+    name: string,
+    preview: string,
+}
+
+export global HistoryVm {
+    in property <bool> open;
+    in property <string> session;
+    in property <int> state;            // 0 loading, 1 empty, 2 text
+    in property <string> text;
+    in property <string> note;
+    in property <int> text-seq;
+    in property <color> foreground: #cdd6f4;
+    callback close();
+    callback copy();
+    callback reload();
+}
+
+export global PaletteVm {
+    in property <bool> open;
+    in property <[PaletteRowData]> rows;
+    in property <int> selected;
+    in property <bool> has-snippets;
+    callback query-changed(string);
+    callback move(int);
+    callback choose(int);
+    callback choose-selected();
+    callback close();
+    callback open-settings();
+}
+
+// Covers everything under the header, tab strip included, so the tab it shows cannot change underneath it.
+export component HistoryOverlay inherits Rectangle {
+    in property <color> well: #1e1e2e;
+    background: root.well;
+    scope := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.Escape) { HistoryVm.close(); return accept; }
+            reject
+        }
+        TouchArea { }
+        VerticalLayout {
+            Rectangle {
+                height: 44px;
+                background: Tokens.surface;
+                Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    Text {
+                        text: "History · " + HistoryVm.session;
+                        color: Tokens.text;
+                        font-size: 14px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center; GhostButton { text: "Copy all"; clicked => { HistoryVm.copy(); } } }
+                    VerticalLayout { alignment: center; GhostButton { text: "Reload"; clicked => { HistoryVm.reload(); } } }
+                    VerticalLayout { alignment: center; GhostButton { text: "Done"; clicked => { HistoryVm.close(); } } }
+                }
+            }
+            if HistoryVm.note != "": Rectangle {
+                height: 28px;
+                background: Tokens.raised;
+                Text {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    height: parent.height;
+                    text: HistoryVm.note;
+                    color: Tokens.text-secondary;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            if HistoryVm.state == 0: VerticalLayout {
+                alignment: center;
+                Text { text: "Loading history…"; color: Tokens.text-secondary; font-size: 13px; horizontal-alignment: center; }
+            }
+            if HistoryVm.state == 1: VerticalLayout {
+                alignment: center;
+                spacing: 8px;
+                Text { text: "Nothing in this session's scrollback yet."; color: Tokens.text-secondary; font-size: 13px; horizontal-alignment: center; }
+                HorizontalLayout { alignment: center; GhostButton { text: "Reload"; clicked => { HistoryVm.reload(); } } }
+            }
+            if HistoryVm.state == 2: body := ScrollView {
+                vertical-stretch: 1;
+                content-width: self.visible-width;
+                content-height: column.preferred-height;
+                property <int> seq: HistoryVm.text-seq;
+                // Opens on the newest output; the layout needs a frame before its height is known.
+                function to-bottom() {
+                    self.content-y = min(0px, self.visible-height - column.preferred-height);
+                }
+                changed seq => { settle.running = true; }
+                settle := Timer {
+                    interval: 40ms;
+                    running: true;
+                    triggered => { self.running = false; body.to-bottom(); }
+                }
+                column := VerticalLayout {
+                    width: body.visible-width;
+                    padding: 12px;
+                    TextInput {
+                        read-only: true;
+                        wrap: word-wrap;
+                        text: HistoryVm.text;
+                        color: HistoryVm.foreground;
+                        font-family: Tokens.mono-font;
+                        font-size: 13px;
+                        selection-background-color: #7c8cf859;
+                    }
+                }
+            }
+        }
+    }
+    init => { scope.focus(); }
+}
+
+component PaletteRow inherits Rectangle {
+    in property <PaletteRowData> entry;
+    in property <bool> active;
+    callback chosen();
+    height: 44px;
+    background: root.active ? Tokens.accent.with-alpha(0.14) : touch.has-hover ? Tokens.surface-hover : transparent;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 12px;
+        Text {
+            text: root.entry.name;
+            color: Tokens.text;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 0;
+            max-width: 220px;
+        }
+        Text {
+            text: root.entry.preview;
+            color: Tokens.text-secondary;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.chosen(); } }
+}
+
+export component PaletteOverlay inherits Rectangle {
+    background: #08080e80;
+    property <length> list-height: min(PaletteVm.rows.length * 44px, 352px);
+    property <int> sel: PaletteVm.selected;
+    changed sel => {
+        if (-list.content-y > sel * 44px) { list.content-y = -sel * 44px; }
+        else if ((sel + 1) * 44px > -list.content-y + list.height) { list.content-y = -((sel + 1) * 44px - list.height); }
+    }
+    TouchArea { clicked => { PaletteVm.close(); } }
+    card := Rectangle {
+        width: min(560px, root.width - 48px);
+        height: 46px + (PaletteVm.rows.length == 0 ? 76px : root.list-height);
+        x: (parent.width - self.width) / 2;
+        y: 56px;
+        background: Tokens.surface;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        drop-shadow-blur: 40px;
+        drop-shadow-offset-y: 14px;
+        drop-shadow-color: #00000059;
+        clip: true;
+        TouchArea { }
+        Rectangle {
+            height: 46px;
+            Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+            query := TextInput {
+                x: 16px;
+                width: parent.width - 32px;
+                height: parent.height;
+                vertical-alignment: center;
+                single-line: true;
+                color: Tokens.text;
+                font-size: 15px;
+                selection-background-color: #7c8cf859;
+                edited => { PaletteVm.query-changed(self.text); }
+                accepted => { PaletteVm.choose-selected(); }
+                key-pressed(e) => {
+                    if (e.text == Key.Escape) { PaletteVm.close(); return accept; }
+                    if (e.text == Key.UpArrow) { PaletteVm.move(-1); return accept; }
+                    if (e.text == Key.DownArrow) { PaletteVm.move(1); return accept; }
+                    reject
+                }
+                init => { self.focus(); }
+            }
+            if query.text == "": Text {
+                x: 16px;
+                height: parent.height;
+                text: "Send a snippet…";
+                color: Tokens.placeholder;
+                font-size: 15px;
+                vertical-alignment: center;
+            }
+        }
+        list := Flickable {
+            y: 46px;
+            height: root.list-height;
+            width: parent.width;
+            content-height: PaletteVm.rows.length * 44px;
+            for row[i] in PaletteVm.rows: PaletteRow {
+                y: i * 44px;
+                width: parent.width;
+                entry: row;
+                active: i == PaletteVm.selected;
+                chosen => { PaletteVm.choose(i); }
+            }
+        }
+        if PaletteVm.rows.length == 0: VerticalLayout {
+            y: 46px;
+            height: 76px;
+            alignment: center;
+            spacing: 4px;
+            Text {
+                text: PaletteVm.has-snippets ? "No snippet matches." : "No snippets yet.";
+                color: Tokens.text-secondary;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+            if !PaletteVm.has-snippets: HorizontalLayout {
+                alignment: center;
+                GhostButton { text: "Add one in Settings"; clicked => { PaletteVm.open-settings(); } }
+            }
+        }
+    }
+}

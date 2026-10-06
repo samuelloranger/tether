@@ -149,6 +149,7 @@ impl UiPort for SlintUi {
                     .unwrap_or(0),
             );
             w.set_window_title(view.title.as_str().into());
+            crate::extras::push_view(&w, &view);
             crate::terminal::keys::set_app_keypad(view.app_keypad);
         });
     }

@@ -1,4 +1,4 @@
-export enum PageKind { home, ssh-import, server-form, key-generate, key-import, key-paste, settings, scheme-picker, font-picker, terminal, host-key-refused, couldnt-connect }
+export enum PageKind { home, ssh-import, server-form, key-generate, key-import, key-paste, settings, scheme-picker, font-picker, terminal, host-key-refused, couldnt-connect, snippets }
 
 export global AppBridge {
     in property <PageKind> page: PageKind.home;

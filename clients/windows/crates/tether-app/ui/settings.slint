@@ -1,6 +1,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { AppBridge, SettingsBridge } from "bridge.slint";
+import { SnippetsBridge } from "extras_bridge.slint";
 import { PageChrome, PrimaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
 
 component Section inherits Text {
@@ -110,6 +111,7 @@ component SettingsForm inherits VerticalLayout {
     Section { text: "Terminal"; }
     LinkRow { label: "Color scheme"; value: SettingsBridge.scheme-name; clicked => { SettingsBridge.open-schemes(); } }
     LinkRow { label: "Font"; value: SettingsBridge.font-name; clicked => { SettingsBridge.open-fonts(); } }
+    LinkRow { label: "Snippets"; value: SnippetsBridge.count-label; clicked => { SnippetsBridge.open(); } }
     StepperRow { label: "Size"; value: SettingsBridge.size-label; step(d) => { SettingsBridge.size-step(d); } }
     Row {
         label: "Line spacing";
