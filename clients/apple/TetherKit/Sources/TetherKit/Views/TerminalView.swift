@@ -585,6 +585,23 @@ public final class TerminalInputTextView: UITextView {
 
   public override var canBecomeFirstResponder: Bool { true }
 
+  #if targetEnvironment(macCatalyst)
+  /// The Edit menu's Copy copies what is selected on the surface; this view's own
+  /// document is invisible filler with nothing worth copying.
+  public override func copy(_ sender: Any?) {
+    guard let text = TerminalCopySource.shared.text else { return }
+    UIPasteboard.general.string = text
+  }
+
+  public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    switch action {
+    case #selector(copy(_:)): TerminalCopySource.shared.text != nil
+    case #selector(cut(_:)), #selector(selectAll(_:)): false
+    default: super.canPerformAction(action, withSender: sender)
+    }
+  }
+  #endif
+
   /// Empty both input-assistant groups: with a hardware keyboard UIKit renders a
   /// shortcuts bar this view has nothing to offer, leaving an empty strip.
   public override init(frame: CGRect, textContainer: NSTextContainer?) {
