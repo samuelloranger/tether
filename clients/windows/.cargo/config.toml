@@ -1,0 +1,4 @@
+# Link the C runtime statically: a fresh Windows install has no Visual C++
+# redistributable, and without it the exe fails to start (VCRUNTIME140.dll missing).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
