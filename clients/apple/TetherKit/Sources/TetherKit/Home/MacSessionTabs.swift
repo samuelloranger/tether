@@ -177,7 +177,7 @@ public final class MacSessionTabs {
   func kill(_ name: String) {
     guard let victim = controllers[name] else {
       state.markKilled(name)
-    if let reader { Task { await reader.killSession(name); await refresh() } }
+      if let reader { Task { await reader.killSession(name); await refresh() } }
       return
     }
     if state.names.count <= 1 {
