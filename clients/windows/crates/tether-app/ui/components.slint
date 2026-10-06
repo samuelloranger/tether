@@ -60,27 +60,68 @@ export component DangerButton inherits ButtonBase {
 
 export component IconButton inherits Rectangle {
     in property <image> icon;
+    // Shown under the button after a short hover; empty means no tooltip.
+    in property <string> tooltip;
+    // An open panel or mode the button controls.
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <length> size: 34px;
+    // Flat buttons sit on a surface that already has a frame (find bar, side panel).
+    in property <bool> flat;
     callback clicked();
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
-    background: touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
-    border-width: focus.has-focus ? 2px : 1px;
-    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    width: root.size;
+    height: root.size;
+    border-radius: root.size * 0.27;
+    background: !root.enabled ? transparent
+        : touch.has-hover ? (root.flat ? Tokens.raised : Tokens.raised.brighter(0.15))
+        : root.flat ? transparent : Tokens.raised;
+    border-width: focus.has-focus || root.active ? 1.5px : root.flat ? 0px : 1px;
+    border-color: focus.has-focus || root.active ? Tokens.accent : Tokens.border;
+    accessible-role: button;
+    accessible-label: root.tooltip;
     focus := FocusScope {
+        enabled: root.enabled;
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
             reject
         }
     }
-    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { tip.close(); focus.focus(); root.clicked(); }
+        changed has-hover => { if (!self.has-hover) { tip.close(); } }
+    }
     Image {
         source: root.icon;
-        colorize: Tokens.accent;
-        width: 16px;
-        height: 16px;
+        colorize: !root.enabled ? Tokens.text-faint : root.active || touch.has-hover ? Tokens.accent : root.flat ? Tokens.text-secondary : Tokens.accent;
+        width: root.size * 0.47;
+        height: root.size * 0.47;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
+    }
+    Timer {
+        interval: 450ms;
+        running: touch.has-hover && root.tooltip != "";
+        triggered => { self.running = false; tip.show(); }
+    }
+    tip := PopupWindow {
+        close-policy: PopupClosePolicy.no-auto-close;
+        x: (root.width - label.preferred-width - 20px) / 2;
+        y: root.height + 6px;
+        Rectangle {
+            background: Tokens.surface;
+            border-radius: 7px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000066;
+            drop-shadow-offset-y: 3px;
+            HorizontalLayout {
+                padding-left: 10px; padding-right: 10px; padding-top: 5px; padding-bottom: 5px;
+                label := Text { text: root.tooltip; color: Tokens.text; font-size: 12px; }
+            }
+        }
     }
 }
 
