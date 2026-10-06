@@ -771,7 +771,20 @@ impl TerminalModel {
                     .iter()
                     .map(|t| TabView {
                         name: t.name.clone(),
-                        cwd_leaf: t.cwd_leaf.clone(),
+                        // OSC 7 follows `cd`; zmx ls only knows where the session started.
+                        cwd_leaf: self
+                            .tabs
+                            .get(&t.name)
+                            .and_then(|x| x.term.reports().cwd.clone())
+                            .and_then(|cwd| {
+                                ZmxSession {
+                                    cwd,
+                                    ..ZmxSession::default()
+                                }
+                                .cwd_leaf()
+                                .map(str::to_string)
+                            })
+                            .or_else(|| t.cwd_leaf.clone()),
                         active: s.active.as_deref() == Some(&t.name),
                         attention: t.attention,
                         progress: self
@@ -919,6 +932,19 @@ pub(crate) mod tests {
             }
         }
         m
+    }
+
+    #[test]
+    fn a_tab_label_follows_osc_7_after_cd() {
+        let mut m = live(vec![crate::terminal::testkit::session("default", 1)]);
+        m.handle(
+            Msg::PtyData {
+                name: "default".into(),
+                bytes: b"\x1b]7;file://box/home/dev/proj\x07".to_vec(),
+            },
+            t(3),
+        );
+        assert_eq!(m.view().tabs[0].cwd_leaf.as_deref(), Some("proj"));
     }
 
     #[test]

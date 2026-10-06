@@ -128,6 +128,7 @@ fn wire_callbacks(ui: &AppWindow) {
     vm.on_home(|| send(Msg::Back));
     vm.on_reconnect(|| send(Msg::Reconnect));
     vm.on_select_tab(|n| send(Msg::SelectTab(n.into())));
+    vm.on_kill_tab(|n| send(Msg::KillRequested(n.into())));
     vm.on_new_session(|| send(Msg::NewSessionBegin));
     vm.on_commit_name(|n| send(Msg::NewSessionCommit(n.into())));
     vm.on_cancel_name(|| send(Msg::NewSessionCancel));
@@ -166,10 +167,10 @@ fn wire_callbacks(ui: &AppWindow) {
             send(Msg::SendFiles(files));
         }
     });
+    // The same path as Home's gear: it fills the page before showing it.
     vm.on_settings(|| {
         if let Some(app) = app() {
-            app.router.go(Page::Settings);
-            app.refresh_router();
+            app.open_settings();
         }
     });
     let weak = ui.as_weak();

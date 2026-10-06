@@ -67,6 +67,7 @@ impl TerminalModel {
         for tab in self.tabs.values_mut() {
             tab.term.search_clear();
         }
+        self.snap_active_to_bottom();
         fx.push(Effect::Redraw);
     }
 
