@@ -37,8 +37,14 @@ export global TerminalVm {
     in property <string> menu-tab;
     in property <length> menu-x;
     in property <length> menu-y;
+    in property <bool> search-open;
+    in property <string> search-query;
+    in property <string> search-label;
+    in property <int> search-focus-seq;
+    in-out property <bool> search-focused;
     callback back();
     callback send-file();
+    callback find();
     callback settings();
     callback select-tab(string);
     callback tab-menu(string, length, length);
@@ -58,6 +64,47 @@ export global TerminalVm {
     // kind: 0 down, 1 up, 2 move. button: 0 left, 1 right, 2 middle, 3 none.
     callback pointer(int, int, bool, bool, bool, length, length);
     callback wheel(length, bool, bool, bool, length, length);
+    callback search-edited(string);
+    callback search-step(bool);
+    callback search-close();
+}
+
+component SearchBar inherits Rectangle {
+    property <int> focus-seq: TerminalVm.search-focus-seq;
+    changed focus-seq => { field.focus(); field.select-all(); }
+    changed visible => { if (!self.visible) { field.clear-focus(); } }
+    width: 340px;
+    height: 36px;
+    background: Tokens.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: field.has-focus ? Tokens.accent : Tokens.border;
+    public function release() { field.clear-focus(); }
+    HorizontalLayout {
+        padding-left: 10px; padding-right: 4px; spacing: 4px;
+        field := TextInput {
+            horizontal-stretch: 1;
+            text: TerminalVm.search-query;
+            color: Tokens.text; font-size: 12.5px; vertical-alignment: center;
+            single-line: true;
+            changed has-focus => { TerminalVm.search-focused = self.has-focus; }
+            edited => { TerminalVm.search-edited(self.text); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) { TerminalVm.search-close(); return accept; }
+                if (e.text == Key.Return) { TerminalVm.search-step(!e.modifiers.shift); return accept; }
+                reject
+            }
+            Text {
+                visible: parent.text == "";
+                text: "Find in scrollback";
+                color: Tokens.text-faint; font-size: 12.5px; vertical-alignment: center;
+            }
+        }
+        Text { text: TerminalVm.search-label; color: Tokens.text-secondary; font-size: 11.5px; vertical-alignment: center; }
+        GhostButton { text: "↑"; clicked => { TerminalVm.search-step(true); } }
+        GhostButton { text: "↓"; clicked => { TerminalVm.search-step(false); } }
+        GhostButton { text: "✕"; clicked => { TerminalVm.search-close(); } }
+    }
 }
 
 component Lamp inherits Rectangle {
@@ -94,6 +141,7 @@ component Header inherits Rectangle {
             }
         }
         Rectangle { horizontal-stretch: 1; }
+        VerticalLayout { alignment: center; GhostButton { text: "Find"; clicked => { TerminalVm.find(); } } }
         VerticalLayout { alignment: center; GhostButton { text: "Send file…"; clicked => { TerminalVm.send-file(); } } }
         IconButton { icon: @image-url("icons/gear.svg"); clicked => { TerminalVm.settings(); } }
     }
@@ -246,6 +294,7 @@ export component TerminalPage inherits Rectangle {
             TouchArea {
                 mouse-cursor: TerminalVm.hand-cursor ? MouseCursor.pointer : MouseCursor.text;
                 pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down && TerminalVm.search-open) { search.release(); }
                     TerminalVm.pointer(
                         e.kind == PointerEventKind.down ? 0 : e.kind == PointerEventKind.up ? 1 : 2,
                         e.button == PointerEventButton.left ? 0 : e.button == PointerEventButton.right ? 1 : e.button == PointerEventButton.middle ? 2 : 3,
@@ -275,6 +324,11 @@ export component TerminalPage inherits Rectangle {
                 y: parent.height - 56px; height: 32px; width: send-text.preferred-width + 32px; x: (parent.width - self.width) / 2;
                 background: Tokens.surface; border-radius: 16px; border-width: 1px; border-color: Tokens.border;
                 send-text := Text { text: TerminalVm.send-capsule; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
+            }
+            search := SearchBar {
+                visible: TerminalVm.search-open;
+                x: parent.width - self.width - 12px;
+                y: 10px;
             }
             if TerminalVm.tooltip != "": Rectangle {
                 x: TerminalVm.pointer-x + 12px; y: TerminalVm.pointer-y + 16px;

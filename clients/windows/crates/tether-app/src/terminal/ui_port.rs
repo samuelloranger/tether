@@ -123,6 +123,11 @@ impl UiPort for SlintUi {
             );
             vm.set_naming(view.naming.is_some());
             vm.set_naming_text(view.naming.clone().unwrap_or_default().into());
+            vm.set_search_open(view.search.is_some());
+            if let Some(search) = &view.search {
+                vm.set_search_query(search.query.as_str().into());
+                vm.set_search_label(search.label.as_str().into());
+            }
             vm.set_kill_name(view.kill_prompt.clone().unwrap_or_default().into());
             vm.set_disconnected(matches!(view.capsule, Some(CapsuleView::Disconnected)));
             vm.set_send_capsule(match &view.capsule {

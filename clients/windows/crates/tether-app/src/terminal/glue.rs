@@ -129,6 +129,10 @@ fn wire_callbacks(ui: &AppWindow) {
     vm.on_new_session(|| send(Msg::NewSessionBegin));
     vm.on_commit_name(|n| send(Msg::NewSessionCommit(n.into())));
     vm.on_cancel_name(|| send(Msg::NewSessionCancel));
+    vm.on_find(|| send(Msg::SearchOpen));
+    vm.on_search_edited(|q| send(Msg::SearchQuery(q.into())));
+    vm.on_search_step(|older| send(Msg::SearchStep { older }));
+    vm.on_search_close(|| send(Msg::SearchClose));
     vm.on_kill_confirmed(|| send(Msg::KillConfirmed));
     vm.on_kill_cancelled(|| send(Msg::KillCancelled));
     let weak = ui.as_weak();
@@ -261,6 +265,7 @@ fn keys_to_pty(app: &App) -> bool {
     current().is_some()
         && app.router.current() == Page::Terminal
         && !vm.get_naming()
+        && !vm.get_search_focused()
         && vm.get_kill_name().is_empty()
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
@@ -412,6 +417,7 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         | UiEffect::SetClipboard(_)
         | UiEffect::BringToFront
         | UiEffect::PickFiles => {}
+        UiEffect::FocusSearch => vm.set_search_focus_seq(vm.get_search_focus_seq() + 1),
         UiEffect::AllowIme => {
             app.ui
                 .window()
