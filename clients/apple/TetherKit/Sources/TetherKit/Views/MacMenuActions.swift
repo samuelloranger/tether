@@ -57,3 +57,15 @@ extension FocusedValues {
     set { self[HomeMenuActionsKey.self] = newValue }
   }
 }
+
+private struct AppPreferencesKey: FocusedValueKey {
+  typealias Value = AppPreferences
+}
+
+extension FocusedValues {
+  /// Lets the View menu step the terminal font size.
+  public var appPreferences: AppPreferences? {
+    get { self[AppPreferencesKey.self] }
+    set { self[AppPreferencesKey.self] = newValue }
+  }
+}
