@@ -66,6 +66,8 @@ public struct AppRootView: View {
       if autoOpenFirst, let first = model.profiles.first { open(first) }
       else if let last = model.lastHostProfile { open(last) }
     }
+    .focusedSceneValue(\.appPreferences, preferences)
+    .environment(preferences)
   }
 
   private var terminalOpen: Bool { tabs != nil || controller != nil }
