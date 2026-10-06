@@ -51,6 +51,15 @@ function calls(log: string): string[] {
   }
 }
 
+const geminiEvents: Record<string, string> = {
+  BeforeAgent: 'working',
+  BeforeTool: 'working',
+  AfterTool: 'working',
+  Notification: 'waiting',
+  AfterAgent: 'done',
+  SessionEnd: 'clear',
+};
+
 test('claude working records state without reading the transcript', () => {
   const env = install();
   hook(env, 'claude', 'working', { cwd: '/src/proj', hook_event_name: 'PreToolUse' });
@@ -120,8 +129,13 @@ test('installer registers every event once, and re-running does not duplicate', 
     expect(codex[event]).toHaveLength(1);
   }
   const cursor = JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8')).hooks;
-  expect(cursor.beforeSubmitPrompt).toHaveLength(1);
-  expect(cursor.stop).toHaveLength(1);
+  for (const event of ['beforeSubmitPrompt', 'postToolUse', 'stop', 'sessionEnd']) {
+    expect(cursor[event]).toHaveLength(1);
+  }
+  const gemini = JSON.parse(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8')).hooks;
+  for (const event of Object.keys(geminiEvents)) {
+    expect(gemini[event]).toHaveLength(1);
+  }
 });
 
 test('claude hooks that Cursor runs from the Claude settings stay silent', () => {
@@ -276,4 +290,49 @@ test('claude done keeps a multi-line last reply whole', () => {
   ]);
   hook(env, 'claude', 'done', { cwd: '/src/proj', transcript_path: transcript });
   expect(calls(env.log)[0]).toContain('--body Done here. Two files changed.');
+});
+
+test('installer wires gemini beside foreign hooks and settings, once', () => {
+  const env = install((home) => {
+    writeFileSync(
+      path.join(home, '.gemini/settings.json'),
+      JSON.stringify({
+        model: { name: 'm' },
+        hooks: { AfterAgent: [{ matcher: '*', hooks: [{ type: 'command', name: 'other', command: 'other-hook' }] }] },
+      }),
+    );
+  });
+  expect(reinstall(env).exitCode).toBe(0);
+  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const gemini = JSON.parse(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8'));
+  expect(gemini.model).toEqual({ name: 'm' });
+  for (const [event, state] of Object.entries(geminiEvents)) {
+    const ours = gemini.hooks[event].filter((g: { hooks: { command: string }[] }) =>
+      g.hooks.some((h) => h.command.includes('tether-notify-hook')),
+    );
+    expect(ours).toEqual([
+      { matcher: '*', hooks: [{ type: 'command', name: 'tether', command: `'${wrapper}' gemini ${state}` }] },
+    ]);
+  }
+  expect(gemini.hooks.AfterAgent).toHaveLength(2);
+  expect(gemini.hooks.AfterAgent[0].hooks[0].command).toBe('other-hook');
+});
+
+test('installer skips gemini when it is not set up', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'agent-hooks-'));
+  const run = Bun.spawnSync(['sh', 'scripts/install-agent-hooks.sh', 'devbox'], {
+    env: { ...process.env, HOME: home },
+  });
+  expect(run.exitCode).toBe(0);
+  expect(() => readFileSync(path.join(home, '.gemini/settings.json'))).toThrow();
+});
+
+test('a settings file jq cannot parse is left untouched and warned about once', () => {
+  const original = '// user comment\n{"hooks": {}}\n';
+  const env = install((home) => writeFileSync(path.join(home, '.gemini/settings.json'), original));
+  const again = reinstall(env);
+  expect(again.exitCode).toBe(0);
+  expect(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8')).toBe(original);
+  expect(again.stderr.match(/not plain JSON/g)).toHaveLength(1);
+  expect(JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8')).hooks.stop).toHaveLength(1);
 });

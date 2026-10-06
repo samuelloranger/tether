@@ -161,30 +161,50 @@ printf '%s\n' "$HOST_LABEL" > "${NOTIFY_HOME}/host-label"
 
 # --- config merges (idempotent; preserve existing hooks) -----------------------
 
+# Rewrites <file> through a jq program. A file jq can't parse (comments, say) is left as
+# is: the agent may accept it, and a rewrite would lose what jq can't read.
+SKIPPED=" "
+jq_merge() { # <file> <empty document> <jq args…>
+  file="$1"; empty="$2"; shift 2
+  mkdir -p "$(dirname "$file")"
+  [ -f "$file" ] || printf '%s\n' "$empty" > "$file"
+  tmp="$(mktemp)"
+  if jq "$@" "$file" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+    case "$SKIPPED" in
+      *" $file "*) ;;
+      *) SKIPPED="${SKIPPED}${file} "; echo "Skipped $file: not plain JSON." >&2 ;;
+    esac
+  fi
+}
+
 # Claude / Codex share a nested shape: hooks.<Event>[].hooks[].command.
 # Strip any prior tether-notify-hook entry for that event, then add ours.
 merge_nested() { # <file> <Event> <command>
-  file="$1"; event="$2"; cmd="$3"
-  mkdir -p "$(dirname "$file")"
-  [ -f "$file" ] || echo '{}' > "$file"
-  tmp="$(mktemp)"
-  jq --arg ev "$event" --arg cmd "$cmd" '
+  jq_merge "$1" '{}' --arg ev "$2" --arg cmd "$3" '
     def clean(a): (a // []) | map(select(any(.hooks[]?; .command | test("tether-notify-hook")) | not));
     .hooks = ((.hooks // {}) | .[$ev] = (clean(.[$ev]) + [{hooks: [{type: "command", command: $cmd}]}]))
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  '
+}
+
+# Gemini CLI: the nested shape plus a matcher (required to match every tool) and a name.
+merge_gemini() { # <file> <Event> <command>
+  jq_merge "$1" '{}' --arg ev "$2" --arg cmd "$3" '
+    def clean(a): (a // []) | map(select(any(.hooks[]?; .command | test("tether-notify-hook")) | not));
+    .hooks = ((.hooks // {}) | .[$ev] = (clean(.[$ev])
+      + [{matcher: "*", hooks: [{type: "command", name: "tether", command: $cmd}]}]))
+  '
 }
 
 # Cursor v1: hooks.<event>[].command (flat), lowercase events.
 merge_cursor() { # <file> <event> <command>
-  file="$1"; event="$2"; cmd="$3"
-  mkdir -p "$(dirname "$file")"
-  [ -f "$file" ] || echo '{"version":1,"hooks":{}}' > "$file"
-  tmp="$(mktemp)"
-  jq --arg ev "$event" --arg cmd "$cmd" '
+  jq_merge "$1" '{"version":1,"hooks":{}}' --arg ev "$2" --arg cmd "$3" '
     def clean(a): (a // []) | map(select((.command // "") | test("tether-notify-hook") | not));
     .version = (.version // 1)
     | .hooks = ((.hooks // {}) | .[$ev] = (clean(.[$ev]) + [{command: $cmd}]))
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  '
 }
 
 # Claude Code — always (create if missing). Working hooks stay synchronous: an async
@@ -197,6 +217,7 @@ merge_nested "${HOME}/.claude/settings.json" Stop             "'${WRAPPER}' clau
 merge_nested "${HOME}/.claude/settings.json" StopFailure      "'${WRAPPER}' claude failed"
 merge_nested "${HOME}/.claude/settings.json" SessionEnd       "'${WRAPPER}' claude clear"
 echo "Registered Claude Code hooks."
+REGISTERED="claude"
 
 version_at_least() { # <have> <want>, dotted numbers
   awk -v a="$1" -v b="$2" 'BEGIN {
@@ -229,15 +250,34 @@ if [ -d "${HOME}/.codex" ]; then
   merge_nested "${HOME}/.codex/hooks.json" PermissionRequest "'${WRAPPER}' codex waiting"
   merge_nested "${HOME}/.codex/hooks.json" Stop              "'${WRAPPER}' codex done"
   merge_nested "${HOME}/.codex/hooks.json" SessionEnd        "'${WRAPPER}' codex clear"
+  REGISTERED="$REGISTERED codex"
   echo "Registered Codex hooks — Codex will ask you to TRUST the new hooks on its next run."
 fi
 
-# Cursor — only if it's set up on this host.
+# Cursor — only if it's set up on this host. No preToolUse: it is a permission step, where
+# a bad answer can block the tool. Cursor has no event before its approval prompt, so it
+# never reports "waiting".
 if [ -d "${HOME}/.cursor" ]; then
   merge_cursor "${HOME}/.cursor/hooks.json" beforeSubmitPrompt "'${WRAPPER}' cursor working"
+  merge_cursor "${HOME}/.cursor/hooks.json" postToolUse        "'${WRAPPER}' cursor working"
   merge_cursor "${HOME}/.cursor/hooks.json" stop               "'${WRAPPER}' cursor done"
+  merge_cursor "${HOME}/.cursor/hooks.json" sessionEnd         "'${WRAPPER}' cursor clear"
+  REGISTERED="$REGISTERED cursor"
   echo "Registered Cursor hooks."
 fi
 
+# Gemini CLI — only if it's set up on this host.
+if [ -d "${HOME}/.gemini" ]; then
+  merge_gemini "${HOME}/.gemini/settings.json" BeforeAgent  "'${WRAPPER}' gemini working"
+  merge_gemini "${HOME}/.gemini/settings.json" BeforeTool   "'${WRAPPER}' gemini working"
+  merge_gemini "${HOME}/.gemini/settings.json" AfterTool    "'${WRAPPER}' gemini working"
+  merge_gemini "${HOME}/.gemini/settings.json" Notification "'${WRAPPER}' gemini waiting"
+  merge_gemini "${HOME}/.gemini/settings.json" AfterAgent   "'${WRAPPER}' gemini done"
+  merge_gemini "${HOME}/.gemini/settings.json" SessionEnd   "'${WRAPPER}' gemini clear"
+  REGISTERED="$REGISTERED gemini"
+  echo "Registered Gemini CLI hooks."
+fi
+
 echo
-echo "Host label: ${HOST_LABEL}.  Test: printf '{}' | tether-notify-hook claude done"
+echo "Host label: ${HOST_LABEL}.  Test one with: printf '{}' | tether-notify-hook <agent> done"
+echo "Agents wired: ${REGISTERED}."
