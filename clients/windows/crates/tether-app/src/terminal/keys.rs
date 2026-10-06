@@ -64,6 +64,18 @@ pub fn translate(
     mods: tether_core::keymap::Mods,
     app_keypad: bool,
 ) -> Option<KeyInput> {
+    if let Key::Named(W::Space) = logical {
+        // A dead key followed by Space composes its own character (^, ', `) and winit still reports Space.
+        if let Some(t) =
+            text.filter(|t| *t != " " && !t.is_empty() && !t.chars().any(char::is_control))
+        {
+            return Some(KeyInput::Char {
+                unmodified: t.chars().next()?,
+                produced: Some(t.to_string()),
+                digit: None,
+            });
+        }
+    }
     if let Key::Named(n) = logical {
         let key = match n {
             W::ArrowUp => NamedKey::Up,
@@ -348,6 +360,51 @@ mod tests {
                 KeyLocation::Left
             ),
             None
+        );
+    }
+
+    #[test]
+    fn a_dead_key_then_space_sends_the_composed_character() {
+        let space = |text: Option<&str>, mods: Mods| {
+            translate(
+                &Key::Named(W::Space),
+                &Key::Named(W::Space),
+                text,
+                code(KeyCode::Space),
+                KeyLocation::Standard,
+                mods,
+                false,
+            )
+        };
+        for c in ["^", "'", "`", "~"] {
+            assert_eq!(
+                space(Some(c), Mods::default()),
+                Some(KeyInput::Char {
+                    unmodified: c.chars().next().unwrap(),
+                    produced: Some(c.to_string()),
+                    digit: None
+                })
+            );
+        }
+        assert_eq!(
+            space(Some(" "), Mods::default()),
+            Some(KeyInput::Named(NamedKey::Space))
+        );
+        assert_eq!(
+            space(None, Mods::default()),
+            Some(KeyInput::Named(NamedKey::Space))
+        );
+        let ctrl = Mods {
+            ctrl: true,
+            ..Mods::default()
+        };
+        assert_eq!(
+            space(Some("\0"), ctrl),
+            Some(KeyInput::Named(NamedKey::Space))
+        );
+        assert_eq!(
+            space(Some(" "), ctrl),
+            Some(KeyInput::Named(NamedKey::Space))
         );
     }
 }
