@@ -424,6 +424,14 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                         let _ = tx.send(DriverMsg::Model(Msg::AgentAnswered { result }));
                     });
                 }
+                Effect::Git { target, job } => {
+                    tokio::spawn(crate::terminal::gitrun::run(
+                        self.remote.clone(),
+                        target,
+                        job,
+                        msg_sink(self.tx.clone()),
+                    ));
+                }
                 Effect::Redraw => {
                     if self.pacer.mark_dirty() {
                         self.render(model);

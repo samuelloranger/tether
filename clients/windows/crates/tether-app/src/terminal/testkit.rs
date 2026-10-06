@@ -177,6 +177,8 @@ pub struct FakeRemote {
     pub histories: Mutex<HashMap<String, Result<String, ConnectError>>>,
     /// Control-connection exec replies by command substring; anything else answers with nothing.
     pub exec_replies: Mutex<Vec<(String, Result<String, ConnectError>)>>,
+    /// Answers `exec` in order after `exec_replies`; an empty queue answers with empty output.
+    pub exec_queue: Mutex<VecDeque<Result<String, ConnectError>>>,
 }
 
 impl Default for FakeRemote {
@@ -192,6 +194,7 @@ impl Default for FakeRemote {
             upload_results: Mutex::default(),
             hold_attach: Mutex::default(),
             histories: Mutex::default(),
+            exec_queue: Mutex::default(),
             exec_replies: Mutex::default(),
         }
     }
@@ -262,7 +265,9 @@ impl Remote for FakeRemote {
             .unwrap()
             .iter()
             .find(|(needle, _)| command.contains(needle.as_str()))
-            .map_or(Ok(String::new()), |(_, reply)| reply.clone())
+            .map(|(_, reply)| reply.clone())
+            .or_else(|| self.exec_queue.lock().unwrap().pop_front())
+            .unwrap_or(Ok(String::new()))
     }
     async fn attach(
         &self,

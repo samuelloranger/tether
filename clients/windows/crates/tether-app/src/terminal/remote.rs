@@ -52,7 +52,8 @@ pub trait Remote: Send + Sync + 'static {
     fn kill(&self, name: &str) -> impl Future<Output = Result<(), ConnectError>> + Send;
     fn history(&self, name: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
     fn uploads_dir(&self) -> impl Future<Output = Option<String>> + Send;
-    /// One command on the control connection, its stdout on success.
+    /// One command on the control connection; a non-zero exit is an error and loses stdout, so
+    /// callers that need the output of a failing command wrap it (`tether_core::git::wrap`).
     fn exec(&self, command: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
     fn attach(
         &self,

@@ -4,6 +4,8 @@ pub mod driver;
 pub mod files;
 pub mod frame;
 pub mod geometry;
+pub mod gitrun;
+pub mod gitview;
 pub mod glue;
 pub mod keys;
 pub mod model;

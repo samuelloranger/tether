@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tether_core::connect::ConnectError;
+use tether_core::gitpanel::{GitJob, GitMsg, GitPanel, GitTarget, GitView};
 use tether_core::keymap::{KeyInput, Mods, TetherCommand};
 use tether_core::lock::LockGrace;
 use tether_core::osc::Progress;
@@ -20,6 +21,7 @@ use crate::terminal::status::{ConnStatus, Lamp};
 mod agents;
 mod events;
 pub(crate) mod extras;
+mod gitpanel;
 mod input;
 mod pointer;
 mod reconnect;
@@ -27,9 +29,9 @@ mod search;
 pub(crate) mod send;
 mod tabs;
 
+pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
 pub use extras::{HistoryBody, HistoryView, PaletteView};
 pub use search::SearchView;
-pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
 pub use send::{SendJob, SendSource};
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -210,6 +212,7 @@ pub enum Msg {
     AgentApprove,
     AgentDeny,
     AgentReply(String),
+    Git(GitMsg),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +253,10 @@ pub enum Effect {
     AgentAnswer {
         command: String,
     },
+    Git {
+        target: GitTarget,
+        job: GitJob,
+    },
     Redraw,
     Ui(UiEffect),
 }
@@ -280,6 +287,7 @@ pub enum UiEffect {
     PickFiles,
     AllowIme,
     FocusSearch,
+    Git(Box<GitView>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -381,6 +389,9 @@ pub struct TerminalModel {
     blink_at: Duration,
     extras: extras::Extras,
     agents: agents::AgentsState,
+    git: GitPanel,
+    git_shown: GitView,
+    session_pids: HashMap<String, i64>,
 }
 
 impl TerminalModel {
@@ -422,6 +433,9 @@ impl TerminalModel {
             blink_at: Duration::ZERO,
             extras: extras::Extras::default(),
             agents: agents::AgentsState::default(),
+            git: GitPanel::default(),
+            git_shown: GitView::default(),
+            session_pids: HashMap::new(),
         };
         (m, vec![Effect::Open])
     }
@@ -447,7 +461,10 @@ impl TerminalModel {
                 fx.push(Effect::Ls);
             }
             Msg::Dropped => self.on_dropped(&mut fx),
-            Msg::Tick => self.on_tick(now, &mut fx),
+            Msg::Tick => {
+                self.on_tick(now, &mut fx);
+                self.git_tick(now, &mut fx);
+            }
             Msg::Focus(f) => self.on_focus(f, now, &mut fx),
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
             Msg::SelectTab(name) => self.activate(&name, &mut fx),
@@ -551,6 +568,7 @@ impl TerminalModel {
             Msg::AgentReply(text) => {
                 self.on_agent_answer(Some(tether_core::agents::Answer::Reply(text)), &mut fx);
             }
+            Msg::Git(m) => self.on_git(m, now, &mut fx),
         }
         self.sync_search(now);
         fx
@@ -611,6 +629,7 @@ impl TerminalModel {
                 .iter()
                 .map(|s| (s.name.clone(), s.display_cwd().to_string()))
                 .collect();
+            self.session_pids = sessions.iter().map(|s| (s.name.clone(), s.pid)).collect();
         }
         if self.strip.is_none() {
             let strip = match result {

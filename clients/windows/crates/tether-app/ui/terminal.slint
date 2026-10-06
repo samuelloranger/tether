@@ -2,6 +2,7 @@ import { Tokens } from "tokens.slint";
 import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
 import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
 import { AgentVm, AgentChip, AgentBanner, AgentSheet } from "agents.slint";
+import { GitVm, GitSidePanel, GitOverlays } from "git.slint";
 
 export struct TermTab {
     name: string, cwd: string, active: bool, attention: bool,
@@ -156,6 +157,7 @@ component Header inherits Rectangle {
         VerticalLayout { alignment: center; GhostButton { text: "Find"; clicked => { TerminalVm.find(); } } }
         VerticalLayout { alignment: center; GhostButton { text: "Snippets"; clicked => { TerminalVm.snippets(); } } }
         VerticalLayout { alignment: center; GhostButton { text: "History"; clicked => { TerminalVm.history(); } } }
+        VerticalLayout { alignment: center; GhostButton { text: "Git"; clicked => { GitVm.toggle(); } } }
         VerticalLayout { alignment: center; GhostButton { text: "Send file…"; clicked => { TerminalVm.send-file(); } } }
         IconButton { icon: @image-url("icons/gear.svg"); clicked => { TerminalVm.settings(); } }
     }
@@ -292,8 +294,10 @@ export component TerminalPage inherits Rectangle {
         if TerminalVm.has-progress: ProgressBar { value: TerminalVm.progress; state: TerminalVm.progress-state; }
         TabStrip { }
         if AgentVm.banner != "": AgentBanner { }
+        HorizontalLayout {
+        vertical-stretch: 1;
         Rectangle {
-            vertical-stretch: 1;
+            horizontal-stretch: 1;
             background: TerminalVm.well-color;
             changed width => { TerminalVm.well-resized(self.width, self.height); }
             changed height => { TerminalVm.well-resized(self.width, self.height); }
@@ -356,6 +360,8 @@ export component TerminalPage inherits Rectangle {
                 tip := Text { text: TerminalVm.tooltip; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
             }
         }
+        if GitVm.open: GitSidePanel { }
+        }
     }
     if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
         clicked => { TerminalVm.close-menu(); }
@@ -388,4 +394,5 @@ export component TerminalPage inherits Rectangle {
         confirmed => { TerminalVm.kill-confirmed(); }
         cancelled => { TerminalVm.kill-cancelled(); }
     }
+    GitOverlays { }
 }
