@@ -163,6 +163,8 @@ pub struct FakeRemote {
     pub uploads_dir: Mutex<Option<String>>,
     pub upload_results: Mutex<VecDeque<Result<(), ConnectError>>>,
     pub hold_attach: Mutex<Option<Arc<tokio::sync::Notify>>>,
+    /// Answers `exec` in order; an empty queue answers with empty output.
+    pub exec_replies: Mutex<VecDeque<Result<String, ConnectError>>>,
 }
 
 impl Default for FakeRemote {
@@ -177,6 +179,7 @@ impl Default for FakeRemote {
             uploads_dir: Mutex::new(Some("/home/sam/.tether/uploads".into())),
             upload_results: Mutex::default(),
             hold_attach: Mutex::default(),
+            exec_replies: Mutex::default(),
         }
     }
 }
@@ -229,6 +232,14 @@ impl Remote for FakeRemote {
     }
     async fn uploads_dir(&self) -> Option<String> {
         self.uploads_dir.lock().unwrap().clone()
+    }
+    async fn exec(&self, command: &str) -> Result<String, ConnectError> {
+        self.log.lock().unwrap().push(format!("exec {command}"));
+        self.exec_replies
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Ok(String::new()))
     }
     async fn attach(
         &self,

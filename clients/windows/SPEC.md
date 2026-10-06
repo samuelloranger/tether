@@ -22,7 +22,7 @@ v1 is the loop they can do without the phone:
 
 ## Out of scope
 
-Push, notification actions, agent questions, agent status, git, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
+Push, notification actions, agent questions, agent status, `zmx history`, inline images (kitty graphics: `alacritty_terminal` has no image support), the phone key bar, the app-icon picker, and Google Fonts downloads. Tabs replace the iOS session drawer; there is no drawer. Pageant, ProxyJump, and keyboard-interactive auth are later slices.
 
 Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their place.
 
@@ -401,6 +401,51 @@ The client trusts the line before the last `__TETHER_UPLOADS_OK__` marker only w
 Each file that arrives is pasted, into the tab that was active when the send began, as soon as it lands: its shell-quoted absolute path, as one paste through the PTY paste path (bracketed when the program asked for it, markers in the text stripped), never as typed keystrokes. Files go in order; every paste after the first starts with a space, so several images become one line of quoted paths and each still arrives as its own paste, which is what makes Claude Code attach each one.
 
 While a send is in flight the header stays, and a capsule at the bottom of the grid reads `Sending paste-1791082819.png (2/3)`. On success it reads `Sent ~/.tether/uploads/paste-1791082819.png`. A failure stops the queue: files already sent stay on the host and stay pasted, and the capsule names the file that failed and why. The capsule leaves on the next keystroke, or after 4 seconds.
+
+## Repository and documents
+
+A **Git** button in the terminal header opens a side panel next to the grid (the grid resizes to what is left; the panel is at most 440 px or half the window). It follows the active tab: switching tabs reloads it for that session. There is no iOS sheet here because a desktop window has the room, and the terminal stays usable beside it.
+
+The directory is the session shell's live cwd, `readlink /proc/<pid>/cwd` on the control connection, with the OSC 7 report and then the `zmx ls` cwd as fallbacks (the iOS order, plus OSC 7). Nothing else is read from the host than what these commands print; there is no server component.
+
+### Panel
+
+Header: a Back button when a diff or pull request is open, the branch in mono (the title of the open page otherwise), a `+n −m` line, Refresh, Close. Four tabs, as an iOS segment:
+
+- **Changes.** `git diff HEAD` (staged and unstaged, tracked files; `git diff` in a repository with no commit yet), listed per file with `+n −m`, followed by untracked files marked `new`. iOS lists `git diff` only; staged work vanishing from the list is wrong on a desktop where you stage in the terminal. A file opens its diff. A `.md` file has a Preview button.
+- **Commits.** The last 50, `<subject>` over `<hash> · <author>`. A commit opens its message and diff (`git show --patch`, message split from the patch at an `0x1e` marker so git's `---` is never read as a deletion).
+- **PRs.** `gh pr list --state all --limit 50`, closed-without-merge dropped, badge Open / Draft / Merged. `gh` missing prints a sentinel: the tab says GitHub CLI isn't installed on this host, which is different from `gh` refusing (its first line is shown) and from an empty list ("No pull requests").
+- **Docs.** `.md` and `.markdown` files of the repository (`git ls-files --cached --others --exclude-standard`, 300 at most). Selecting one opens the markdown viewer. iOS has no equivalent; this is the desktop's way in to a file without a path-detection hook in the grid.
+
+The list refreshes every 15 s (60 s on PRs) while it is the visible page, never under an open diff. A refresh in flight is never stacked, and an answer for a superseded request is dropped.
+
+### Diff
+
+One mono list, 20 px rows: a bold row per file with its stat, the hunk's full `@@ -a,b +c,d @@ context` line, old and new line numbers, `+` or `−` in the gutter, green and red row tints, context in the text colour. Git's own headers (`index`, `---`, `+++`, mode lines) are not rows. `Binary files … differ` and `\ No newline at end of file` are plain rows that take no line number. The list scrolls both ways (the width follows the longest of the first 400 columns). More than 20 000 rows are cut with a note; the host cuts a patch at 2 MB.
+
+The parsing is the iOS `DiffFile`, `GitDiffModel` and `GitRepositoryModel` rules ported to `tether-core` with their test cases: a file is named by its new path, a hunk keeps only its context in `text`, a preamble before the first file (commit message) is kept as plain rows, and a patch with no marker is all patch.
+
+### Pull request
+
+Title, `head → base`, state chip, file count and review decision. A checks card: the rollup headline (`No checks`, `n failing`, `x of n running`, `n checks passed`; failing outranks running) and one row per check, a link when it has a URL. A merge card shows the gate. **Review changes** opens the PR diff (`gh pr diff`), **Open in GitHub** the page.
+
+The gate is the iOS one, from `gh pr view --json mergeable,mergeStateStatus,isDraft`: a draft wins over everything, a conflict wins over `BLOCKED`, `UNKNOWN` is "Checking mergeability…", then `BEHIND`, `BLOCKED`, otherwise ready. Only a ready, open pull request enables the button, and only when `gh repo view` allows at least one method (`mergeCommitAllowed`, `squashMergeAllowed`, `rebaseMergeAllowed`; an unreadable answer allows none). The button is labelled with the default method, squash if allowed.
+
+**Merge** opens a confirm dialog titled `Merge #n?` with the allowed methods as options (squash preselected) and Cancel / Merge. Confirming checks the gate again against the latest answer and refuses silently if the pull request stopped being mergeable while the dialog was open. Then `gh pr merge n --squash|--merge|--rebase`. On success the page flips to Merged without waiting for GitHub to propagate; on failure `gh`'s first line is shown and the detail is fetched again. While checks are running or the gate is being computed, the page re-reads every 10 s.
+
+iOS also offers Close, Checkout and Update branch on a pull request, and streams `gh pr checks --watch` over a second connection. Those are not here: Checkout and Update change the working tree under the running shell, Close is one click from GitHub, and polling at 10 s needs no second connection.
+
+### Markdown viewer
+
+Opened from a Preview button (Changes, Docs) and covering the page, Close returns. It is read-only: headings (three sizes), paragraphs, bullet and numbered lists (nested items are flattened), block quotes, rules, fenced code and pipe tables in a mono block. Inline emphasis and code markers are dropped and `[label](url)` is kept as its label with a link chip under the block; bare URLs also become chips. A chip opens through the same safe-link rule as links in the grid (`http`, `https`, `mailto` only); `javascript:`, `file:` and relative links are plain text. Images show their alt text. The viewer is the iOS `MarkdownDocument` parser (pull request bodies there) plus tables, `+` bullets, `~~~` fences and the `3.14 is not a list` rule.
+
+The file is read with `head -c 524289 -- <path>`, so a file over 512 KiB shows its start and a note. The path is always the repository root joined to a path the panel itself listed: it must be relative, free of control characters and of `..`, and is quoted as one argument.
+
+Ctrl+click on a detected `.md` path in the grid is not implemented: it needs path detection across wrapped rows, and the Docs tab and the Changes list reach the same files.
+
+### Remote commands
+
+Every command is built in `tether-core` (`git`), passed through `shell_quote`, and run as `sh -c '<script>'` so it does not depend on the login shell (fish does not parse `{ }`). The script ends in `printf '\n__TETHER_RC__%s' "$?"`: the exec channel reports a non-zero exit as a failure and drops stdout, which would hide `gh`'s reason. Directories must be absolute with no control character, commit ids hexadecimal, pull request numbers are integers, repository paths are validated as above.
 
 ## How it is built
 

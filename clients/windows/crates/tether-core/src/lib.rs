@@ -3,12 +3,15 @@
 pub mod connect;
 pub mod edit;
 pub mod fonts;
+pub mod git;
+pub mod gitpanel;
 pub mod hints;
 pub mod hostkey;
 pub mod keymap;
 pub mod keys;
 pub mod links;
 pub mod lock;
+pub mod markdown;
 pub mod osc;
 pub mod paste;
 pub mod prefs;

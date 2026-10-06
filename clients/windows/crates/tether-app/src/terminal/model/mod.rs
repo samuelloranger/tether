@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tether_core::connect::ConnectError;
+use tether_core::gitpanel::{GitJob, GitMsg, GitPanel, GitTarget, GitView};
 use tether_core::keymap::{KeyInput, Mods, TetherCommand};
 use tether_core::lock::LockGrace;
 use tether_core::osc::Progress;
@@ -18,6 +19,7 @@ use crate::terminal::geometry::{Layout, TermStyle};
 use crate::terminal::status::{ConnStatus, Lamp};
 
 mod events;
+mod gitpanel;
 mod input;
 mod pointer;
 mod reconnect;
@@ -159,6 +161,7 @@ pub enum Msg {
     },
     CopySelection,
     PasteClipboard,
+    Git(GitMsg),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -188,6 +191,10 @@ pub enum Effect {
         generation: u64,
     },
     StartSend(SendJob),
+    Git {
+        target: GitTarget,
+        job: GitJob,
+    },
     Redraw,
     Ui(UiEffect),
 }
@@ -217,6 +224,7 @@ pub enum UiEffect {
     #[allow(dead_code)] // send-file dialog path (platform::pick_files in glue)
     PickFiles,
     AllowIme,
+    Git(Box<GitView>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +318,9 @@ pub struct TerminalModel {
     pub(crate) hover: Option<(usize, usize, usize)>,
     blink_on: bool,
     blink_at: Duration,
+    git: GitPanel,
+    git_shown: GitView,
+    session_pids: HashMap<String, i64>,
 }
 
 impl TerminalModel {
@@ -348,6 +359,9 @@ impl TerminalModel {
             hover: None,
             blink_on: true,
             blink_at: Duration::ZERO,
+            git: GitPanel::default(),
+            git_shown: GitView::default(),
+            session_pids: HashMap::new(),
         };
         (m, vec![Effect::Open])
     }
@@ -373,7 +387,10 @@ impl TerminalModel {
                 fx.push(Effect::Ls);
             }
             Msg::Dropped => self.on_dropped(&mut fx),
-            Msg::Tick => self.on_tick(now, &mut fx),
+            Msg::Tick => {
+                self.on_tick(now, &mut fx);
+                self.git_tick(now, &mut fx);
+            }
             Msg::Focus(f) => self.on_focus(f, now, &mut fx),
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
             Msg::SelectTab(name) => self.activate(&name, &mut fx),
@@ -442,6 +459,7 @@ impl TerminalModel {
                 &mut fx,
             ),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
+            Msg::Git(m) => self.on_git(m, now, &mut fx),
         }
         fx
     }
@@ -500,6 +518,7 @@ impl TerminalModel {
                 .iter()
                 .map(|s| (s.name.clone(), s.display_cwd().to_string()))
                 .collect();
+            self.session_pids = sessions.iter().map(|s| (s.name.clone(), s.pid)).collect();
         }
         if self.strip.is_none() {
             let strip = match result {

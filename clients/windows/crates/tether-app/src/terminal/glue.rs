@@ -179,6 +179,7 @@ fn wire_callbacks(ui: &AppWindow) {
     cv.on_retry(|| send(Msg::Retry));
     cv.on_back_home(|| send(Msg::Back));
     vm.on_retry_session(|| send(Msg::RetrySession));
+    crate::terminal::gitview::wire(ui);
 
     use crate::terminal::mouse::{Button, MouseKind, MouseMsg};
     let started = std::time::Instant::now();
@@ -262,6 +263,7 @@ fn keys_to_pty(app: &App) -> bool {
         && vm.get_kill_name().is_empty()
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
+        && !app.ui.global::<crate::GitVm>().get_modal()
 }
 
 pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
@@ -410,6 +412,7 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         | UiEffect::SetClipboard(_)
         | UiEffect::BringToFront
         | UiEffect::PickFiles => {}
+        UiEffect::Git(view) => crate::terminal::gitview::apply(w, *view),
         UiEffect::AllowIme => {
             app.ui
                 .window()
