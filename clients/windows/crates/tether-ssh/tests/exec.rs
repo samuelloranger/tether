@@ -26,12 +26,26 @@ async fn signed_in() -> (support::server::Running, tether_ssh::RusshConnection) 
 }
 
 #[tokio::test]
-async fn exec_returns_stdout_and_drops_stderr_even_on_nonzero_exit() {
+async fn exec_returns_stdout_and_drops_stderr() {
     let (_server, conn) = signed_in().await;
     assert_eq!(
         conn.exec("tether-echo hello there").await.unwrap(),
         "hello there\n"
     );
+}
+
+#[tokio::test]
+async fn a_nonzero_exit_is_an_error_not_empty_output() {
+    let (_server, conn) = signed_in().await;
+    let err = conn.exec("tether-fail").await.unwrap_err();
+    assert!(matches!(err, ConnectError::Transport(m) if m.contains("status 3")));
+}
+
+#[tokio::test]
+async fn a_channel_that_closes_without_an_exit_status_is_an_error() {
+    let (_server, conn) = signed_in().await;
+    let err = conn.exec("tether-drop").await.unwrap_err();
+    assert!(matches!(err, ConnectError::Transport(_)));
 }
 
 #[tokio::test]
@@ -71,10 +85,9 @@ async fn hostile_names_reach_zmx_as_one_argument() {
         "`touch pwned`",
         ";touch pwned",
         "ünï",
-        "--force",
     ] {
         let out = conn
-            .exec(&tether_core::zmx::kill_command(name))
+            .exec(&tether_core::zmx::kill_command(name).unwrap())
             .await
             .unwrap();
         assert_eq!(

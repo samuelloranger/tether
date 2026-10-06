@@ -1,5 +1,6 @@
 use super::*;
 use tether_core::tabs::CreateOutcome;
+use tether_core::zmx::valid_session_name;
 
 impl TerminalModel {
     pub(crate) fn activate(&mut self, name: &str, fx: &mut Vec<Effect>) {
@@ -111,6 +112,13 @@ impl TerminalModel {
         self.naming = None;
         let name = raw.trim();
         if name.is_empty() || self.strip.is_none() {
+            return;
+        }
+        if !valid_session_name(name) {
+            self.naming = Some(raw.to_string());
+            fx.push(Effect::Ui(UiEffect::Tooltip(Some(
+                "A session name can't start with \"-\" or contain control characters".into(),
+            ))));
             return;
         }
         if self.strip.as_ref().is_some_and(|s| s.tab(name).is_some()) {
@@ -275,6 +283,23 @@ mod tests {
         let fx = m.handle(Msg::NewSessionCommit("build".into()), t(6));
         assert!(has_attach(&fx, "build"));
         assert_eq!(m.view().tabs.len(), 2);
+    }
+
+    #[test]
+    fn an_invalid_name_is_rejected_and_the_field_stays_open() {
+        for bad in ["-rf", "a\u{15}b", "a\nb"] {
+            let mut m = live(vec![session("default", 1)]);
+            m.handle(Msg::NewSessionBegin, t(5));
+            let fx = m.handle(Msg::NewSessionCommit(bad.into()), t(6));
+            assert!(
+                fx.iter()
+                    .any(|e| matches!(e, Effect::Ui(UiEffect::Tooltip(Some(_))))),
+                "{bad:?}"
+            );
+            assert!(!fx.iter().any(|e| matches!(e, Effect::Attach { .. })));
+            assert_eq!(m.view().naming.as_deref(), Some(bad));
+            assert_eq!(m.view().tabs.len(), 1);
+        }
     }
 
     #[test]

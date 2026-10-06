@@ -144,7 +144,20 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                     reader,
                 } => {
                     let current = self.wanted.lock().unwrap().get(&name).copied();
-                    if current == Some(id) {
+                    if current == Some(id) && attach_command(&name).is_none() {
+                        reader.abort();
+                        tokio::spawn(async move {
+                            sink.close().await;
+                        });
+                        model.handle(
+                            Msg::AttachFailed {
+                                name,
+                                id,
+                                reason: "invalid session name".into(),
+                            },
+                            now,
+                        )
+                    } else if current == Some(id) {
                         if let Some(old) = self.readers.insert(name.clone(), reader) {
                             old.abort();
                         }
@@ -154,7 +167,7 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                         let _ = wtx.send(ChanOp::Resize(model.grid()));
                         let _ = wtx.send(ChanOp::Attach {
                             id,
-                            bytes: attach_command(&name).into_bytes(),
+                            bytes: attach_command(&name).unwrap_or_default().into_bytes(),
                         });
                         self.writers.insert(name.clone(), (wtx, writer));
                         model.handle(Msg::Attached { name }, now)

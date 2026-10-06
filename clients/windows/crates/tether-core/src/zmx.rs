@@ -67,7 +67,7 @@ pub fn parse_ls(output: &str) -> Vec<ZmxSession> {
                     _ => {}
                 }
             }
-            s.name = name.filter(|n| !n.is_empty())?;
+            s.name = name.filter(|n| valid_session_name(n))?;
             Some(s)
         })
         .collect()
@@ -88,12 +88,12 @@ pub fn ls_command() -> String {
     format!("{ZMX} ls")
 }
 
-pub fn attach_command(name: &str) -> String {
-    format!("{ZMX} attach {}\n", shell_quote(name))
+pub fn attach_command(name: &str) -> Option<String> {
+    valid_session_name(name).then(|| format!("{ZMX} attach {}\n", shell_quote(name)))
 }
 
-pub fn kill_command(name: &str) -> String {
-    format!("{ZMX} kill {} --force", shell_quote(name))
+pub fn kill_command(name: &str) -> Option<String> {
+    valid_session_name(name).then(|| format!("{ZMX} kill {} --force", shell_quote(name)))
 }
 
 #[cfg(test)]
@@ -159,12 +159,12 @@ mod tests {
     fn commands_use_the_ios_binary_path() {
         assert_eq!(ls_command(), "~/.local/bin/zmx ls");
         assert_eq!(
-            attach_command("default"),
-            "~/.local/bin/zmx attach 'default'\n"
+            attach_command("default").as_deref(),
+            Some("~/.local/bin/zmx attach 'default'\n")
         );
         assert_eq!(
-            kill_command("build"),
-            "~/.local/bin/zmx kill 'build' --force"
+            kill_command("build").as_deref(),
+            Some("~/.local/bin/zmx kill 'build' --force")
         );
     }
 
@@ -172,15 +172,30 @@ mod tests {
     fn hostile_names_stay_one_argument() {
         assert_eq!(shell_quote("it's"), r#"'it'"'"'s'"#);
         assert_eq!(
-            attach_command("my session"),
-            "~/.local/bin/zmx attach 'my session'\n"
+            attach_command("my session").as_deref(),
+            Some("~/.local/bin/zmx attach 'my session'\n")
         );
         assert_eq!(
-            kill_command("$(rm -rf ~)"),
-            "~/.local/bin/zmx kill '$(rm -rf ~)' --force"
+            kill_command("$(rm -rf ~)").as_deref(),
+            Some("~/.local/bin/zmx kill '$(rm -rf ~)' --force")
         );
         assert_eq!(shell_quote("日本"), "'日本'");
         assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn invalid_names_get_no_command() {
+        for name in ["a\u{15}b", "a\nb", "-rf", "", "  "] {
+            assert_eq!(attach_command(name), None, "{name:?}");
+            assert_eq!(kill_command(name), None, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn parse_ls_drops_invalid_names() {
+        let out = "name=ok\tpid=1\nname=-rf\tpid=2\nname=a\u{15}b\tpid=3\nname=fine two\tpid=4\n";
+        let names: Vec<_> = parse_ls(out).into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["ok", "fine two"]);
     }
 
     #[test]

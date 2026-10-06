@@ -149,11 +149,9 @@ where
     }
 
     async fn kill(&self, name: &str) -> Result<(), ConnectError> {
-        self.control()
-            .await?
-            .exec(&kill_command(name))
-            .await
-            .map(|_| ())
+        let command = kill_command(name)
+            .ok_or_else(|| ConnectError::Transport("invalid session name".into()))?;
+        self.control().await?.exec(&command).await.map(|_| ())
     }
 
     async fn uploads_dir(&self) -> Option<String> {
@@ -287,8 +285,19 @@ mod tests {
             t.log
                 .lock()
                 .unwrap()
-                .contains(&format!("exec {}", kill_command("it's $(x)")))
+                .contains(&format!("exec {}", kill_command("it's $(x)").unwrap()))
         );
+    }
+
+    #[tokio::test]
+    async fn kill_refuses_an_invalid_name_without_running_anything() {
+        let t = FakeTransport::default();
+        let r = remote(t.clone());
+        r.open().await.unwrap();
+        for name in ["a\u{15}b", "a\nb", "-rf"] {
+            assert!(r.kill(name).await.is_err(), "{name:?}");
+        }
+        assert!(!t.log.lock().unwrap().iter().any(|l| l.starts_with("exec")));
     }
 
     #[tokio::test]
@@ -323,7 +332,9 @@ mod tests {
     async fn host_key_change_surfaces_as_refused() {
         let t = FakeTransport::default();
         let hostkeys = Arc::new(MemoryHostKeys::default());
-        hostkeys.pin("devbox.lan", 22, &hex_fingerprint(&[9; 32]));
+        hostkeys
+            .pin("devbox.lan", 22, &hex_fingerprint(&[9; 32]))
+            .unwrap();
         let secrets = Arc::new(MemorySecretStore::default());
         secrets.set(&password_account(machine().id), b"x").unwrap();
         let r = SshRemote::new(t, machine(), hostkeys, secrets);
