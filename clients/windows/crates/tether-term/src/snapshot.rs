@@ -101,7 +101,8 @@ impl TabTerminal {
                         None => (fg, bg) = (theme.background, theme.foreground),
                     }
                 }
-                let ch = if spacer || cell.c == '\0' {
+                // alacritty keeps a tab as '\t' in the cell it lands on; it draws as blank.
+                let ch = if spacer || cell.c.is_control() {
                     ' '
                 } else {
                     cell.c
@@ -254,6 +255,19 @@ mod tests {
         t.feed("x\r\n".repeat(40).as_bytes());
         t.scroll(10);
         assert_eq!(t.snapshot().cursor, None);
+    }
+
+    #[test]
+    fn a_tab_draws_as_a_blank_cell() {
+        let mut t = crate::terminal::tests::term();
+        t.feed(b"a\tb\r\n");
+        let s = t.snapshot();
+        assert!(
+            s.row_texts[0].starts_with("a       b"),
+            "{:?}",
+            s.row_texts[0]
+        );
+        assert!((0..s.cols).all(|c| !s.cell(0, c).ch.is_control()));
     }
 
     #[test]
