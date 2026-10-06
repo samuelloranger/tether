@@ -170,10 +170,15 @@ extension View {
   }
 
   /// Sheets on the Mac are floating panels; the phone's full-height sizing is left alone there.
-  @ViewBuilder func macSheetSize(width: CGFloat, height: CGFloat) -> some View {
+  /// `large` is for browsers like Git, which want most of the window rather than a form's width.
+  @ViewBuilder func macSheetSize(width: CGFloat, height: CGFloat, large: Bool = false) -> some View {
     if TetherPlatform.isMac {
       if #available(iOS 18.0, macCatalyst 18.0, *) {
-        frame(minWidth: width, minHeight: height).presentationSizing(.form)
+        if large {
+          frame(minWidth: width, minHeight: height).presentationSizing(.page)
+        } else {
+          frame(minWidth: width, minHeight: height).presentationSizing(.form)
+        }
       } else {
         frame(minWidth: width, minHeight: height)
       }

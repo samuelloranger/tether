@@ -24,20 +24,29 @@ public enum TetherMacWindow {
   #if targetEnvironment(macCatalyst)
   @MainActor private static func sizeOnFirstLaunch(_ scene: UIWindowScene) {
     guard !UserDefaults.standard.bool(forKey: sizedKey) else { return }
-    UserDefaults.standard.set(true, forKey: sizedKey)
-    let origin = scene.effectiveGeometry.systemFrame.origin
-    scene.requestGeometryUpdate(
-      .Mac(systemFrame: CGRect(origin: origin, size: defaultSize))
-    )
+    // Asked for while the scene is still connecting, the update is silently dropped.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak scene] in
+      guard let scene, !UserDefaults.standard.bool(forKey: sizedKey) else { return }
+      let current = scene.effectiveGeometry.systemFrame
+      let frame = CGRect(
+        x: current.midX - defaultSize.width / 2, y: current.midY - defaultSize.height / 2,
+        width: defaultSize.width, height: defaultSize.height
+      )
+      UserDefaults.standard.set(true, forKey: sizedKey)
+      scene.requestGeometryUpdate(.Mac(systemFrame: frame)) { _ in
+        UserDefaults.standard.set(false, forKey: sizedKey)
+      }
+    }
   }
   #endif
 
   /// Menus this app has no use for. Called from the app delegate's `buildMenu`:
   /// SwiftUI's `CommandGroup(replacing:)` cannot remove UIKit's own menus.
+  /// `.newScene` stays: it is the menu SwiftUI's `.newItem` group lives in.
   public static func removeDeadMenus(from builder: any UIMenuBuilder) {
     guard builder.system == .main else { return }
     let dead: [UIMenu.Identifier] = [
-      .format, .help, .newScene, .document, .openRecent, .print, .share,
+      .format, .help, .toolbar, .document, .openRecent, .print, .share,
       .find, .replace, .spelling, .substitutions, .transformations, .speech,
     ]
     for identifier in dead { builder.remove(menu: identifier) }

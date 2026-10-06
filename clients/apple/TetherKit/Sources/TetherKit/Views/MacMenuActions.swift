@@ -10,6 +10,18 @@ public enum TetherPlatform {
   #endif
 }
 
+extension View {
+  /// A Mac `Menu` draws as a bordered pull-down with a chevron; an icon menu in a
+  /// header should look like the icon buttons beside it.
+  @ViewBuilder public func macPlainMenu() -> some View {
+    #if targetEnvironment(macCatalyst)
+    menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+    #else
+    self
+    #endif
+  }
+}
+
 /// What the focused window's terminal offers the Mac menu bar. A nil action
 /// disables its menu item, so the menu always reflects what can be done now.
 public struct TerminalMenuActions {

@@ -182,10 +182,17 @@ public struct SSHTerminalView: View {
         AgentQuestionSheet(target: target, runner: questionRunner) { answering = nil }
       }
     }
-    .sheet(isPresented: $showSettings) { TerminalSettingsSheet(preferences: preferences) { showSettings = false } }
-    .sheet(isPresented: $showGit) { GitDiffView(controller: controller) { showGit = false } }
+    .sheet(isPresented: $showSettings) {
+      TerminalSettingsSheet(preferences: preferences) { showSettings = false }
+        .macSheetSize(width: 560, height: 680)
+    }
+    .sheet(isPresented: $showGit) {
+      GitDiffView(controller: controller) { showGit = false }
+        .macSheetSize(width: 900, height: 640, large: true)
+    }
     .sheet(isPresented: $showHistory) {
       TerminalHistoryView(controller: controller, preferences: preferences) { showHistory = false }
+        .macSheetSize(width: 900, height: 640, large: true)
     }
     .destructiveConfirmation(
       $pendingKill,
@@ -336,6 +343,7 @@ public struct SSHTerminalView: View {
         Image(systemName: "ellipsis").font(.title3.weight(.semibold))
           .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
       }
+      .macPlainMenu()
       .accessibilityIdentifier("sshTerminalOverflow")
       .accessibilityLabel("More terminal actions")
     }

@@ -106,6 +106,14 @@ public final class TetherSurfaceView: UIView {
   private var lastPanY: CGFloat = 0
   private var lastScrollY: CGFloat = 0
   private var selectionAnchor: (row: Int, col: Int)?
+  /// Where the mouse went down: a pan only begins once the pointer has travelled a few
+  /// points, so its own start would anchor the selection a cell late.
+  private var pressOrigin: CGPoint?
+
+  public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    pressOrigin = touches.first?.location(in: self)
+    super.touchesBegan(touches, with: event)
+  }
 
   // MARK: - Layers
 
@@ -226,7 +234,9 @@ public final class TetherSurfaceView: UIView {
     tap.require(toFail: doubleTap)
     addGestureRecognizer(tap)
 
-    addInteraction(UIEditMenuInteraction(delegate: self))
+    // On the Mac a secondary click belongs to the native context menu; the edit menu
+    // would claim it first and show the phone's bubble instead.
+    if !TetherPlatform.isMac { addInteraction(UIEditMenuInteraction(delegate: self)) }
     installPointerBehaviour()
   }
 
@@ -648,7 +658,7 @@ public final class TetherSurfaceView: UIView {
     switch gesture.state {
     case .began:
       let translation = gesture.translation(in: self)
-      let origin = CGPoint(x: point.x - translation.x, y: point.y - translation.y)
+      let origin = pressOrigin ?? CGPoint(x: point.x - translation.x, y: point.y - translation.y)
       guard let cell = clampedCell(at: origin) else { return }
       selectionAnchor = cell
       selection = TerminalSelection(startRow: cell.row, startCol: cell.col, endRow: cell.row, endCol: cell.col)
@@ -678,8 +688,10 @@ public final class TetherSurfaceView: UIView {
     let y = gesture.translation(in: self).y
     switch gesture.state {
     case .began:
-      lastScrollY = y
+      // A mouse wheel tick arrives as a `.began` that already carries its whole movement.
+      lastScrollY = 0
       scrollRemainder = 0
+      fallthrough
     case .changed:
       let delta = lastScrollY - y
       lastScrollY = y
