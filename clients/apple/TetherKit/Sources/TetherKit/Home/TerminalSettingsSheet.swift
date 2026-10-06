@@ -14,13 +14,15 @@ struct TerminalSettingsSheet: View {
             ForEach(AppPreferences.ColorSchemePreference.allCases) { Text($0.label).tag($0) }
           }
           .pickerStyle(.segmented)
-          NavigationLink {
-            AppIconPicker(current: $appIcon)
-          } label: {
-            HStack {
-              Text("App icon")
-              Spacer()
-              Text(appIcon.name).foregroundStyle(.secondary)
+          if !TetherPlatform.isMac {
+            NavigationLink {
+              AppIconPicker(current: $appIcon)
+            } label: {
+              HStack {
+                Text("App icon")
+                Spacer()
+                Text(appIcon.name).foregroundStyle(.secondary)
+              }
             }
           }
         }
@@ -43,7 +45,7 @@ struct TerminalSettingsSheet: View {
               Text(preferences.terminalFont.label).foregroundStyle(.secondary)
             }
           }
-          Stepper(value: $preferences.terminalFontSize, in: 8...24, step: 1) {
+          Stepper(value: $preferences.terminalFontSize, in: TerminalFontSizeStep.range, step: TerminalFontSizeStep.step) {
             HStack {
               Text("Size")
               Spacer()
@@ -81,32 +83,37 @@ struct TerminalSettingsSheet: View {
           }
         }
         Section {
-          NavigationLink {
-            KeyBarEditor(preferences: preferences)
-          } label: {
-            HStack {
-              Text("Key bar")
-              Spacer()
-              Text("\(preferences.keyBar.items.count) keys").foregroundStyle(.secondary)
+          if !TetherPlatform.isMac {
+            NavigationLink {
+              KeyBarEditor(preferences: preferences)
+            } label: {
+              HStack {
+                Text("Key bar")
+                Spacer()
+                Text("\(preferences.keyBar.items.count) keys").foregroundStyle(.secondary)
+              }
+            }
+            Picker("Key size", selection: $preferences.compactKeys) {
+              Text("Regular").tag(false)
+              Text("Compact").tag(true)
             }
           }
-          Picker("Key size", selection: $preferences.compactKeys) {
-            Text("Regular").tag(false)
-            Text("Compact").tag(true)
-          }
           Picker("Bell", selection: $preferences.bellMode) {
-            ForEach(BellMode.allCases) { Text($0.label).tag($0) }
+            ForEach(BellMode.choices(isMac: TetherPlatform.isMac, including: preferences.bellMode)) { Text($0.label).tag($0) }
           }
         } header: {
-          Text("Keyboard")
+          Text(TetherPlatform.isMac ? "Alerts" : "Keyboard")
         } footer: {
           Text("The bell is what a program rings when it wants your attention. Only the session on screen rings.")
         }
       }
-      .onAppear { appIcon = .current(alternateName: UIApplication.shared.alternateIconName) }
+      .onAppear {
+        guard !TetherPlatform.isMac else { return }
+        appIcon = .current(alternateName: UIApplication.shared.alternateIconName)
+      }
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone) } }
+      .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone).macShortcut(.cancelAction) } }
     }
     .tint(TetherColors.accent)
   }

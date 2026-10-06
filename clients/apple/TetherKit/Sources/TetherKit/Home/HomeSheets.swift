@@ -39,6 +39,7 @@ struct AddServerSheet: View {
               .foregroundStyle(canSave ? TetherColors.onAccent : TetherColors.textFaint)
           }
           .disabled(!canSave)
+          .macShortcut(.defaultAction)
           .accessibilityIdentifier("addServerSave")
           .accessibilityHint(saveBlocker ?? "")
           .padding(.top, 4)
@@ -53,7 +54,7 @@ struct AddServerSheet: View {
       .background(TetherColors.background)
       .navigationTitle("Add a server")
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onDone) } }
+      .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onDone).macShortcut(.cancelAction) } }
       .onAppear { if keyId == nil { keyId = model.keys.first?.id } }
     }
   }
@@ -205,6 +206,7 @@ struct KeyEntrySheet: View {
               .foregroundStyle(canCommit ? TetherColors.onAccent : TetherColors.textFaint)
           }
           .disabled(!canCommit)
+          .macShortcut(.defaultAction)
           .accessibilityIdentifier("keyEntryCommit")
           .accessibilityHint(commitBlocker ?? "")
           if let commitBlocker {
@@ -218,7 +220,7 @@ struct KeyEntrySheet: View {
       .background(TetherColors.background)
       .navigationTitle(title)
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onDone) } }
+      .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onDone).macShortcut(.cancelAction) } }
       .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data, .text]) { result in
         if case let .success(url) = result { loadPrivateKey(from: url) }
       }
