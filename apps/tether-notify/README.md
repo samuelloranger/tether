@@ -11,8 +11,19 @@ never see the plaintext; the iOS Notification Service Extension decrypts it.
     go build -o ~/.local/bin/tether-notify .
     # or, from the repo root:  bash install.sh
 
-Wire it into agent hooks (Claude Code, Codex, Cursor) with
-`bash scripts/install-agent-hooks.sh [host-label]`.
+Wire it into agent hooks (Claude Code, Codex, Gemini CLI, Cursor Agent CLI) with
+`bash scripts/install-agent-hooks.sh [host-label]`. Each agent reports what its hooks
+can see:
+
+- Claude Code: working, needs you, done. With the Tether mod, the phone's
+  Approve / Deny / Reply is the real decision; every other agent gets typed keys.
+- Codex: working, needs you (permission requests), done. Codex runs a hook only
+  after it is trusted: open `/hooks` in Codex once; the installer names any entry
+  still untrusted. Its questions have no hook, so they don't show as needs you.
+- Gemini CLI: working, needs you (confirmations; a question shows without its
+  text), done.
+- Cursor Agent CLI: working and done only. Cursor has no hook before its approval
+  prompt, and print mode (`-p`) fires no turn events.
 
 ## Use
 
