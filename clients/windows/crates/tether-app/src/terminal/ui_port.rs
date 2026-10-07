@@ -120,6 +120,29 @@ fn show_questions(vm: &AgentVm<'_>, questions: &[QuestionView]) {
     SHOWN_QUESTIONS.with(|shown| *shown.borrow_mut() = questions.to_vec());
 }
 
+/// Rows change in place: a new model rebuilds every tab, and a tab rebuilt between press and
+/// release never sees the click. An agent animating its OSC title changes the view many times
+/// a second.
+pub fn sync_rows<T: Clone + PartialEq + 'static>(
+    current: &ModelRc<T>,
+    rows: Vec<T>,
+) -> Option<ModelRc<T>> {
+    let Some(vec) = current.as_any().downcast_ref::<VecModel<T>>() else {
+        return Some(ModelRc::new(VecModel::from(rows)));
+    };
+    while vec.row_count() > rows.len() {
+        vec.remove(vec.row_count() - 1);
+    }
+    for (i, row) in rows.into_iter().enumerate() {
+        if i >= vec.row_count() {
+            vec.push(row);
+        } else if vec.row_data(i).as_ref() != Some(&row) {
+            vec.set_row_data(i, row);
+        }
+    }
+    None
+}
+
 fn show_agents(vm: &AgentVm<'_>, a: &AgentView) {
     vm.set_line(a.line.as_str().into());
     vm.set_line_state(a.state.map_or(-1, agent_index));
@@ -200,7 +223,9 @@ impl UiPort for SlintUi {
             vm.set_session(view.header.session.as_str().into());
             vm.set_word(view.header.word.into());
             vm.set_lamp(lamp_index(view.header.lamp));
-            vm.set_tabs(ModelRc::new(VecModel::from(tab_items_from(&view.tabs))));
+            if let Some(tabs) = sync_rows(&vm.get_tabs(), tab_items_from(&view.tabs)) {
+                vm.set_tabs(tabs);
+            }
             vm.set_empty(view.empty.is_some());
             vm.set_empty_title(
                 view.empty
@@ -311,6 +336,24 @@ mod mapping_tests {
         assert!(items[0].has_progress);
         assert!((items[0].progress - 0.4).abs() < 1e-6);
         assert_eq!(items[0].progress_state, 1);
+    }
+
+    #[test]
+    fn rows_update_in_place_as_the_strip_grows_and_shrinks() {
+        let model = ModelRc::new(VecModel::from(vec![1, 2, 3]));
+        assert!(sync_rows(&model, vec![1, 5, 3]).is_none());
+        assert_eq!(model.iter().collect::<Vec<_>>(), [1, 5, 3]);
+        assert!(sync_rows(&model, vec![1, 5, 3, 4]).is_none());
+        assert_eq!(model.iter().collect::<Vec<_>>(), [1, 5, 3, 4]);
+        assert!(sync_rows(&model, vec![1]).is_none());
+        assert_eq!(model.iter().collect::<Vec<_>>(), [1]);
+    }
+
+    #[test]
+    fn a_model_that_is_not_a_vec_model_is_replaced() {
+        let model: ModelRc<i32> = ModelRc::default();
+        let next = sync_rows(&model, vec![7]).expect("a new model");
+        assert_eq!(next.iter().collect::<Vec<_>>(), [7]);
     }
 
     #[test]
