@@ -290,7 +290,9 @@ impl Builder {
         } else if let Some(li) = self.items.last_mut() {
             let prefix = if li.started { "" } else { li.prefix.as_str() };
             let item = Item {
-                kind: if li.ordered {
+                kind: if self.quote > 0 {
+                    ItemKind::Quote
+                } else if li.ordered {
                     ItemKind::Numbered
                 } else {
                     ItemKind::Bullet
@@ -484,6 +486,19 @@ mod tests {
             [ItemKind::Quote, ItemKind::Rule]
         );
         assert_eq!(texts("> quoted\n> still quoted")[0], "quoted still quoted");
+    }
+
+    #[test]
+    fn a_list_inside_a_quote_stays_quoted() {
+        let list = items("> - one\n> - two");
+        let rows: Vec<_> = list.iter().map(|i| (i.kind, i.text.as_str())).collect();
+        assert_eq!(
+            rows,
+            [
+                (ItemKind::Quote, "\u{2022}  one"),
+                (ItemKind::Quote, "\u{2022}  two")
+            ]
+        );
     }
 
     #[test]
