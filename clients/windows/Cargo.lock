@@ -6018,6 +6018,7 @@ dependencies = [
  "futures",
  "p256 0.13.2",
  "p384 0.13.1",
+ "pulldown-cmark",
  "rand_core 0.6.4",
  "regex",
  "rsa 0.9.10",
