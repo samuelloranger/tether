@@ -22,9 +22,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 rfd = "0.15"
 arboard = { version = "3.6", default-features = false }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 ureq = "3.4"
+tracing-appender = "0.2.5"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

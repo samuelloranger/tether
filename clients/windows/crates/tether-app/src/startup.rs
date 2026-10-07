@@ -43,6 +43,7 @@ pub fn panic_box_message(info: &PanicHookInfo) -> String {
 #[cfg_attr(debug_assertions, allow(dead_code))]
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
+        tracing::error!("{info}");
         crate::platform::show_error_box(&panic_box_message(info));
     }));
 }
