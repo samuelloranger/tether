@@ -155,7 +155,6 @@ private struct PullRequestDetailView: View {
   @State private var showCopied = false
   @State private var diffFiles: [DiffFile] = []
   @State private var blocks: [MarkdownBlock] = []
-  @State private var inlineBlocks: [[AttributedString]] = []
   @State private var loadingDiff = false
   @State private var showDiff = false
 
@@ -471,7 +470,7 @@ private struct PullRequestDetailView: View {
     if !blocks.isEmpty {
       VStack(alignment: .leading, spacing: 8) {
         sectionTitle("Description")
-        MarkdownBodyView(blocks: blocks, inlineBlocks: inlineBlocks)
+        MarkdownBodyView(blocks: blocks)
       }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -526,9 +525,7 @@ private struct PullRequestDetailView: View {
   }
 
   private func refreshDescription(_ body: String) {
-    let parsed = MarkdownDocument.parse(body)
-    blocks = parsed
-    inlineBlocks = MarkdownBodyView.renderedInline(for: parsed)
+    blocks = MarkdownDocument.parse(body)
   }
 
 }

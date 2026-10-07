@@ -16,6 +16,7 @@ let package = Package(
       url: "https://github.com/migueldeicaza/SwiftTerm.git",
       revision: "082119f6fe9207eca15ed7083460792eb2883d7d"
     ),
+    .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.9.0"),
   ],
   targets: [
     .binaryTarget(
@@ -42,6 +43,7 @@ let package = Package(
       dependencies: [
         "CLibSSH2",
         .product(name: "SwiftTerm", package: "SwiftTerm"),
+        .product(name: "Markdown", package: "swift-markdown"),
       ],
       path: "Sources/TetherKit",
       resources: [.process("Resources")]
