@@ -1,0 +1,81 @@
+use std::path::{Path, PathBuf};
+
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::EnvFilter;
+
+const KEEP_DAYS: usize = 7;
+
+/// `%LOCALAPPDATA%\Tether\logs`, next to the data the app keeps.
+pub fn log_dir(local_app_data: Option<&Path>) -> Option<PathBuf> {
+    local_app_data.map(|base| base.join("Tether").join("logs"))
+}
+
+pub fn file_appender(dir: &Path) -> Result<RollingFileAppender, Box<dyn std::error::Error>> {
+    Ok(RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("tether")
+        .filename_suffix("log")
+        .max_log_files(KEEP_DAYS)
+        .build(dir)?)
+}
+
+fn filter() -> EnvFilter {
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
+}
+
+/// A release build has no console, so its log goes to a daily file; a debug build keeps
+/// stderr. Keep the guard until exit: dropping it flushes what is still queued.
+pub fn init() -> Option<WorkerGuard> {
+    if cfg!(debug_assertions) {
+        tracing_subscriber::fmt().with_env_filter(filter()).init();
+        return None;
+    }
+    let dir = log_dir(std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new))?;
+    let appender = file_appender(&dir).ok()?;
+    let (writer, guard) = tracing_appender::non_blocking(appender);
+    tracing_subscriber::fmt()
+        .with_env_filter(filter())
+        .with_ansi(false)
+        .with_writer(writer)
+        .init();
+    Some(guard)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logs_live_under_the_app_data_folder() {
+        let base = Path::new("local");
+        assert_eq!(log_dir(Some(base)), Some(base.join("Tether").join("logs")));
+        assert_eq!(log_dir(None), None);
+    }
+
+    #[test]
+    fn events_land_in_a_dated_file_in_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        let appender = file_appender(&logs).unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(std::sync::Mutex::new(appender))
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!("connected to the host");
+        });
+        let files: Vec<_> = std::fs::read_dir(&logs)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(files.len(), 1);
+        let name = files[0].file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with("tether.") && name.ends_with(".log"),
+            "{name}"
+        );
+        let text = std::fs::read_to_string(&files[0]).unwrap();
+        assert!(text.contains("connected to the host"), "{text}");
+    }
+}

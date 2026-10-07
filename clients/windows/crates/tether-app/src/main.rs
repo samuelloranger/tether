@@ -4,6 +4,7 @@ slint::include_modules!();
 
 mod app;
 mod extras;
+mod logging;
 mod open_machine;
 mod platform;
 mod preview;
@@ -17,10 +18,15 @@ mod win32;
 fn main() {
     #[cfg(windows)]
     updates::startup();
+    let log = logging::init();
     #[cfg(not(debug_assertions))]
     startup::install_panic_hook();
     if let Err(err) = start() {
-        platform::show_error_box(&startup::startup_message(err.as_ref()));
+        let message = startup::startup_message(err.as_ref());
+        tracing::error!("startup failed: {message}");
+        platform::show_error_box(&message);
+        // exit skips destructors, and the guard's drop is what flushes the file.
+        drop(log);
         std::process::exit(1);
     }
 }
@@ -33,7 +39,6 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
             windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
         );
     }
-    tracing_subscriber::fmt::init();
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .select()?;
