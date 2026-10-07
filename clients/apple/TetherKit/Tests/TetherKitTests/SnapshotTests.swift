@@ -7,11 +7,23 @@ import XCTest
 
 /// Whole-picture checks for what structural tests can't see: glyph placement, colours,
 /// spacing. References are recorded on the simulator CI runs (iPhone 16, iOS 26.2); the
-/// tolerance absorbs anti-aliasing differences between runtimes, not layout changes.
+/// tolerance absorbs anti-aliasing noise, not layout changes.
 /// To re-record after an intended change, delete the image in `__Snapshots__` and run once.
 @MainActor
 final class SnapshotTests: XCTestCase {
   private let image = Snapshotting<UIImage, UIImage>.image(precision: 0.99, perceptualPrecision: 0.97)
+  /// Another runtime renders text differently enough to fail every reference, so the
+  /// snapshots only run where they were recorded; CI pins that runtime.
+  nonisolated static let recordedRuntime = "26.2"
+
+  override nonisolated func setUpWithError() throws {
+    let os = ProcessInfo.processInfo.operatingSystemVersion
+    let version = "\(os.majorVersion).\(os.minorVersion)"
+    try XCTSkipUnless(
+      version == Self.recordedRuntime,
+      "snapshots are recorded on iOS \(Self.recordedRuntime); this simulator runs \(version)"
+    )
+  }
 
   // MARK: Terminal
 
