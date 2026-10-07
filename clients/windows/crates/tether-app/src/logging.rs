@@ -24,15 +24,20 @@ fn filter() -> EnvFilter {
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
 }
 
-/// A release build has no console, so its log goes to a daily file; a debug build keeps
-/// stderr. Keep the guard until exit: dropping it flushes what is still queued.
+/// A release build has no console, so its log goes to a daily file; a debug build, or one
+/// without a usable log folder, writes to stderr. Keep the guard until exit: dropping it
+/// flushes what is still queued.
 pub fn init() -> Option<WorkerGuard> {
-    if cfg!(debug_assertions) {
+    let appender = if cfg!(debug_assertions) {
+        None
+    } else {
+        log_dir(std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new))
+            .and_then(|dir| file_appender(&dir).ok())
+    };
+    let Some(appender) = appender else {
         tracing_subscriber::fmt().with_env_filter(filter()).init();
         return None;
-    }
-    let dir = log_dir(std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new))?;
-    let appender = file_appender(&dir).ok()?;
+    };
     let (writer, guard) = tracing_appender::non_blocking(appender);
     tracing_subscriber::fmt()
         .with_env_filter(filter())
