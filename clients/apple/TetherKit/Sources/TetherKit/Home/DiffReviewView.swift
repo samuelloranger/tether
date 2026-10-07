@@ -108,23 +108,20 @@ private struct DiffRowView: View {
 
 struct MarkdownBodyView: View {
   let blocks: [MarkdownBlock]
-  let inlineBlocks: [[AttributedString]]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+      ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
         switch block {
-        case let .heading(level, _):
-          Text(inlineBlocks[index][0])
+        case let .heading(level, text):
+          Text(text)
             .font(level == 1 ? .headline : level == 2 ? .subheadline.weight(.semibold) : .footnote.weight(.semibold))
             .foregroundStyle(TetherColors.textPrimary)
             .padding(.top, 2)
-        case .paragraph:
-          Text(inlineBlocks[index][0]).font(.footnote).foregroundStyle(TetherColors.textSecondary)
-        case let .bullets(items):
-          listRows(items.map { _ in "•" }, inline: inlineBlocks[index])
-        case let .numbered(items):
-          listRows(items.enumerated().map { "\($0.offset + 1)." }, inline: inlineBlocks[index])
+        case let .paragraph(text):
+          Text(text).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        case let .list(items):
+          listRows(items)
         case let .code(lines):
           ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 1) {
@@ -136,11 +133,11 @@ struct MarkdownBodyView: View {
             .padding(10)
           }
           .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
-        case .quote:
-          HStack(spacing: 8) {
-            Rectangle().fill(TetherColors.border).frame(width: 2)
-            Text(inlineBlocks[index][0]).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
-          }
+        case let .quote(text):
+          Text(text).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
+            .quoteBar()
+        case let .table(header, rows):
+          table(header: header, rows: rows)
         case .rule:
           Rectangle().fill(TetherColors.border).frame(height: 0.5).padding(.vertical, 2)
         }
@@ -148,31 +145,65 @@ struct MarkdownBodyView: View {
     }
   }
 
-  private func listRows(_ markers: [String], inline: [AttributedString]) -> some View {
+  private func listRows(_ items: [MarkdownListItem]) -> some View {
     VStack(alignment: .leading, spacing: 5) {
-      ForEach(Array(markers.enumerated()), id: \.offset) { index, marker in
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-          Text(marker).font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
-          Text(inline[index]).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+      ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+        let row = HStack(alignment: .firstTextBaseline, spacing: 7) {
+          marker(item.marker).frame(minWidth: 12, alignment: .leading)
+          Text(item.text).font(item.quoted ? .footnote.italic() : .footnote)
+            .foregroundStyle(item.quoted ? TetherColors.textFaint : TetherColors.textSecondary)
+        }
+        .padding(.leading, CGFloat(item.depth) * 16)
+        if item.quoted { row.quoteBar() } else { row }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func marker(_ marker: MarkdownListItem.Marker) -> some View {
+    switch marker {
+    case .bullet:
+      Text("•").font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
+    case let .number(n):
+      Text("\(n).").font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
+    case let .task(done):
+      Image(systemName: done ? "checkmark.square.fill" : "square")
+        .font(.caption)
+        .foregroundStyle(done ? TetherColors.success : TetherColors.textFaint)
+        .accessibilityLabel(done ? "Done" : "To do")
+    case .continuation:
+      Text(" ").font(.caption2.monospaced())
+    }
+  }
+
+  private func table(header: [AttributedString], rows: [[AttributedString]]) -> some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+        GridRow {
+          ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
+            Text(cell).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+          }
+        }
+        Rectangle().fill(TetherColors.border).frame(height: 0.5).gridCellUnsizedAxes(.horizontal)
+        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+          GridRow {
+            ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+              Text(cell).font(.caption).foregroundStyle(TetherColors.textSecondary)
+            }
+          }
         }
       }
+      .padding(10)
     }
+    .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
   }
+}
 
-  static func renderedInline(for blocks: [MarkdownBlock]) -> [[AttributedString]] {
-    blocks.map { block in
-      switch block {
-      case let .heading(_, text), let .paragraph(text), let .quote(text):
-        [inline(text)]
-      case let .bullets(items), let .numbered(items):
-        items.map { inline($0) }
-      case .code, .rule:
-        []
-      }
-    }
-  }
-
-  private static func inline(_ text: String) -> AttributedString {
-    (try? AttributedString(markdown: text)) ?? AttributedString(text)
+private extension View {
+  /// The bar takes the text's height; left flexible it stretches to whatever is offered.
+  func quoteBar() -> some View {
+    padding(.leading, 10)
+      .overlay(alignment: .leading) { Rectangle().fill(TetherColors.border).frame(width: 2) }
+      .fixedSize(horizontal: false, vertical: true)
   }
 }
