@@ -437,7 +437,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.10.0;
+				MARKETING_VERSION = 5.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.samuelloranger.tether-mobile";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "$(APP_PROVISIONING_PROFILE_SPECIFIER)";
@@ -467,7 +467,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 5.10.0;
+				MARKETING_VERSION = 5.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.samuelloranger.tether-mobile";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "$(APP_PROVISIONING_PROFILE_SPECIFIER)";
@@ -495,7 +495,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 5.10.0;
+				MARKETING_VERSION = 5.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.samuelloranger.tether-mobile.TetherNotificationService";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "$(NSE_PROVISIONING_PROFILE_SPECIFIER)";
@@ -524,7 +524,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 5.10.0;
+				MARKETING_VERSION = 5.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.samuelloranger.tether-mobile.TetherNotificationService";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "$(NSE_PROVISIONING_PROFILE_SPECIFIER)";
