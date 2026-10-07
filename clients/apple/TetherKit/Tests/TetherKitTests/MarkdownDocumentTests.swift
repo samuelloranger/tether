@@ -84,6 +84,17 @@ final class MarkdownDocumentTests: XCTestCase {
     XCTAssertEqual(MarkdownDocument.parse("   \n\n"), [])
   }
 
+  func test_a_list_inside_a_quote_keeps_the_quote() {
+    guard case let .list(items) = MarkdownDocument.parse("> - one\n> - two").first else {
+      return XCTFail("expected a list")
+    }
+    XCTAssertEqual(items.map(\.quoted), [true, true])
+    guard case let .list(plainItems) = MarkdownDocument.parse("- one").first else {
+      return XCTFail("expected a list")
+    }
+    XCTAssertEqual(plainItems.map(\.quoted), [false])
+  }
+
   func test_a_table_keeps_its_header_and_cells() {
     XCTAssertEqual(
       outline("| name | n |\n|---|--:|\n| **alpha** | 1 |\n| b | 22 |"),

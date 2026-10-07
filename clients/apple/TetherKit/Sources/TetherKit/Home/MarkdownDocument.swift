@@ -27,6 +27,8 @@ public struct MarkdownListItem: Equatable, Sendable {
   /// 0 at the top, one more per nested list.
   public var depth: Int
   public var text: AttributedString
+  /// Inside a `>` quote: drawn with the quote's bar.
+  public var quoted = false
 }
 
 public enum MarkdownDocument {
@@ -81,7 +83,7 @@ public enum MarkdownDocument {
         case let nested as ListItemContainer:
           appendList(nested, depth: depth + 1, to: &blocks, quoted: quoted)
         case let paragraph as Paragraph:
-          let row = MarkdownListItem(marker: marker, depth: depth, text: inline(paragraph))
+          let row = MarkdownListItem(marker: marker, depth: depth, text: inline(paragraph), quoted: quoted)
           if case let .list(rows) = blocks.last {
             blocks[blocks.count - 1] = .list(rows + [row])
           } else {

@@ -134,10 +134,8 @@ struct MarkdownBodyView: View {
           }
           .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
         case let .quote(text):
-          HStack(spacing: 8) {
-            Rectangle().fill(TetherColors.border).frame(width: 2)
-            Text(text).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
-          }
+          Text(text).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
+            .quoteBar()
         case let .table(header, rows):
           table(header: header, rows: rows)
         case .rule:
@@ -150,11 +148,13 @@ struct MarkdownBodyView: View {
   private func listRows(_ items: [MarkdownListItem]) -> some View {
     VStack(alignment: .leading, spacing: 5) {
       ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
+        let row = HStack(alignment: .firstTextBaseline, spacing: 7) {
           marker(item.marker).frame(minWidth: 12, alignment: .leading)
-          Text(item.text).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          Text(item.text).font(item.quoted ? .footnote.italic() : .footnote)
+            .foregroundStyle(item.quoted ? TetherColors.textFaint : TetherColors.textSecondary)
         }
         .padding(.leading, CGFloat(item.depth) * 16)
+        if item.quoted { row.quoteBar() } else { row }
       }
     }
   }
@@ -196,5 +196,14 @@ struct MarkdownBodyView: View {
       .padding(10)
     }
     .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
+  }
+}
+
+private extension View {
+  /// The bar takes the text's height; left flexible it stretches to whatever is offered.
+  func quoteBar() -> some View {
+    padding(.leading, 10)
+      .overlay(alignment: .leading) { Rectangle().fill(TetherColors.border).frame(width: 2) }
+      .fixedSize(horizontal: false, vertical: true)
   }
 }
