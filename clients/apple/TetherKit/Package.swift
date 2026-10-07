@@ -17,6 +17,7 @@ let package = Package(
       revision: "082119f6fe9207eca15ed7083460792eb2883d7d"
     ),
     .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.9.0"),
+    .package(url: "https://github.com/pointfreeco/swift-snapshot-testing.git", from: "1.19.6"),
   ],
   targets: [
     .binaryTarget(
@@ -53,8 +54,10 @@ let package = Package(
       dependencies: [
         "TetherKit",
         .product(name: "SwiftTerm", package: "SwiftTerm"),
+        .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
       ],
-      path: "Tests/TetherKitTests"
+      path: "Tests/TetherKitTests",
+      exclude: ["__Snapshots__"]
     ),
   ]
 )
