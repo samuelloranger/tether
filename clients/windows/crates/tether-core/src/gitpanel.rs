@@ -647,9 +647,7 @@ impl GitPanel {
                     return;
                 }
                 doc.state = match result {
-                    Ok((text, truncated)) => {
-                        Ok((markdown::items(&markdown::parse(&text)), truncated))
-                    }
+                    Ok((text, truncated)) => Ok((markdown::items(&text), truncated)),
                     Err(message) => Err(Some(message)),
                 };
             }
