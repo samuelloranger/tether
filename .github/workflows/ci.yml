@@ -97,13 +97,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+      # Pinned runtime: the snapshot references are recorded on it, and the snapshot tests
+      # skip themselves anywhere else.
       - name: TetherKit tests on the simulator
         timeout-minutes: 20
         run: |
           xcodebuild test \
             -skipPackagePluginValidation \
             -scheme TetherKit \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=26.2' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
         working-directory: clients/apple/TetherKit
