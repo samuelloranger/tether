@@ -10,10 +10,15 @@ struct TerminalSettingsSheet: View {
     NavigationStack {
       Form {
         Section("Appearance") {
-          Picker("Theme", selection: $preferences.colorSchemePreference) {
-            ForEach(AppPreferences.ColorSchemePreference.allCases) { Text($0.label).tag($0) }
+          NavigationLink {
+            TerminalThemePicker(preferences: preferences)
+          } label: {
+            HStack {
+              Text("Color scheme")
+              Spacer()
+              Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
+            }
           }
-          .pickerStyle(.segmented)
           if !TetherPlatform.isMac {
             NavigationLink {
               AppIconPicker(current: $appIcon)
@@ -27,15 +32,6 @@ struct TerminalSettingsSheet: View {
           }
         }
         Section("Terminal") {
-          NavigationLink {
-            TerminalThemePicker(preferences: preferences)
-          } label: {
-            HStack {
-              Text("Color scheme")
-              Spacer()
-              Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
-            }
-          }
           NavigationLink {
             TerminalFontPicker(preferences: preferences)
           } label: {

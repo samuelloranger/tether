@@ -4,13 +4,15 @@
 
 ## World
 
-Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night as the default scene. Home opens on an aurora-glow hero; the terminal is quiet chrome around the grid. Catppuccin flavors remain optional full-surface palettes; the terminal well is Mocha.
+Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night as the default scene. Home opens on an aurora-glow hero; the terminal is quiet chrome around the grid. Every terminal colour scheme is a full-app palette; Tether's own is the default.
 
 ## Color
 
-**Restrained.** Near-black neutrals plus one periwinkle accent, with a heat ramp reserved for session state. Tokens live in `TetherColors` (`clients/apple`); light values are darkened so state words stay legible on white.
+**The terminal theme colours everything.** The chosen terminal colour scheme sets the whole chrome palette, and whether the app is light or dark; there is no separate appearance setting. Tokens live in `TetherColors` (`clients/apple`) and `Tokens` (`clients/windows`), both reading a `ChromePalette`.
 
-| Role | Default dark | Default light |
+**Tether** (the default) and **Tether Light** are the hand-set Aurora palettes: near-black neutrals plus one periwinkle accent, with light values darkened so state words stay legible on white.
+
+| Role | Tether | Tether Light |
 |---|---|---|
 | Background | `#08080E` | `#F1F1F6` |
 | Surface | `#12121D` | `#FFFFFF` |
@@ -18,13 +20,13 @@ Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night
 | Border | `#232333` | `#DCDCE6` |
 | Text | `#EDEEF6` | `#14141B` |
 | Secondary text | `#9797AC` | `#5C5C6C` |
+| Faint text | `#8B8BA3` | `#8A8A9C` |
 | Accent (primary) | `#7C8CF8` | `#4353D0` |
+| Terminal well | `#1E1E2E` | `#FBFBFD` |
 
-**Heat ramp** — what the active session is doing: `working` `#F2B34C`, `waiting` `#FF7050`, `done` `#6EE7A8`, cool/idle `#7C8CF8` (periwinkle, same as the accent). These drive the status lamp and state word.
+**Every other theme derives its chrome** from its background, foreground and ANSI colours: surfaces and borders step from the background toward the foreground, the accent is the theme's blue, the state colours its green, yellow and red. A contrast guard lifts anything below 4.5:1 (3:1 for faint text) toward black or white, which keeps each state's hue. The well is the theme's background, so the terminal and its chrome read as one surface. `ChromePalette` holds the rules; a golden file keeps the Swift and Rust implementations identical.
 
-**Terminal well:** `#1E1E2E` — this is fixed, not appearance-dynamic. It must equal the emulator's cell background (`TerminalPalette.background`) or a seam shows at the grid edge.
-
-**System:** OS light → Default light; otherwise Default dark.
+**Heat ramp:** what the active session is doing — `working` is the warning colour, `waiting` the danger colour, `done` the success colour, idle the accent. They drive the status lamp and state word.
 
 ## Typography
 

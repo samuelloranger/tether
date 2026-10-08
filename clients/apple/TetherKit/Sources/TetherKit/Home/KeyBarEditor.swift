@@ -28,7 +28,7 @@ struct KeyBarEditor: View {
             Label {
               KeyDescription(label: key.label, detail: key.detail)
             } icon: {
-              Image(systemName: "plus.circle.fill").foregroundStyle(.green)
+              Image(systemName: "plus.circle.fill").foregroundStyle(TetherColors.success)
             }
           }
           .tint(.primary)

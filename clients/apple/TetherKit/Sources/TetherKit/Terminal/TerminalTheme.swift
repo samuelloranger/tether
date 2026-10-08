@@ -37,8 +37,20 @@ public struct TerminalTheme: Equatable, Identifiable, Sendable {
     ]
   )
 
-  /// Tether's own theme first, then the bundled schemes in their curated order.
-  public static let catalog: [TerminalTheme] = [.tether] + bundled()
+  /// Aurora light's terminal: Catppuccin Latte with Aurora light's accent and state colours.
+  public static let tetherLight = TerminalTheme(
+    id: "tether-light", name: "Tether Light",
+    background: 0xFFFB_FBFD, foreground: 0xFF14_141B, cursor: 0xFF14_141B,
+    ansi: [
+      0xFF5C_5F77, 0xFFC4_381C, 0xFF1C_7A4F, 0xFF8A_5A00,
+      0xFF43_53D0, 0xFFEA_76CB, 0xFF17_9299, 0xFFAC_B0BE,
+      0xFF6C_6F85, 0xFFD2_0F39, 0xFF40_A02B, 0xFFDF_8E1D,
+      0xFF1E_66F5, 0xFFEA_76CB, 0xFF17_9299, 0xFFBC_C0CC,
+    ]
+  )
+
+  /// Tether's own themes first, then the bundled schemes in their curated order.
+  public static let catalog: [TerminalTheme] = [.tether, .tetherLight] + bundled()
 
   public static func named(_ id: String) -> TerminalTheme {
     catalog.first { $0.id == id } ?? .tether

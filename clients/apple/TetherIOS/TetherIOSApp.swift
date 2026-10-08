@@ -15,6 +15,9 @@ struct TetherIOSApp: App {
   @Environment(\.scenePhase) private var scenePhase
 
   init() {
+    #if DEBUG
+    if let id = ProcessInfo.processInfo.environment["TETHER_THEME"] { ChromeTheme.shared.apply(.named(id)) }
+    #endif
     TetherMacWindow.applyBarAppearance()
   }
 
@@ -36,11 +39,9 @@ struct TetherIOSApp: App {
       if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
         AppRootView(demoModel: .liveDemoFromEnv())
           .tint(TetherColors.accent)
-          .preferredColorScheme(.dark)
       } else if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
         AppRootView(demoModel: .preview())
           .tint(TetherColors.accent)
-          .preferredColorScheme(.dark)
       } else if ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] != nil {
         HomeView(
           model: .preview(),
@@ -48,7 +49,7 @@ struct TetherIOSApp: App {
           onOpen: { _ in }
         )
         .tint(TetherColors.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
       } else {
         appRoot
       }
