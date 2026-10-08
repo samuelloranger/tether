@@ -441,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn altgr_symbols_are_text_with_no_modifier_on_linux() {
+    fn altgr_symbols_are_plain_text_when_the_platform_reports_no_modifier() {
         let euro = plain(
             &ch("€"),
             &ch("e"),

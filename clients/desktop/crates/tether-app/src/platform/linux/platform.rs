@@ -93,7 +93,7 @@ impl Platform for LinuxPlatform {
                 let RawWindowHandle::Wayland(s) = w.window_handle().ok()?.as_raw() else {
                     return None;
                 };
-                // SAFETY: both handles belong to winit's live Wayland window, which outlives the process's event loop.
+                // SAFETY: both handles are winit's, valid now; a surface Slint later destroys is refused by wayland-backend, not dereferenced.
                 unsafe { Wayland::connect(d.display.as_ptr(), s.surface.as_ptr()) }
             })
             .flatten();
@@ -119,6 +119,8 @@ impl Platform for LinuxPlatform {
         crate::terminal::clip::snapshot(&clipboard::ArboardSource::default(), &std::thread::sleep)
     }
     fn bring_to_front(&self) {
+        // The protocol has no reply, so a token the compositor rejects cannot be told from one it
+        // honoured; only a failed request falls through to the plain focus attempt.
         if let Some(token) = notify::take_activation_token()
             && self.wayland().is_some_and(|wl| wl.activate(&token))
         {

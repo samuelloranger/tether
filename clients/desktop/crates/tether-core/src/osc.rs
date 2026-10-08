@@ -273,7 +273,8 @@ fn notify_777(body: &[u8]) -> Option<Notification> {
     }
 }
 
-fn percent_decode(s: &str) -> Option<String> {
+/// The bytes a `%XX`-escaped string stands for; `None` on a broken escape.
+pub fn percent_decode_bytes(s: &str) -> Option<Vec<u8>> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -287,7 +288,21 @@ fn percent_decode(s: &str) -> Option<String> {
             i += 1;
         }
     }
-    String::from_utf8(out).ok()
+    Some(out)
+}
+
+fn percent_decode(s: &str) -> Option<String> {
+    String::from_utf8(percent_decode_bytes(s)?).ok()
+}
+
+/// The raw path bytes of a `file://` URL whose host is empty or `localhost`.
+pub fn file_url_path_bytes(url: &str) -> Option<Vec<u8>> {
+    let rest = url.strip_prefix("file://")?;
+    let slash = rest.find('/')?;
+    if !matches!(&rest[..slash], "" | "localhost") {
+        return None;
+    }
+    percent_decode_bytes(&rest[slash..])
 }
 
 fn path_from_url(body: &[u8]) -> Option<String> {
@@ -312,6 +327,31 @@ fn clipboard_text(body: &[u8]) -> Option<String> {
         return None;
     }
     String::from_utf8(data).ok().filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod file_url_tests {
+    use super::*;
+
+    #[test]
+    fn local_hosts_decode_to_raw_bytes() {
+        assert_eq!(
+            file_url_path_bytes("file:///a%20b/%FF"),
+            Some(b"/a b/\xff".to_vec())
+        );
+        assert_eq!(
+            file_url_path_bytes("file://localhost/tmp/c"),
+            Some(b"/tmp/c".to_vec())
+        );
+    }
+
+    #[test]
+    fn other_hosts_schemes_and_broken_escapes_are_refused() {
+        assert_eq!(file_url_path_bytes("file://nas/share/f"), None);
+        assert_eq!(file_url_path_bytes("https://x/y"), None);
+        assert_eq!(file_url_path_bytes("file:///a%zz"), None);
+        assert_eq!(file_url_path_bytes("file://host"), None);
+    }
 }
 
 #[cfg(test)]

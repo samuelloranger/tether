@@ -34,13 +34,9 @@ use smithay_client_toolkit::reexports::client::{
 };
 use smithay_client_toolkit::reexports::protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 
-const TEXT_MIMES: [&str; 5] = [
-    "text/plain;charset=utf-8",
-    "text/plain",
-    "UTF8_STRING",
-    "STRING",
-    "TEXT",
-];
+/// Offered and read as UTF-8. `STRING` is Latin-1 by the X11 convention, so it is only read.
+const TEXT_MIMES: [&str; 3] = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING"];
+const LATIN1_MIME: &str = "STRING";
 const IMAGE_MIMES: [&str; 4] = ["image/png", "image/jpeg", "image/bmp", "image/tiff"];
 const READ_LIMIT: u64 = 64 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -65,8 +61,9 @@ pub struct Wayland {
 
 impl Wayland {
     /// # Safety
-    /// `display` and `surface` are winit's `wl_display` and the window's `wl_surface`, which
-    /// outlive this value (the window lives as long as the process).
+    /// `display` and `surface` are winit's `wl_display` and the window's `wl_surface`. The display
+    /// lives as long as the event loop. Slint destroys the window's surface when it is hidden;
+    /// requests on a destroyed one are refused by wayland-backend's liveness check, not undefined.
     pub unsafe fn connect(display: *mut c_void, surface: *mut c_void) -> Option<Self> {
         let backend = unsafe { Backend::from_foreign_display(display.cast()) };
         let conn = Connection::from_backend(backend);
@@ -98,8 +95,15 @@ impl Wayland {
         std::thread::Builder::new()
             .name("wayland-clipboard".into())
             .spawn(move || {
+                // Cleared on a panic too, so a dead queue sends pastes to the fallback.
+                struct Alive(Arc<Shared>);
+                impl Drop for Alive {
+                    fn drop(&mut self) {
+                        self.0.alive.store(false, Ordering::Relaxed);
+                    }
+                }
+                let _alive = Alive(state.shared.clone());
                 while queue.blocking_dispatch(&mut state).is_ok() {}
-                state.shared.alive.store(false, Ordering::Relaxed);
             })
             .ok()?;
         Some(Self { shared, surface })
@@ -147,8 +151,8 @@ impl Wayland {
 
 /// One paste's worth of the clipboard, read through the focused window's data device.
 pub struct Source<'a> {
-    pub wl: &'a Wayland,
-    pub files: std::cell::RefCell<Option<Option<Vec<PathBuf>>>>,
+    wl: &'a Wayland,
+    files: std::cell::RefCell<Option<Option<Vec<PathBuf>>>>,
 }
 
 impl<'a> Source<'a> {
@@ -190,8 +194,11 @@ impl crate::terminal::clip::ClipboardSource for Source<'_> {
             return None;
         }
         let mimes = self.wl.mimes();
-        let mime = pick(&mimes, &TEXT_MIMES)?;
-        String::from_utf8(self.wl.read(mime)?).ok()
+        if let Some(mime) = pick(&mimes, &TEXT_MIMES) {
+            return String::from_utf8(self.wl.read(mime)?).ok();
+        }
+        let raw = self.wl.read(pick(&mimes, &[LATIN1_MIME])?)?;
+        Some(latin1_to_string(&raw))
     }
 
     fn files(&self) -> Option<Vec<PathBuf>> {
@@ -247,39 +254,18 @@ fn read_limited(mut pipe: impl Read + std::os::fd::AsFd) -> Option<Vec<u8>> {
     }
 }
 
-/// `file://` lines of a `text/uri-list` (or GNOME's `x-special/gnome-copied-files`, whose first
-/// line is the `copy` or `cut` verb). Comments and other schemes are ignored.
-pub fn parse_uri_list(raw: &str) -> Vec<PathBuf> {
-    raw.lines()
-        .filter_map(|line| {
-            let rest = line.trim().strip_prefix("file://")?;
-            // An authority is empty or `localhost`; the path starts at the next slash.
-            let path = &rest[rest.find('/')?..];
-            Some(PathBuf::from(percent_decode(path)))
-        })
-        .collect()
+pub fn latin1_to_string(raw: &[u8]) -> String {
+    raw.iter().map(|&b| char::from(b)).collect()
 }
 
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        let hex = |c: u8| (c as char).to_digit(16);
-        if b[i] == b'%'
-            && let (Some(h), Some(l)) = (
-                b.get(i + 1).and_then(|c| hex(*c)),
-                b.get(i + 2).and_then(|c| hex(*c)),
-            )
-        {
-            out.push((h * 16 + l) as u8);
-            i += 3;
-        } else {
-            out.push(b[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
+/// Local `file://` lines of a `text/uri-list` (or GNOME's `x-special/gnome-copied-files`, whose
+/// first line is the `copy` or `cut` verb). Comments, other schemes and other hosts are ignored.
+pub fn parse_uri_list(raw: &str) -> Vec<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    raw.lines()
+        .filter_map(|line| tether_core::osc::file_url_path_bytes(line.trim()))
+        .map(|bytes| PathBuf::from(std::ffi::OsString::from_vec(bytes)))
+        .collect()
 }
 
 struct State {
@@ -491,8 +477,18 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_escape_stays_literal() {
-        assert_eq!(parse_uri_list("file:///a%zz%4"), [PathBuf::from("/a%zz%4")]);
+    fn a_bad_escape_or_remote_host_is_skipped_and_bytes_stay_raw() {
+        assert_eq!(
+            parse_uri_list("file:///a%zz\nfile://nas/x\nfile:///ok"),
+            [PathBuf::from("/ok")]
+        );
+        let raw = parse_uri_list("file:///%FF");
+        assert_eq!(raw[0].as_os_str().as_encoded_bytes(), b"/\xff");
+    }
+
+    #[test]
+    fn string_is_latin1() {
+        assert_eq!(latin1_to_string(b"caf\xe9"), "café");
     }
 
     #[test]

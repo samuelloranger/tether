@@ -67,6 +67,10 @@ impl Live {
         }
     }
 
+    pub fn knows(&self, id: u32) -> bool {
+        self.by_id.contains_key(&id)
+    }
+
     pub fn clicked(&self, id: u32, action: &str) -> Option<Msg> {
         if action != "default" {
             return None;
@@ -77,23 +81,39 @@ impl Live {
 }
 
 /// The token a daemon sends just before `ActionInvoked`, which lets the clicked app take focus.
+/// Daemons broadcast one per notification of any app, so a token is kept only for one of our own
+/// notifications and only the one of the clicked id is handed on.
 #[derive(Default)]
-pub struct ActivationSlot(Option<(Instant, String)>);
+pub struct ActivationSlot {
+    pending: Option<(u32, String)>,
+    ready: Option<(Instant, String)>,
+}
 
 const TOKEN_LIFE: Duration = Duration::from_secs(10);
 
 impl ActivationSlot {
-    pub fn put(&mut self, token: String, now: Instant) {
-        self.0 = Some((now, token));
+    pub fn offered(&mut self, id: u32, token: String) {
+        self.pending = Some((id, token));
+    }
+
+    pub fn clicked(&mut self, id: u32, now: Instant) {
+        if let Some((pending_id, token)) = self.pending.take()
+            && pending_id == id
+        {
+            self.ready = Some((now, token));
+        }
     }
 
     pub fn take(&mut self, now: Instant) -> Option<String> {
-        let (at, token) = self.0.take()?;
+        let (at, token) = self.ready.take()?;
         (now.duration_since(at) <= TOKEN_LIFE).then_some(token)
     }
 }
 
-static ACTIVATION: Mutex<ActivationSlot> = Mutex::new(ActivationSlot(None));
+static ACTIVATION: Mutex<ActivationSlot> = Mutex::new(ActivationSlot {
+    pending: None,
+    ready: None,
+});
 
 pub fn take_activation_token() -> Option<String> {
     ACTIVATION.lock().unwrap().take(Instant::now())
@@ -106,11 +126,17 @@ pub fn on_signal(live: &Mutex<Live>, msg: &Message) -> Option<Msg> {
     match header.member()?.as_str() {
         "ActionInvoked" => {
             let (id, action): (u32, String) = body.deserialize().ok()?;
-            live.lock().unwrap().clicked(id, &action)
+            let click = live.lock().unwrap().clicked(id, &action);
+            if click.is_some() {
+                ACTIVATION.lock().unwrap().clicked(id, Instant::now());
+            }
+            click
         }
         "ActivationToken" => {
-            let (_id, token): (u32, String) = body.deserialize().ok()?;
-            ACTIVATION.lock().unwrap().put(token, Instant::now());
+            let (id, token): (u32, String) = body.deserialize().ok()?;
+            if live.lock().unwrap().knows(id) {
+                ACTIVATION.lock().unwrap().offered(id, token);
+            }
             None
         }
         "NotificationClosed" => {
@@ -280,17 +306,31 @@ mod tests {
     }
 
     #[test]
-    fn an_activation_token_is_used_once_and_expires() {
+    fn only_the_clicked_notifications_token_is_handed_on_once_and_it_expires() {
         let t0 = Instant::now();
         let mut slot = ActivationSlot::default();
-        slot.put("tok".into(), t0);
+        slot.offered(4, "tok".into());
+        slot.clicked(5, t0);
+        assert_eq!(slot.take(t0), None);
+        slot.offered(4, "tok".into());
+        slot.clicked(4, t0);
         assert_eq!(
             slot.take(t0 + Duration::from_secs(1)).as_deref(),
             Some("tok")
         );
         assert_eq!(slot.take(t0 + Duration::from_secs(1)), None);
-        slot.put("old".into(), t0);
+        slot.offered(4, "old".into());
+        slot.clicked(4, t0);
         assert_eq!(slot.take(t0 + Duration::from_secs(11)), None);
+    }
+
+    #[test]
+    fn a_token_for_another_apps_notification_is_not_kept() {
+        let live = Mutex::new(Live::default());
+        live.lock().unwrap().shown(4, "m", "s");
+        on_signal(&live, &signal("ActivationToken", &(99u32, "foreign")));
+        on_signal(&live, &signal("ActionInvoked", &(4u32, "default")));
+        assert_eq!(take_activation_token(), None);
     }
 
     #[test]
