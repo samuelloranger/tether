@@ -20,6 +20,8 @@ pub enum SecretError {
     Unavailable,
     #[error("The keyring is locked. Unlock it and try again.")]
     Locked,
+    #[error("The keyring did not answer in time. Try again.")]
+    Timeout,
     #[error("secret service: {0}")]
     Backend(String),
     #[error("not a secret account: {0:?}")]
@@ -31,6 +33,10 @@ pub trait SecretStore: Send + Sync {
     fn set(&self, account: &str, secret: &[u8]) -> Result<(), SecretError>;
     /// Deleting an absent secret is not an error.
     fn delete(&self, account: &str) -> Result<(), SecretError>;
+    /// Whether a secret exists, without asking the user for anything the store could ask.
+    fn contains(&self, account: &str) -> Result<bool, SecretError> {
+        Ok(self.get(account)?.is_some())
+    }
 }
 
 pub fn key_account(id: Uuid) -> String {
@@ -90,6 +96,8 @@ pub struct SecretServiceStore;
 #[cfg(target_os = "linux")]
 mod secret_service_store {
     use std::collections::HashMap;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
 
     use secret_service::blocking::{Collection, SecretService};
     use secret_service::{EncryptionType, Error as SsError};
@@ -98,6 +106,10 @@ mod secret_service_store {
     use super::{SecretError, SecretServiceStore, SecretStore, check_account};
 
     const APPLICATION: &str = "tether";
+    /// How long a call that shows no prompt may take. Callers sit on the UI thread.
+    const QUIET: Duration = Duration::from_secs(5);
+    /// Once the keyring shows an unlock or creation prompt, how long the user gets to answer.
+    const PROMPTED: Duration = Duration::from_secs(120);
 
     pub(super) fn attributes(account: &str) -> HashMap<&str, &str> {
         HashMap::from([("application", APPLICATION), ("account", account)])
@@ -133,55 +145,159 @@ mod secret_service_store {
         }
     }
 
-    fn with_collection<T>(
-        f: impl FnOnce(&Collection<'_>) -> Result<T, SsError>,
+    enum Event<T> {
+        Prompting,
+        Done(Result<T, SecretError>),
+    }
+
+    /// Runs `work` on its own thread so a stuck keyring can never hold the caller for longer
+    /// than `quiet`, or than `prompted` once `work` reports it is waiting on a prompt. A
+    /// timed-out thread is left to finish on its own.
+    pub(super) fn run_bounded<T: Send + 'static>(
+        quiet: Duration,
+        prompted: Duration,
+        work: impl FnOnce(&dyn Fn()) -> Result<T, SecretError> + Send + 'static,
     ) -> Result<T, SecretError> {
-        let service = SecretService::connect(EncryptionType::Dh).map_err(map_error)?;
-        let collection = match service.get_default_collection() {
-            Ok(c) => c,
-            // A fresh profile has no default keyring yet; creating it asks for a password.
-            Err(SsError::NoResult) => service
-                .create_collection("Login", "default")
-                .map_err(map_error)?,
-            Err(e) => return Err(map_error(e)),
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = work(&|| {
+                let _ = tx.send(Event::Prompting);
+            });
+            let _ = tx.send(Event::Done(result));
+        });
+        let mut deadline = Instant::now() + quiet;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(Event::Done(result)) => return result,
+                Ok(Event::Prompting) => deadline = Instant::now() + prompted,
+                Err(_) => return Err(SecretError::Timeout),
+            }
+        }
+    }
+
+    /// Any failure to reach the service means there is none to use.
+    fn connect() -> Result<SecretService<'static>, SecretError> {
+        SecretService::connect(EncryptionType::Dh).map_err(|_| SecretError::Unavailable)
+    }
+
+    fn default_collection<'a>(
+        service: &'a SecretService<'a>,
+        create: bool,
+        prompting: &dyn Fn(),
+    ) -> Result<Option<Collection<'a>>, SecretError> {
+        match service.get_default_collection() {
+            Ok(c) => Ok(Some(c)),
+            // A fresh profile has no default keyring; only a save may ask to create one.
+            Err(SsError::NoResult) if create => {
+                prompting();
+                service
+                    .create_collection("Login", "default")
+                    .map(Some)
+                    .map_err(map_error)
+            }
+            Err(SsError::NoResult) => Ok(None),
+            Err(e) => Err(map_error(e)),
+        }
+    }
+
+    fn unlocked(collection: &Collection<'_>, prompting: &dyn Fn()) -> Result<(), SecretError> {
+        if collection.is_locked().map_err(map_error)? {
+            prompting();
+            collection.unlock().map_err(map_error)?;
+        }
+        collection.ensure_unlocked().map_err(map_error)
+    }
+
+    fn read(
+        account: String,
+        prompting: &dyn Fn(),
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+        let service = connect()?;
+        let Some(collection) = default_collection(&service, false, prompting)? else {
+            return Ok(None);
         };
-        collection.ensure_unlocked().map_err(map_error)?;
-        f(&collection).map_err(map_error)
+        unlocked(&collection, prompting)?;
+        let items = collection
+            .search_items(attributes(&account))
+            .map_err(map_error)?;
+        items
+            .first()
+            .map(|item| item.get_secret().map(Zeroizing::new).map_err(map_error))
+            .transpose()
+    }
+
+    fn write(
+        account: String,
+        secret: Zeroizing<Vec<u8>>,
+        prompting: &dyn Fn(),
+    ) -> Result<(), SecretError> {
+        let service = connect()?;
+        let collection = default_collection(&service, true, prompting)?
+            .ok_or_else(|| SecretError::Backend("no default collection".into()))?;
+        unlocked(&collection, prompting)?;
+        collection
+            .create_item(
+                &label(&account),
+                attributes(&account),
+                &secret,
+                true,
+                "application/octet-stream",
+            )
+            .map(drop)
+            .map_err(map_error)
+    }
+
+    fn remove(account: String, prompting: &dyn Fn()) -> Result<(), SecretError> {
+        let service = connect()?;
+        let Some(collection) = default_collection(&service, false, prompting)? else {
+            return Ok(());
+        };
+        unlocked(&collection, prompting)?;
+        for item in collection
+            .search_items(attributes(&account))
+            .map_err(map_error)?
+        {
+            item.delete().map_err(map_error)?;
+        }
+        Ok(())
+    }
+
+    /// Existence needs no unlock: a search lists locked items too.
+    fn exists(account: String, _prompting: &dyn Fn()) -> Result<bool, SecretError> {
+        let service = connect()?;
+        let Some(collection) = default_collection(&service, false, &|| {})? else {
+            return Ok(false);
+        };
+        Ok(!collection
+            .search_items(attributes(&account))
+            .map_err(map_error)?
+            .is_empty())
     }
 
     impl SecretStore for SecretServiceStore {
         fn get(&self, account: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
             check_account(account)?;
-            with_collection(|c| {
-                c.search_items(attributes(account))?
-                    .first()
-                    .map(|item| item.get_secret().map(Zeroizing::new))
-                    .transpose()
-            })
+            let account = account.to_string();
+            run_bounded(QUIET, PROMPTED, move |p| read(account, p))
         }
 
         fn set(&self, account: &str, secret: &[u8]) -> Result<(), SecretError> {
             check_account(account)?;
-            with_collection(|c| {
-                c.create_item(
-                    &label(account),
-                    attributes(account),
-                    secret,
-                    true,
-                    "application/octet-stream",
-                )
-                .map(drop)
-            })
+            let (account, secret) = (account.to_string(), Zeroizing::new(secret.to_vec()));
+            run_bounded(QUIET, PROMPTED, move |p| write(account, secret, p))
         }
 
         fn delete(&self, account: &str) -> Result<(), SecretError> {
             check_account(account)?;
-            with_collection(|c| {
-                for item in c.search_items(attributes(account))? {
-                    item.delete()?;
-                }
-                Ok(())
-            })
+            let account = account.to_string();
+            run_bounded(QUIET, PROMPTED, move |p| remove(account, p))
+        }
+
+        fn contains(&self, account: &str) -> Result<bool, SecretError> {
+            check_account(account)?;
+            let account = account.to_string();
+            run_bounded(QUIET, QUIET, move |p| exists(account, p))
         }
     }
 }
@@ -377,6 +493,52 @@ mod tests {
             SecretError::Unavailable
         ));
         assert!(matches!(map_error(E::NoResult), SecretError::Backend(_)));
+    }
+
+    #[cfg(target_os = "linux")]
+    mod bounded {
+        use super::super::secret_service_store::run_bounded;
+        use super::*;
+        use std::time::Duration;
+
+        const SHORT: Duration = Duration::from_millis(100);
+
+        #[test]
+        fn a_quiet_call_that_hangs_times_out() {
+            let r = run_bounded(SHORT, Duration::from_secs(30), |_| {
+                std::thread::sleep(Duration::from_secs(5));
+                Ok(())
+            });
+            assert!(matches!(r, Err(SecretError::Timeout)));
+        }
+
+        #[test]
+        fn a_prompt_extends_the_wait() {
+            let r = run_bounded(SHORT, Duration::from_secs(5), |prompting| {
+                prompting();
+                std::thread::sleep(SHORT * 4);
+                Ok(7)
+            });
+            assert_eq!(r.unwrap(), 7);
+        }
+
+        #[test]
+        fn a_prompt_has_its_own_bound() {
+            let r = run_bounded(SHORT, SHORT, |prompting| {
+                prompting();
+                std::thread::sleep(Duration::from_secs(5));
+                Ok(())
+            });
+            assert!(matches!(r, Err(SecretError::Timeout)));
+        }
+
+        #[test]
+        fn results_and_errors_pass_through() {
+            assert!(matches!(
+                run_bounded(SHORT, SHORT, |_| Err::<(), _>(SecretError::Locked)),
+                Err(SecretError::Locked)
+            ));
+        }
     }
 
     #[cfg(target_os = "linux")]
