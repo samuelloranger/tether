@@ -207,8 +207,9 @@ fn load_system_fallbacks() -> Vec<&'static [u8]> {
 
 #[cfg(target_os = "linux")]
 /// What each fallback has to cover, in the order they are tried: colour emoji first, as on
-/// Windows, because common symbol fonts draw monochrome emoji. A match that lacks the probe
-/// is dropped, since fontconfig always answers with its best guess even when nothing fits.
+/// Windows, because common symbol fonts draw monochrome emoji. Chinese comes before
+/// Japanese as on Windows, since only the first face of a collection is drawn. A match that
+/// cannot draw its probe is dropped, since fontconfig always answers with its best guess even when nothing fits.
 const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
     (
         "emoji",
@@ -221,13 +222,13 @@ const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
         &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
     ),
     (
-        "sans-serif:lang=ja",
-        '\u{65e5}',
+        "sans-serif:lang=zh-cn",
+        '\u{6c49}',
         &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
     ),
     (
-        "sans-serif:lang=zh-cn",
-        '\u{6c49}',
+        "sans-serif:lang=ja",
+        '\u{65e5}',
         &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
     ),
     (
@@ -239,14 +240,34 @@ const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
 
 #[cfg(target_os = "linux")]
 fn fontconfig_match(pattern: &str) -> Option<std::path::PathBuf> {
-    let out = std::process::Command::new("fc-match")
+    let out = tether_core::hostcmd::host_command("fc-match")
         .args(["-f", "%{file}", pattern])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
     let path = String::from_utf8(out.stdout).ok()?;
     (out.status.success() && !path.is_empty()).then(|| path.into())
+}
+
+/// Mapped is not drawn: swash reads colour tables of version 0 only, so a font whose emoji are
+/// COLRv1 passes the charmap and rasterizes blank.
+#[cfg(target_os = "linux")]
+fn draws(data: &[u8], probe: char) -> bool {
+    let Some(font) = swash::FontRef::from_index(data, 0) else {
+        return false;
+    };
+    let glyph = font.charmap().map(probe);
+    if glyph == 0 {
+        return false;
+    }
+    let mut ctx = swash::scale::ScaleContext::new();
+    let mut scaler = ctx.builder(font).size(16.0).build();
+    swash::scale::Render::new(&[
+        swash::scale::Source::ColorOutline(0),
+        swash::scale::Source::ColorBitmap(swash::scale::StrikeWith::BestFit),
+        swash::scale::Source::Outline,
+    ])
+    .render(&mut scaler, glyph)
+    .is_some_and(|image| image.data.iter().any(|b| *b != 0))
 }
 
 #[cfg(target_os = "linux")]
@@ -268,9 +289,7 @@ fn linux_fallbacks(
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
-            let covers =
-                swash::FontRef::from_index(&bytes, 0).is_some_and(|f| f.charmap().map(*probe) != 0);
-            if covers {
+            if draws(&bytes, *probe) {
                 seen.push(path);
                 loaded.push(&*Box::leak(bytes.into_boxed_slice()));
                 break;
@@ -418,16 +437,22 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert!(covers(found[0], '\u{f121}'));
         assert!(linux_fallbacks(&|_| None, &[("any", 'A', &[])]).is_empty());
+        assert!(!draws(SYMBOLS, '\u{1f600}'));
+        assert!(draws(SYMBOLS, '\u{f121}'));
+        assert!(!draws(b"not a font", 'A'));
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn this_hosts_fallbacks_cover_emoji_and_cjk_when_installed() {
         let found = system_fallbacks();
-        let has_emoji =
-            std::path::Path::new("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf").exists();
-        if has_emoji {
+        let installed = |p: &str| std::path::Path::new(p).exists();
+        if installed("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf") {
             assert!(found.iter().any(|f| covers(f, '\u{1f600}')));
+        }
+        if installed("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc") {
+            assert!(found.iter().any(|f| covers(f, '\u{65e5}')));
+            assert!(found.iter().any(|f| covers(f, '\u{d55c}')));
         }
         for f in found {
             assert!(swash::FontRef::from_index(f, 0).is_some());

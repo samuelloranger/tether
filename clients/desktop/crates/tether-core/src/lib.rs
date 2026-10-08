@@ -11,6 +11,7 @@ pub mod googlefonts;
 pub mod graphics;
 pub mod hints;
 pub mod history;
+pub mod hostcmd;
 pub mod hostkey;
 pub mod keymap;
 pub mod keys;

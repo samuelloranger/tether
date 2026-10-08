@@ -2,10 +2,8 @@
 /// own choice lives in fontconfig.
 #[cfg(not(windows))]
 pub fn system_ui_family() -> Option<String> {
-    let out = std::process::Command::new("fc-match")
+    let out = tether_core::hostcmd::host_command("fc-match")
         .args(["-f", "%{family[0]}", "system-ui"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
     family_from(&String::from_utf8(out.stdout).ok()?, out.status.success())
