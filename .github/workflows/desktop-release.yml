@@ -130,6 +130,8 @@ jobs:
     container: ubuntu:22.04
     defaults:
       run:
+        # A container job runs steps with sh, which has no pipefail.
+        shell: bash
         working-directory: clients/desktop
     outputs:
       version: ${{ steps.ver.outputs.version }}
