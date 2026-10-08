@@ -14,6 +14,14 @@ pub enum SecretError {
     Io(#[from] io::Error),
     #[error("DPAPI: {0}")]
     Crypto(String),
+    #[error(
+        "No secret service is running. Start GNOME Keyring, KWallet or KeePassXC with its Secret Service enabled, then try again."
+    )]
+    Unavailable,
+    #[error("The keyring is locked. Unlock it and try again.")]
+    Locked,
+    #[error("secret service: {0}")]
+    Backend(String),
     #[error("not a secret account: {0:?}")]
     BadAccount(String),
 }
@@ -70,6 +78,111 @@ impl SecretStore for MemorySecretStore {
         check_account(account)?;
         self.secrets.lock().unwrap().remove(account);
         Ok(())
+    }
+}
+
+/// The freedesktop Secret Service (GNOME Keyring, KWallet, KeePassXC) over the session bus.
+/// There is no plaintext fallback: with no service, saving fails.
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+pub struct SecretServiceStore;
+
+#[cfg(target_os = "linux")]
+mod secret_service_store {
+    use std::collections::HashMap;
+
+    use secret_service::blocking::{Collection, SecretService};
+    use secret_service::{EncryptionType, Error as SsError};
+    use zeroize::Zeroizing;
+
+    use super::{SecretError, SecretServiceStore, SecretStore, check_account};
+
+    const APPLICATION: &str = "tether";
+
+    pub(super) fn attributes(account: &str) -> HashMap<&str, &str> {
+        HashMap::from([("application", APPLICATION), ("account", account)])
+    }
+
+    pub(super) fn label(account: &str) -> String {
+        format!("Tether ({account})")
+    }
+
+    fn is_service_missing(name: &str) -> bool {
+        matches!(
+            name,
+            "org.freedesktop.DBus.Error.ServiceUnknown"
+                | "org.freedesktop.DBus.Error.NameHasNoOwner"
+                | "org.freedesktop.DBus.Error.NoServer"
+                | "org.freedesktop.DBus.Error.FileNotFound"
+        )
+    }
+
+    pub(super) fn map_error(e: SsError) -> SecretError {
+        match e {
+            SsError::Unavailable => SecretError::Unavailable,
+            SsError::Locked | SsError::Prompt => SecretError::Locked,
+            SsError::Zbus(zbus::Error::Address(_)) | SsError::Zbus(zbus::Error::InputOutput(_)) => {
+                SecretError::Unavailable
+            }
+            SsError::Zbus(zbus::Error::MethodError(name, _, _)) if is_service_missing(&name) => {
+                SecretError::Unavailable
+            }
+            SsError::ZbusFdo(zbus::fdo::Error::ServiceUnknown(_))
+            | SsError::ZbusFdo(zbus::fdo::Error::NameHasNoOwner(_)) => SecretError::Unavailable,
+            other => SecretError::Backend(other.to_string()),
+        }
+    }
+
+    fn with_collection<T>(
+        f: impl FnOnce(&Collection<'_>) -> Result<T, SsError>,
+    ) -> Result<T, SecretError> {
+        let service = SecretService::connect(EncryptionType::Dh).map_err(map_error)?;
+        let collection = match service.get_default_collection() {
+            Ok(c) => c,
+            // A fresh profile has no default keyring yet; creating it asks for a password.
+            Err(SsError::NoResult) => service
+                .create_collection("Login", "default")
+                .map_err(map_error)?,
+            Err(e) => return Err(map_error(e)),
+        };
+        collection.ensure_unlocked().map_err(map_error)?;
+        f(&collection).map_err(map_error)
+    }
+
+    impl SecretStore for SecretServiceStore {
+        fn get(&self, account: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+            check_account(account)?;
+            with_collection(|c| {
+                c.search_items(attributes(account))?
+                    .first()
+                    .map(|item| item.get_secret().map(Zeroizing::new))
+                    .transpose()
+            })
+        }
+
+        fn set(&self, account: &str, secret: &[u8]) -> Result<(), SecretError> {
+            check_account(account)?;
+            with_collection(|c| {
+                c.create_item(
+                    &label(account),
+                    attributes(account),
+                    secret,
+                    true,
+                    "application/octet-stream",
+                )
+                .map(drop)
+            })
+        }
+
+        fn delete(&self, account: &str) -> Result<(), SecretError> {
+            check_account(account)?;
+            with_collection(|c| {
+                for item in c.search_items(attributes(account))? {
+                    item.delete()?;
+                }
+                Ok(())
+            })
+        }
     }
 }
 
@@ -236,6 +349,44 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn secret_service_items_carry_the_app_and_account() {
+        use super::secret_service_store::{attributes, label};
+        let a = attributes("key-1");
+        assert_eq!(a["application"], "tether");
+        assert_eq!(a["account"], "key-1");
+        assert_eq!(label("key-1"), "Tether (key-1)");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn secret_service_errors_map_to_what_the_user_can_act_on() {
+        use super::secret_service_store::map_error;
+        use secret_service::Error as E;
+        assert!(matches!(
+            map_error(E::Unavailable),
+            SecretError::Unavailable
+        ));
+        assert!(matches!(map_error(E::Locked), SecretError::Locked));
+        assert!(matches!(map_error(E::Prompt), SecretError::Locked));
+        assert!(matches!(
+            map_error(E::Zbus(zbus::Error::Address("none".into()))),
+            SecretError::Unavailable
+        ));
+        assert!(matches!(map_error(E::NoResult), SecretError::Backend(_)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn secret_service_rejects_bad_accounts_before_any_bus_call() {
+        let store = SecretServiceStore;
+        assert!(matches!(
+            store.set("../x", b"x"),
+            Err(SecretError::BadAccount(_))
+        ));
     }
 
     #[cfg(windows)]

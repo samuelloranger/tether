@@ -84,7 +84,12 @@ fn secret_store(data: &DataDir) -> Arc<dyn SecretStore> {
     {
         Arc::new(tether_core::DpapiSecretStore::new(data))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = data;
+        Arc::new(tether_core::SecretServiceStore)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = data;
         Arc::new(tether_core::MemorySecretStore::default())
