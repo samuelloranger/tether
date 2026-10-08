@@ -127,6 +127,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: clients/desktop
+          # One cache per platform, saved from main only: PR caches would evict the one that
+          # releases and PRs restore.
+          shared-key: desktop-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Format
         run: cargo fmt --all --check
@@ -190,6 +194,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: clients/desktop
+          shared-key: desktop-linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Format
         run: cargo fmt --all --check
