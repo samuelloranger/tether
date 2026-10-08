@@ -143,6 +143,10 @@ impl App {
             cursor_on: Cell::new(true),
             blink_timer: slint::Timer::default(),
         });
+        #[cfg(not(windows))]
+        if let Some(family) = crate::uifont::system_ui_family() {
+            app.ui.global::<Tokens>().set_ui_font(family.into());
+        }
         app.restore_placement();
         app.install();
         app.refresh();

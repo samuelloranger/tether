@@ -195,9 +195,89 @@ fn load_system_fallbacks() -> Vec<&'static [u8]> {
     .collect()
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn load_system_fallbacks() -> Vec<&'static [u8]> {
     Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn load_system_fallbacks() -> Vec<&'static [u8]> {
+    linux_fallbacks(&fontconfig_match, FALLBACK_WANTS)
+}
+
+#[cfg(target_os = "linux")]
+/// What each fallback has to cover, in the order they are tried: colour emoji first, as on
+/// Windows, because common symbol fonts draw monochrome emoji. A match that lacks the probe
+/// is dropped, since fontconfig always answers with its best guess even when nothing fits.
+const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
+    (
+        "emoji",
+        '\u{1f600}',
+        &["/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"],
+    ),
+    (
+        "sans-serif:charset=2603",
+        '\u{2603}',
+        &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
+    ),
+    (
+        "sans-serif:lang=ja",
+        '\u{65e5}',
+        &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
+    ),
+    (
+        "sans-serif:lang=zh-cn",
+        '\u{6c49}',
+        &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
+    ),
+    (
+        "sans-serif:lang=ko",
+        '\u{d55c}',
+        &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
+    ),
+];
+
+#[cfg(target_os = "linux")]
+fn fontconfig_match(pattern: &str) -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", pattern])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let path = String::from_utf8(out.stdout).ok()?;
+    (out.status.success() && !path.is_empty()).then(|| path.into())
+}
+
+#[cfg(target_os = "linux")]
+/// Only the first face of a collection is ever drawn, so that is the one that is checked.
+fn linux_fallbacks(
+    find: &dyn Fn(&str) -> Option<std::path::PathBuf>,
+    wants: &[(&str, char, &[&str])],
+) -> Vec<&'static [u8]> {
+    let mut seen = Vec::new();
+    let mut loaded = Vec::new();
+    for (pattern, probe, well_known) in wants {
+        let candidates = find(pattern)
+            .into_iter()
+            .chain(well_known.iter().map(std::path::PathBuf::from));
+        for path in candidates {
+            if seen.contains(&path) {
+                break;
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let covers =
+                swash::FontRef::from_index(&bytes, 0).is_some_and(|f| f.charmap().map(*probe) != 0);
+            if covers {
+                seen.push(path);
+                loaded.push(&*Box::leak(bytes.into_boxed_slice()));
+                break;
+            }
+        }
+    }
+    loaded
 }
 
 #[cfg(test)]
@@ -321,9 +401,36 @@ mod tests {
         assert!(!uniform(&[300.0, 600.0, 800.0]));
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    fn covers(data: &[u8], ch: char) -> bool {
+        maps(data, ch)
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
-    fn no_system_fallbacks_off_windows() {
-        assert!(system_fallbacks().is_empty());
+    fn a_fallback_that_lacks_its_probe_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let nerd = dir.path().join("nerd.ttf");
+        std::fs::write(&nerd, SYMBOLS).unwrap();
+        let wants: &[(&str, char, &[&str])] =
+            &[("any", '\u{1f600}', &[]), ("any", '\u{f121}', &[])];
+        let found = linux_fallbacks(&|_| Some(nerd.clone()), wants);
+        assert_eq!(found.len(), 1);
+        assert!(covers(found[0], '\u{f121}'));
+        assert!(linux_fallbacks(&|_| None, &[("any", 'A', &[])]).is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn this_hosts_fallbacks_cover_emoji_and_cjk_when_installed() {
+        let found = system_fallbacks();
+        let has_emoji =
+            std::path::Path::new("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf").exists();
+        if has_emoji {
+            assert!(found.iter().any(|f| covers(f, '\u{1f600}')));
+        }
+        for f in found {
+            assert!(swash::FontRef::from_index(f, 0).is_some());
+        }
     }
 }
