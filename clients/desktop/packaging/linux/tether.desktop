@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Tether
+GenericName=SSH terminal
+Comment=Persistent terminal sessions on your own machines, over SSH to zmx
+Exec=tether
+Icon=tether
+Terminal=false
+StartupWMClass=tether
+Categories=System;TerminalEmulator;Network;
+Keywords=ssh;terminal;zmx;shell;remote;session;
