@@ -16,12 +16,10 @@ impl DataDir {
         Self { root: root.into() }
     }
 
-    /// `%LOCALAPPDATA%\Tether`. Local, not roaming: the DPAPI secrets the records point at
-    /// cannot roam with them.
-    pub fn default_windows() -> io::Result<Self> {
-        let base = std::env::var_os("LOCALAPPDATA")
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is not set"))?;
-        let dir = Self::new(PathBuf::from(base).join("Tether"));
+    /// The per-user data folder: `%LOCALAPPDATA%\Tether` on Windows, `$XDG_DATA_HOME/tether`
+    /// on Linux. Local, not roaming: the secrets the records point at cannot roam with them.
+    pub fn default_location() -> io::Result<Self> {
+        let dir = Self::new(default_root()?);
         fs::create_dir_all(dir.root())?;
         Ok(dir)
     }
@@ -61,6 +59,40 @@ impl DataDir {
     pub fn save<T: Serialize>(&self, file: &str, value: &T) -> io::Result<()> {
         let json = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
         write_atomic(&self.root.join(file), &json)
+    }
+}
+
+#[cfg(windows)]
+fn default_root() -> io::Result<PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is not set"))?;
+    Ok(PathBuf::from(base).join("Tether"))
+}
+
+#[cfg(not(windows))]
+fn default_root() -> io::Result<PathBuf> {
+    xdg_dir(
+        std::env::var_os("XDG_DATA_HOME").as_deref().map(Path::new),
+        std::env::var_os("HOME").as_deref().map(Path::new),
+        ".local/share",
+    )
+    .map(|base| base.join("tether"))
+    .ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "neither XDG_DATA_HOME nor HOME is set",
+        )
+    })
+}
+
+/// An XDG base directory: the variable when it is an absolute path (the spec says to ignore a
+/// relative one), else `fallback` under home.
+pub fn xdg_dir(var: Option<&Path>, home: Option<&Path>, fallback: &str) -> Option<PathBuf> {
+    match var {
+        Some(dir) if dir.is_absolute() => Some(dir.to_path_buf()),
+        _ => home
+            .filter(|h| !h.as_os_str().is_empty())
+            .map(|h| h.join(fallback)),
     }
 }
 
@@ -106,6 +138,26 @@ pub(crate) fn unix_now() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn xdg_dir_prefers_an_absolute_variable_over_home() {
+        let home = Some(Path::new("/home/u"));
+        let rel = ".local/share";
+        assert_eq!(
+            xdg_dir(Some(Path::new("/data")), home, rel),
+            Some(PathBuf::from("/data"))
+        );
+        assert_eq!(
+            xdg_dir(None, home, rel),
+            Some(PathBuf::from("/home/u/.local/share"))
+        );
+        assert_eq!(
+            xdg_dir(Some(Path::new("relative")), home, rel),
+            Some(PathBuf::from("/home/u/.local/share"))
+        );
+        assert_eq!(xdg_dir(Some(Path::new("")), None, rel), None);
+        assert_eq!(xdg_dir(None, Some(Path::new("")), rel), None);
+    }
+
     use super::*;
     use serde::{Deserialize, Serialize};
 

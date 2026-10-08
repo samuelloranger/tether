@@ -113,7 +113,7 @@ impl App {
     pub fn new() -> Result<Rc<Self>, Box<dyn Error>> {
         let data = match dev_env("TETHER_DEV_DATA") {
             Some(dir) => DataDir::new(dir),
-            None => DataDir::default_windows()?,
+            None => DataDir::default_location()?,
         };
         let secrets = secret_store(&data);
         let hostkeys = Arc::new(JsonHostKeys::new(DataDir::new(data.root()))?);
