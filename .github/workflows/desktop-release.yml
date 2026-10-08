@@ -5,8 +5,8 @@ name: Desktop release
 # It never matches the iOS release.yml or relay-deploy.yml filter ('v*.*.*'),
 # and its release is never marked latest: `releases/latest` stays the iOS app.
 #
-# Same draft-then-publish shape as release.yml: the draft opens first, the
-# build attaches to it, and only a green build takes it out of draft. Installed
+# Same draft-then-publish shape as release.yml: the builds run first, then the draft opens and
+# the assets attach to it, and it only leaves draft once they are all up. Installed
 # apps update from the rolling `windows-feed` and `linux-feed` releases, moved last.
 # Manual runs are build-only: they upload a workflow artifact and touch no release.
 on:
@@ -125,10 +125,9 @@ jobs:
             clients/desktop/dist/velopack/releases.win.json
           if-no-files-found: error
 
-  # ubuntu-22.04 on purpose: the binary links the glibc it was built against (2.35 here), so
-  # it starts on every distro at least that recent.
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
     defaults:
       run:
         working-directory: clients/desktop
@@ -160,10 +159,18 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Building $V"
 
+      # The build runs in ubuntu:22.04 so the binary links glibc 2.35 and starts on every distro
+      # at least that recent; a build on ubuntu-latest would refuse to start on an LTS a release
+      # or two behind. The container is used because the ubuntu-22.04 runner image is being
+      # retired, and the Windows release waits on this job. fontconfig is the only system library
+      # linked at build time (it brings the freetype and expat headers); the windowing, GL and
+      # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk.
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config libfontconfig1-dev \
+            squashfs-tools dotnet-sdk-8.0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
