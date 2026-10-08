@@ -6,7 +6,7 @@ use tether_core::connect::{ConnectError, Transport};
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, broadcast};
 
-use crate::agent::{AgentConnector, FallbackAgent};
+use crate::agent::{AgentConnector, default_agent};
 use crate::connection::RusshConnection;
 use crate::handler::ClientHandler;
 
@@ -17,7 +17,7 @@ pub struct RusshTransport {
 
 impl RusshTransport {
     pub fn new(runtime: tokio::runtime::Handle) -> Self {
-        Self::with_agent(runtime, Arc::new(FallbackAgent::windows()))
+        Self::with_agent(runtime, default_agent())
     }
 
     pub fn with_agent(runtime: tokio::runtime::Handle, agent: Arc<dyn AgentConnector>) -> Self {

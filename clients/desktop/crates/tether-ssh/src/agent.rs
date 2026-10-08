@@ -56,6 +56,44 @@ impl AgentConnector for NamedPipeAgent {
     }
 }
 
+/// An SSH agent on a Unix-domain socket, normally the one `SSH_AUTH_SOCK` names.
+pub struct UnixAgent {
+    pub socket: Option<std::path::PathBuf>,
+}
+
+impl UnixAgent {
+    pub fn from_env() -> Self {
+        Self {
+            socket: std::env::var_os("SSH_AUTH_SOCK")
+                .filter(|v| !v.is_empty())
+                .map(Into::into),
+        }
+    }
+}
+
+impl AgentConnector for UnixAgent {
+    fn connect(&self) -> BoxFuture<'static, Result<AgentClient<AgentStreamBox>, ConnectError>> {
+        #[cfg(unix)]
+        {
+            let socket = self.socket.clone();
+            Box::pin(async move {
+                let Some(socket) = socket else {
+                    return Err(ConnectError::AgentNotRunning);
+                };
+                AgentClient::connect_uds(&socket)
+                    .await
+                    .map(|c| c.dynamic())
+                    .map_err(|e| match e {
+                        russh::keys::Error::IO(io) => map_agent_io_error(&io),
+                        other => ConnectError::Transport(format!("SSH agent: {other}")),
+                    })
+            })
+        }
+        #[cfg(not(unix))]
+        Box::pin(async { Err(ConnectError::AgentNotRunning) })
+    }
+}
+
 /// Pageant, for people who keep their keys in PuTTY's agent.
 pub struct PageantAgent;
 
@@ -88,6 +126,18 @@ impl FallbackAgent {
             first: Arc::new(NamedPipeAgent::default()),
             then: Arc::new(PageantAgent),
         }
+    }
+}
+
+/// The agent this OS ships: `SSH_AUTH_SOCK` on Unix, else the Windows pair.
+pub fn default_agent() -> Arc<dyn AgentConnector> {
+    #[cfg(windows)]
+    {
+        Arc::new(FallbackAgent::windows())
+    }
+    #[cfg(not(windows))]
+    {
+        Arc::new(UnixAgent::from_env())
     }
 }
 

@@ -163,3 +163,81 @@ async fn missing_named_pipe_is_agent_not_running() {
         Some(ConnectError::AgentNotRunning)
     );
 }
+
+#[cfg(unix)]
+mod unix {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command, Stdio};
+    use tether_ssh::UnixAgent;
+
+    struct Agent(Child);
+    impl Drop for Agent {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    async fn spawn_agent(sock: &Path) -> Option<Agent> {
+        let child = Command::new("ssh-agent")
+            .args(["-D", "-a"])
+            .arg(sock)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let agent = Agent(child);
+        for _ in 0..100 {
+            if sock.exists() {
+                return Some(agent);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn unix_agent_lists_the_identities_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("agent.sock");
+        let Some(_agent) = spawn_agent(&sock).await else {
+            eprintln!("ssh-agent is not available; skipping");
+            return;
+        };
+        let held = key();
+        let connector = UnixAgent { socket: Some(sock) };
+        let mut c = connector.connect().await.unwrap();
+        assert!(c.request_identities().await.unwrap().is_empty());
+        c.add_identity(&held, &[]).await.unwrap();
+        let ids = c.request_identities().await.unwrap();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].public_key().key_data(), held.public_key().key_data());
+    }
+
+    #[tokio::test]
+    async fn no_socket_or_a_dead_one_is_agent_not_running() {
+        let none = UnixAgent { socket: None };
+        assert_eq!(
+            none.connect().await.err(),
+            Some(ConnectError::AgentNotRunning)
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let missing = UnixAgent {
+            socket: Some(dir.path().join("absent.sock")),
+        };
+        assert_eq!(
+            missing.connect().await.err(),
+            Some(ConnectError::AgentNotRunning)
+        );
+        let stale: PathBuf = dir.path().join("stale.sock");
+        drop(std::os::unix::net::UnixListener::bind(&stale).unwrap());
+        let refused = UnixAgent {
+            socket: Some(stale),
+        };
+        assert_eq!(
+            refused.connect().await.err(),
+            Some(ConnectError::AgentNotRunning)
+        );
+    }
+}
