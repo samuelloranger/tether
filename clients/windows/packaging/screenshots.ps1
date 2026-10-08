@@ -1,5 +1,5 @@
 # Captures every screen of a debug build against throwaway sample data, for UI review.
-#   pwsh packaging/screenshots.ps1 -Out <dir> [-Pages home,keys] [-Theme dark|light] [-Size 1040x680]
+#   pwsh packaging/screenshots.ps1 -Out <dir> [-Pages home,keys] [-Theme <theme id>]  (dark and light alias tether and tether-light) [-Size 1040x680]
 # Opening machines dials the sample hosts: "Offline" (127.0.0.1:1) gives Couldn't connect, and
 # -RefusedHost host:port is pinned to a wrong key so it shows Host key refused without signing in.
 param(

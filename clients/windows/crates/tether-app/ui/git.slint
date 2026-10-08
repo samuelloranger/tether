@@ -583,7 +583,7 @@ export component GitOverlays inherits Rectangle {
         }
     }
     if GitVm.dialog-open: Rectangle {
-        background: #08080e9e;
+        background: Tokens.background.with-alpha(0.62);
         TouchArea { }
         Rectangle {
             width: min(420px, parent.width - 48px);

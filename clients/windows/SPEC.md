@@ -2,7 +2,7 @@
 
 Date: 2026-10-05
 
-A native Windows client for the same hosts the iOS app already talks to. Rust, Slint, one window. It is a port of Home, terminal appearance, and file send. The visual source of truth stays `DESIGN.md`: night chrome, periwinkle accent, terminal well `#1E1E2E`.
+A native Windows client for the same hosts the iOS app already talks to. Rust, Slint, one window. It is a port of Home, terminal appearance, and file send. The visual source of truth stays `DESIGN.md`: for the default Tether theme that is night chrome, periwinkle accent, terminal well `#1E1E2E`; every colour follows the chosen terminal theme.
 
 The screen map is `design-preview/index.html`, next to this file. Open it in a browser.
 
@@ -160,13 +160,12 @@ Generate stores an Ed25519 key. The record keeps the OpenSSH public line, the al
 
 One page.
 
-**Appearance.** Colour scheme is the only appearance choice. It colours the whole window, not just the terminal, and changes live. Tether Light is the old Light scene; a saved Light, or System while Windows was light, migrates to it once.
+**Appearance.** Colour scheme is the only appearance choice. It colours the whole window, not just the terminal, and changes live. Tether Light is the old Light scene; a saved Light, or System while Windows was light, migrates to it once, and only when the scheme is Tether (any other scheme is kept).
 
 **Terminal.**
 
 | Control | Range | Default on Windows |
 |---|---|---|
-| Color scheme | the shared catalog, Tether first | Tether |
 | Font | the faces below | Cascadia Mono |
 | Size | 8–24 pt, step 1 | 14 |
 | Line spacing | 1.00×–1.60×, step 0.05 | 1.00× |
@@ -184,7 +183,7 @@ Color scheme and Font are their own pages, opened from those rows.
 
 A search field filters by name. Each row is a swatch and a name. The swatch is `~ git main` in that theme's blue, foreground, and green, plus six ANSI dots, on that theme's background. A secondary line says Light or Dark from the background luminance, same rule as iOS (relative luminance above 0.5 is Light). The active row has a check. Choosing a row applies it immediately.
 
-The catalog is the iOS `TerminalThemes.json`, embedded in the binary from its iOS path at build time, with Tether's own theme first. One file, so the two clients never drift. Its `TerminalThemes-LICENSE.txt` ships with the app. An unknown stored id falls back to Tether.
+The catalog is the iOS `TerminalThemes.json`, embedded in the binary from its iOS path at build time, with Tether's own themes first (Tether, then Tether Light), then the shared JSON. One file, so the two clients never drift. Its `TerminalThemes-LICENSE.txt` ships with the app. An unknown stored id falls back to Tether.
 
 ### Font
 
@@ -218,7 +217,7 @@ The lamp follows the iOS connection lamp, not the agent heat ramp. Agent state i
 | The socket died, redialing | reconnecting | warning `#F2B34C` |
 | Gave up | disconnected | danger `#FF7050` |
 
-Light scene uses the light column for each token.
+Colours come from the chosen theme's chrome palette; the table shows the Tether theme.
 
 The grid fills the rest of the window. Its background is the active theme's background, which for Tether is `#1E1E2E`. Padding around the grid is the padding setting. The grid is bottom-anchored. A full repaint of the cell buffer, not a row diff, coalesced to at most one frame per display refresh. The grid itself does not animate, and padding does not animate: a resizing grid would report sizes the PTY then has to honor. A window drag-resize redraws the grid locally at once and sends the PTY resize only once the size settles (about 150 ms quiet), the same split iOS uses to avoid a SIGWINCH storm.
 

@@ -5,10 +5,14 @@ use std::{
     sync::Arc,
 };
 
-use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
+use slint::winit_030::{
+    EventResult, WinitWindowAccessor,
+    winit::{self, event::WindowEvent},
+};
 use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, SharedString, VecModel};
 use tether_core::{
-    DataDir, JsonHostKeys, KeyOrigin, SecretStore, TerminalPrefs, WindowPlacement, theme_named,
+    DataDir, JsonHostKeys, KeyOrigin, SecretStore, TerminalPrefs, WindowPlacement,
+    chrome::ChromePalette, theme_named,
 };
 use uuid::Uuid;
 
@@ -286,6 +290,7 @@ impl App {
         let weak = Rc::downgrade(self);
         picker.on_choose_scheme(move |id| {
             if let Some(app) = weak.upgrade() {
+                app.state.borrow_mut().dev_real_scheme = None;
                 app.update_terminal_prefs(|t| t.scheme = id.to_string());
             }
         });
@@ -378,6 +383,14 @@ impl App {
         if let Some(hwnd) = platform::hwnd_of(self.ui.window()) {
             platform::apply_caption(hwnd, c.background, dark);
         }
+        // Slint never sets a winit theme, so winit would follow Windows and reset the caption's dark flag.
+        self.ui.window().with_winit_window(|w| {
+            w.set_theme(Some(if dark {
+                winit::window::Theme::Dark
+            } else {
+                winit::window::Theme::Light
+            }));
+        });
         self.refresh_home();
     }
 
@@ -385,11 +398,14 @@ impl App {
     /// put a debug build on one screen for a screenshot. Nothing here is saved.
     pub fn apply_dev_screen(self: &Rc<Self>) {
         if let Some(theme) = dev_env("TETHER_DEV_THEME") {
-            self.state.borrow_mut().prefs.terminal.scheme = match theme.as_str() {
+            let mut state = self.state.borrow_mut();
+            state.dev_real_scheme = Some(state.prefs.terminal.scheme.clone());
+            state.prefs.terminal.scheme = match theme.as_str() {
                 "dark" => "tether".into(),
                 "light" => "tether-light".into(),
                 id => id.to_string(),
             };
+            drop(state);
             self.refresh_scene();
         }
         if let Some((w, h)) = dev_env("TETHER_DEV_SIZE").and_then(|s| {
@@ -503,6 +519,7 @@ impl App {
         match event {
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => self.remember_normal_bounds(),
             WindowEvent::ScaleFactorChanged { .. } => self.refresh_preview(),
+            WindowEvent::ThemeChanged(_) => self.refresh_scene(),
             _ => {}
         }
         EventResult::Propagate
@@ -516,8 +533,8 @@ impl App {
         slint::Color::from_rgb_u8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
     }
 
-    fn art_image(public_line: &str, dark: bool) -> slint::Image {
-        let px = home::randomart_rgba(public_line, dark);
+    fn art_image(public_line: &str, chrome: &ChromePalette) -> slint::Image {
+        let px = home::randomart_rgba(public_line, chrome);
         slint::Image::from_rgba8(SharedPixelBuffer::clone_from_slice(
             &px,
             home::ART_WIDTH,
@@ -527,7 +544,7 @@ impl App {
 
     pub fn refresh_home(&self) {
         let state = self.state.borrow();
-        let dark = self.ui.global::<Tokens>().get_dark();
+        let chrome = theme_named(&state.prefs.terminal.scheme).chrome();
         let tab = self.home_tab.get();
         let bridge = self.ui.global::<HomeBridge>();
         bridge.set_tab(tab.index());
@@ -546,7 +563,7 @@ impl App {
         let keys: Vec<KeyCard> = home::key_cards(&state.keys, &state.profiles, home::local_date)
             .into_iter()
             .map(|c| KeyCard {
-                art: Self::art_image(&c.public_line, dark),
+                art: Self::art_image(&c.public_line, &chrome),
                 id: c.id.to_string().into(),
                 name: c.name.into(),
                 origin: c.origin.into(),
