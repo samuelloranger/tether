@@ -25,8 +25,8 @@ fn embed_icon() {
 
 fn copy_licenses() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let windows = manifest.join("../..");
-    let apple = windows.join("../apple/TetherKit/Sources/TetherKit/Resources");
+    let client = manifest.join("../..");
+    let apple = client.join("../apple/TetherKit/Sources/TetherKit/Resources");
     let sources = [
         (
             apple.join("TerminalThemes-LICENSE.txt"),
@@ -34,7 +34,7 @@ fn copy_licenses() {
         ),
         (apple.join("Fonts/LICENSES.md"), "Fonts-LICENSES.md"),
         (
-            windows.join("assets/fonts/CascadiaCode-LICENSE.txt"),
+            client.join("assets/fonts/CascadiaCode-LICENSE.txt"),
             "CascadiaCode-LICENSE.txt",
         ),
     ];

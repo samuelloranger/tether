@@ -1,13 +1,35 @@
 /// A fixed URL rather than Velopack's GitHub source: that source scans only the ten newest
-/// releases, and iOS releases in the same repo would push the Windows one out of view.
+/// releases, and iOS releases in the same repo would push the desktop ones out of view.
+/// Each OS reads its own rolling feed release.
+#[cfg(windows)]
 pub const FEED_URL: &str =
     "https://github.com/samuelloranger/tether/releases/download/windows-feed";
+#[cfg(not(windows))]
+pub const FEED_URL: &str = "https://github.com/samuelloranger/tether/releases/download/linux-feed";
+
+/// Debug builds read `TETHER_UPDATE_FEED` so an update can be tried against a local feed.
+/// Release builds never do: the feed decides what code gets installed.
+#[cfg(any(windows, target_os = "linux"))]
+fn feed_url() -> String {
+    feed_url_with(
+        cfg!(debug_assertions),
+        std::env::var("TETHER_UPDATE_FEED").ok(),
+    )
+}
+
+fn feed_url_with(debug: bool, over: Option<String>) -> String {
+    match over {
+        Some(url) if debug && !url.is_empty() => url.trim_end_matches('/').to_string(),
+        _ => FEED_URL.to_string(),
+    }
+}
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStatus {
-    /// Portable zip or dev build: no installer owns the files, so nothing can replace them.
+    /// Portable zip, unpacked binary or dev build: no installer owns the files, so nothing can
+    /// replace them.
     Unmanaged,
     Checking,
     UpToDate,
@@ -17,10 +39,15 @@ pub enum UpdateStatus {
     InstallFailed,
 }
 
+#[cfg(windows)]
+const UNMANAGED_LABEL: &str = "Portable build, updates not managed";
+#[cfg(not(windows))]
+const UNMANAGED_LABEL: &str = "Not running from the AppImage, updates not managed";
+
 impl UpdateStatus {
     pub fn label(&self) -> String {
         match self {
-            Self::Unmanaged => "Portable build, updates not managed".into(),
+            Self::Unmanaged => UNMANAGED_LABEL.into(),
             Self::Checking => "Checking for updates…".into(),
             Self::UpToDate => "Up to date".into(),
             Self::Downloading(v) => format!("Downloading {v}…"),
@@ -71,20 +98,44 @@ mod tests {
         assert!(!FEED_URL.ends_with('/'));
         assert!(FEED_URL.starts_with("https://"));
     }
+
+    #[test]
+    fn each_os_reads_its_own_feed() {
+        let feed = if cfg!(windows) {
+            "windows-feed"
+        } else {
+            "linux-feed"
+        };
+        assert!(FEED_URL.ends_with(&format!("/releases/download/{feed}")));
+    }
+
+    #[test]
+    fn only_debug_builds_honour_a_feed_override() {
+        let local = Some("http://127.0.0.1:8000/".to_string());
+        assert_eq!(feed_url_with(true, local.clone()), "http://127.0.0.1:8000");
+        assert_eq!(feed_url_with(false, local), FEED_URL);
+        assert_eq!(feed_url_with(true, Some(String::new())), FEED_URL);
+        assert_eq!(feed_url_with(true, None), FEED_URL);
+    }
 }
 
-#[cfg(windows)]
-mod win {
+#[cfg(any(windows, target_os = "linux"))]
+mod managed {
     use super::*;
-    use crate::platform::windows::aumid::AUMID;
     use std::sync::{Arc, Mutex};
     use velopack::sources::HttpSource;
     use velopack::{UpdateCheck, UpdateManager, VelopackApp, VelopackAsset};
 
     /// Must run before anything else: the installer launches the exe with hook arguments and
-    /// expects it to exit, and a downloaded update is applied here on the next launch.
+    /// expects it to exit, and a downloaded update is applied here on the next launch. Outside
+    /// a Velopack package (a dev build, an unpacked AppImage) it does nothing.
     pub fn startup() {
-        VelopackApp::build().set_app_user_model_id(AUMID).run();
+        let mut app = VelopackApp::build();
+        #[cfg(windows)]
+        {
+            app = app.set_app_user_model_id(crate::platform::windows::aumid::AUMID);
+        }
+        app.run();
     }
 
     #[derive(Clone, Default)]
@@ -97,7 +148,8 @@ mod win {
         pub fn spawn(&self, report: impl Fn(UpdateStatus) + Send + 'static) {
             let ready = self.ready.clone();
             std::thread::spawn(move || {
-                let Ok(manager) = UpdateManager::new(HttpSource::new(FEED_URL), None, None) else {
+                let Ok(manager) = UpdateManager::new(HttpSource::new(feed_url()), None, None)
+                else {
                     report(UpdateStatus::Unmanaged);
                     return;
                 };
@@ -136,5 +188,5 @@ mod win {
         }
     }
 }
-#[cfg(windows)]
-pub use win::*;
+#[cfg(any(windows, target_os = "linux"))]
+pub use managed::*;
