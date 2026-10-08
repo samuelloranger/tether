@@ -387,7 +387,7 @@ Opening a card:
 2. Read the server host key. Fingerprint is SHA-256 of the host key blob, lowercase hex, colon-separated bytes. The same string format the iOS client pins.
 3. Nothing pinned for this host and port: pin it and continue. Pinning happens before auth, as on iOS.
 4. Pinned and different: stop. Do not offer a way to replace the pin.
-5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; when that pipe does not exist it tries Pageant instead. The private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
+5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth connects to `\\.\pipe\openssh-ssh-agent` and offers its identities in the agent's order; when that pipe does not exist it tries Pageant instead. On Linux it connects to the socket named by `SSH_AUTH_SOCK` and has no second agent to try. The private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
 6. Run `~/.local/bin/zmx ls` on a control connection (see below) to build the tab strip and choose the first tab (see Sessions). The binary path is `~/.local/bin/zmx`, same as iOS.
 7. For the chosen tab, open a PTY channel sized to the grid on the terminal connection, start the login shell, and push the current size.
 8. Type `~/.local/bin/zmx attach '<name>'` plus newline into that shell, name shell-quoted. Tether attaches by typing into the login shell, not by exec, exactly as iOS does, so the user lands in their shell if they detach.
@@ -428,7 +428,7 @@ Same chrome. One sentence, then **Retry** and **Back to Home**.
 |---|---|
 | Auth rejected | Authentication failed. Check the key or password. |
 | Key deleted | This machine's key was deleted. Edit the machine and choose another key. |
-| Agent not running | No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key. |
+| Agent not running | No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key. (Linux: no agent socket answers on `SSH_AUTH_SOCK`.) |
 | The machine to connect through was removed, or the jumps loop | The machine this one connects through is gone. Edit the machine and choose another, or Direct. |
 | Agent has no key the host accepts | The SSH agent has no key this host accepts. |
 | Connect timeout, or no reply after the handshake | The host stopped answering. |
@@ -611,12 +611,14 @@ Secrets are encrypted with DPAPI (`CryptProtectData`, current-user scope, the ap
 | `key-<uuid>` | Private key as imported, or PKCS#8 PEM when generated |
 | `host-password-<uuid>` | The machine's password |
 
+**On Linux** the folder is `$XDG_DATA_HOME/tether` (`~/.local/share/tether`). The v4 desktop app used the Tauri identifier `cloud.samlo.tether`, so that name never collides. There is no `secrets` folder: secrets live in the desktop's Secret Service keyring (GNOME Keyring, KWallet, KeePassXC) as items labelled `Tether (<account>)` with the attributes `application=tether` and `account=<account>`, in the default collection. A locked collection raises the keyring's own unlock prompt. With no Secret Service reachable, or an unlock that is dismissed, saving a password or key fails with a message saying so; secrets are never written to a plaintext file. Logs go to `$XDG_STATE_HOME/tether/logs` (`~/.local/state/tether/logs`).
+
 Deleting a machine deletes its password entry. Deleting a key deletes its secret.
 
 ### Build, CI, and packaging
 
 - `ci.yml` gains a `windows-latest` job: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` for the workspace, and a release build of `tether-app`.
-- The `tether-core`, `tether-ssh`, and `tether-term` tests also run on Linux in CI. Only `tether-app` needs Windows.
+- The `tether-core`, `tether-ssh`, and `tether-term` tests also run on Linux in CI. The Secret Service round trip in `tether-core/tests/secret_service.rs` runs only on a private session bus the caller sets up, and the Unix agent test starts a real `ssh-agent`. On Linux the terminal's emoji, symbol and CJK fallbacks come from fontconfig, and the window chrome uses its `system-ui` family. Only `tether-app` needs Windows.
 - `desktop-release.yml` releases on a `desktop-vX.Y.Z` tag (`windows-vX.Y.Z` before 0.0.5), whose version must equal the workspace version. It ships a Velopack installer (per-user, no admin, installed to `%LOCALAPPDATA%\TetherTerminal`, never the data folder) and a portable zip. Neither is code-signed yet; the MSIX is built but not shipped until it is.
 - Installed apps update themselves: at launch they read the rolling `windows-feed` release, download a newer version in the background, and apply it on the next launch or from **Settings → About → Restart**. The portable zip does not update.
 - Slint is used under GPLv3, which matches this repo's license.
