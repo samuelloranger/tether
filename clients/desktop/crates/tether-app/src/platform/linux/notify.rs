@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use zbus::Message;
 use zbus::blocking::Connection;
@@ -75,6 +76,29 @@ impl Live {
     }
 }
 
+/// The token a daemon sends just before `ActionInvoked`, which lets the clicked app take focus.
+#[derive(Default)]
+pub struct ActivationSlot(Option<(Instant, String)>);
+
+const TOKEN_LIFE: Duration = Duration::from_secs(10);
+
+impl ActivationSlot {
+    pub fn put(&mut self, token: String, now: Instant) {
+        self.0 = Some((now, token));
+    }
+
+    pub fn take(&mut self, now: Instant) -> Option<String> {
+        let (at, token) = self.0.take()?;
+        (now.duration_since(at) <= TOKEN_LIFE).then_some(token)
+    }
+}
+
+static ACTIVATION: Mutex<ActivationSlot> = Mutex::new(ActivationSlot(None));
+
+pub fn take_activation_token() -> Option<String> {
+    ACTIVATION.lock().unwrap().take(Instant::now())
+}
+
 /// The message a notification signal means, updating `live` for a closed one.
 pub fn on_signal(live: &Mutex<Live>, msg: &Message) -> Option<Msg> {
     let header = msg.header();
@@ -83,6 +107,11 @@ pub fn on_signal(live: &Mutex<Live>, msg: &Message) -> Option<Msg> {
         "ActionInvoked" => {
             let (id, action): (u32, String) = body.deserialize().ok()?;
             live.lock().unwrap().clicked(id, &action)
+        }
+        "ActivationToken" => {
+            let (_id, token): (u32, String) = body.deserialize().ok()?;
+            ACTIVATION.lock().unwrap().put(token, Instant::now());
+            None
         }
         "NotificationClosed" => {
             let (id, _reason): (u32, u32) = body.deserialize().ok()?;
@@ -109,7 +138,7 @@ impl Notifier {
             let spawned = std::thread::Builder::new()
                 .name("notification-signals".into())
                 .spawn(move || {
-                    let rules = ["ActionInvoked", "NotificationClosed"]
+                    let rules = ["ActionInvoked", "ActivationToken", "NotificationClosed"]
                         .map(|m| signal_rule(DEST, m, Some(PATH)))
                         .into_iter()
                         .collect::<Result<Vec<_>, _>>();
@@ -248,6 +277,20 @@ mod tests {
         ));
         assert!(on_signal(&live, &signal("ActionInvoked", &(4u32, "other"))).is_none());
         assert!(on_signal(&live, &signal("ActionInvoked", &(5u32, "default"))).is_none());
+    }
+
+    #[test]
+    fn an_activation_token_is_used_once_and_expires() {
+        let t0 = Instant::now();
+        let mut slot = ActivationSlot::default();
+        slot.put("tok".into(), t0);
+        assert_eq!(
+            slot.take(t0 + Duration::from_secs(1)).as_deref(),
+            Some("tok")
+        );
+        assert_eq!(slot.take(t0 + Duration::from_secs(1)), None);
+        slot.put("old".into(), t0);
+        assert_eq!(slot.take(t0 + Duration::from_secs(11)), None);
     }
 
     #[test]

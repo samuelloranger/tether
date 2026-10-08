@@ -52,6 +52,27 @@ pub fn init(app: &Rc<App>, platform: Arc<dyn Platform>) {
     PLATFORM.with(|p| *p.borrow_mut() = Some(platform));
 }
 
+/// Called once the native window exists.
+pub fn window_shown() {
+    platform().window_shown();
+    // X11 never sends a scale change for the scale a window starts with, and a terminal opened
+    // before the window existed measured itself at scale 1.
+    if let Some(app) = app() {
+        remeasure_well(&app.ui);
+    }
+}
+
+/// The terminal sizes its grid from the well's physical size, so a new scale needs a new measure.
+fn remeasure_well(ui: &AppWindow) {
+    let (w, h) = WELL_LOGICAL.get();
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<TerminalVm>().invoke_well_resized(w, h);
+        }
+    });
+}
+
 fn platform() -> Arc<dyn Platform> {
     PLATFORM
         .with(|p| p.borrow().clone())
@@ -307,6 +328,7 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
         WindowEvent::ModifiersChanged(m) => {
             let mods = crate::terminal::keys::mods_of(m.state());
             MODS.set(mods);
+            SUPER.set(m.state().super_key());
             send(Msg::Modifiers(mods));
             EventResult::Propagate
         }
@@ -329,7 +351,6 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
                     });
                 }
             }
-            SUPER.set(m.state().super_key());
             EventResult::PreventDefault
         }
         WindowEvent::Ime(Ime::Commit(text)) if keys_to_pty(app) => {
@@ -370,13 +391,7 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             EventResult::Propagate
         }
         WindowEvent::ScaleFactorChanged { .. } => {
-            let (w, h) = WELL_LOGICAL.get();
-            let weak = app.ui.as_weak();
-            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
-                if let Some(ui) = weak.upgrade() {
-                    ui.global::<TerminalVm>().invoke_well_resized(w, h);
-                }
-            });
+            remeasure_well(&app.ui);
             EventResult::Propagate
         }
         _ => EventResult::Propagate,

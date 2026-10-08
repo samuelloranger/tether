@@ -44,7 +44,8 @@ velopack = "1.2.161"
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 zbus = "5.19"
-nix = { version = "0.31", default-features = false, features = ["net"] }
+nix = { version = "0.31", default-features = false, features = ["net", "poll"] }
+smithay-client-toolkit = { version = "0.19.2", default-features = false }
 netlink-sys = "0.8"
 
 [build-dependencies]

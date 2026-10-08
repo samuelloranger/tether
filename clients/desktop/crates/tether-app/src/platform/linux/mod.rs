@@ -4,10 +4,12 @@ pub mod codec;
 pub mod launcher;
 pub mod network;
 pub mod notify;
+pub mod placement;
 pub mod platform;
 pub mod session;
 pub mod shell;
 mod system;
+pub mod wayland;
 
 pub use system::{show_error_box, system_uses_light};
 
