@@ -615,6 +615,23 @@ Secrets are encrypted with DPAPI (`CryptProtectData`, current-user scope, the ap
 
 Deleting a machine deletes its password entry. Deleting a key deletes its secret.
 
+### Linux platform layer
+
+`tether-app/src/platform/linux/` implements the `Platform` trait for Linux, X11 first (Wayland is a later step). Every feature that is a Windows API there maps to a freedesktop interface, with pure-Rust dependencies and no GTK.
+
+| Feature | Linux |
+|---|---|
+| Notifications | `org.freedesktop.Notifications` over the session bus (`zbus`), on a worker thread so the UI never waits on the daemon. Same shaping as the Windows toast: the header, then the first two non-empty body lines; the body is escaped only when the daemon advertises `body-markup`. One live notification per machine and session: a newer one passes `replaces_id`. The `default` action (a click) arrives as `Msg::ToastClicked`. |
+| Taskbar flash, bring to front | winit `request_user_attention` and `focus_window`. |
+| Progress | The `com.canonical.Unity.LauncherEntry` `Update` signal for `application://tether.desktop` (`progress`, `progress-visible`, `urgent`), read by KDE and dock extensions. It has one bar: paused and error show their value (error also sets `urgent`), indeterminate shows an empty bar. |
+| Clipboard | `arboard` (X11 selections, so Wayland sessions go through XWayland for now). Text, `text/uri-list` as a file drop, and an image as PNG. A file manager's text copy of the paths counts as a file drop. No DIB. A native Wayland clipboard needs arboard's `wayland-data-control` feature and a compositor that implements it. |
+| Open a link | `xdg-open`, detached. |
+| File picker | `rfd` on its XDG desktop portal backend, so the AppImage needs no GTK. The error box shells out to `zenity` or `kdialog` (the portal has no message dialog) and always writes to stderr. |
+| Image re-encode | The `image` crate decodes BMP and TIFF and encodes JPEG at quality 90. HEIC, HEIF and AVIF would need C decoders, so they are sent as they are. |
+| System light or dark | `org.freedesktop.portal.Settings` `color-scheme` (2 is light; 1, 0 and a missing portal are dark), read once at startup with a 500 ms limit. The window theme follows the palette through winit `set_theme`; there is no caption to colour. |
+| Sleep, lock | logind on the system bus, subscribed only: `PrepareForSleep(false)` is `Resumed`; the own session's `Lock` and `Unlock` signals and its `LockedHint` property (what desktops set on an idle lock) are `Locked` and `Unlocked`, once per change. |
+| Network | A netlink route socket (link, address and route groups, settled for 300 ms) triggers a re-check of the route to the host: the interface of the source address the kernel picks, fed to the same `route_change` rule as Windows. Online means a route to the host exists. |
+
 ### Build, CI, and packaging
 
 - `ci.yml` gains a `windows-latest` job: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` for the workspace, and a release build of `tether-app`.

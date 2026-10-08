@@ -23,7 +23,7 @@ rfd = "0.15"
 arboard = { version = "3.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 ureq = "3.4"
 tracing-appender = "0.2.5"
 
@@ -40,9 +40,18 @@ windows = { version = "0.62.2", features = [
 ] }
 velopack = "1.2.161"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+zbus = "5.19"
+nix = { version = "0.31", default-features = false, features = ["net"] }
+netlink-sys = "0.8"
+
 [build-dependencies]
 slint-build = "1.18.1"
 winresource = "0.1.31"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+serde.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -91,7 +91,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         width_px: 640,
         height_px: 384,
     };
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     let network_target = (machine.host.clone(), machine.port);
     set_well_color(&app.ui, style.theme.background);
     crate::extras::set_foreground(&app.ui, style.theme.foreground);
@@ -107,6 +107,8 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
     crate::platform::windows::network::watch(network_target.0, network_target.1);
+    #[cfg(target_os = "linux")]
+    crate::platform::linux::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
@@ -340,6 +342,11 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
                         crate::platform::windows::wndproc::install(h);
                     }
                 });
+            }
+            #[cfg(target_os = "linux")]
+            if *focused {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(crate::platform::linux::session::watch);
             }
             if *focused && keys_to_pty(app) {
                 let _ = app
