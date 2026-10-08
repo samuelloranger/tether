@@ -166,6 +166,8 @@ mod tests {
         }
     }
 
+    // Unix paths.
+    #[cfg(unix)]
     #[test]
     fn xdg_dir_prefers_an_absolute_variable_over_home() {
         let home = Some(Path::new("/home/u"));

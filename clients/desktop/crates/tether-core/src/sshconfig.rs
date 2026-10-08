@@ -427,6 +427,8 @@ mod tests {
         assert_eq!(parse_hop("fe80::1"), (None, "fe80::1".into(), 22));
     }
 
+    // Unix paths.
+    #[cfg(unix)]
     #[test]
     fn a_home_folder_on_disk_reads_includes_and_tilde_identity_files() {
         let home = tempfile::tempdir().unwrap();

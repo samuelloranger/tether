@@ -78,6 +78,8 @@ mod tests {
         assert_eq!(windows_log_dir(None), None);
     }
 
+    // Unix paths.
+    #[cfg(unix)]
     #[test]
     fn linux_logs_live_under_the_state_folder() {
         let home = Some(Path::new("/home/u"));

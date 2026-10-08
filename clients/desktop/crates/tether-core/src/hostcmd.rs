@@ -61,6 +61,8 @@ mod tests {
         assert!(removed("APPIMAGE"));
     }
 
+    // Unix paths.
+    #[cfg(unix)]
     #[test]
     fn the_appimage_folders_leave_the_path() {
         let path = OsStr::new("/tmp/.mount_x/usr/bin:/usr/local/bin:/usr/bin");
