@@ -18,6 +18,8 @@ pub struct AppState {
     pub profiles: Profiles,
     pub keys: KeyRecords,
     pub prefs: Preferences,
+    /// The saved scheme while a dev-screen override is on `prefs`, so saving never persists the override.
+    pub dev_real_scheme: Option<String>,
     pub secrets: Arc<dyn SecretStore>,
     #[allow(dead_code)]
     pub hostkeys: Arc<dyn HostKeyStore>,
@@ -46,11 +48,13 @@ impl AppState {
         data: DataDir,
         secrets: Arc<dyn SecretStore>,
         hostkeys: Arc<dyn HostKeyStore>,
+        system_is_light: bool,
     ) -> Result<Self, AppError> {
         Ok(Self {
             profiles: data.load(PROFILES_FILE)?,
             keys: data.load(KEYS_FILE)?,
-            prefs: Preferences::load(&data)?,
+            prefs: Preferences::load(&data, system_is_light)?,
+            dev_real_scheme: None,
             data,
             secrets,
             hostkeys,
@@ -58,7 +62,11 @@ impl AppState {
     }
 
     pub fn save_prefs(&self) {
-        if let Err(e) = self.prefs.save(&self.data) {
+        let mut prefs = self.prefs.clone();
+        if let Some(real) = &self.dev_real_scheme {
+            prefs.terminal.scheme = real.clone();
+        }
+        if let Err(e) = prefs.save(&self.data) {
             tracing::warn!("saving preferences failed: {e}");
         }
     }
@@ -187,7 +195,8 @@ mod tests {
     fn state(dir: &std::path::Path) -> (AppState, Arc<MemorySecretStore>, Arc<MemoryHostKeys>) {
         let secrets = Arc::new(MemorySecretStore::default());
         let hostkeys = Arc::new(MemoryHostKeys::default());
-        let s = AppState::load(DataDir::new(dir), secrets.clone(), hostkeys.clone()).unwrap();
+        let s =
+            AppState::load(DataDir::new(dir), secrets.clone(), hostkeys.clone(), false).unwrap();
         (s, secrets, hostkeys)
     }
 

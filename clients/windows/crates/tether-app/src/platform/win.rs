@@ -14,7 +14,7 @@ use windows::{
     core::{HSTRING, w},
 };
 
-use crate::vm::scene::caption_colorref;
+use crate::vm::scene::colorref;
 
 pub fn show_error_box(message: &str) {
     let text = HSTRING::from(message);
@@ -24,10 +24,10 @@ pub fn show_error_box(message: &str) {
     }
 }
 
-pub fn apply_caption(hwnd: isize, dark: bool) {
+pub fn apply_caption(hwnd: isize, background: u32, dark: bool) {
     let hwnd = HWND(hwnd as *mut c_void);
     let dark_mode = i32::from(dark);
-    let caption = COLORREF(caption_colorref(dark));
+    let caption = COLORREF(colorref(background));
     unsafe {
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -42,6 +42,16 @@ pub fn apply_caption(hwnd: isize, dark: bool) {
             size_of::<COLORREF>() as u32,
         );
     }
+}
+
+pub fn placement_visible(p: &WindowPlacement) -> bool {
+    let strip = RECT {
+        left: p.x,
+        top: p.y,
+        right: p.x + p.width as i32,
+        bottom: p.y + 40,
+    };
+    !unsafe { MonitorFromRect(&strip, MONITOR_DEFAULTTONULL) }.is_invalid()
 }
 
 pub fn system_uses_light() -> bool {
@@ -59,14 +69,4 @@ pub fn system_uses_light() -> bool {
         )
     };
     status.is_ok() && value == 1
-}
-
-pub fn placement_visible(p: &WindowPlacement) -> bool {
-    let strip = RECT {
-        left: p.x,
-        top: p.y,
-        right: p.x + p.width as i32,
-        bottom: p.y + 40,
-    };
-    !unsafe { MonitorFromRect(&strip, MONITOR_DEFAULTTONULL) }.is_invalid()
 }

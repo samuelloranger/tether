@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::DataDir;
+use crate::{DataDir, theme_named};
 
 pub const PREFERENCES_FILE: &str = "preferences.json";
 pub const DEFAULT_SIZE_PT: f32 = 14.0;
@@ -12,16 +12,6 @@ pub const SPACING_RANGE: RangeInclusive<f32> = 1.0..=1.6;
 pub const PADDING_RANGE: RangeInclusive<f32> = 0.0..=24.0;
 pub const MIN_CLIENT_WIDTH: u32 = 640;
 pub const MIN_CLIENT_HEIGHT: u32 = 420;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ThemeMode {
-    System,
-    // Night is the default scene, as on iOS.
-    #[default]
-    Dark,
-    Light,
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -109,16 +99,39 @@ pub struct WindowPlacement {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
-    pub theme_mode: ThemeMode,
     pub terminal: TerminalPrefs,
     pub window: Option<WindowPlacement>,
 }
 
+/// What is read from disk: `Preferences` plus the `theme_mode` field it no longer has.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct Stored {
+    theme_mode: Option<serde_json::Value>,
+    #[serde(flatten)]
+    prefs: Preferences,
+}
+
 impl Preferences {
-    pub fn load(dir: &DataDir) -> io::Result<Self> {
-        let mut p: Preferences = dir.load(PREFERENCES_FILE)?;
+    /// `system_is_light` only matters for a file that still carries the old `theme_mode`.
+    pub fn load(dir: &DataDir, system_is_light: bool) -> io::Result<Self> {
+        let stored: Stored = dir.load(PREFERENCES_FILE)?;
+        let mut p = stored.prefs;
         p.terminal = p.terminal.clamped();
+        if let Some(mode) = stored.theme_mode.as_ref().and_then(|v| v.as_str()) {
+            p.migrate_theme_mode(mode, system_is_light);
+            // Drop the old field from disk so a later change of the Windows theme cannot flip the result.
+            // A failed save only means the migration runs again next launch.
+            let _ = p.save(dir);
+        }
         Ok(p)
+    }
+
+    fn migrate_theme_mode(&mut self, mode: &str, system_is_light: bool) {
+        let light = mode == "light" || (mode == "system" && system_is_light);
+        if light && theme_named(&self.terminal.scheme).id == "tether" {
+            self.terminal.scheme = "tether-light".into();
+        }
     }
 
     pub fn save(&self, dir: &DataDir) -> io::Result<()> {
@@ -133,7 +146,6 @@ mod tests {
     #[test]
     fn windows_defaults() {
         let p = Preferences::default();
-        assert_eq!(p.theme_mode, ThemeMode::Dark);
         let t = p.terminal;
         assert_eq!(
             (t.scheme.as_str(), t.font.as_str()),
@@ -212,8 +224,7 @@ mod tests {
             r#"{"terminal":{"size_pt":99,"line_spacing":null,"cursor":"bar","future_field":1},"unknown":true}"#,
         )
         .unwrap();
-        let p = Preferences::load(&data).unwrap();
-        assert_eq!(p.theme_mode, ThemeMode::Dark);
+        let p = Preferences::load(&data, false).unwrap();
         assert_eq!(p.terminal.size_pt, 24.0);
         assert_eq!(p.terminal.line_spacing, 1.0);
         assert_eq!(p.terminal.cursor, CursorShape::Bar);
@@ -225,7 +236,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let data = DataDir::new(dir.path());
         let p = Preferences {
-            theme_mode: ThemeMode::Light,
             terminal: TerminalPrefs {
                 scheme: "dracula".into(),
                 ..TerminalPrefs::default()
@@ -239,6 +249,107 @@ mod tests {
             }),
         };
         p.save(&data).unwrap();
-        assert_eq!(Preferences::load(&data).unwrap(), p);
+        assert_eq!(Preferences::load(&data, false).unwrap(), p);
+    }
+
+    fn load_with(json: &str, system_is_light: bool) -> (Preferences, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(PREFERENCES_FILE), json).unwrap();
+        let p = Preferences::load(&DataDir::new(dir.path()), system_is_light).unwrap();
+        (p, dir)
+    }
+
+    fn scheme_after(json: &str, system_is_light: bool) -> String {
+        load_with(json, system_is_light).0.terminal.scheme
+    }
+
+    #[test]
+    fn an_old_light_mode_moves_tether_to_tether_light() {
+        let json = r#"{"theme_mode":"light","terminal":{"scheme":"tether"}}"#;
+        assert_eq!(scheme_after(json, false), "tether-light");
+        assert_eq!(
+            scheme_after(r#"{"theme_mode":"light"}"#, false),
+            "tether-light"
+        );
+    }
+
+    #[test]
+    fn an_old_system_mode_follows_windows_once() {
+        let json = r#"{"theme_mode":"system"}"#;
+        assert_eq!(scheme_after(json, true), "tether-light");
+        assert_eq!(scheme_after(json, false), "tether");
+    }
+
+    #[test]
+    fn an_old_dark_mode_changes_nothing() {
+        assert_eq!(scheme_after(r#"{"theme_mode":"dark"}"#, true), "tether");
+    }
+
+    #[test]
+    fn another_scheme_is_kept() {
+        let json = r#"{"theme_mode":"light","terminal":{"scheme":"dracula"}}"#;
+        assert_eq!(scheme_after(json, true), "dracula");
+    }
+
+    #[test]
+    fn the_old_field_is_never_written_back() {
+        let (p, dir) = load_with(r#"{"theme_mode":"light"}"#, false);
+        let on_disk = std::fs::read_to_string(dir.path().join(PREFERENCES_FILE)).unwrap();
+        assert!(!on_disk.contains("theme_mode"));
+        assert!(!serde_json::to_string(&p).unwrap().contains("theme_mode"));
+        assert_eq!(
+            Preferences::load(&DataDir::new(dir.path()), true)
+                .unwrap()
+                .terminal
+                .scheme,
+            "tether-light"
+        );
+    }
+
+    #[test]
+    fn a_full_old_format_file_survives_the_migration() {
+        let json = r#"{
+            "theme_mode": "light",
+            "unknown_top_level": {"a": 1},
+            "terminal": {
+                "scheme": "tether", "font": "jetbrains-mono", "size_pt": 16,
+                "line_spacing": 1.25, "padding_pt": 12, "cursor": "bar", "blink": true
+            },
+            "window": {"x": -10, "y": 20, "width": 1000, "height": 700, "maximized": true}
+        }"#;
+        let (p, dir) = load_with(json, false);
+        let expected = Preferences {
+            terminal: TerminalPrefs {
+                scheme: "tether-light".into(),
+                font: "jetbrains-mono".into(),
+                size_pt: 16.0,
+                line_spacing: 1.25,
+                padding_pt: 12.0,
+                cursor: CursorShape::Bar,
+                blink: true,
+            },
+            window: Some(WindowPlacement {
+                x: -10,
+                y: 20,
+                width: 1000,
+                height: 700,
+                maximized: true,
+            }),
+        };
+        assert_eq!(p, expected);
+        assert_eq!(
+            Preferences::load(&DataDir::new(dir.path()), true).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn a_non_string_theme_mode_still_loads_the_rest() {
+        let json = r#"{"theme_mode":42,"terminal":{"scheme":"dracula","size_pt":18}}"#;
+        let p = load_with(json, true).0;
+        assert_eq!(
+            (p.terminal.scheme.as_str(), p.terminal.size_pt),
+            ("dracula", 18.0)
+        );
     }
 }

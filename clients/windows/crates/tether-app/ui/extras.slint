@@ -115,7 +115,7 @@ export component HistoryOverlay inherits Rectangle {
                         color: HistoryVm.foreground;
                         font-family: Tokens.mono-font;
                         font-size: 13px;
-                        selection-background-color: #7c8cf859;
+                        selection-background-color: Tokens.accent.with-alpha(0.35);
                     }
                 }
             }
@@ -158,7 +158,7 @@ component PaletteRow inherits Rectangle {
 }
 
 export component PaletteOverlay inherits Rectangle {
-    background: #08080e80;
+    background: Tokens.background.with-alpha(0.5);
     property <length> list-height: min(PaletteVm.rows.length * 44px, 352px);
     property <int> sel: PaletteVm.selected;
     changed sel => {
@@ -193,7 +193,7 @@ export component PaletteOverlay inherits Rectangle {
                 single-line: true;
                 color: Tokens.text;
                 font-size: 15px;
-                selection-background-color: #7c8cf859;
+                selection-background-color: Tokens.accent.with-alpha(0.35);
                 edited => { PaletteVm.query-changed(self.text); }
                 accepted => { PaletteVm.choose-selected(); }
                 key-pressed(e) => {

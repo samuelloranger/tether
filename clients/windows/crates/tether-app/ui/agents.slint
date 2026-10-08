@@ -115,7 +115,7 @@ export component AgentBanner inherits Rectangle {
 }
 
 export component AgentSheet inherits Rectangle {
-    background: #08080e9e;
+    background: Tokens.background.with-alpha(0.62);
     TouchArea { }
     card := Rectangle {
         width: min(520px, root.width - 48px);

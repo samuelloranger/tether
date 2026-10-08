@@ -278,7 +278,7 @@ export component Field inherits VerticalLayout {
             color: Tokens.text;
             font-family: root.mono ? Tokens.mono-font : Tokens.ui-font;
             font-size: 14px;
-            selection-background-color: #7c8cf859;
+            selection-background-color: Tokens.accent.with-alpha(0.35);
             edited => { root.edited(self.text); }
         }
         if root.text == "" && root.placeholder != "": Text {
@@ -321,7 +321,7 @@ export component AreaField inherits VerticalLayout {
                 color: Tokens.text;
                 font-family: Tokens.mono-font;
                 font-size: 12px;
-                selection-background-color: #7c8cf859;
+                selection-background-color: Tokens.accent.with-alpha(0.35);
                 edited => { root.edited(self.text); }
             }
         }
@@ -369,7 +369,16 @@ export component Aurora inherits Rectangle {
     Image {
         width: parent.width;
         height: parent.height;
-        source: @image-url("icons/aurora.svg");
+        source: @image-url("icons/aurora-accent.svg");
+        colorize: Tokens.accent;
+        image-fit: fill;
+        opacity: Tokens.dark ? 1 : 0.57;
+    }
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("icons/aurora-success.svg");
+        colorize: Tokens.success;
         image-fit: fill;
         opacity: Tokens.dark ? 1 : 0.57;
     }
@@ -413,8 +422,7 @@ export component ConfirmDialog inherits Rectangle {
     in property <string> action;
     callback confirmed();
     callback cancelled();
-    // rgba(8, 8, 14, 0.62)
-    background: #08080e9e;
+    background: Tokens.background.with-alpha(0.62);
     TouchArea { }
     card := Rectangle {
         width: min(460px, root.width - 48px);

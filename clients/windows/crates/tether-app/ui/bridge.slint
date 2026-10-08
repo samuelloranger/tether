@@ -89,7 +89,6 @@ export global KeyFormBridge {
 }
 
 export global SettingsBridge {
-    in-out property <int> theme-mode;
     in property <string> scheme-name;
     in property <string> font-name;
     in property <string> size-label;
@@ -104,7 +103,6 @@ export global SettingsBridge {
     in property <string> update-label;
     in property <bool> update-ready;
     callback restart-to-update();
-    callback theme-mode-changed(int);
     callback size-step(int);
     callback spacing-changed(float);
     callback padding-step(int);

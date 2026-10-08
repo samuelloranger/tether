@@ -1,6 +1,8 @@
 use chrono::{DateTime, Local, NaiveDate};
 use tether_core::{
-    KeyRecord, KeyRecords, Machine, Profiles, fingerprint_digest,
+    KeyRecord, KeyRecords, Machine, Profiles,
+    chrome::ChromePalette,
+    fingerprint_digest,
     profiles::{delete_key_warning, keys_subtitle, machines_subtitle, used_by_line},
     randomart, short_fingerprint,
 };
@@ -138,27 +140,14 @@ pub const ART_GAP: u32 = 2;
 pub const ART_WIDTH: u32 = 17 * ART_CELL + 16 * ART_GAP;
 pub const ART_HEIGHT: u32 = 9 * ART_CELL + 8 * ART_GAP;
 
-pub fn art_color(count: u8, dark: bool) -> Option<[u8; 4]> {
-    let accent = if dark {
-        [0x7C, 0x8C, 0xF8]
-    } else {
-        [0x43, 0x53, 0xD0]
-    };
-    let success = if dark {
-        [0x6E, 0xE7, 0xA8]
-    } else {
-        [0x1C, 0x7A, 0x4F]
-    };
-    let warning = if dark {
-        [0xF2, 0xB3, 0x4C]
-    } else {
-        [0x8A, 0x5A, 0x00]
-    };
-    let danger = if dark {
-        [0xFF, 0x70, 0x50]
-    } else {
-        [0xC4, 0x38, 0x1C]
-    };
+pub fn art_color(count: u8, chrome: &ChromePalette) -> Option<[u8; 4]> {
+    let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
+    let (accent, success, warning, danger) = (
+        rgb(chrome.accent),
+        rgb(chrome.success),
+        rgb(chrome.warning),
+        rgb(chrome.danger),
+    );
     let (rgb, alpha) = match count {
         0 => return None,
         1..=2 => (accent, 89),
@@ -171,14 +160,14 @@ pub fn art_color(count: u8, dark: bool) -> Option<[u8; 4]> {
     Some([rgb[0], rgb[1], rgb[2], alpha])
 }
 
-pub fn randomart_rgba(public_line: &str, dark: bool) -> Vec<u8> {
+pub fn randomart_rgba(public_line: &str, chrome: &ChromePalette) -> Vec<u8> {
     let mut px = vec![0u8; (ART_WIDTH * ART_HEIGHT * 4) as usize];
     let Some(digest) = fingerprint_digest(public_line) else {
         return px;
     };
     for (row, counts) in randomart(&digest).iter().enumerate() {
         for (col, &count) in counts.iter().enumerate() {
-            let Some(color) = art_color(count, dark) else {
+            let Some(color) = art_color(count, chrome) else {
                 continue;
             };
             let (x0, y0) = (
@@ -216,7 +205,7 @@ mod tests {
     }
 
     use super::*;
-    use tether_core::{Auth, KeyOrigin};
+    use tether_core::{Auth, KeyOrigin, theme_named};
 
     const PUBLIC: &str =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILq/BDv7Gp/1wzBMF+DvEX6mWJIR0N8VwBDoNiyMcRfz work";
@@ -356,20 +345,26 @@ mod tests {
     }
 
     #[test]
-    fn art_colors_follow_the_ios_ramp() {
-        assert_eq!(art_color(0, true), None);
-        assert_eq!(art_color(1, true), Some([0x7C, 0x8C, 0xF8, 89]));
-        assert_eq!(art_color(4, true), Some([0x7C, 0x8C, 0xF8, 255]));
-        assert_eq!(art_color(7, true), Some([0x6E, 0xE7, 0xA8, 255]));
-        assert_eq!(art_color(12, true), Some([0xF2, 0xB3, 0x4C, 255]));
-        assert_eq!(art_color(15, true), Some([0x7C, 0x8C, 0xF8, 255]));
-        assert_eq!(art_color(16, true), Some([0xFF, 0x70, 0x50, 255]));
-        assert_eq!(art_color(4, false), Some([0x43, 0x53, 0xD0, 255]));
+    fn art_colors_come_from_the_chrome_palette() {
+        let c = theme_named("dracula").chrome();
+        let rgb = |v: u32| [(v >> 16) as u8, (v >> 8) as u8, v as u8];
+        let with = |v: u32, a: u8| {
+            let [r, g, b] = rgb(v);
+            Some([r, g, b, a])
+        };
+        assert_ne!(c.accent, theme_named("tether").chrome().accent);
+        assert_eq!(art_color(0, &c), None);
+        assert_eq!(art_color(1, &c), with(c.accent, 89));
+        assert_eq!(art_color(4, &c), with(c.accent, 255));
+        assert_eq!(art_color(7, &c), with(c.success, 255));
+        assert_eq!(art_color(12, &c), with(c.warning, 255));
+        assert_eq!(art_color(15, &c), with(c.accent, 255));
+        assert_eq!(art_color(16, &c), with(c.danger, 255));
     }
 
     #[test]
     fn randomart_buffer_has_the_end_cell_in_danger() {
-        let px = randomart_rgba(PUBLIC, true);
+        let px = randomart_rgba(PUBLIC, &theme_named("tether").chrome());
         assert_eq!(px.len(), (ART_WIDTH * ART_HEIGHT * 4) as usize);
         let field = randomart(&fingerprint_digest(PUBLIC).unwrap());
         let (row, col) = (0..9)
@@ -388,6 +383,10 @@ mod tests {
 
     #[test]
     fn unparsable_public_line_draws_an_empty_field() {
-        assert!(randomart_rgba("not a key", true).iter().all(|&b| b == 0));
+        assert!(
+            randomart_rgba("not a key", &theme_named("tether").chrome())
+                .iter()
+                .all(|&b| b == 0)
+        );
     }
 }
