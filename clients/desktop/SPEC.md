@@ -617,20 +617,32 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 
 ### Linux platform layer
 
-`tether-app/src/platform/linux/` implements the `Platform` trait for Linux, X11 first (Wayland is a later step). Every feature that is a Windows API there maps to a freedesktop interface, with pure-Rust dependencies and no GTK.
+`tether-app/src/platform/linux/` implements the `Platform` trait for Linux, on X11 and on native Wayland. Every feature that is a Windows API there maps to a freedesktop interface, with pure-Rust dependencies and no GTK.
 
 | Feature | Linux |
 |---|---|
 | Notifications | `org.freedesktop.Notifications` over the session bus (`zbus`), on a worker thread so the UI never waits on the daemon. Same shaping as the Windows toast: the header, then the first two non-empty body lines; the body is escaped only when the daemon advertises `body-markup`. One live notification per machine and session: a newer one passes `replaces_id`. The `default` action (a click) arrives as `Msg::ToastClicked`. |
 | Taskbar flash, bring to front | winit `request_user_attention` and `focus_window`. |
 | Progress | The `com.canonical.Unity.LauncherEntry` `Update` signal for `application://tether.desktop` (`progress`, `progress-visible`, `urgent`), read by KDE and dock extensions. It has one bar: paused and error show their value (error also sets `urgent`), indeterminate shows an empty bar. |
-| Clipboard | `arboard` (X11 selections, so Wayland sessions go through XWayland for now). Text, `text/uri-list` as a file drop, and an image as PNG. A file manager's text copy of the paths counts as a file drop. No DIB. A native Wayland clipboard needs arboard's `wayland-data-control` feature and a compositor that implements it. |
+| Clipboard | X11: `arboard` (selections). Wayland: the app's own data device on winit's `wl_display` (see Wayland below). Text, `text/uri-list` as a file drop (GNOME's `x-special/gnome-copied-files` too), and an image as PNG (JPEG, BMP and TIFF are re-encoded). A file manager's text copy of the paths counts as a file drop. No DIB. |
 | Open a link | `xdg-open`, detached, started without an AppImage's library variables (`tether_core::hostcmd`). |
 | File picker | `rfd` on its XDG desktop portal backend, so the AppImage needs no GTK. The dialog is awaited from the event loop, so the window keeps painting while it is open. The error box runs `zenity` (the portal has no message dialog) and always writes to stderr. |
 | Image re-encode | The `image` crate decodes BMP and TIFF and encodes JPEG at quality 90. HEIC, HEIF and AVIF would need C decoders, so they are sent as they are. |
 | System light or dark | `org.freedesktop.portal.Settings` `color-scheme` (2 is light; 1, 0 and a missing portal are dark), read once at startup with a 500 ms limit. The window theme follows the palette through winit `set_theme`; there is no caption to colour. |
 | Sleep, lock | logind on the system bus, subscribed only, started with the platform (the session is `GetSession("auto")`, which also covers an app launched from the desktop's own systemd scope): `PrepareForSleep(false)` is `Resumed`; the own session's `Lock` and `Unlock` signals and its `LockedHint` property (what desktops set on an idle lock) are `Locked` and `Unlocked`, once per change. |
 | Network | A netlink route socket (link, address and route groups, settled for 300 ms) triggers a re-check of the route to the host: the interface of the source address the kernel picks, fed to the same `route_change` rule as Windows. Online means a route to the host exists. |
+
+### Wayland
+
+The window is a native Wayland client on GNOME and KDE (winit's Wayland backend with client-side decorations). XWayland is not needed.
+
+- **App id.** `slint::set_xdg_app_id("tether")` sets the Wayland `app_id` and the X11 `WM_CLASS` class to `tether`, so a `tether.desktop` entry, the notification's `desktop-entry` hint and the launcher entry all name the same window. The X11 instance name is empty.
+- **Decorations.** GNOME has no server-side decorations, so winit draws its own title bar (sctk-adwaita). The buttons follow the desktop's `button-layout` setting (GNOME shows only Close by default) and the bar is dark or light with the palette through `set_theme`. KDE draws server-side decorations.
+- **Clipboard.** GNOME's compositor offers no data-control protocol, so no client can read the selection while unfocused, and arboard's Wayland backend falls back to XWayland, which a session without X11 does not have. The app instead opens a second event queue on winit's own display (`platform/linux/wayland.rs`), binds `wl_data_device_manager` and the seat, and runs one thread that dispatches it, as GTK does. Reading uses the offer the compositor gave this window; copying uses the serial of the last key or pointer event. So both work only while the window has focus, which is when a copy or paste is asked for. The mime types read are text (`text/plain;charset=utf-8` first), `text/uri-list` and `x-special/gnome-copied-files`, and `image/png`, `image/jpeg`, `image/bmp`, `image/tiff`. Copying offers text only. The primary selection is not used. If the data device cannot be bound or its thread ends, copy and paste fall back to arboard.
+- **Keyboard.** AltGr symbols, dead keys, Compose and `Ime::Commit` arrive as text and are sent as typed; dead-key presses send nothing. A key pressed with Super held is never typed, because the desktop owns those shortcuts. The IME's preedit text and candidate popup position are not drawn: the app never sets an IME cursor area, so an input method's popup appears at the window corner.
+- **Scale.** Window size is saved and restored in logical pixels, because a Wayland window does not know its monitor's scale until it is shown. The terminal grid is measured again once the window exists, since X11 sends no scale change for the scale a window starts with.
+- **Placement.** Wayland can neither set nor read a window's position. The size restores; the saved position is kept as it was and ignored. On X11 a saved position whose title strip touches no monitor is moved to the primary monitor once the window exists (a 40 px strip, the rule the Windows build uses).
+- **Focus from a notification.** A daemon sends `ActivationToken(id, token)` just before `ActionInvoked`. The app keeps the token for 10 s and, on the click, passes it to `xdg_activation_v1.activate` for its surface. Without a token or the protocol, bringing the window to front can only flash the window with `request_user_attention`, and the compositor may then show it as demanding attention instead of raising it. Whether the compositor raises it depends on its focus-stealing rules and the token's age.
 
 ### Build, CI, and packaging
 
