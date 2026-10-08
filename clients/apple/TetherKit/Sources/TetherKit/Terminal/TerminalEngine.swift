@@ -248,6 +248,11 @@ final class TerminalEngine {
     locked { jumpToPromptLocked(direction) }
   }
 
+  /// Whether the shell has marked any prompt still in the buffer.
+  var hasPromptMarks: Bool {
+    locked { !promptRows().isEmpty }
+  }
+
   /// Text of the newest finished command's output, from the OSC 133 marks. Nil when the
   /// shell marks no prompts or the last command printed nothing.
   func lastCommandOutput() -> String? {

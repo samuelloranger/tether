@@ -999,6 +999,7 @@ public final class SSHTerminalController {
   }
   public func jumpToPrompt(_ direction: PromptJump) async -> Bool { await pipeline.jumpToPrompt(direction) }
   public func lastCommandOutput() async -> String? { await pipeline.lastCommandOutput() }
+  public func shellMarksPrompts() async -> Bool { await pipeline.hasPromptMarks() }
   /// Numbered here, synchronously, so the pipeline can drop a request that reaches it
   /// after a newer one, however the tasks carrying them are scheduled.
   public func requestTheme(_ theme: TerminalTheme) {

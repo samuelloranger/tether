@@ -197,6 +197,26 @@ final class TerminalSemanticTests: XCTestCase {
     XCTAssertNil(engine.lastCommandOutput())
   }
 
+  /// Every prompt is already on screen: there is nothing above to jump to, and the shell
+  /// does mark its prompts, so the notice must not tell the user it doesn't.
+  func test_with_every_prompt_on_screen_the_notice_does_not_blame_the_shell() {
+    let engine = TerminalEngine(cols: 30, rows: 10)
+    shell(engine, commands: [("one", ["a"]), ("two", ["b"])])
+    XCTAssertFalse(engine.jumpToPrompt(.previous))
+    XCTAssertTrue(engine.hasPromptMarks)
+    XCTAssertEqual(PromptNotice.text("No earlier prompt", shellMarksPrompts: engine.hasPromptMarks), "No earlier prompt")
+  }
+
+  func test_a_shell_without_marks_is_told_what_navigation_needs() {
+    let engine = TerminalEngine(cols: 30, rows: 5)
+    engine.feed("$ cmd\r\nout\r\n$ ")
+    XCTAssertFalse(engine.hasPromptMarks)
+    XCTAssertEqual(
+      PromptNotice.text("No earlier prompt", shellMarksPrompts: engine.hasPromptMarks),
+      "No earlier prompt — needs a shell that marks prompts (OSC 133)"
+    )
+  }
+
   func test_a_shell_without_marks_offers_no_navigation() {
     let engine = TerminalEngine(cols: 30, rows: 5)
     engine.feed((1...20).map { "$ cmd \($0)\r\n" }.joined())

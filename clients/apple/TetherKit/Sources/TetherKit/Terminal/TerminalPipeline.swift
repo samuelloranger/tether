@@ -291,6 +291,10 @@ actor TerminalPipeline {
     emulator?.lastCommandOutput()
   }
 
+  func hasPromptMarks() -> Bool {
+    emulator?.hasPromptMarks ?? false
+  }
+
   // MARK: - Outbound
 
   /// One consumer keeps every frame in order; only resizes need the actor.

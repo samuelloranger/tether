@@ -667,7 +667,7 @@ public struct SSHTerminalView: View {
   private func jump(_ direction: PromptJump) {
     Task {
       if await !controller.jumpToPrompt(direction) {
-        showPromptNotice(direction == .previous ? "No earlier prompt" : "No later prompt")
+        await showPromptNotice(direction == .previous ? "No earlier prompt" : "No later prompt")
       }
     }
   }
@@ -675,7 +675,7 @@ public struct SSHTerminalView: View {
   private func copyLastOutput() {
     Task {
       guard let output = await controller.lastCommandOutput() else {
-        showPromptNotice("No finished command to copy")
+        await showPromptNotice("No finished command to copy")
         return
       }
       acknowledgeCopy(output, into: $showCopyConfirmation)
@@ -683,8 +683,8 @@ public struct SSHTerminalView: View {
   }
 
   /// Prompt navigation reads the shell's OSC 133 marks; a shell that emits none finds nothing.
-  private func showPromptNotice(_ message: String) {
-    promptNotice = "\(message) — needs a shell that marks prompts (OSC 133)"
+  private func showPromptNotice(_ message: String) async {
+    promptNotice = PromptNotice.text(message, shellMarksPrompts: await controller.shellMarksPrompts())
   }
 
   private func copySelection() {
