@@ -5,7 +5,7 @@ use zbus::Message;
 use zbus::blocking::Connection;
 use zbus::zvariant::{ObjectPath, OwnedValue};
 
-use super::bus::{for_each_signal, signal_rule};
+use super::bus::{for_each_signal, signal_rule, system};
 use crate::terminal::model::Msg;
 
 const LOGIN: &str = "org.freedesktop.login1";
@@ -46,19 +46,17 @@ fn lock_changed(locked: &AtomicBool, now: bool) -> Option<Msg> {
     Some(if now { Msg::Locked } else { Msg::Unlocked })
 }
 
-fn own_session(conn: &Connection) -> Option<ObjectPath<'static>> {
-    conn.call_method(
+/// "auto" is the caller's session, or else the user's display session: an app started from the
+/// desktop runs in a systemd scope that belongs to no session of its own.
+fn own_session(conn: &Connection) -> zbus::Result<ObjectPath<'static>> {
+    let reply = conn.call_method(
         Some(LOGIN),
         MANAGER,
         Some(MANAGER_IFACE),
-        "GetSessionByPID",
-        &(std::process::id(),),
-    )
-    .ok()?
-    .body()
-    .deserialize::<ObjectPath>()
-    .ok()
-    .map(|p| p.into_owned())
+        "GetSession",
+        &("auto",),
+    )?;
+    Ok(reply.body().deserialize::<ObjectPath>()?.into_owned())
 }
 
 /// Subscribes to logind on the system bus: resume from sleep, and this session's lock and unlock.
@@ -75,17 +73,20 @@ pub fn watch() {
 }
 
 fn run() -> zbus::Result<()> {
-    let conn = Connection::system()?;
+    let conn = system()?;
     let mut rules = vec![signal_rule(
         MANAGER_IFACE,
         "PrepareForSleep",
         Some(MANAGER),
     )?];
-    if let Some(session) = own_session(&conn) {
-        let path = session.as_str();
-        rules.push(signal_rule(SESSION_IFACE, "Lock", Some(path))?);
-        rules.push(signal_rule(SESSION_IFACE, "Unlock", Some(path))?);
-        rules.push(signal_rule(PROPERTIES, "PropertiesChanged", Some(path))?);
+    match own_session(&conn) {
+        Ok(session) => {
+            let path = session.as_str();
+            rules.push(signal_rule(SESSION_IFACE, "Lock", Some(path))?);
+            rules.push(signal_rule(SESSION_IFACE, "Unlock", Some(path))?);
+            rules.push(signal_rule(PROPERTIES, "PropertiesChanged", Some(path))?);
+        }
+        Err(e) => tracing::warn!("no logind session, lock and unlock are not followed: {e}"),
     }
     let locked = AtomicBool::new(false);
     for_each_signal(&conn, rules, |msg| {

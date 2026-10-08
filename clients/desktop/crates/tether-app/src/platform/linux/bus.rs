@@ -1,7 +1,11 @@
 use std::sync::mpsc::{Sender, channel};
-use zbus::blocking::{Connection, MessageIterator, fdo::DBusProxy};
+use std::time::Duration;
+use zbus::blocking::{Connection, MessageIterator, connection::Builder, fdo::DBusProxy};
 use zbus::message::Type;
 use zbus::{MatchRule, Message};
+
+/// A hung daemon would otherwise hold the worker in a call forever.
+const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
 type Job = Box<dyn FnOnce(&Connection) + Send>;
 
@@ -22,7 +26,7 @@ impl SessionBus {
                 let mut conn: Option<Connection> = None;
                 for job in rx {
                     if conn.is_none() {
-                        match Connection::session() {
+                        match session() {
                             Ok(c) => {
                                 if let Some(f) = on_connect.take() {
                                     f(&c);
@@ -49,6 +53,14 @@ impl SessionBus {
     pub fn run(&self, job: impl FnOnce(&Connection) + Send + 'static) {
         let _ = self.tx.send(Box::new(job));
     }
+}
+
+pub fn session() -> zbus::Result<Connection> {
+    Builder::session()?.method_timeout(CALL_TIMEOUT).build()
+}
+
+pub fn system() -> zbus::Result<Connection> {
+    Builder::system()?.method_timeout(CALL_TIMEOUT).build()
 }
 
 pub fn signal_rule(

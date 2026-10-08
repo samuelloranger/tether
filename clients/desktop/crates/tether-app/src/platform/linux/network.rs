@@ -3,8 +3,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use netlink_sys::{Socket, SocketAddr as NetlinkAddr, protocols::NETLINK_ROUTE};
+use tether_core::network::route_change;
 
-use crate::platform::windows::network::route_change;
 use crate::terminal::model::Msg;
 
 // RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_IFADDR | RTMGRP_IPV6_ROUTE

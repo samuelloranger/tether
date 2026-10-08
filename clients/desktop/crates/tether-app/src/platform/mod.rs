@@ -56,8 +56,9 @@ pub trait Platform: Send + Sync + 'static {
     /// Blocking; called off the UI thread.
     fn read_clipboard(&self) -> ClipboardSnapshot;
     fn bring_to_front(&self);
-    /// Modal; called on the UI thread.
-    fn pick_files(&self) -> Vec<PathBuf>;
+    /// Called on the UI thread; `done` runs there too, with nothing picked when cancelled. Windows
+    /// answers before returning (the dialog is modal), Linux when the portal dialog closes.
+    fn pick_files(&self, done: Box<dyn FnOnce(Vec<PathBuf>)>);
 }
 
 pub struct NullPlatform;
@@ -72,7 +73,7 @@ impl Platform for NullPlatform {
         ClipboardSnapshot::Empty
     }
     fn bring_to_front(&self) {}
-    fn pick_files(&self) -> Vec<PathBuf> {
-        Vec::new()
+    fn pick_files(&self, done: Box<dyn FnOnce(Vec<PathBuf>)>) {
+        done(Vec::new());
     }
 }

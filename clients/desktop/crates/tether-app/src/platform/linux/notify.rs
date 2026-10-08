@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use zbus::Message;
 use zbus::blocking::Connection;
@@ -7,6 +7,7 @@ use zbus::zvariant::Value;
 
 use super::bus::{SessionBus, for_each_signal, signal_rule};
 use crate::terminal::model::Msg;
+use tether_core::toast::{body_lines, escape};
 
 const DEST: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
@@ -14,19 +15,16 @@ const PATH: &str = "/org/freedesktop/Notifications";
 /// The summary and body of a notification: the header, then the first two non-empty body lines.
 /// `markup` is whether the daemon renders `<`, `>` and `&` in the body as markup.
 pub fn content(header: &str, body: &str, markup: bool) -> (String, String) {
-    let lines: Vec<String> = body
-        .lines()
-        .filter(|l| !l.is_empty())
-        .take(2)
+    let lines: Vec<String> = body_lines(body)
+        .into_iter()
         .map(|l| if markup { escape(l) } else { l.to_string() })
         .collect();
     (header.to_string(), lines.join("\n"))
 }
 
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+/// `None` when the daemon could not be asked, which must not be remembered.
+pub fn markup_from(caps: Option<Vec<String>>) -> Option<bool> {
+    caps.map(|c| c.iter().any(|c| c == "body-markup"))
 }
 
 /// The live notification of each session, so a newer one replaces it and a click finds its tab.
@@ -52,7 +50,12 @@ impl Live {
         {
             self.by_id.remove(&old);
         }
-        self.by_id.insert(id, key);
+        // A restarted daemon hands out ids again: the session that held this one lost it.
+        if let Some(prev) = self.by_id.insert(id, key.clone())
+            && prev != key
+        {
+            self.by_session.remove(&prev);
+        }
     }
 
     pub fn closed(&mut self, id: u32) {
@@ -93,14 +96,14 @@ pub fn on_signal(live: &Mutex<Live>, msg: &Message) -> Option<Msg> {
 pub struct Notifier {
     bus: SessionBus,
     live: Arc<Mutex<Live>>,
-    markup: Arc<OnceLock<bool>>,
+    markup: Arc<Mutex<Option<bool>>>,
 }
 
 impl Notifier {
     pub fn new() -> Self {
         let live = Arc::new(Mutex::new(Live::default()));
         let listener = live.clone();
-        // The listener starts with the connection, so no click can arrive before it listens.
+        // The listener subscribes as soon as the connection exists, before the first notification is sent.
         let bus = SessionBus::spawn(move |conn| {
             let conn = conn.clone();
             let spawned = std::thread::Builder::new()
@@ -127,7 +130,7 @@ impl Notifier {
         Self {
             bus,
             live,
-            markup: Arc::new(OnceLock::new()),
+            markup: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -140,7 +143,13 @@ impl Notifier {
         let (machine, session) = (machine.to_string(), session.to_string());
         let (title, body) = (title.to_string(), body.to_string());
         self.bus.run(move |conn| {
-            let markup = *markup.get_or_init(|| supports_markup(conn));
+            let known = *markup.lock().unwrap();
+            let markup = known.unwrap_or_else(|| {
+                let asked = supports_markup(conn);
+                *markup.lock().unwrap() = asked;
+                // Unasked, escape: unescaped text on a markup daemon could render as links.
+                asked.unwrap_or(true)
+            });
             let (summary, text) = content(&title, &body, markup);
             let replaces = live.lock().unwrap().replaces(&machine, &session);
             match notify(conn, replaces, &summary, &text) {
@@ -151,11 +160,12 @@ impl Notifier {
     }
 }
 
-fn supports_markup(conn: &Connection) -> bool {
-    conn.call_method(Some(DEST), PATH, Some(DEST), "GetCapabilities", &())
+fn supports_markup(conn: &Connection) -> Option<bool> {
+    let caps = conn
+        .call_method(Some(DEST), PATH, Some(DEST), "GetCapabilities", &())
         .ok()
-        .and_then(|r| r.body().deserialize::<Vec<String>>().ok())
-        .is_some_and(|caps| caps.iter().any(|c| c == "body-markup"))
+        .and_then(|r| r.body().deserialize::<Vec<String>>().ok());
+    markup_from(caps)
 }
 
 fn notify(conn: &Connection, replaces: u32, summary: &str, body: &str) -> zbus::Result<u32> {

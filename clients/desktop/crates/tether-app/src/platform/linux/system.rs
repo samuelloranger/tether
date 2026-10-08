@@ -1,7 +1,6 @@
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-use zbus::blocking::Connection;
 use zbus::zvariant::OwnedValue;
 
 /// The portal is asked on a thread: without one the call can wait for service activation.
@@ -9,7 +8,7 @@ const PORTAL_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub fn show_error_box(message: &str) {
     eprintln!("Tether: {message}");
-    // rfd's portal backend has no message dialog and shells out to zenity or kdialog; with neither, only stderr shows it.
+    // rfd's portal backend has no message dialog and runs `zenity`; without it only stderr shows the error.
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("Tether")
@@ -24,7 +23,7 @@ pub fn scheme_is_light(value: u32) -> bool {
 }
 
 fn read_scheme() -> Option<u32> {
-    let conn = Connection::session().ok()?;
+    let conn = super::bus::session().ok()?;
     let args = ("org.freedesktop.appearance", "color-scheme");
     let call = |method| {
         conn.call_method(

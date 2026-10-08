@@ -1,14 +1,14 @@
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+
+use tether_core::hostcmd::host_command;
 
 pub fn open_url(url: &str) {
     if !tether_core::links::is_openable(url) {
         return;
     }
-    match Command::new("xdg-open")
+    match host_command("xdg-open")
         .arg(url)
-        .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .spawn()
     {
         // xdg-open can outlive the call; reap it off the UI thread so it doesn't linger as a zombie.

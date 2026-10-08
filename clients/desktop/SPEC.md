@@ -625,11 +625,11 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 | Taskbar flash, bring to front | winit `request_user_attention` and `focus_window`. |
 | Progress | The `com.canonical.Unity.LauncherEntry` `Update` signal for `application://tether.desktop` (`progress`, `progress-visible`, `urgent`), read by KDE and dock extensions. It has one bar: paused and error show their value (error also sets `urgent`), indeterminate shows an empty bar. |
 | Clipboard | `arboard` (X11 selections, so Wayland sessions go through XWayland for now). Text, `text/uri-list` as a file drop, and an image as PNG. A file manager's text copy of the paths counts as a file drop. No DIB. A native Wayland clipboard needs arboard's `wayland-data-control` feature and a compositor that implements it. |
-| Open a link | `xdg-open`, detached. |
-| File picker | `rfd` on its XDG desktop portal backend, so the AppImage needs no GTK. The error box shells out to `zenity` or `kdialog` (the portal has no message dialog) and always writes to stderr. |
+| Open a link | `xdg-open`, detached, started without an AppImage's library variables (`tether_core::hostcmd`). |
+| File picker | `rfd` on its XDG desktop portal backend, so the AppImage needs no GTK. The dialog is awaited from the event loop, so the window keeps painting while it is open. The error box runs `zenity` (the portal has no message dialog) and always writes to stderr. |
 | Image re-encode | The `image` crate decodes BMP and TIFF and encodes JPEG at quality 90. HEIC, HEIF and AVIF would need C decoders, so they are sent as they are. |
 | System light or dark | `org.freedesktop.portal.Settings` `color-scheme` (2 is light; 1, 0 and a missing portal are dark), read once at startup with a 500 ms limit. The window theme follows the palette through winit `set_theme`; there is no caption to colour. |
-| Sleep, lock | logind on the system bus, subscribed only: `PrepareForSleep(false)` is `Resumed`; the own session's `Lock` and `Unlock` signals and its `LockedHint` property (what desktops set on an idle lock) are `Locked` and `Unlocked`, once per change. |
+| Sleep, lock | logind on the system bus, subscribed only, started with the platform (the session is `GetSession("auto")`, which also covers an app launched from the desktop's own systemd scope): `PrepareForSleep(false)` is `Resumed`; the own session's `Lock` and `Unlock` signals and its `LockedHint` property (what desktops set on an idle lock) are `Locked` and `Unlocked`, once per change. |
 | Network | A netlink route socket (link, address and route groups, settled for 300 ms) triggers a re-check of the route to the host: the interface of the source address the kernel picks, fed to the same `route_change` rule as Windows. Online means a route to the host exists. |
 
 ### Build, CI, and packaging

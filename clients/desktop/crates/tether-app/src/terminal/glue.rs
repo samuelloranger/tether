@@ -164,10 +164,11 @@ fn wire_callbacks(ui: &AppWindow) {
         vm.set_menu_link("".into());
     });
     vm.on_send_file(|| {
-        let files = platform().pick_files();
-        if !files.is_empty() {
-            send(Msg::SendFiles(files));
-        }
+        platform().pick_files(Box::new(|files| {
+            if !files.is_empty() {
+                send(Msg::SendFiles(files));
+            }
+        }));
     });
     // The same path as Home's gear: it fills the page before showing it.
     vm.on_settings(|| {
@@ -342,11 +343,6 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
                         crate::platform::windows::wndproc::install(h);
                     }
                 });
-            }
-            #[cfg(target_os = "linux")]
-            if *focused {
-                static ONCE: std::sync::Once = std::sync::Once::new();
-                ONCE.call_once(crate::platform::linux::session::watch);
             }
             if *focused && keys_to_pty(app) {
                 let _ = app

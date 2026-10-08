@@ -4,7 +4,7 @@ use tether_core::osc::Progress;
 use zbus::blocking::Connection;
 use zbus::zvariant::Value;
 
-use crate::platform::windows::taskbar::{TaskbarState, taskbar_state};
+use tether_core::taskbar::{TaskbarState, taskbar_state};
 
 const APP_URI: &str = "application://tether.desktop";
 const PATH: &str = "/com/canonical/unity/launcherentry/1";
