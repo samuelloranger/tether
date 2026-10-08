@@ -54,8 +54,8 @@ public struct TerminalImageLayer: Sendable, Equatable {
   }
 
   /// Virtual placements (Unicode placeholders) are skipped: the grid would have to draw
-  /// them cell by cell.
-  init(_ snapshot: KittyGraphicsRenderSnapshot, owner: UInt64) {
+  /// them cell by cell. `rowShift` moves a placement, by token, to where its line went.
+  init(_ snapshot: KittyGraphicsRenderSnapshot, owner: UInt64, rowShift: [UInt64: Int] = [:]) {
     var bitmaps: [Key: Bitmap] = [:]
     var placements: [Placement] = []
     for placement in snapshot.placements where !placement.isVirtual {
@@ -69,7 +69,7 @@ public struct TerminalImageLayer: Sendable, Equatable {
       placements.append(Placement(
         key: key,
         sourceX: source.x, sourceY: source.y, sourceWidth: source.width, sourceHeight: source.height,
-        col: cells.column, row: cells.row, cols: cells.columns, rows: cells.rows,
+        col: cells.column, row: cells.row + (rowShift[placement.token] ?? 0), cols: cells.columns, rows: cells.rows,
         offsetX: placement.pixelOffsetX, offsetY: placement.pixelOffsetY,
         depth: Depth(zIndex: placement.zIndex)
       ))

@@ -27,6 +27,9 @@ final class TerminalEngine {
   private var graphicsDirty = true
   /// A chunk that ended on ESC may continue an APC in the next one.
   private var endedOnEscape = false
+  /// Rows each kitty placement has to move, by token: SwiftTerm keeps a placement at its
+  /// buffer row through a reflow while the text it was printed with moves.
+  private var imageRowShift: [UInt64: Int] = [:]
   private let imageOwner = TerminalEngine.nextImageOwner()
   private static let ownerLock = NSLock()
   nonisolated(unsafe) private static var lastImageOwner: UInt64 = 0
@@ -380,9 +383,67 @@ final class TerminalEngine {
     scrollOffset = 0
     // A reflow moves text between rows; recorded command marks no longer line up.
     commandMarks.removeAll()
+    // Only the primary screen reflows.
+    let reflows = Int(cols) != dims.cols && !terminal.isCurrentBufferAlternate
+    let anchors = reflows ? imageAnchors() : []
+    let trimmedBefore = terminal.buffer.totalLinesTrimmed
     terminal.resize(cols: Int(cols), rows: Int(rows))
     liveTop = terminal.buffer.yDisp
+    if !anchors.isEmpty { reanchorImages(anchors, trimmed: terminal.buffer.totalLinesTrimmed > trimmedBefore) }
     needsRefresh = true
+  }
+
+  /// A placement's line, as the index of the line among the buffer's lines (soft-wrapped
+  /// rows are one line) and the row within it, which a reflow leaves alone.
+  private struct ImageAnchor {
+    var token: UInt64
+    var storedRow: Int
+    var line: Int
+    var offset: Int
+    var lineCount: Int
+  }
+
+  /// Buffer rows that begin a line, oldest first.
+  private func lineStarts() -> [Int] {
+    var starts: [Int] = []
+    var row = 0
+    while let line = terminal.bufferLine(atRow: row) {
+      if !line.isWrapped || row == 0 { starts.append(row) }
+      row += 1
+    }
+    return starts
+  }
+
+  private func imageAnchors() -> [ImageAnchor] {
+    let placements = terminal.kittyGraphicsRenderSnapshot().placements.filter { !$0.isVirtual }
+    guard !placements.isEmpty else { return [] }
+    let top = terminal.buffer.yDisp
+    let starts = lineStarts()
+    return placements.compactMap { placement in
+      let storedRow = top + placement.geometry.row
+      let row = storedRow + (imageRowShift[placement.token] ?? 0)
+      guard row >= 0, let line = starts.lastIndex(where: { $0 <= row }) else { return nil }
+      return ImageAnchor(
+        token: placement.token, storedRow: storedRow, line: line, offset: row - starts[line], lineCount: starts.count
+      )
+    }
+  }
+
+  /// `trimmed`: the resize dropped rows off the top of the scrollback, and the lines on them.
+  private func reanchorImages(_ anchors: [ImageAnchor], trimmed: Bool) {
+    let starts = lineStarts()
+    var end = 0
+    while terminal.bufferLine(atRow: end) != nil { end += 1 }
+    for anchor in anchors {
+      let line = anchor.line - (trimmed ? max(0, anchor.lineCount - starts.count) : 0)
+      guard starts.indices.contains(line) else {
+        imageRowShift[anchor.token] = nil
+        continue
+      }
+      let next = line + 1 < starts.count ? starts[line + 1] : end
+      let row = min(starts[line] + anchor.offset, next - 1)
+      imageRowShift[anchor.token] = row - anchor.storedRow
+    }
   }
 
   private func scrollLocked(lines: Int32) {
@@ -552,9 +613,17 @@ final class TerminalEngine {
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
     // An animation tick marks the screen for update without any output.
-    let images = graphicsDirty || terminal.getUpdateRange() != nil
-      ? TerminalImageLayer(terminal.kittyGraphicsRenderSnapshot(), owner: imageOwner)
-      : cached.images
+    let images: TerminalImageLayer
+    if graphicsDirty || terminal.getUpdateRange() != nil {
+      let snapshot = terminal.kittyGraphicsRenderSnapshot()
+      if !imageRowShift.isEmpty {
+        let live = Set(snapshot.placements.map(\.token))
+        imageRowShift = imageRowShift.filter { live.contains($0.key) }
+      }
+      images = TerminalImageLayer(snapshot, owner: imageOwner, rowShift: imageRowShift)
+    } else {
+      images = cached.images
+    }
     graphicsDirty = false
     let imagesChanged = images != cached.images
     // OSC 4/104 repaint colors without touching the update range; a kitty placement or

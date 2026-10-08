@@ -202,6 +202,39 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertEqual(engine.frame().images.placements.first?.row, 2)
   }
 
+  /// A font change reflows the text; an image must stay on the line it was printed after,
+  /// not keep its old row and cover what moved under it.
+  func test_a_reflow_keeps_an_image_under_the_line_it_followed() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(String(repeating: "x", count: 20) + "\r\nabove\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow")
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 2)
+
+    // Narrower: the full-width line wraps, so everything after it moves down a row.
+    engine.resize(cols: 10, rows: 10)
+    let narrow = engine.frame()
+    XCTAssertEqual(rowText(narrow, 2), "above")
+    XCTAssertEqual(narrow.images.placements.first?.row, 3, "the image covers the line that moved into its old row")
+
+    // And back: the line joins again and the image follows it up.
+    engine.resize(cols: 20, rows: 10)
+    let wide = engine.frame()
+    XCTAssertEqual(rowText(wide, 1), "above")
+    XCTAssertEqual(wide.images.placements.first?.row, 2)
+  }
+
+  func test_after_a_reflow_output_still_scrolls_the_image_with_its_line() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(String(repeating: "x", count: 20) + "\r\nabove\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow")
+    engine.resize(cols: 10, rows: 10)
+    engine.feed((1...7).map { "\r\nline \($0)" }.joined())
+    let frame = engine.frame()
+    let above = (0..<10).first { rowText(frame, $0) == "above" }
+    XCTAssertEqual(above, 0)
+    XCTAssertEqual(frame.images.placements.first?.row, 1)
+  }
+
   func test_deleting_the_last_image_on_an_empty_alt_screen_clears_it() throws {
     let renderer = TerminalGridRenderer()
     let cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)
