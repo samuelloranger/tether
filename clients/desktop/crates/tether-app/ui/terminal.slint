@@ -1,7 +1,7 @@
 import { Tokens } from "tokens.slint";
 import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
 import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
-import { AgentVm, AgentChip, AgentBanner, AgentSheet, Heat } from "agents.slint";
+import { AgentVm, AgentChip, AgentBanner, AgentSheet, Heat, TextDot } from "agents.slint";
 import { GitVm, GitSidePanel, GitOverlays } from "git.slint";
 
 export struct TermTab {
@@ -211,7 +211,7 @@ component SessionTab inherits Rectangle {
         padding-left: 14px;
         padding-right: 14px;
         spacing: 7px;
-        Text {
+        name := Text {
             text: root.tab.name;
             color: root.tab.active ? Tokens.text : touch.has-hover ? Tokens.text : Tokens.text-secondary;
             font-size: 12.5px;
@@ -225,14 +225,8 @@ component SessionTab inherits Rectangle {
             font-size: 11.5px;
             vertical-alignment: center;
         }
-        if root.tab.attention: VerticalLayout {
-            alignment: center;
-            Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; }
-        }
-        if root.tab.agent-state >= 0: VerticalLayout {
-            alignment: center;
-            AgentChip { state: root.tab.agent-state; label: root.tab.agent-label; }
-        }
+        if root.tab.attention: TextDot { ink: Tokens.warning; line-height: name.preferred-height; }
+        if root.tab.agent-state >= 0: AgentChip { state: root.tab.agent-state; label: root.tab.agent-label; }
         // Always laid out, shown on hover: the tab keeps its width either way.
         VerticalLayout {
             alignment: center;
