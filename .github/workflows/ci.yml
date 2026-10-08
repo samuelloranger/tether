@@ -172,13 +172,14 @@ jobs:
       # or two behind. The container is used because the ubuntu-22.04 runner image is being
       # retired, and the Windows release waits on this job. fontconfig is the only system library
       # linked at build time (it brings the freetype and expat headers); the windowing, GL and
-      # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk.
+      # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk, and the
+      # colour emoji font is what the glyph test expects a desktop to have.
       - name: Install build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git build-essential pkg-config libfontconfig1-dev \
-            squashfs-tools dotnet-sdk-8.0
+            squashfs-tools dotnet-sdk-8.0 fonts-noto-color-emoji
 
       - uses: dtolnay/rust-toolchain@stable
         with:
