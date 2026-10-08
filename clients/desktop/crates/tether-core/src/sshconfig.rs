@@ -426,4 +426,26 @@ mod tests {
         assert_eq!(parse_hop("[::1]:2222"), (None, "::1".into(), 2222));
         assert_eq!(parse_hop("fe80::1"), (None, "fe80::1".into(), 22));
     }
+
+    #[test]
+    fn a_home_folder_on_disk_reads_includes_and_tilde_identity_files() {
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        std::fs::create_dir_all(ssh.join("conf.d")).unwrap();
+        std::fs::write(
+            ssh.join("config"),
+            "Include conf.d/*.conf\nHost *\n  User fallback\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ssh.join("conf.d/work.conf"),
+            "Host box\n  HostName 10.0.0.9\n  IdentityFile ~/.ssh/id_box\n",
+        )
+        .unwrap();
+        let hosts = read_config(home.path(), &DiskFiles);
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].alias, "box");
+        assert_eq!(hosts[0].user.as_deref(), Some("fallback"));
+        assert_eq!(hosts[0].identity_file, Some(ssh.join("id_box")));
+    }
 }
