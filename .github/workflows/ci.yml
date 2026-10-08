@@ -156,26 +156,53 @@ jobs:
             clients/desktop/dist/Tether-*-x64.msix
           if-no-files-found: error
 
-  # The Windows client's library crates hold no Win32 code outside cfg(windows),
-  # so they must also build and pass on Linux.
-  windows-libs-linux:
-    runs-on: ubuntu-latest
+  # The desktop client builds, lints and tests on Linux as well as Windows, and ships there
+  # as an AppImage. ubuntu-22.04 on purpose: a binary links the glibc of the machine that
+  # built it, and this one (2.35) runs on every distro newer than that, where a build on
+  # ubuntu-latest would refuse to start on an LTS a release or two behind.
+  desktop-linux:
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: clients/desktop
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # fontconfig is the only system library linked at build time (it brings freetype and
+      # expat headers); the windowing, GL and D-Bus libraries are loaded at run time.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: clients/desktop
 
+      - name: Format
+        run: cargo fmt --all --check
+
       - name: Clippy
-        run: cargo clippy -p tether-core -p tether-ssh -p tether-term --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test -p tether-core -p tether-ssh -p tether-term
+        run: cargo test --workspace --locked
+
+      - name: Release build of the app
+        run: cargo build --release --locked -p tether-app
+
+      - name: AppImage
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          PATH="$HOME/.dotnet/tools:$PATH" packaging/linux/package.sh --skip-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-linux-appimage
+          path: clients/desktop/dist/Tether-*-x86_64.AppImage
+          if-no-files-found: error
