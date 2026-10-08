@@ -27,6 +27,8 @@ thread_local! {
     static PLATFORM: RefCell<Option<Arc<dyn Platform>>> = const { RefCell::new(None) };
     static WIRED: Cell<bool> = const { Cell::new(false) };
     static MODS: Cell<tether_core::keymap::Mods> = Cell::new(tether_core::keymap::Mods::default());
+    #[cfg(target_os = "linux")]
+    static SUPER: Cell<bool> = const { Cell::new(false) };
     static WELL_LOGICAL: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
     static DROPS: RefCell<Vec<std::path::PathBuf>> = const { RefCell::new(Vec::new()) };
 }
@@ -49,6 +51,31 @@ fn app() -> Option<Rc<App>> {
 pub fn init(app: &Rc<App>, platform: Arc<dyn Platform>) {
     APP.with(|a| *a.borrow_mut() = Rc::downgrade(app));
     PLATFORM.with(|p| *p.borrow_mut() = Some(platform));
+}
+
+/// Called once the native window exists.
+pub fn window_shown() {
+    platform().window_shown();
+    // X11 never sends a scale change for the scale a window starts with, and a terminal opened
+    // before the window existed measured itself at scale 1.
+    if let Some(app) = app() {
+        remeasure_well(&app.ui);
+    }
+}
+
+/// The terminal sizes its grid from the well's physical size, so a new scale needs a new measure.
+fn remeasure_well(ui: &AppWindow) {
+    let (w, h) = WELL_LOGICAL.get();
+    // Before the first layout there is nothing to measure.
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<TerminalVm>().invoke_well_resized(w, h);
+        }
+    });
 }
 
 fn platform() -> Arc<dyn Platform> {
@@ -306,11 +333,18 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
         WindowEvent::ModifiersChanged(m) => {
             let mods = crate::terminal::keys::mods_of(m.state());
             MODS.set(mods);
+            #[cfg(target_os = "linux")]
+            SUPER.set(m.state().super_key());
             send(Msg::Modifiers(mods));
             EventResult::Propagate
         }
         WindowEvent::KeyboardInput { event, .. } if keys_to_pty(app) => {
-            if event.state == ElementState::Pressed {
+            // Super combos belong to the desktop; one that still reaches the window must not type its letter.
+            #[cfg(target_os = "linux")]
+            let desktop_owns = SUPER.get();
+            #[cfg(not(target_os = "linux"))]
+            let desktop_owns = false;
+            if event.state == ElementState::Pressed && !desktop_owns {
                 let input = crate::terminal::keys::translate(
                     &event.logical_key,
                     &event.key_without_modifiers(),
@@ -367,13 +401,7 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             EventResult::Propagate
         }
         WindowEvent::ScaleFactorChanged { .. } => {
-            let (w, h) = WELL_LOGICAL.get();
-            let weak = app.ui.as_weak();
-            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
-                if let Some(ui) = weak.upgrade() {
-                    ui.global::<TerminalVm>().invoke_well_resized(w, h);
-                }
-            });
+            remeasure_well(&app.ui);
             EventResult::Propagate
         }
         _ => EventResult::Propagate,

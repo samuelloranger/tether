@@ -6080,6 +6080,7 @@ dependencies = [
  "serde",
  "slint",
  "slint-build",
+ "smithay-client-toolkit",
  "tempfile",
  "tether-core",
  "tether-ssh",

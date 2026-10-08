@@ -42,6 +42,8 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .select()?;
+    // The Wayland app_id and X11 WM_CLASS, which a desktop entry named `tether` is matched against.
+    slint::set_xdg_app_id(platform::APP_ID)?;
     let app = app::App::new()?;
     #[cfg(windows)]
     terminal::files::set_codec(std::sync::Arc::new(platform::windows::wic::WicCodec));

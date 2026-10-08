@@ -408,4 +408,65 @@ mod tests {
             Some(KeyInput::Named(NamedKey::Space))
         );
     }
+
+    fn sent(input: Option<KeyInput>, mods: Mods) -> Option<Vec<u8>> {
+        use tether_core::keymap::{KeyAction, KeyContext, encode_key};
+        match encode_key(&input?, mods, &KeyContext::default()) {
+            KeyAction::Send(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_dead_key_press_types_nothing_and_its_composed_result_types_once() {
+        let dead = plain(
+            &Key::Dead(Some('^')),
+            &ch("["),
+            None,
+            code(KeyCode::BracketLeft),
+            KeyLocation::Standard,
+        );
+        assert_eq!(sent(dead, Mods::default()), None);
+        let composed = plain(
+            &ch("ê"),
+            &ch("e"),
+            Some("ê"),
+            code(KeyCode::KeyE),
+            KeyLocation::Standard,
+        );
+        assert_eq!(
+            sent(composed, Mods::default()),
+            Some("ê".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn altgr_symbols_are_plain_text_when_the_platform_reports_no_modifier() {
+        let euro = plain(
+            &ch("€"),
+            &ch("e"),
+            Some("€"),
+            code(KeyCode::KeyE),
+            KeyLocation::Standard,
+        );
+        assert_eq!(sent(euro, Mods::default()), Some("€".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn alt_with_a_compose_capable_key_prefixes_escape() {
+        let alt = Mods {
+            alt: true,
+            ..Mods::default()
+        };
+        let got = translate(
+            &ch("q"),
+            &ch("q"),
+            Some("q"),
+            code(KeyCode::KeyA),
+            KeyLocation::Standard,
+            alt,
+            false,
+        );
+        assert_eq!(sent(got, alt), Some(b"\x1bq".to_vec()));
+    }
 }

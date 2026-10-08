@@ -47,6 +47,8 @@ pub fn hwnd_of(window: &slint::Window) -> Option<isize> {
         .flatten()
 }
 
+pub const APP_ID: &str = "tether";
+
 pub trait Platform: Send + Sync + 'static {
     fn flash_taskbar(&self);
     fn set_progress(&self, p: Option<&Progress>);
@@ -56,6 +58,8 @@ pub trait Platform: Send + Sync + 'static {
     /// Blocking; called off the UI thread.
     fn read_clipboard(&self) -> ClipboardSnapshot;
     fn bring_to_front(&self);
+    /// The native window exists; platforms that talk to the compositor directly connect here.
+    fn window_shown(&self) {}
     /// Called on the UI thread; `done` runs there too, with nothing picked when cancelled. Windows
     /// answers before returning (the dialog is modal), Linux when the portal dialog closes.
     fn pick_files(&self, done: Box<dyn FnOnce(Vec<PathBuf>)>);

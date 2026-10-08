@@ -354,6 +354,9 @@ impl App {
                 return;
             };
             if app.ui.window().winit_window().await.is_ok() {
+                crate::terminal::glue::window_shown();
+                #[cfg(target_os = "linux")]
+                app.keep_on_screen();
                 app.refresh_scene();
             }
         })
@@ -1006,6 +1009,27 @@ impl App {
     fn current_bounds(&self) -> WindowPlacement {
         let w = self.ui.window();
         let (pos, size) = (w.position(), w.size());
+        #[cfg(target_os = "linux")]
+        let (pos, size) = {
+            // Wayland has no window position to read; keep the one saved earlier.
+            let known = self
+                .ui
+                .window()
+                .with_winit_window(|w| w.outer_position().is_ok());
+            let kept = self
+                .last_normal
+                .borrow()
+                .or(self.state.borrow().prefs.window);
+            let pos = match (known, kept) {
+                (Some(false), Some(k)) => slint::PhysicalPosition::new(k.x, k.y),
+                _ => pos,
+            };
+            let (width, height) = platform::linux::placement::logical_size(
+                (size.width, size.height),
+                w.scale_factor(),
+            );
+            (pos, slint::PhysicalSize::new(width, height))
+        };
         WindowPlacement {
             x: pos.x,
             y: pos.y,
@@ -1028,12 +1052,57 @@ impl App {
             return;
         };
         let w = self.ui.window();
+        #[cfg(target_os = "linux")]
+        w.set_size(slint::LogicalSize::new(p.width as f32, p.height as f32));
+        #[cfg(not(target_os = "linux"))]
         w.set_size(slint::PhysicalSize::new(p.width, p.height));
         w.set_position(slint::PhysicalPosition::new(p.x, p.y));
         w.set_maximized(p.maximized);
         *self.last_normal.borrow_mut() = Some(WindowPlacement {
             maximized: false,
             ..p
+        });
+    }
+
+    /// A saved position can sit on a monitor that is gone, and X11 window managers do not always move it back.
+    #[cfg(target_os = "linux")]
+    fn keep_on_screen(&self) {
+        self.ui.window().with_winit_window(|w| {
+            let (Ok(pos), size) = (w.outer_position(), w.outer_size()) else {
+                return;
+            };
+            let monitors: Vec<_> = w
+                .available_monitors()
+                .map(|m| {
+                    (
+                        m.position().x,
+                        m.position().y,
+                        m.size().width,
+                        m.size().height,
+                    )
+                })
+                .collect();
+            let here = WindowPlacement {
+                x: pos.x,
+                y: pos.y,
+                width: size.width,
+                height: size.height,
+                maximized: false,
+            };
+            if monitors.is_empty() || platform::linux::placement::strip_on_screen(&here, &monitors)
+            {
+                return;
+            }
+            if let Some(m) = w
+                .primary_monitor()
+                .or_else(|| w.available_monitors().next())
+            {
+                let origin = m.position();
+                w.set_outer_position(winit::dpi::PhysicalPosition::new(
+                    origin.x + 40,
+                    origin.y + 40,
+                ));
+            }
         });
     }
 

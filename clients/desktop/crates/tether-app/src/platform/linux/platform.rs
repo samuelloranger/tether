@@ -1,15 +1,24 @@
 use slint::ComponentHandle;
-use slint::winit_030::{WinitWindowAccessor, winit::window::UserAttentionType};
+use slint::winit_030::{
+    WinitWindowAccessor,
+    winit::raw_window_handle::{
+        HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+    },
+    winit::window::UserAttentionType,
+};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
 
 use crate::AppWindow;
 use crate::platform::Platform;
 use crate::platform::file_dialog;
-use crate::platform::linux::{clipboard, launcher, notify, session, shell};
+use crate::platform::linux::{
+    clipboard, launcher, notify, session, shell,
+    wayland::{self, Wayland},
+};
 
 /// Every method except `read_clipboard` runs on the UI thread (`SlintUi` routes them there).
 pub struct LinuxPlatform {
@@ -20,6 +29,8 @@ pub struct LinuxPlatform {
     // The newest progress not yet sent: a burst of updates costs one bus job, not one each.
     progress: Arc<Mutex<Option<launcher::LauncherUpdate>>>,
     picking: Arc<AtomicBool>,
+    // Set once the window exists; `None` inside means X11, or a compositor without a data device.
+    wayland: OnceLock<Option<Wayland>>,
 }
 
 impl LinuxPlatform {
@@ -31,7 +42,14 @@ impl LinuxPlatform {
             clipboard: Mutex::new(None),
             progress: Arc::default(),
             picking: Arc::default(),
+            wayland: OnceLock::new(),
         }
+    }
+}
+
+impl LinuxPlatform {
+    fn wayland(&self) -> Option<&Wayland> {
+        self.wayland.get()?.as_ref().filter(|wl| wl.alive())
     }
 }
 
@@ -62,7 +80,30 @@ impl Platform for LinuxPlatform {
     fn open_url(&self, url: &str) {
         shell::open_url(url);
     }
+    fn window_shown(&self) {
+        let Some(app) = self.window.upgrade() else {
+            return;
+        };
+        let link = app
+            .window()
+            .with_winit_window(|w| {
+                let RawDisplayHandle::Wayland(d) = w.display_handle().ok()?.as_raw() else {
+                    return None;
+                };
+                let RawWindowHandle::Wayland(s) = w.window_handle().ok()?.as_raw() else {
+                    return None;
+                };
+                // SAFETY: both handles are winit's, valid now; a surface Slint later destroys is refused by wayland-backend, not dereferenced.
+                unsafe { Wayland::connect(d.display.as_ptr(), s.surface.as_ptr()) }
+            })
+            .flatten();
+        let _ = self.wayland.set(link);
+    }
     fn set_clipboard(&self, text: &str) {
+        if let Some(wl) = self.wayland() {
+            wl.set_text(text);
+            return;
+        }
         let mut slot = self.clipboard.lock().unwrap();
         if slot.is_none() {
             *slot = arboard::Clipboard::new().ok();
@@ -72,9 +113,19 @@ impl Platform for LinuxPlatform {
         }
     }
     fn read_clipboard(&self) -> ClipboardSnapshot {
+        if let Some(wl) = self.wayland() {
+            return crate::terminal::clip::snapshot(&wayland::Source::new(wl), &std::thread::sleep);
+        }
         crate::terminal::clip::snapshot(&clipboard::ArboardSource::default(), &std::thread::sleep)
     }
     fn bring_to_front(&self) {
+        // The protocol has no reply, so a token the compositor rejects cannot be told from one it
+        // honoured; only a failed request falls through to the plain focus attempt.
+        if let Some(token) = notify::take_activation_token()
+            && self.wayland().is_some_and(|wl| wl.activate(&token))
+        {
+            return;
+        }
         if let Some(app) = self.window.upgrade() {
             app.window().with_winit_window(|w| {
                 w.set_minimized(false);
