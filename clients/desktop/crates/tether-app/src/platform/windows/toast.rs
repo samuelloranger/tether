@@ -61,7 +61,7 @@ mod tests {
 #[cfg(windows)]
 mod win {
     use super::*;
-    use crate::win32::aumid::{AUMID, ToastIdentity};
+    use crate::platform::windows::aumid::{AUMID, ToastIdentity};
     use std::collections::HashMap;
     use std::sync::Mutex;
     use windows::Data::Xml::Dom::XmlDocument;

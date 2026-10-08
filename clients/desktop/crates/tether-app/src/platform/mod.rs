@@ -2,20 +2,41 @@ use std::path::PathBuf;
 use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
 
-pub mod aumid;
+// Its pure logic is tested everywhere but only called on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod windows;
+
 #[cfg(windows)]
-pub mod clipboard;
-#[cfg(windows)]
-pub mod file_dialog;
-pub mod network;
-#[cfg(windows)]
-pub mod platform;
-pub mod shell;
-pub mod taskbar;
-pub mod toast;
-#[cfg(windows)]
-pub mod wic;
-pub mod wndproc;
+pub use windows::{apply_caption, placement_visible, show_error_box, system_uses_light};
+
+#[cfg(not(windows))]
+pub fn apply_caption(_hwnd: isize, _background: u32, _dark: bool) {}
+
+#[cfg(not(windows))]
+pub fn system_uses_light() -> bool {
+    false
+}
+
+#[cfg(not(windows))]
+pub fn placement_visible(_p: &tether_core::WindowPlacement) -> bool {
+    true
+}
+
+#[cfg(not(windows))]
+pub fn show_error_box(_message: &str) {}
+
+pub fn hwnd_of(window: &slint::Window) -> Option<isize> {
+    use slint::winit_030::{
+        WinitWindowAccessor,
+        winit::raw_window_handle::{HasWindowHandle, RawWindowHandle},
+    };
+    window
+        .with_winit_window(|w| match w.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+            _ => None,
+        })
+        .flatten()
+}
 
 pub trait Platform: Send + Sync + 'static {
     fn flash_taskbar(&self);

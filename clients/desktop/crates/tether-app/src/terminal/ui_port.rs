@@ -3,13 +3,13 @@ use std::sync::Arc;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use tether_core::osc::ProgressState;
 
+use crate::platform::Platform;
 use crate::terminal::driver::MsgSink;
 use crate::terminal::frame::FrameJob;
 use crate::terminal::model::{
     AgentView, CapsuleView, Msg, QuestionView, SheetPhase, TabView, TerminalView, UiEffect,
 };
 use crate::terminal::status::Lamp;
-use crate::win32::Platform;
 use crate::{AgentOption, AgentQuestionRow, AgentVm, AppWindow, TermTab, TerminalVm};
 
 pub trait UiPort: Send + 'static {

@@ -116,7 +116,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: clients/windows
+        working-directory: clients/desktop
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -126,7 +126,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: clients/windows
+          workspaces: clients/desktop
 
       - name: Format
         run: cargo fmt --all --check
@@ -152,8 +152,8 @@ jobs:
         with:
           name: tether-windows-${{ github.run_number }}
           path: |
-            clients/windows/dist/Tether-*-x64-portable.zip
-            clients/windows/dist/Tether-*-x64.msix
+            clients/desktop/dist/Tether-*-x64-portable.zip
+            clients/desktop/dist/Tether-*-x64.msix
           if-no-files-found: error
 
   # The Windows client's library crates hold no Win32 code outside cfg(windows),
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: clients/windows
+        working-directory: clients/desktop
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -172,7 +172,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: clients/windows
+          workspaces: clients/desktop
 
       - name: Clippy
         run: cargo clippy -p tether-core -p tether-ssh -p tether-term --all-targets -- -D warnings

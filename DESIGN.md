@@ -8,7 +8,7 @@ Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night
 
 ## Color
 
-**The terminal theme colours everything.** The chosen terminal colour scheme sets the whole chrome palette, and whether the app is light or dark; there is no separate appearance setting. Tokens live in `TetherColors` (`clients/apple`) and `Tokens` (`clients/windows`), both reading a `ChromePalette`.
+**The terminal theme colours everything.** The chosen terminal colour scheme sets the whole chrome palette, and whether the app is light or dark; there is no separate appearance setting. Tokens live in `TetherColors` (`clients/apple`) and `Tokens` (`clients/desktop`), both reading a `ChromePalette`.
 
 **Tether** (the default) and **Tether Light** are the hand-set Aurora palettes: near-black neutrals plus one periwinkle accent, with light values darkened so state words stay legible on white.
 

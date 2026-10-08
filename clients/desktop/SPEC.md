@@ -571,7 +571,7 @@ Every command is built in `tether-core` (`git`), passed through `shell_quote`, a
 
 ## How it is built
 
-A Cargo workspace under `clients/windows/`:
+A Cargo workspace under `clients/desktop/`:
 
 | Crate | Job |
 |---|---|
