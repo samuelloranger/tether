@@ -246,6 +246,8 @@ mod tests {
         }
         let on_disk =
             std::fs::read_to_string(GOLDEN).expect("golden file missing: run with UPDATE_GOLDEN=1");
+        // A Windows checkout can turn the file's line endings into CRLF.
+        let on_disk = on_disk.replace("\r\n", "\n");
         assert!(on_disk == expected, "chrome palettes differ from {GOLDEN}");
     }
 
