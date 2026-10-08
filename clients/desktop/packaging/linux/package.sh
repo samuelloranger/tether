@@ -41,7 +41,7 @@ cp "$release"/licenses/* "$pack/licenses/"
 "$vpk" pack --packId "$pack_id" --packVersion "$version" \
   --packDir "$pack" --mainExe tether --packTitle Tether \
   --icon "$here/icons/hicolor/256x256/apps/tether.png" \
-  --categories "System;TerminalEmulator;Network" \
+  --categories "System;TerminalEmulator" \
   --outputDir "$dist/velopack"
 
 appimage="$dist/Tether-$version-x86_64.AppImage"
@@ -49,9 +49,9 @@ mv "$dist/velopack/$pack_id.AppImage" "$appimage"
 
 # vpk writes the entry itself; fail the build if it stops matching the window's app_id.
 check="$(mktemp -d)"
+trap 'rm -rf "$check"' EXIT
 (cd "$check" && "$appimage" --appimage-extract '*.desktop' >/dev/null)
 grep -qx 'StartupWMClass=tether' "$check"/squashfs-root/*.desktop \
   || { echo "the AppImage's desktop entry does not carry StartupWMClass=tether" >&2; exit 1; }
-rm -rf "$check"
 
 ls -l "$dist" "$dist/velopack"

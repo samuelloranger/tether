@@ -7,5 +7,5 @@ Exec=tether
 Icon=tether
 Terminal=false
 StartupWMClass=tether
-Categories=System;TerminalEmulator;Network;
+Categories=System;TerminalEmulator;
 Keywords=ssh;terminal;zmx;shell;remote;session;
