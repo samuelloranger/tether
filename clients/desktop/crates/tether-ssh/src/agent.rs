@@ -56,11 +56,13 @@ impl AgentConnector for NamedPipeAgent {
     }
 }
 
+#[cfg(unix)]
 /// An SSH agent on a Unix-domain socket, normally the one `SSH_AUTH_SOCK` names.
 pub struct UnixAgent {
     pub socket: Option<std::path::PathBuf>,
 }
 
+#[cfg(unix)]
 impl UnixAgent {
     pub fn from_env() -> Self {
         Self {
@@ -71,26 +73,22 @@ impl UnixAgent {
     }
 }
 
+#[cfg(unix)]
 impl AgentConnector for UnixAgent {
     fn connect(&self) -> BoxFuture<'static, Result<AgentClient<AgentStreamBox>, ConnectError>> {
-        #[cfg(unix)]
-        {
-            let socket = self.socket.clone();
-            Box::pin(async move {
-                let Some(socket) = socket else {
-                    return Err(ConnectError::AgentNotRunning);
-                };
-                AgentClient::connect_uds(&socket)
-                    .await
-                    .map(|c| c.dynamic())
-                    .map_err(|e| match e {
-                        russh::keys::Error::IO(io) => map_agent_io_error(&io),
-                        other => ConnectError::Transport(format!("SSH agent: {other}")),
-                    })
-            })
-        }
-        #[cfg(not(unix))]
-        Box::pin(async { Err(ConnectError::AgentNotRunning) })
+        let socket = self.socket.clone();
+        Box::pin(async move {
+            let Some(socket) = socket else {
+                return Err(ConnectError::AgentNotRunning);
+            };
+            AgentClient::connect_uds(&socket)
+                .await
+                .map(|c| c.dynamic())
+                .map_err(|e| match e {
+                    russh::keys::Error::IO(io) => map_agent_io_error(&io),
+                    other => ConnectError::Transport(format!("SSH agent: {other}")),
+                })
+        })
     }
 }
 
@@ -135,7 +133,7 @@ pub fn default_agent() -> Arc<dyn AgentConnector> {
     {
         Arc::new(FallbackAgent::windows())
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
         Arc::new(UnixAgent::from_env())
     }
