@@ -15,7 +15,7 @@ On iOS the VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngin
 | Path | Stack | What it is |
 |---|---|---|
 | `clients/apple/` | Swift / SwiftUI | The iOS app, also built for the Mac with Mac Catalyst ("Optimize for Mac" idiom, same bundle id and App Store Connect record). On the Mac the terminal screen shows one tab per `zmx` session (`MacSessionTabs`, one SSH connection per opened tab) instead of the drawer, with a menu bar (`TetherCommands`) and desktop pointer behaviour; every Mac difference is gated on `TetherPlatform.isMac`. `TetherKit` package (SSH transport, terminal pipeline + `TerminalEngine` + renderer, Home / key vault, all UI), `TetherIOS` app target, `TetherNotificationService` (NSE — decrypts push), `Tether.xcodeproj`. |
-| `clients/desktop/` | Rust / Slint | The Windows and Linux app: SSH to `zmx`, one tab per session. Cargo workspace: `tether-core` (every rule as pure, host-free logic — profiles, keys, host-key pins, session list, git panel, markdown, agent badges), `tether-ssh` (`russh` transport, ProxyJump, agent / Pageant), `tether-term` (`alacritty_terminal` + `swash` raster, inline images), `tether-app` (Slint UI + per-OS platform layer under `platform/windows` and `platform/linux`, Velopack self-update). Data lives in `%LOCALAPPDATA%\Tether` (Windows, secrets under DPAPI) or `$XDG_DATA_HOME/tether` (Linux, secrets in the Secret Service keyring). `SPEC.md` is the design; `design-preview/index.html` is the screen map. |
+| `clients/desktop/` | Rust / Slint | The Windows and Linux app: SSH to `zmx`, one tab per session. Cargo workspace: `tether-core` (every rule as pure, host-free logic — profiles, keys, host-key pins, session list, git panel, markdown, agent badges), `tether-ssh` (`russh` transport, ProxyJump, SSH agent: Windows OpenSSH / Pageant, `SSH_AUTH_SOCK` on Linux), `tether-term` (`alacritty_terminal` + `swash` raster, inline images), `tether-app` (Slint UI + per-OS platform layer under `platform/windows` and `platform/linux`, Velopack self-update). Data lives in `%LOCALAPPDATA%\Tether` (Windows, secrets under DPAPI) or `$XDG_DATA_HOME/tether` (Linux, secrets in the Secret Service keyring). `SPEC.md` is the design; `design-preview/index.html` is the screen map. |
 | `apps/tether-notify/` | Go | Host-side encrypted-push CLI. Registers a phone's APNs token + AES key (sent by the app over SSH) and posts ciphertext to the relay. |
 | `apps/relay/` | Cloudflare Worker (Hono) | Push relay: forwards ciphertext to APNs (production first, sandbox on `BadDeviceToken`). Deployed on its own by `relay-deploy.yml` (wrangler); APNs config lives in Worker secrets. |
 | `integrations/claude-code/` | Claude Code mod (TS) | `tether` plugin, published by the repo-root `.claude-plugin/marketplace.json`. Holds a permission prompt while no client is attached and applies the phone's Approve / Deny / Reply as the decision (`tether-notify hold` / `wait`); holds Claude's questions (`AskUserQuestion`, in any mode) and answers them from per-option notification buttons (the NSE registers a per-push category) or the app's answer sheet (`tether-notify pending`, `answer --option/--answers`). Never holds a `-p`/SDK run, a plugin's permission query, an agent under tmux/screen, or a mode that settles asks itself (auto, dontAsk, bypass) — the mode comes from classic events, or only the settings' `defaultMode` where an org guard blocks those for user mods. Installed by `install-agent-hooks.sh` on Claude Code ≥ 2.1.287. Test: `claude plugin test integrations/claude-code/tether`. |
@@ -45,15 +45,15 @@ xcodebuild test -scheme TetherKit -destination 'platform=iOS Simulator,name=iPho
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo build -p tether-app                       # target/debug/tether.exe
-pwsh packaging/package.ps1 -Version 0.0.0       # portable zip + MSIX into dist/
-pwsh packaging/screenshots.ps1 -Out <dir>       # capture every screen of a debug build
+cargo build -p tether-app                       # target/debug/tether(.exe)
+pwsh packaging/package.ps1 -Version 0.0.0       # Windows: portable zip + MSIX into dist/
+pwsh packaging/screenshots.ps1 -Out <dir>       # Windows: capture every screen of a debug build
 ```
 
 - Every crate builds and tests on Linux, `tether-app` included. Linux build dependencies: `pkg-config` and `libfontconfig1-dev` (the windowing, GL and D-Bus libraries are loaded at run time). `packaging/linux/package.sh [version] [--skip-build]` builds the AppImage and the Velopack update package (needs `vpk` 1.2.161). Cross-check the Windows build from Linux with `cargo xwin`.
 - The C runtime is linked statically (`.cargo/config.toml`): a fresh Windows has no VC++ redistributable.
 - Debug builds read `TETHER_DEV_DATA`, `TETHER_DEV_PAGE`, `TETHER_DEV_THEME`, `TETHER_DEV_SIZE` to open one screen against sample data, and `TETHER_UPDATE_FEED` to point the updater at a local feed; release builds ignore them.
-- Releases: push a `desktop-vX.Y.Z` tag (`windows-vX.Y.Z` before 0.0.5). Installed apps update from the rolling `windows-feed` / `linux-feed` release, never from `releases/latest` (that stays the iOS app).
+- Releases: push a `desktop-vX.Y.Z` tag (`windows-vX.Y.Z` before 0.0.5); one tag builds both OSes into one "Tether desktop X.Y.Z" release with one `SHA256SUMS.txt`. Installed apps update from the rolling `windows-feed` / `linux-feed` release, never from `releases/latest` (that stays the iOS app).
 
 **Host tools (`apps/tether-notify/`):**
 
@@ -80,7 +80,7 @@ The steps name the iOS types; the desktop app runs the same loop through `tether
 
 ## Security
 
-- **Transport is SSH.** No shared password, no setup flow without host-key verification. Private keys live in the iOS Keychain (Windows: DPAPI-protected files under `%LOCALAPPDATA%\Tether`) and leave the device only in memory, to the SSH library.
+- **Transport is SSH.** No shared password, no setup flow without host-key verification. Private keys live in the iOS Keychain (Windows: DPAPI-protected files under `%LOCALAPPDATA%\Tether`; Linux: the Secret Service keyring, never a plaintext file) and leave the device only in memory, to the SSH library.
 - A host-key mismatch fails loudly and is never retried.
 - The APNs signing key can never sit on a self-hosted host — the relay only routes ciphertext it cannot read (see the push section).
 

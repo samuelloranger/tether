@@ -38,24 +38,23 @@ xcodebuild build \
 
 See [`clients/apple/README.md`](clients/apple/README.md) for signing and on-device install.
 
-## Install (Windows)
+## Install (desktop: Windows and Linux)
 
-**[Download the installer](https://github.com/samuelloranger/tether/releases?q=desktop-v&expanded=true)** — take `Tether-<version>-x64-Setup.exe` from the newest `desktop-v*` release. It installs per user (no admin) and the app updates itself from then on. `Tether-<version>-x64-portable.zip` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch.
+One app for both systems, built from one codebase and released together: take the file for your OS from the newest [`desktop-v*` release](https://github.com/samuelloranger/tether/releases?q=desktop-v&expanded=true). One window, one tab per zmx session. On top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), SSH agent auth, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette.
 
-Windows 10 22H2 or Windows 11, x64. One window, one tab per zmx session; on top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), Pageant, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette. Build from source with Rust stable: `cargo build --release -p tether-app` in `clients/desktop/` (see [`clients/desktop/SPEC.md`](clients/desktop/SPEC.md)).
+| | Windows | Linux |
+|---|---|---|
+| Download | `Tether-<version>-x64-Setup.exe` (per user, no admin), or `Tether-<version>-x64-portable.zip` (no install, no updates) | `Tether-<version>-x86_64.AppImage` |
+| Run | Start menu after install; neither file is code-signed yet, so SmartScreen may warn on first launch | `chmod +x` the file, then run it |
+| Updates | Self-updates from the `windows-feed` release | Self-updates from the `linux-feed` release, in place: it downloads a newer AppImage in the background and swaps the file on the next launch or from **Settings → About → Restart**. Keep the file somewhere you can write to; downloads go to a private folder under `~/.cache/tether/updates` |
+| Requires | Windows 10 22H2 or Windows 11, x64 | x86_64, glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 or later), X11 or Wayland |
+| Saved keys and passwords | DPAPI-protected files | A Secret Service keyring (GNOME Keyring, KWallet) that is running; nothing is written in plain text |
+| SSH agent | Windows OpenSSH agent, then Pageant | `SSH_AUTH_SOCK`, set in the session when the app starts |
+| Notifications | Windows toasts | Freedesktop notifications |
 
-## Install (Linux)
+On Linux the AppImage needs `fusermount` (FUSE 3, present on desktop installs); without it, start it with `--appimage-extract-and-run`, which updates the same way.
 
-Take `Tether-<version>-x86_64.AppImage` from the newest [`desktop-v*` release](https://github.com/samuelloranger/tether/releases?q=desktop-v&expanded=true), then:
-
-```sh
-chmod +x Tether-<version>-x86_64.AppImage
-./Tether-<version>-x86_64.AppImage
-```
-
-The app updates itself in place: it checks the `linux-feed` release at launch, downloads a newer AppImage in the background and swaps the file on the next launch or from **Settings → About → Restart**. Keep the file somewhere you can write to. Downloads go to a private folder under `~/.cache/tether/updates`. Running it directly needs FUSE 2 (`libfuse2`); without it, run `./Tether-<version>-x86_64.AppImage --appimage-extract-and-run`, which updates the same way and still replaces the original file.
-
-x86_64, glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 or later), X11 or Wayland. Running the AppImage needs `fusermount` (FUSE 3, present on desktop installs); without it, start it with `--appimage-extract-and-run`. Saved passwords and key passphrases live in the desktop's Secret Service keyring (GNOME Keyring, KWallet), which must be running; agent authentication needs `SSH_AUTH_SOCK` set in the session. Build from source with `cargo build --release -p tether-app` in `clients/desktop/` after installing `libfontconfig1-dev` and `pkg-config`; `clients/desktop/packaging/linux/package.sh` builds the AppImage.
+Build from source with Rust stable: `cargo build --release -p tether-app` in `clients/desktop/` (on Linux after installing `libfontconfig1-dev` and `pkg-config`; `clients/desktop/packaging/linux/package.sh` builds the AppImage). Design and per-OS behaviour: [`clients/desktop/SPEC.md`](clients/desktop/SPEC.md).
 
 On first launch: add a machine (host, port, user, and a key from the vault), then open it. The app attaches an existing zmx session if the host has one, otherwise it starts `default`.
 
@@ -98,7 +97,7 @@ Architecture, data flow, and conventions: [`CLAUDE.md`](CLAUDE.md).
 
 ## Security
 
-Transport is SSH — there is no shared password and no setup flow that skips host-key verification. Keys live in the iOS Keychain (or DPAPI-protected storage on Windows) and reach the SSH library in memory only. A host-key mismatch fails loudly. The push relay only ever routes ciphertext it cannot read. Keep hosts reachable over your LAN, a tunnel, or plain SSH as you already do.
+Transport is SSH — there is no shared password and no setup flow that skips host-key verification. Keys live in the iOS Keychain (DPAPI-protected storage on Windows, the Secret Service keyring on Linux) and reach the SSH library in memory only. A host-key mismatch fails loudly. The push relay only ever routes ciphertext it cannot read. Keep hosts reachable over your LAN, a tunnel, or plain SSH as you already do.
 
 ## License
 
