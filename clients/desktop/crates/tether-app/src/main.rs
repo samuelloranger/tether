@@ -13,7 +13,6 @@ mod startup;
 mod terminal;
 mod updates;
 mod vm;
-mod win32;
 
 fn main() {
     #[cfg(windows)]
@@ -44,15 +43,18 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         .select()?;
     let app = app::App::new()?;
     #[cfg(windows)]
-    terminal::files::set_codec(std::sync::Arc::new(win32::wic::WicCodec));
+    terminal::files::set_codec(std::sync::Arc::new(platform::windows::wic::WicCodec));
     #[cfg(windows)]
-    let platform: std::sync::Arc<dyn win32::Platform> = {
-        let p = std::sync::Arc::new(win32::platform::WindowsPlatform::new(app.ui.as_weak()));
+    let platform: std::sync::Arc<dyn platform::Platform> = {
+        let p = std::sync::Arc::new(platform::windows::platform::WindowsPlatform::new(
+            app.ui.as_weak(),
+        ));
         p.prepare_identity();
         p
     };
     #[cfg(not(windows))]
-    let platform: std::sync::Arc<dyn win32::Platform> = std::sync::Arc::new(win32::NullPlatform);
+    let platform: std::sync::Arc<dyn platform::Platform> =
+        std::sync::Arc::new(platform::NullPlatform);
     terminal::glue::init(&app, platform);
     watch_updates(&app);
     app.apply_dev_screen();

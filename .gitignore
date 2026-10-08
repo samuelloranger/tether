@@ -4,7 +4,7 @@ apps/**/node_modules/
 
 # Build outputs
 dist/
-clients/windows/dist/
+clients/desktop/dist/
 
 # Environment files
 .env

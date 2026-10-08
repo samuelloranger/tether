@@ -10,6 +10,7 @@ use winit::event::{ElementState, Ime, WindowEvent};
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 
 use crate::app::App;
+use crate::platform::Platform;
 use crate::router::Page;
 use crate::terminal::driver::{Driver, MsgSink, msg_sink, presented_sink};
 use crate::terminal::geometry::TermStyle;
@@ -18,7 +19,6 @@ use crate::terminal::model::{
 };
 use crate::terminal::remote::SshRemote;
 use crate::terminal::ui_port::SlintUi;
-use crate::win32::Platform;
 use crate::{AgentVm, AppWindow, ConnectVm, TerminalVm};
 
 thread_local! {
@@ -54,7 +54,7 @@ pub fn init(app: &Rc<App>, platform: Arc<dyn Platform>) {
 fn platform() -> Arc<dyn Platform> {
     PLATFORM
         .with(|p| p.borrow().clone())
-        .unwrap_or_else(|| Arc::new(crate::win32::NullPlatform))
+        .unwrap_or_else(|| Arc::new(crate::platform::NullPlatform))
 }
 
 /// The body of M5's `open_machine::on_open_machine`.
@@ -106,7 +106,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
-    crate::win32::network::watch(network_target.0, network_target.1);
+    crate::platform::windows::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
@@ -337,7 +337,7 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
                 static ONCE: std::sync::Once = std::sync::Once::new();
                 ONCE.call_once(|| {
                     if let Some(h) = crate::platform::hwnd_of(app.ui.window()) {
-                        crate::win32::wndproc::install(h);
+                        crate::platform::windows::wndproc::install(h);
                     }
                 });
             }

@@ -1,6 +1,6 @@
 name: Windows release
 
-# Pushing the tag windows-vX.Y.Z releases the Windows client (clients/windows).
+# Pushing the tag windows-vX.Y.Z releases the Windows client (clients/desktop).
 # It never matches the iOS release.yml or relay-deploy.yml filter ('v*.*.*'),
 # and its release is never marked latest: `releases/latest` stays the iOS app.
 #
@@ -34,7 +34,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: clients/windows
+        working-directory: clients/desktop
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
@@ -52,13 +52,13 @@ jobs:
           set -euo pipefail
           CARGO_VERSION="$(tr -d '\r' < Cargo.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)"
           if [ -z "$CARGO_VERSION" ]; then
-            echo "::error::No version found in clients/windows/Cargo.toml"
+            echo "::error::No version found in clients/desktop/Cargo.toml"
             exit 1
           fi
           if [ "${{ github.event_name }}" = "push" ]; then
             V="${TAG#windows-v}"
             if [ "$V" != "$CARGO_VERSION" ]; then
-              echo "::error::Tag $TAG but clients/windows/Cargo.toml is $CARGO_VERSION. Bump the workspace version and re-tag."
+              echo "::error::Tag $TAG but clients/desktop/Cargo.toml is $CARGO_VERSION. Bump the workspace version and re-tag."
               exit 1
             fi
           else
@@ -73,7 +73,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: clients/windows
+          workspaces: clients/desktop
 
       - name: Format
         run: cargo fmt --all --check
@@ -115,7 +115,7 @@ jobs:
       # OID, so Windows will not install it; it does not ship.
       - name: Checksums
         shell: pwsh
-        working-directory: clients/windows/dist
+        working-directory: clients/desktop/dist
         run: |
           Get-ChildItem "Tether-*-x64-portable.zip", "Tether-*-x64-Setup.exe" | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
@@ -126,11 +126,11 @@ jobs:
         with:
           name: tether-windows-${{ steps.ver.outputs.version }}
           path: |
-            clients/windows/dist/Tether-*-x64-portable.zip
-            clients/windows/dist/Tether-*-x64-Setup.exe
-            clients/windows/dist/SHA256SUMS.txt
-            clients/windows/dist/velopack/*-full.nupkg
-            clients/windows/dist/velopack/releases.win.json
+            clients/desktop/dist/Tether-*-x64-portable.zip
+            clients/desktop/dist/Tether-*-x64-Setup.exe
+            clients/desktop/dist/SHA256SUMS.txt
+            clients/desktop/dist/velopack/*-full.nupkg
+            clients/desktop/dist/velopack/releases.win.json
           if-no-files-found: error
 
   release:
@@ -153,7 +153,7 @@ jobs:
           name: tether-windows-${{ needs.build.outputs.version }}
           path: dist
 
-      # Notes cover only clients/windows since the previous Windows tag, so iOS
+      # Notes cover only clients/desktop since the previous Windows tag, so iOS
       # and host-tool commits never land in a Windows release.
       - name: Write notes
         run: |
@@ -167,7 +167,7 @@ jobs:
             echo "Install with \`Tether-$V-x64-Setup.exe\` (per-user, no admin); the app then updates itself. \`Tether-$V-x64-portable.zip\` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch."
             echo
             echo "## Changes"
-            git log --no-merges --format='- %s' "$RANGE" -- clients/windows
+            git log --no-merges --format='- %s' "$RANGE" -- clients/desktop clients/windows
           } > notes.md
           cat notes.md
 

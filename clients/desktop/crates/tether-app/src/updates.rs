@@ -76,7 +76,7 @@ mod tests {
 #[cfg(windows)]
 mod win {
     use super::*;
-    use crate::win32::aumid::AUMID;
+    use crate::platform::windows::aumid::AUMID;
     use std::sync::{Arc, Mutex};
     use velopack::sources::HttpSource;
     use velopack::{UpdateCheck, UpdateManager, VelopackApp, VelopackAsset};
