@@ -53,7 +53,7 @@ chmod +x Tether-<version>-x86_64.AppImage
 ./Tether-<version>-x86_64.AppImage
 ```
 
-The app updates itself in place: it checks the `linux-feed` release at launch, downloads a newer AppImage in the background and swaps the file on the next launch or from **Settings → About → Restart**. Keep the file somewhere you can write to. Running it directly needs FUSE 2 (`libfuse2`); without it, run `./Tether-<version>-x86_64.AppImage --appimage-extract-and-run` (the extracted copy is not Velopack-managed, so it does not update).
+The app updates itself in place: it checks the `linux-feed` release at launch, downloads a newer AppImage in the background and swaps the file on the next launch or from **Settings → About → Restart**. Keep the file somewhere you can write to. Downloads go to a private folder under `~/.cache/tether/updates`. Running it directly needs FUSE 2 (`libfuse2`); without it, run `./Tether-<version>-x86_64.AppImage --appimage-extract-and-run`, which updates the same way and still replaces the original file.
 
 x86_64, glibc 2.35 or newer, X11 or Wayland. Saved passwords and key passphrases live in the desktop's Secret Service keyring (GNOME Keyring, KWallet), which must be running; agent authentication needs `SSH_AUTH_SOCK` set in the session. Build from source with `cargo build --release -p tether-app` in `clients/desktop/` after installing `libfontconfig1-dev` and `pkg-config`; `clients/desktop/packaging/linux/package.sh` builds the AppImage.
 

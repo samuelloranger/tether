@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Tether v5 is a **native terminal for iOS, Mac and Windows that connects over SSH to `zmx`** — a persistent session manager running on your own hosts. The client speaks SSH straight to the host, attaches a zmx session, and renders the live PTY. Sessions survive disconnects because **zmx owns them on the host**; Tether is a pure client with no server of its own.
+Tether v5 is a **native terminal for iOS, Mac, Windows and Linux that connects over SSH to `zmx`** — a persistent session manager running on your own hosts. The client speaks SSH straight to the host, attaches a zmx session, and renders the live PTY. Sessions survive disconnects because **zmx owns them on the host**; Tether is a pure client with no server of its own.
 
 Tether through v4 was a Bun server + Noise transport with desktop and web clients. **All of that was removed in v5** — `apps/server`, `apps/desktop`, the VitePress docs site, and the whole Noise / holder / replay / WebSocket stack are gone. Do **not** reintroduce a server, a Noise channel, a WebSocket transport, or a web client. The desktop clients allowed are the native Windows and Linux app in `clients/desktop/` (one Rust codebase; spec: `clients/desktop/SPEC.md`) and the Mac Catalyst build of the iOS app; both are pure SSH-to-`zmx` clients like iOS. The only host-side artifact is `tether-notify`, a small Go tool for push. The push relay (`apps/relay`) is separate infrastructure, not part of any host: it routes ciphertext to APNs and is the only piece that holds the APNs key.
 
@@ -65,7 +65,7 @@ bash scripts/install-agent-hooks.sh [host] # fire notifications from agent hooks
 
 ## Data flow (the core loop)
 
-The steps name the iOS types; the desktop app runs the same loop through `tether-core` and `tether-ssh`, with keys in the DPAPI vault instead of the Keychain.
+The steps name the iOS types; the desktop app runs the same loop through `tether-core` and `tether-ssh`, with keys in the DPAPI vault (Windows) or the Secret Service keyring (Linux) instead of the Keychain.
 
 1. The app keeps SSH **host profiles** and **keys** (keys in the Keychain). Opening a machine → `SSHConnector` dials libssh2 to `host:port`.
 2. **Host-key TOFU:** an unknown key is pinned on first connect; a later mismatch is **hard-refused, never overridden**.
