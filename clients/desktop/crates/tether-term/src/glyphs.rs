@@ -188,4 +188,25 @@ mod tests {
             assert!(atlas.len() <= ATLAS_CAP, "atlas grew to {}", atlas.len());
         }
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_system_colour_emoji_font_rasterizes_in_colour() {
+        let font = font_named("cascadia-mono");
+        let (slot, glyph) = resolve(font, false, '\u{1f600}');
+        if !matches!(slot, FaceSlot::System(_)) {
+            return;
+        }
+        let mut ctx = ScaleContext::new();
+        let mut atlas = GlyphAtlas::new();
+        atlas.prepare(16.0);
+        let key = GlyphKey {
+            font: font.id,
+            slot,
+            glyph,
+        };
+        let raster = atlas.get(&mut ctx, key).expect("emoji draws");
+        assert!(raster.width > 0 && raster.height > 0);
+        assert!(raster.color);
+    }
 }

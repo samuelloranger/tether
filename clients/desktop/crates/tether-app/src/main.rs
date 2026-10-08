@@ -11,6 +11,7 @@ mod preview;
 mod router;
 mod startup;
 mod terminal;
+mod uifont;
 mod updates;
 mod vm;
 

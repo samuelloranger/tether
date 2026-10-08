@@ -72,7 +72,7 @@ impl AppState {
     }
 
     pub fn has_saved_password(&self, id: Uuid) -> bool {
-        matches!(self.secrets.get(&password_account(id)), Ok(Some(_)))
+        matches!(self.secrets.contains(&password_account(id)), Ok(true))
     }
 
     pub fn save_server(
@@ -95,7 +95,7 @@ impl AppState {
         self.data.save(PROFILES_FILE, &next)?;
         self.profiles = next;
         if matches!(action, PasswordAction::Delete) {
-            self.secrets.delete(&password_account(id))?;
+            self.forget_secret(&password_account(id));
         }
         Ok(id)
     }
@@ -105,7 +105,7 @@ impl AppState {
         next.remove(id);
         self.data.save(PROFILES_FILE, &next)?;
         self.profiles = next;
-        self.secrets.delete(&password_account(id))?;
+        self.forget_secret(&password_account(id));
         Ok(())
     }
 
@@ -182,8 +182,16 @@ impl AppState {
         next.remove(id);
         self.data.save(KEYS_FILE, &next)?;
         self.keys = next;
-        self.secrets.delete(&key_account(id))?;
+        self.forget_secret(&key_account(id));
         Ok(())
+    }
+
+    /// The record is already gone, so a store that cannot delete (a locked keyring) is logged,
+    /// not shown: the user did nothing wrong and the leftover item is unreachable.
+    fn forget_secret(&self, account: &str) {
+        if let Err(e) = self.secrets.delete(account) {
+            tracing::warn!("could not delete a stored secret: {e}");
+        }
     }
 }
 
@@ -191,6 +199,7 @@ impl AppState {
 mod tests {
     use super::*;
     use tether_core::{AuthChoice, HostKeyStore, MemoryHostKeys, MemorySecretStore};
+    use zeroize::Zeroizing;
 
     fn state(dir: &std::path::Path) -> (AppState, Arc<MemorySecretStore>, Arc<MemoryHostKeys>) {
         let secrets = Arc::new(MemorySecretStore::default());
@@ -264,6 +273,40 @@ mod tests {
         let (reloaded, _, _) = state(dir.path());
         assert_eq!(reloaded.profiles.machines.len(), 1);
         assert!(s.has_saved_password(id));
+    }
+
+    struct CannotDelete;
+
+    impl SecretStore for CannotDelete {
+        fn get(&self, _: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &[u8]) -> Result<(), SecretError> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<(), SecretError> {
+            Err(SecretError::Locked)
+        }
+    }
+
+    #[test]
+    fn a_secret_that_cannot_be_deleted_does_not_fail_a_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = AppState::load(
+            DataDir::new(dir.path()),
+            Arc::new(CannotDelete),
+            Arc::new(MemoryHostKeys::default()),
+            false,
+        )
+        .unwrap();
+        let id = s
+            .save_server(None, &form(AuthChoice::Password, "pw"))
+            .unwrap();
+        s.remove_machine(id).unwrap();
+        assert!(s.profiles.machines.is_empty());
+        let key = s.generate_key("k", 1).unwrap();
+        s.delete_key(key).unwrap();
+        assert!(s.keys.keys.is_empty());
     }
 
     #[test]

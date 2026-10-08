@@ -84,7 +84,12 @@ fn secret_store(data: &DataDir) -> Arc<dyn SecretStore> {
     {
         Arc::new(tether_core::DpapiSecretStore::new(data))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = data;
+        Arc::new(tether_core::SecretServiceStore)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = data;
         Arc::new(tether_core::MemorySecretStore::default())
@@ -113,7 +118,7 @@ impl App {
     pub fn new() -> Result<Rc<Self>, Box<dyn Error>> {
         let data = match dev_env("TETHER_DEV_DATA") {
             Some(dir) => DataDir::new(dir),
-            None => DataDir::default_windows()?,
+            None => DataDir::default_location()?,
         };
         let secrets = secret_store(&data);
         let hostkeys = Arc::new(JsonHostKeys::new(DataDir::new(data.root()))?);
@@ -138,6 +143,10 @@ impl App {
             cursor_on: Cell::new(true),
             blink_timer: slint::Timer::default(),
         });
+        #[cfg(not(windows))]
+        if let Some(family) = crate::uifont::system_ui_family() {
+            app.ui.global::<Tokens>().set_ui_font(family.into());
+        }
         app.restore_placement();
         app.install();
         app.refresh();

@@ -55,9 +55,17 @@ pub enum ConnectError {
     AgentNoKey,
     Timeout,
     Transport(String),
+    /// The secret store refused: the sentence says why. Retrying only repeats the prompt.
+    Keyring(String),
     /// The machine to connect through was removed, or the jumps loop back on themselves.
     JumpMissing,
 }
+
+#[cfg(windows)]
+const NO_AGENT: &str = "No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key.";
+#[cfg(not(windows))]
+const NO_AGENT: &str =
+    "No SSH agent was found. Start ssh-agent and set SSH_AUTH_SOCK, or choose a key.";
 
 impl ConnectError {
     pub fn sentence(&self) -> String {
@@ -69,12 +77,11 @@ impl ConnectError {
             ConnectError::KeyMissing => {
                 "This machine's key was deleted. Edit the machine and choose another key.".into()
             }
-            ConnectError::AgentNotRunning => {
-                "No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key.".into()
-            }
+            ConnectError::AgentNotRunning => NO_AGENT.into(),
             ConnectError::AgentNoKey => "The SSH agent has no key this host accepts.".into(),
             ConnectError::Timeout => "The host stopped answering.".into(),
             ConnectError::Transport(detail) => format!("Could not connect: {detail}"),
+            ConnectError::Keyring(sentence) => sentence.clone(),
             ConnectError::JumpMissing => {
                 "The machine this one connects through is gone. Edit the machine and choose another, or Direct.".into()
             }
@@ -162,7 +169,7 @@ pub fn load_credential(
     let read = |account: String| {
         secrets
             .get(&account)
-            .map_err(|e| ConnectError::Transport(format!("{e:?}")))
+            .map_err(|e| ConnectError::Keyring(e.to_string()))
     };
     match &machine.auth {
         Auth::Agent => Ok(Credential::Agent),
@@ -762,9 +769,15 @@ mod tests {
             ConnectError::KeyMissing.sentence(),
             "This machine's key was deleted. Edit the machine and choose another key."
         );
+        #[cfg(windows)]
         assert_eq!(
             ConnectError::AgentNotRunning.sentence(),
             "No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key."
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            ConnectError::AgentNotRunning.sentence(),
+            "No SSH agent was found. Start ssh-agent and set SSH_AUTH_SOCK, or choose a key."
         );
         assert_eq!(
             ConnectError::AgentNoKey.sentence(),

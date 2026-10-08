@@ -11,6 +11,7 @@ pub mod googlefonts;
 pub mod graphics;
 pub mod hints;
 pub mod history;
+pub mod hostcmd;
 pub mod hostkey;
 pub mod keymap;
 pub mod keys;
@@ -51,6 +52,8 @@ pub use profiles::{
 };
 #[cfg(windows)]
 pub use secrets::DpapiSecretStore;
+#[cfg(target_os = "linux")]
+pub use secrets::SecretServiceStore;
 pub use secrets::{MemorySecretStore, SecretError, SecretStore, key_account, password_account};
 pub use store::DataDir;
 pub use theme::{THEMES_LICENSE, TerminalTheme, catalog, theme_named};

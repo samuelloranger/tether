@@ -11,3 +11,6 @@ swash = "=0.2.10"
 base64.workspace = true
 miniz_oxide = "0.8"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+
+[dev-dependencies]
+tempfile.workspace = true

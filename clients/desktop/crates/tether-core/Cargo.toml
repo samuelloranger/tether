@@ -25,6 +25,10 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5.2", default-features = false, features = ["rt-async-io-crypto-rust"] }
+zbus = { version = "5", default-features = false }
+
 [dev-dependencies]
 futures = "0.3"
 tempfile.workspace = true

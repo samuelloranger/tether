@@ -195,9 +195,108 @@ fn load_system_fallbacks() -> Vec<&'static [u8]> {
     .collect()
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn load_system_fallbacks() -> Vec<&'static [u8]> {
     Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn load_system_fallbacks() -> Vec<&'static [u8]> {
+    linux_fallbacks(&fontconfig_match, FALLBACK_WANTS)
+}
+
+#[cfg(target_os = "linux")]
+/// What each fallback has to cover, in the order they are tried: colour emoji first, as on
+/// Windows, because common symbol fonts draw monochrome emoji. Chinese comes before
+/// Japanese as on Windows, since only the first face of a collection is drawn. A match that
+/// cannot draw its probe is dropped, since fontconfig always answers with its best guess even when nothing fits.
+const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
+    (
+        "emoji",
+        '\u{1f600}',
+        &["/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"],
+    ),
+    (
+        "sans-serif:charset=2603",
+        '\u{2603}',
+        &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
+    ),
+    (
+        "sans-serif:lang=zh-cn",
+        '\u{6c49}',
+        &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
+    ),
+    (
+        "sans-serif:lang=ja",
+        '\u{65e5}',
+        &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
+    ),
+    (
+        "sans-serif:lang=ko",
+        '\u{d55c}',
+        &["/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"],
+    ),
+];
+
+#[cfg(target_os = "linux")]
+fn fontconfig_match(pattern: &str) -> Option<std::path::PathBuf> {
+    let out = tether_core::hostcmd::host_command("fc-match")
+        .args(["-f", "%{file}", pattern])
+        .output()
+        .ok()?;
+    let path = String::from_utf8(out.stdout).ok()?;
+    (out.status.success() && !path.is_empty()).then(|| path.into())
+}
+
+/// Mapped is not drawn: swash reads colour tables of version 0 only, so a font whose emoji are
+/// COLRv1 passes the charmap and rasterizes blank.
+#[cfg(target_os = "linux")]
+fn draws(data: &[u8], probe: char) -> bool {
+    let Some(font) = swash::FontRef::from_index(data, 0) else {
+        return false;
+    };
+    let glyph = font.charmap().map(probe);
+    if glyph == 0 {
+        return false;
+    }
+    let mut ctx = swash::scale::ScaleContext::new();
+    let mut scaler = ctx.builder(font).size(16.0).build();
+    swash::scale::Render::new(&[
+        swash::scale::Source::ColorOutline(0),
+        swash::scale::Source::ColorBitmap(swash::scale::StrikeWith::BestFit),
+        swash::scale::Source::Outline,
+    ])
+    .render(&mut scaler, glyph)
+    .is_some_and(|image| image.data.iter().any(|b| *b != 0))
+}
+
+#[cfg(target_os = "linux")]
+/// Only the first face of a collection is ever drawn, so that is the one that is checked.
+fn linux_fallbacks(
+    find: &dyn Fn(&str) -> Option<std::path::PathBuf>,
+    wants: &[(&str, char, &[&str])],
+) -> Vec<&'static [u8]> {
+    let mut seen = Vec::new();
+    let mut loaded = Vec::new();
+    for (pattern, probe, well_known) in wants {
+        let candidates = find(pattern)
+            .into_iter()
+            .chain(well_known.iter().map(std::path::PathBuf::from));
+        for path in candidates {
+            if seen.contains(&path) {
+                break;
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            if draws(&bytes, *probe) {
+                seen.push(path);
+                loaded.push(&*Box::leak(bytes.into_boxed_slice()));
+                break;
+            }
+        }
+    }
+    loaded
 }
 
 #[cfg(test)]
@@ -321,9 +420,42 @@ mod tests {
         assert!(!uniform(&[300.0, 600.0, 800.0]));
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    fn covers(data: &[u8], ch: char) -> bool {
+        maps(data, ch)
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
-    fn no_system_fallbacks_off_windows() {
-        assert!(system_fallbacks().is_empty());
+    fn a_fallback_that_lacks_its_probe_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let nerd = dir.path().join("nerd.ttf");
+        std::fs::write(&nerd, SYMBOLS).unwrap();
+        let wants: &[(&str, char, &[&str])] =
+            &[("any", '\u{1f600}', &[]), ("any", '\u{f121}', &[])];
+        let found = linux_fallbacks(&|_| Some(nerd.clone()), wants);
+        assert_eq!(found.len(), 1);
+        assert!(covers(found[0], '\u{f121}'));
+        assert!(linux_fallbacks(&|_| None, &[("any", 'A', &[])]).is_empty());
+        assert!(!draws(SYMBOLS, '\u{1f600}'));
+        assert!(draws(SYMBOLS, '\u{f121}'));
+        assert!(!draws(b"not a font", 'A'));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn this_hosts_fallbacks_cover_emoji_and_cjk_when_installed() {
+        let found = system_fallbacks();
+        let installed = |p: &str| std::path::Path::new(p).exists();
+        if installed("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf") {
+            assert!(found.iter().any(|f| covers(f, '\u{1f600}')));
+        }
+        if installed("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc") {
+            assert!(found.iter().any(|f| covers(f, '\u{65e5}')));
+            assert!(found.iter().any(|f| covers(f, '\u{d55c}')));
+        }
+        for f in found {
+            assert!(swash::FontRef::from_index(f, 0).is_some());
+        }
     }
 }
