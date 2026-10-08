@@ -4,10 +4,31 @@ import { AppBridge, SettingsBridge } from "bridge.slint";
 import { SnippetsBridge } from "extras_bridge.slint";
 import { PageChrome, PrimaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
 
-component Section inherits Text {
-    font-size: 12px;
-    font-weight: 650;
-    color: Tokens.text-faint;
+component Section inherits VerticalLayout {
+    in property <string> text;
+    in property <bool> first;
+    padding-top: root.first ? 4px : 26px;
+    padding-bottom: 8px;
+    padding-left: 4px;
+    Text {
+        text: root.text;
+        font-size: 13px;
+        font-weight: 700;
+        color: Tokens.text-secondary;
+    }
+}
+
+// One settings section's rows on a card, so each group reads as a unit.
+component Group inherits Rectangle {
+    background: Tokens.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        @children
+    }
 }
 
 component Label inherits Text {
@@ -18,8 +39,9 @@ component Label inherits Text {
 
 component Row inherits Rectangle {
     in property <string> label;
+    in property <bool> last;
     height: 50px;
-    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    if !root.last: Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
     HorizontalLayout {
         spacing: 12px;
         Text { text: root.label; font-weight: 600; color: Tokens.text; vertical-alignment: center; }
@@ -59,6 +81,7 @@ component SmallButton inherits Rectangle {
 component LinkRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
+    in property <bool> last;
     callback clicked();
     height: 50px;
     forward-focus: focus;
@@ -70,7 +93,7 @@ component LinkRow inherits Rectangle {
         border-width: focus.has-focus ? 2px : 0px;
         border-color: Tokens.accent;
     }
-    Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+    if !root.last: Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
     HorizontalLayout {
         spacing: 12px;
         Text { text: root.label; font-weight: 600; color: Tokens.text; vertical-alignment: center; }
@@ -96,53 +119,62 @@ component StepperRow inherits Row {
 }
 
 component SettingsForm inherits VerticalLayout {
-    Section { text: "Appearance"; }
-    LinkRow { label: "Color scheme"; value: SettingsBridge.scheme-name; clicked => { SettingsBridge.open-schemes(); } }
+    Section { text: "Appearance"; first: true; }
+    Group {
+        LinkRow { label: "Color scheme"; value: SettingsBridge.scheme-name; last: true; clicked => { SettingsBridge.open-schemes(); } }
+    }
     Section { text: "Terminal"; }
-    LinkRow { label: "Font"; value: SettingsBridge.font-name; clicked => { SettingsBridge.open-fonts(); } }
-    LinkRow { label: "Snippets"; value: SnippetsBridge.count-label; clicked => { SnippetsBridge.open(); } }
-    StepperRow { label: "Size"; value: SettingsBridge.size-label; step(d) => { SettingsBridge.size-step(d); } }
-    Row {
-        label: "Line spacing";
-        Value { text: SettingsBridge.spacing-label; }
+    Group {
+        LinkRow { label: "Font"; value: SettingsBridge.font-name; clicked => { SettingsBridge.open-fonts(); } }
+        LinkRow { label: "Snippets"; value: SnippetsBridge.count-label; clicked => { SnippetsBridge.open(); } }
+        StepperRow { label: "Size"; value: SettingsBridge.size-label; step(d) => { SettingsBridge.size-step(d); } }
+        Row {
+            label: "Line spacing";
+            Value { text: SettingsBridge.spacing-label; }
+            VerticalLayout {
+                alignment: center;
+                TetherSlider {
+                    width: 140px;
+                    minimum: 1.0;
+                    maximum: 1.6;
+                    value <=> SettingsBridge.spacing;
+                    changed(v) => { SettingsBridge.spacing-changed(v); }
+                }
+            }
+        }
+        StepperRow { label: "Padding"; value: SettingsBridge.padding-label; step(d) => { SettingsBridge.padding-step(d); } }
         VerticalLayout {
-            alignment: center;
-            TetherSlider {
-                width: 140px;
-                minimum: 1.0;
-                maximum: 1.6;
-                value <=> SettingsBridge.spacing;
-                changed(v) => { SettingsBridge.spacing-changed(v); }
+            spacing: 8px;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            Label { text: "Cursor"; }
+            Segment {
+                options: ["Block", "Bar", "Underline"];
+                selected <=> SettingsBridge.cursor;
+                changed(i) => { SettingsBridge.cursor-changed(i); }
+            }
+        }
+        Rectangle { height: 1px; background: Tokens.border; }
+        Row {
+            label: "Blink cursor";
+            last: true;
+            VerticalLayout {
+                alignment: center;
+                TetherSwitch { checked <=> SettingsBridge.blink; toggled => { SettingsBridge.blink-changed(self.checked); } }
             }
         }
     }
-    StepperRow { label: "Padding"; value: SettingsBridge.padding-label; step(d) => { SettingsBridge.padding-step(d); } }
-    VerticalLayout {
-        spacing: 5px;
-        padding-top: 12px;
-        padding-bottom: 4px;
-        Label { text: "Cursor"; }
-        Segment {
-            options: ["Block", "Bar", "Underline"];
-            selected <=> SettingsBridge.cursor;
-            changed(i) => { SettingsBridge.cursor-changed(i); }
-        }
-    }
-    Row {
-        label: "Blink cursor";
-        VerticalLayout {
-            alignment: center;
-            TetherSwitch { checked <=> SettingsBridge.blink; toggled => { SettingsBridge.blink-changed(self.checked); } }
-        }
-    }
-    VerticalLayout { padding-top: 20px; Section { text: "About"; } }
-    Row { label: "Version"; Value { text: SettingsBridge.version-label; } }
-    Row {
-        label: "Updates";
-        Value { text: SettingsBridge.update-label; }
-        if SettingsBridge.update-ready: VerticalLayout {
-            alignment: center;
-            PrimaryButton { min-height: 32px; text: "Restart"; clicked => { SettingsBridge.restart-to-update(); } }
+    Section { text: "About"; }
+    Group {
+        Row { label: "Version"; Value { text: SettingsBridge.version-label; } }
+        Row {
+            label: "Updates";
+            last: true;
+            Value { text: SettingsBridge.update-label; }
+            if SettingsBridge.update-ready: VerticalLayout {
+                alignment: center;
+                PrimaryButton { min-height: 32px; text: "Restart"; clicked => { SettingsBridge.restart-to-update(); } }
+            }
         }
     }
 }

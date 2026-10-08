@@ -34,15 +34,28 @@ export global Heat {
     }
 }
 
+// A dot beside text sits on the text's x-height, not the line box's middle: glyphs ride low in
+// their line box, by a font-dependent amount, but their x-height centre stays near 60 % down
+// it for both Segoe UI and Noto Sans.
+export component TextDot inherits Rectangle {
+    in property <color> ink;
+    in property <length> line-height;
+    width: 6px;
+    Rectangle {
+        y: (parent.height - root.line-height) / 2 + root.line-height * 0.6 - 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: root.ink;
+    }
+}
+
 export component AgentChip inherits HorizontalLayout {
     in property <int> state;                 // 0 working, 1 waiting, 2 done
     in property <string> label;
     spacing: 5px;
-    VerticalLayout {
-        alignment: center;
-        Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Heat.ink(root.state); }
-    }
-    Text {
+    TextDot { ink: Heat.ink(root.state); line-height: word.preferred-height; }
+    word := Text {
         text: root.label;
         color: Heat.ink(root.state);
         font-size: 11.5px;
