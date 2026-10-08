@@ -59,6 +59,12 @@ pub enum ConnectError {
     JumpMissing,
 }
 
+#[cfg(windows)]
+const NO_AGENT: &str = "No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key.";
+#[cfg(not(windows))]
+const NO_AGENT: &str =
+    "No SSH agent was found. Start ssh-agent and set SSH_AUTH_SOCK, or choose a key.";
+
 impl ConnectError {
     pub fn sentence(&self) -> String {
         match self {
@@ -69,9 +75,7 @@ impl ConnectError {
             ConnectError::KeyMissing => {
                 "This machine's key was deleted. Edit the machine and choose another key.".into()
             }
-            ConnectError::AgentNotRunning => {
-                "No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key.".into()
-            }
+            ConnectError::AgentNotRunning => NO_AGENT.into(),
             ConnectError::AgentNoKey => "The SSH agent has no key this host accepts.".into(),
             ConnectError::Timeout => "The host stopped answering.".into(),
             ConnectError::Transport(detail) => format!("Could not connect: {detail}"),
@@ -762,9 +766,15 @@ mod tests {
             ConnectError::KeyMissing.sentence(),
             "This machine's key was deleted. Edit the machine and choose another key."
         );
+        #[cfg(windows)]
         assert_eq!(
             ConnectError::AgentNotRunning.sentence(),
             "No SSH agent is running. Start the OpenSSH Authentication Agent service or Pageant, or choose a key."
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            ConnectError::AgentNotRunning.sentence(),
+            "No SSH agent was found. Start ssh-agent and set SSH_AUTH_SOCK, or choose a key."
         );
         assert_eq!(
             ConnectError::AgentNoKey.sentence(),

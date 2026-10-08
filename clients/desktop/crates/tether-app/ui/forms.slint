@@ -52,7 +52,9 @@ export component ServerFormPage inherits PageChrome {
                 color: Tokens.text-secondary;
             }
             if ServerFormBridge.auth == 1: Text {
-                text: "Uses the keys in the Windows OpenSSH agent (1Password's too when it serves that agent), or in Pageant when that agent isn't running.";
+                text: Platform.os == OperatingSystemType.windows
+                    ? "Uses the keys in the Windows OpenSSH agent (1Password's too when it serves that agent), or in Pageant when that agent isn't running."
+                    : "Uses the keys in the SSH agent that SSH_AUTH_SOCK points at (1Password's too when it serves that agent).";
                 wrap: word-wrap;
                 font-size: 13px;
                 color: Tokens.text-secondary;
