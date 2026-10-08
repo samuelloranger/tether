@@ -71,18 +71,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: clients/desktop
+          # Restores what CI saved on main; a tag's own cache would never be read again.
+          shared-key: desktop-windows
+          save-if: false
 
       - name: Format
         run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
+      # Clippy is CI's gate on main, where every tag is cut.
       - name: Test
         run: cargo test --workspace --locked
 
@@ -127,7 +128,7 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
-    container: ubuntu:22.04
+    container: ubuntu:24.04
     defaults:
       run:
         # A container job runs steps with sh, which has no pipefail.
@@ -161,10 +162,8 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Building $V"
 
-      # The build runs in ubuntu:22.04 so the binary links glibc 2.35 and starts on every distro
-      # at least that recent; a build on ubuntu-latest would refuse to start on an LTS a release
-      # or two behind. The container is used because the ubuntu-22.04 runner image is being
-      # retired, and the Windows release waits on this job. fontconfig is the only system library
+      # The build runs in ubuntu:24.04 so the binary links glibc 2.39 and starts on every distro
+      # at least that recent; a container keeps that floor fixed while ubuntu-latest moves on. fontconfig is the only system library
       # linked at build time (it brings the freetype and expat headers); the windowing, GL and
       # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk, and the
       # colour emoji font is what the glyph test expects a desktop to have.
@@ -177,18 +176,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: clients/desktop
+          shared-key: desktop-linux
+          save-if: false
 
       - name: Format
         run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
+      # Clippy is CI's gate on main, where every tag is cut.
       - name: Test
         run: cargo test --workspace --locked
 

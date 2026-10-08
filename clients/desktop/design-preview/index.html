@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tether for Windows</title>
+<title>Tether desktop</title>
 <style>
   :root {
     --bg: #08080e;
@@ -712,7 +712,7 @@
 </head>
 <body>
 <nav class="rail" aria-label="Screens">
-  <h1>Tether for Windows</h1>
+  <h1>Tether desktop</h1>
   <div class="group">Home</div>
   <button type="button" data-go="machines" aria-current="true">Machines</button>
   <button type="button" data-go="empty">Empty</button>
@@ -815,7 +815,7 @@
         </div>
       </section>
 
-      <section class="screen" id="keys" data-title="Keys" data-caption="The public half lives on the card. The private half stays on this PC, encrypted with DPAPI. Copy is on the card. Delete is a confirm, from a right-click or the Delete key.">
+      <section class="screen" id="keys" data-title="Keys" data-caption="The public half lives on the card. The private half stays on this computer: DPAPI on Windows, the Secret Service keyring on Linux. Copy is on the card. Delete is a confirm, from a right-click or the Delete key.">
         <div class="titlebar" data-chrome></div>
         <div class="client">
           <div class="aurora"></div>
@@ -895,7 +895,7 @@
         </div>
       </section>
 
-      <section class="screen" id="generate" data-title="Generate key" data-caption="Ed25519, created on this PC. The PEM is encrypted with DPAPI on this PC. The card then shows only the public half.">
+      <section class="screen" id="generate" data-title="Generate key" data-caption="Ed25519, created on this computer. The PEM is stored in the OS secret store (DPAPI on Windows, Secret Service on Linux). The card then shows only the public half.">
         <div class="titlebar" data-chrome></div>
         <div class="client">
           <div class="aurora"></div>
@@ -1084,7 +1084,7 @@ me@devbox ~ $ <i class="cursor"></i></div>
         </div>
       </section>
 
-      <section class="screen" id="fonts" data-title="Font" data-caption="Cascadia Mono is the Windows default. The other rows are the faces already bundled with the iOS app. Apple's system faces are not on this list.">
+      <section class="screen" id="fonts" data-title="Font" data-caption="Cascadia Mono is the default on Windows and Linux. The other rows are the faces already bundled with the iOS app. Apple's system faces are not on this list.">
         <div class="titlebar" data-chrome></div>
         <div class="client">
           <div class="page">
