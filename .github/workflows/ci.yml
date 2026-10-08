@@ -156,26 +156,60 @@ jobs:
             clients/desktop/dist/Tether-*-x64.msix
           if-no-files-found: error
 
-  # The Windows client's library crates hold no Win32 code outside cfg(windows),
-  # so they must also build and pass on Linux.
-  windows-libs-linux:
+  # The desktop client builds, lints and tests on Linux as well as Windows, and ships there
+  # as an AppImage.
+  desktop-linux:
     runs-on: ubuntu-latest
+    container: ubuntu:22.04
     defaults:
       run:
+        # A container job runs steps with sh, which has no pipefail.
+        shell: bash
         working-directory: clients/desktop
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # The build runs in ubuntu:22.04 so the binary links glibc 2.35 and starts on every distro
+      # at least that recent; a build on ubuntu-latest would refuse to start on an LTS a release
+      # or two behind. The container is used because the ubuntu-22.04 runner image is being
+      # retired, and the Windows release waits on this job. fontconfig is the only system library
+      # linked at build time (it brings the freetype and expat headers); the windowing, GL and
+      # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk, and the
+      # colour emoji font is what the glyph test expects a desktop to have.
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config libfontconfig1-dev \
+            squashfs-tools dotnet-sdk-8.0 fonts-noto-color-emoji
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: clients/desktop
 
+      - name: Format
+        run: cargo fmt --all --check
+
       - name: Clippy
-        run: cargo clippy -p tether-core -p tether-ssh -p tether-term --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test -p tether-core -p tether-ssh -p tether-term
+        run: cargo test --workspace --locked
+
+      - name: Release build of the app
+        run: cargo build --release --locked -p tether-app
+
+      - name: AppImage
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          PATH="$HOME/.dotnet/tools:$PATH" packaging/linux/package.sh --skip-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-linux-appimage
+          path: clients/desktop/dist/Tether-*-x86_64.AppImage
+          if-no-files-found: error

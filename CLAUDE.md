@@ -4,23 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Tether v5 is a **native terminal for iOS, Mac and Windows that connects over SSH to `zmx`** — a persistent session manager running on your own hosts. The client speaks SSH straight to the host, attaches a zmx session, and renders the live PTY. Sessions survive disconnects because **zmx owns them on the host**; Tether is a pure client with no server of its own.
+Tether v5 is a **native terminal for iOS, Mac, Windows and Linux that connects over SSH to `zmx`** — a persistent session manager running on your own hosts. The client speaks SSH straight to the host, attaches a zmx session, and renders the live PTY. Sessions survive disconnects because **zmx owns them on the host**; Tether is a pure client with no server of its own.
 
-Tether through v4 was a Bun server + Noise transport with desktop and web clients. **All of that was removed in v5** — `apps/server`, `apps/desktop`, the VitePress docs site, and the whole Noise / holder / replay / WebSocket stack are gone. Do **not** reintroduce a server, a Noise channel, a WebSocket transport, or a web client. The desktop clients allowed are the native Windows app in `clients/desktop/` (spec: `clients/desktop/SPEC.md`) and the Mac Catalyst build of the iOS app; both are pure SSH-to-`zmx` clients like iOS. The only host-side artifact is `tether-notify`, a small Go tool for push. The push relay (`apps/relay`) is separate infrastructure, not part of any host: it routes ciphertext to APNs and is the only piece that holds the APNs key.
+Tether through v4 was a Bun server + Noise transport with desktop and web clients. **All of that was removed in v5** — `apps/server`, `apps/desktop`, the VitePress docs site, and the whole Noise / holder / replay / WebSocket stack are gone. Do **not** reintroduce a server, a Noise channel, a WebSocket transport, or a web client. The desktop clients allowed are the native Windows and Linux app in `clients/desktop/` (one Rust codebase; spec: `clients/desktop/SPEC.md`) and the Mac Catalyst build of the iOS app; both are pure SSH-to-`zmx` clients like iOS. The only host-side artifact is `tether-notify`, a small Go tool for push. The push relay (`apps/relay`) is separate infrastructure, not part of any host: it routes ciphertext to APNs and is the only piece that holds the APNs key.
 
-On iOS the VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngine` (pinned by revision in `TetherKit/Package.swift`). It does no networking — it only turns a PTY byte stream into a `TerminalFrame`; Tether renders its own grid. On Windows it is `alacritty_terminal`, rasterized to RGBA with `swash` (`tether-term`).
+On iOS the VT emulator is SwiftTerm's headless engine, wrapped by `TerminalEngine` (pinned by revision in `TetherKit/Package.swift`). It does no networking — it only turns a PTY byte stream into a `TerminalFrame`; Tether renders its own grid. On Windows and Linux it is `alacritty_terminal`, rasterized to RGBA with `swash` (`tether-term`).
 
 ## Layout
 
 | Path | Stack | What it is |
 |---|---|---|
 | `clients/apple/` | Swift / SwiftUI | The iOS app, also built for the Mac with Mac Catalyst ("Optimize for Mac" idiom, same bundle id and App Store Connect record). On the Mac the terminal screen shows one tab per `zmx` session (`MacSessionTabs`, one SSH connection per opened tab) instead of the drawer, with a menu bar (`TetherCommands`) and desktop pointer behaviour; every Mac difference is gated on `TetherPlatform.isMac`. `TetherKit` package (SSH transport, terminal pipeline + `TerminalEngine` + renderer, Home / key vault, all UI), `TetherIOS` app target, `TetherNotificationService` (NSE — decrypts push), `Tether.xcodeproj`. |
-| `clients/desktop/` | Rust / Slint | The Windows app: SSH to `zmx`, one tab per session. Cargo workspace: `tether-core` (every rule as pure, host-free logic — profiles, keys, host-key pins, session list, git panel, markdown, agent badges), `tether-ssh` (`russh` transport, ProxyJump, agent / Pageant), `tether-term` (`alacritty_terminal` + `swash` raster, inline images), `tether-app` (Slint UI + Win32 glue, Velopack self-update). Data lives in `%LOCALAPPDATA%\Tether`, secrets under DPAPI. `SPEC.md` is the design; `design-preview/index.html` is the screen map. |
+| `clients/desktop/` | Rust / Slint | The Windows and Linux app: SSH to `zmx`, one tab per session. Cargo workspace: `tether-core` (every rule as pure, host-free logic — profiles, keys, host-key pins, session list, git panel, markdown, agent badges), `tether-ssh` (`russh` transport, ProxyJump, agent / Pageant), `tether-term` (`alacritty_terminal` + `swash` raster, inline images), `tether-app` (Slint UI + per-OS platform layer under `platform/windows` and `platform/linux`, Velopack self-update). Data lives in `%LOCALAPPDATA%\Tether` (Windows, secrets under DPAPI) or `$XDG_DATA_HOME/tether` (Linux, secrets in the Secret Service keyring). `SPEC.md` is the design; `design-preview/index.html` is the screen map. |
 | `apps/tether-notify/` | Go | Host-side encrypted-push CLI. Registers a phone's APNs token + AES key (sent by the app over SSH) and posts ciphertext to the relay. |
 | `apps/relay/` | Cloudflare Worker (Hono) | Push relay: forwards ciphertext to APNs (production first, sandbox on `BadDeviceToken`). Deployed on its own by `relay-deploy.yml` (wrangler); APNs config lives in Worker secrets. |
 | `integrations/claude-code/` | Claude Code mod (TS) | `tether` plugin, published by the repo-root `.claude-plugin/marketplace.json`. Holds a permission prompt while no client is attached and applies the phone's Approve / Deny / Reply as the decision (`tether-notify hold` / `wait`); holds Claude's questions (`AskUserQuestion`, in any mode) and answers them from per-option notification buttons (the NSE registers a per-push category) or the app's answer sheet (`tether-notify pending`, `answer --option/--answers`). Never holds a `-p`/SDK run, a plugin's permission query, an agent under tmux/screen, or a mode that settles asks itself (auto, dontAsk, bypass) — the mode comes from classic events, or only the settings' `defaultMode` where an org guard blocks those for user mods. Installed by `install-agent-hooks.sh` on Claude Code ≥ 2.1.287. Test: `claude plugin test integrations/claude-code/tether`. |
 | `scripts/` | shell / ruby | `install.sh` (install `tether-notify`), `install-agent-hooks.sh` (wire Claude Code, Codex, Gemini CLI and Cursor push), `release.sh`. |
-| `.github/workflows/` | — | `ci.yml` (lint + host-tools + relay + iOS and Mac Catalyst build, TetherKit tests + Windows build/test/package, and the three library crates on Linux), `release.yml` (signed iOS archive → TestFlight; signed Mac Catalyst build → productbuild pkg → TestFlight, non-blocking), `relay-deploy.yml` (relay Worker deploy on tag or manual run), `desktop-release.yml` (Windows installer + portable zip on a `desktop-vX.Y.Z` tag; updates the `windows-feed` release installed apps update from). |
+| `.github/workflows/` | — | `ci.yml` (lint + host-tools + relay + iOS and Mac Catalyst build, TetherKit tests + Windows build/test/package, and the desktop build/lint/test/AppImage on Linux), `release.yml` (signed iOS archive → TestFlight; signed Mac Catalyst build → productbuild pkg → TestFlight, non-blocking), `relay-deploy.yml` (relay Worker deploy on tag or manual run), `desktop-release.yml` (one `desktop-vX.Y.Z` tag builds the Windows installer + portable zip and the Linux AppImage, and moves the `windows-feed` and `linux-feed` releases installed apps update from). |
 
 ## Commands
 
@@ -39,7 +39,7 @@ xcodebuild test -scheme TetherKit -destination 'platform=iOS Simulator,name=iPho
 - The iOS compile check is the **`TetherIOS` scheme via `xcodebuild`**, not `swift build` (bare SwiftPM builds for macOS; the vendored SSH XCFrameworks have no plain macOS slice).
 - SwiftTerm runs a build-tool plugin: `xcodebuild` needs `-skipPackagePluginValidation` (Xcode asks once to trust it).
 
-**Windows (`clients/desktop/`, Rust stable):**
+**Desktop (`clients/desktop/`, Rust stable; Windows and Linux):**
 
 ```bash
 cargo fmt --all --check
@@ -50,10 +50,10 @@ pwsh packaging/package.ps1 -Version 0.0.0       # portable zip + MSIX into dist/
 pwsh packaging/screenshots.ps1 -Out <dir>       # capture every screen of a debug build
 ```
 
-- `tether-core`, `tether-ssh` and `tether-term` build and test on Linux; only `tether-app` needs Windows (or `cargo xwin`).
+- Every crate builds and tests on Linux, `tether-app` included. Linux build dependencies: `pkg-config` and `libfontconfig1-dev` (the windowing, GL and D-Bus libraries are loaded at run time). `packaging/linux/package.sh [version] [--skip-build]` builds the AppImage and the Velopack update package (needs `vpk` 1.2.161). Cross-check the Windows build from Linux with `cargo xwin`.
 - The C runtime is linked statically (`.cargo/config.toml`): a fresh Windows has no VC++ redistributable.
-- Debug builds read `TETHER_DEV_DATA`, `TETHER_DEV_PAGE`, `TETHER_DEV_THEME`, `TETHER_DEV_SIZE` to open one screen against sample data; release builds ignore them.
-- Releases: push a `desktop-vX.Y.Z` tag (`windows-vX.Y.Z` before 0.0.5). Installed apps update from the rolling `windows-feed` release, never from `releases/latest` (that stays the iOS app).
+- Debug builds read `TETHER_DEV_DATA`, `TETHER_DEV_PAGE`, `TETHER_DEV_THEME`, `TETHER_DEV_SIZE` to open one screen against sample data, and `TETHER_UPDATE_FEED` to point the updater at a local feed; release builds ignore them.
+- Releases: push a `desktop-vX.Y.Z` tag (`windows-vX.Y.Z` before 0.0.5). Installed apps update from the rolling `windows-feed` / `linux-feed` release, never from `releases/latest` (that stays the iOS app).
 
 **Host tools (`apps/tether-notify/`):**
 
@@ -65,7 +65,7 @@ bash scripts/install-agent-hooks.sh [host] # fire notifications from agent hooks
 
 ## Data flow (the core loop)
 
-The steps name the iOS types; the Windows app runs the same loop through `tether-core` and `tether-ssh`, with keys in the DPAPI vault instead of the Keychain.
+The steps name the iOS types; the desktop app runs the same loop through `tether-core` and `tether-ssh`, with keys in the DPAPI vault (Windows) or the Secret Service keyring (Linux) instead of the Keychain.
 
 1. The app keeps SSH **host profiles** and **keys** (keys in the Keychain). Opening a machine → `SSHConnector` dials libssh2 to `host:port`.
 2. **Host-key TOFU:** an unknown key is pinned on first connect; a later mismatch is **hard-refused, never overridden**.

@@ -16,7 +16,7 @@ mod updates;
 mod vm;
 
 fn main() {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     updates::startup();
     let log = logging::init();
     #[cfg(not(debug_assertions))]
@@ -76,7 +76,7 @@ fn watch_updates(app: &app::App) {
     let bridge = app.ui.global::<SettingsBridge>();
     bridge.set_version_label(updates::VERSION.into());
     bridge.set_update_label(updates::UpdateStatus::Unmanaged.label().into());
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         let updater = updates::Updater::default();
         let restart = updater.clone();

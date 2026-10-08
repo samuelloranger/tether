@@ -1,13 +1,13 @@
 name: Desktop release
 
-# Pushing the tag desktop-vX.Y.Z releases the desktop client (clients/desktop).
-# Releases before 0.0.5 were tagged windows-vX.Y.Z.
+# Pushing the tag desktop-vX.Y.Z releases the desktop client (clients/desktop) for Windows and
+# Linux from one release. Releases before 0.0.5 were tagged windows-vX.Y.Z and were Windows only.
 # It never matches the iOS release.yml or relay-deploy.yml filter ('v*.*.*'),
 # and its release is never marked latest: `releases/latest` stays the iOS app.
 #
-# Same draft-then-publish shape as release.yml: the draft opens first, the
-# build attaches to it, and only a green build takes it out of draft. Installed
-# apps update from the rolling `windows-feed` release, moved last.
+# Same draft-then-publish shape as release.yml: the builds run first, then the draft opens and
+# the assets attach to it, and it only leaves draft once they are all up. Installed
+# apps update from the rolling `windows-feed` and `linux-feed` releases, moved last.
 # Manual runs are build-only: they upload a workflow artifact and touch no release.
 on:
   push:
@@ -25,9 +25,10 @@ concurrency:
 
 env:
   TAG: ${{ github.ref_name }}
-  # Velopack installs to %LOCALAPPDATA%\<packId> and empties it on uninstall, so
+  # Windows only: Velopack installs to %LOCALAPPDATA%\<packId> and empties it on uninstall, so
   # it must never be "Tether": that folder holds the app's profiles, keys and
-  # secrets. Changing it later orphans every existing install.
+  # secrets. Changing it later orphans every existing install. The Linux pack id is
+  # set in packaging/linux/package.sh.
   PACK_ID: TetherTerminal
 
 jobs:
@@ -114,29 +115,105 @@ jobs:
 
       # The MSIX is unsigned and its manifest publisher is not the unsigned-package
       # OID, so Windows will not install it; it does not ship.
-      - name: Checksums
-        shell: pwsh
-        working-directory: clients/desktop/dist
-        run: |
-          Get-ChildItem "Tether-*-x64-portable.zip", "Tether-*-x64-Setup.exe" | ForEach-Object {
-            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Set-Content -Encoding ascii SHA256SUMS.txt
-          Get-Content SHA256SUMS.txt
-
       - uses: actions/upload-artifact@v4
         with:
           name: tether-windows-${{ steps.ver.outputs.version }}
           path: |
             clients/desktop/dist/Tether-*-x64-portable.zip
             clients/desktop/dist/Tether-*-x64-Setup.exe
-            clients/desktop/dist/SHA256SUMS.txt
             clients/desktop/dist/velopack/*-full.nupkg
             clients/desktop/dist/velopack/releases.win.json
           if-no-files-found: error
 
+  build-linux:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    defaults:
+      run:
+        # A container job runs steps with sh, which has no pipefail.
+        shell: bash
+        working-directory: clients/desktop
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "::error::No version found in clients/desktop/Cargo.toml"
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            V="${TAG#desktop-v}"
+            if [ "$V" != "$CARGO_VERSION" ]; then
+              echo "::error::Tag $TAG but clients/desktop/Cargo.toml is $CARGO_VERSION. Bump the workspace version and re-tag."
+              exit 1
+            fi
+          else
+            V="$CARGO_VERSION"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building $V"
+
+      # The build runs in ubuntu:22.04 so the binary links glibc 2.35 and starts on every distro
+      # at least that recent; a build on ubuntu-latest would refuse to start on an LTS a release
+      # or two behind. The container is used because the ubuntu-22.04 runner image is being
+      # retired, and the Windows release waits on this job. fontconfig is the only system library
+      # linked at build time (it brings the freetype and expat headers); the windowing, GL and
+      # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk, and the
+      # colour emoji font is what the glyph test expects a desktop to have.
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config libfontconfig1-dev \
+            squashfs-tools dotnet-sdk-8.0 fonts-noto-color-emoji
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Release build of the app
+        run: cargo build --release --locked -p tether-app
+
+      # vpk refuses a binary that never calls VelopackApp, so this also proves the updater
+      # is wired in; package.sh checks the AppImage's desktop entry.
+      - name: AppImage and update package
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          PATH="$HOME/.dotnet/tools:$PATH" packaging/linux/package.sh ${{ steps.ver.outputs.version }} --skip-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-linux-${{ steps.ver.outputs.version }}
+          path: |
+            clients/desktop/dist/Tether-*-x86_64.AppImage
+            clients/desktop/dist/velopack/*-full.nupkg
+            clients/desktop/dist/velopack/releases.linux.json
+          if-no-files-found: error
+
   release:
     if: github.event_name == 'push'
-    needs: build
+    needs: [build, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -152,10 +229,25 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tether-windows-${{ needs.build.outputs.version }}
-          path: dist
+          path: dist/windows
 
-      # Notes cover only clients/desktop since the previous Windows tag, so iOS
-      # and host-tool commits never land in a Windows release.
+      - uses: actions/download-artifact@v4
+        with:
+          name: tether-linux-${{ needs.build-linux.outputs.version }}
+          path: dist/linux
+
+      # One checksum file for every asset, written next to them so the names carry no path.
+      - name: Collect assets and checksums
+        run: |
+          set -euo pipefail
+          mkdir assets
+          cp dist/windows/Tether-*-x64-portable.zip dist/windows/Tether-*-x64-Setup.exe dist/linux/Tether-*-x86_64.AppImage assets/
+          cd assets
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Notes cover only clients/desktop since the previous desktop tag, so iOS
+      # and host-tool commits never land in a desktop release.
       - name: Write notes
         run: |
           set -euo pipefail
@@ -165,9 +257,13 @@ jobs:
             | sed -E 's/^(desktop|windows)-v(.*)$/\2 &/' | sort -V | tail -1 | cut -d' ' -f2 || true)"
           RANGE="${PREV:+$PREV..}$TAG"
           {
-            echo "Tether for Windows $V."
+            echo "Tether desktop $V, for Windows and Linux."
             echo
-            echo "Install with \`Tether-$V-x64-Setup.exe\` (per-user, no admin); the app then updates itself. \`Tether-$V-x64-portable.zip\` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch."
+            echo "**Windows:** install with \`Tether-$V-x64-Setup.exe\` (per-user, no admin); the app then updates itself. \`Tether-$V-x64-portable.zip\` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch."
+            echo
+            echo "**Linux (x86_64):** download \`Tether-$V-x86_64.AppImage\`, make it executable (\`chmod +x\`) and run it; the app then updates itself in place. It needs FUSE 2 (\`libfuse2\`) to run directly, a Secret Service keyring for saved passwords and key passphrases, and \`SSH_AUTH_SOCK\` for agent authentication."
+            echo
+            echo "\`SHA256SUMS.txt\` covers every file."
             echo
             echo "## Changes"
             git log --no-merges --format='- %s' "$RANGE" -- clients/desktop clients/windows
@@ -180,11 +276,11 @@ jobs:
           set -euo pipefail
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --verify-tag --latest=false \
-              --title "Tether for Windows ${TAG#desktop-v}" --notes-file notes.md
+              --title "Tether desktop ${TAG#desktop-v}" --notes-file notes.md
           fi
 
       - name: Upload assets
-        run: gh release upload "$TAG" dist/Tether-*-x64-portable.zip dist/Tether-*-x64-Setup.exe dist/SHA256SUMS.txt --clobber
+        run: gh release upload "$TAG" assets/* --clobber
 
       - name: Publish the release
         run: gh release edit "$TAG" --draft=false --latest=false
@@ -193,7 +289,7 @@ jobs:
   # fixed download path. One run at a time across all tags, never moved backwards,
   # and the previous package stays one release so a client that read the old feed
   # can still download it.
-  feed:
+  windows-feed:
     needs: [build, release]
     runs-on: ubuntu-latest
     permissions:
@@ -232,6 +328,50 @@ jobs:
           NEW="$(basename dist/velopack/*-full.nupkg)"
           gh release upload "$FEED" "dist/velopack/$NEW" --clobber
           gh release upload "$FEED" dist/velopack/releases.win.json --clobber
+          gh release view "$FEED" --json assets -q '.assets[].name' \
+            | grep -E -- '-full\.nupkg$' | sort -V | head -n -2 \
+            | while read -r old; do gh release delete-asset "$FEED" "$old" --yes; done
+
+  # Same rules as the Windows feed, for the AppImage's updater.
+  linux-feed:
+    needs: [build-linux, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: linux-feed
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      FEED: linux-feed
+      VERSION: ${{ needs.build-linux.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tether-linux-${{ needs.build-linux.outputs.version }}
+          path: dist
+
+      - name: Point the update feed at this version
+        run: |
+          set -euo pipefail
+          if ! gh release view "$FEED" >/dev/null 2>&1; then
+            gh release create "$FEED" --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Linux update feed" \
+              --notes "Read by installed Linux apps to find updates. Download Tether from the desktop-v* releases instead."
+          fi
+          CURRENT=""
+          if gh release download "$FEED" -p releases.linux.json -O current.json 2>/dev/null; then
+            CURRENT="$(jq -r '[.Assets[].Version] | max_by(split(".") | map(tonumber? // 0))' current.json)"
+          fi
+          if [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ] \
+            && [ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" = "$CURRENT" ]; then
+            echo "Feed already serves $CURRENT, newer than $VERSION; leaving it."
+            exit 0
+          fi
+          NEW="$(basename dist/velopack/*-full.nupkg)"
+          gh release upload "$FEED" "dist/velopack/$NEW" --clobber
+          gh release upload "$FEED" dist/velopack/releases.linux.json --clobber
           gh release view "$FEED" --json assets -q '.assets[].name' \
             | grep -E -- '-full\.nupkg$' | sort -V | head -n -2 \
             | while read -r old; do gh release delete-asset "$FEED" "$old" --yes; done

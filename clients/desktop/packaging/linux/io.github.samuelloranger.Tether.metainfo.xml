@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.samuelloranger.Tether</id>
+  <name>Tether</name>
+  <summary>A native SSH terminal for persistent zmx sessions</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <description>
+    <p>Tether connects over SSH to zmx, a persistent session manager on your own machines, attaches a session and renders the live shell. Sessions keep running on the host when you close the app or lose the connection.</p>
+  </description>
+  <launchable type="desktop-id">tether.desktop</launchable>
+  <url type="homepage">https://github.com/samuelloranger/tether</url>
+  <provides>
+    <binary>tether</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -14,7 +14,7 @@ macro_rules! apple_font {
     };
 }
 
-macro_rules! windows_font {
+macro_rules! bundled_font {
     ($file:literal) => {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -25,12 +25,12 @@ macro_rules! windows_font {
 }
 
 static CASCADIA_MONO: (&[u8], &[u8]) = (
-    windows_font!("CascadiaMono-Regular.ttf"),
-    windows_font!("CascadiaMono-Bold.ttf"),
+    bundled_font!("CascadiaMono-Regular.ttf"),
+    bundled_font!("CascadiaMono-Bold.ttf"),
 );
 static CASCADIA_CODE: (&[u8], &[u8]) = (
-    windows_font!("CascadiaCode-Regular.ttf"),
-    windows_font!("CascadiaCode-Bold.ttf"),
+    bundled_font!("CascadiaCode-Regular.ttf"),
+    bundled_font!("CascadiaCode-Bold.ttf"),
 );
 static JETBRAINS_MONO: (&[u8], &[u8]) = (
     apple_font!("JetBrainsMono-Regular.ttf"),
