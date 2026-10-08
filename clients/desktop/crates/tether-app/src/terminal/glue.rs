@@ -27,6 +27,7 @@ thread_local! {
     static PLATFORM: RefCell<Option<Arc<dyn Platform>>> = const { RefCell::new(None) };
     static WIRED: Cell<bool> = const { Cell::new(false) };
     static MODS: Cell<tether_core::keymap::Mods> = Cell::new(tether_core::keymap::Mods::default());
+    static SUPER: Cell<bool> = const { Cell::new(false) };
     static WELL_LOGICAL: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
     static DROPS: RefCell<Vec<std::path::PathBuf>> = const { RefCell::new(Vec::new()) };
 }
@@ -310,7 +311,8 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             EventResult::Propagate
         }
         WindowEvent::KeyboardInput { event, .. } if keys_to_pty(app) => {
-            if event.state == ElementState::Pressed {
+            // Super combos belong to the desktop; one that still reaches the window must not type its letter.
+            if event.state == ElementState::Pressed && !SUPER.get() {
                 let input = crate::terminal::keys::translate(
                     &event.logical_key,
                     &event.key_without_modifiers(),
@@ -327,6 +329,7 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
                     });
                 }
             }
+            SUPER.set(m.state().super_key());
             EventResult::PreventDefault
         }
         WindowEvent::Ime(Ime::Commit(text)) if keys_to_pty(app) => {
