@@ -194,7 +194,15 @@ mod tests {
     fn a_system_colour_emoji_font_rasterizes_in_colour() {
         let font = font_named("cascadia-mono");
         let (slot, glyph) = resolve(font, false, '\u{1f600}');
-        if !matches!(slot, FaceSlot::System(_)) {
+        let FaceSlot::System(i) = slot else {
+            return;
+        };
+        // A host with no colour emoji font falls back to a plain face, which draws in one colour.
+        let face = FontRef::from_index(system_fallbacks()[i], 0).unwrap();
+        let colour = [b"CBDT", b"COLR", b"sbix"]
+            .iter()
+            .any(|t| face.table(swash::tag_from_bytes(t)).is_some());
+        if !colour {
             return;
         }
         let mut ctx = ScaleContext::new();
