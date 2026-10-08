@@ -402,9 +402,31 @@ public final class SSHTerminalController {
     return agentAlert?.session == link.sessionId
   }
 
+  /// The switch being typed. Each tap is its own task, and two switches' keystrokes must
+  /// never interleave: the second's attach would land inside the session the first opened.
+  @ObservationIgnored private var switchQueue: Task<Void, Never>?
+  @ObservationIgnored private var latestSwitch = 0
+
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
-  /// program in the session we leave is never typed into and keeps running.
+  /// program in the session we leave is never typed into and keeps running. Switches run one
+  /// at a time; one a newer tap replaced while it waited is dropped.
   public func switchSession(to name: String) async {
+    latestSwitch += 1
+    let ticket = latestSwitch
+    let previous = switchQueue
+    let task = Task { [weak self] in
+      await previous?.value
+      guard let self, ticket == self.latestSwitch else { return }
+      await self.performSwitch(to: name)
+      // The next switch's detach key must not reach the shell while this attach starts up.
+      if ticket != self.latestSwitch { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
+    }
+    switchQueue = task
+    await task.value
+    if ticket == latestSwitch { await refreshSessions() }
+  }
+
+  private func performSwitch(to name: String) async {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
     guard name != attach || !hasSession else { return }
@@ -427,7 +449,6 @@ public final class SSHTerminalController {
       pipeline.outbound.yield(.input(write, key: sessionKey))
     }
     if wasAttached { flushPushInBackground(session: departing) }
-    await refreshSessions()
   }
 
   /// Switch away first when killing the current session — killing the one we're

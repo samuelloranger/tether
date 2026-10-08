@@ -129,4 +129,33 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     XCTAssertTrue(back)
     await controller.leave()
   }
+  /// Taps faster than a switch takes: each switch types in full before the next starts, and
+  /// one a later tap replaced while it waited is never typed.
+  func test_overlapping_switches_type_one_at_a_time_and_skip_replaced_ones() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    var taps: [Task<Void, Never>] = []
+    for name in ["b", "c", "d"] {
+      taps.append(Task { await controller.switchSession(to: name) })
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    for tap in taps { await tap.value }
+
+    let typed = await eventually { stream.writtenText.contains("attach 'd'") }
+    XCTAssertTrue(typed)
+    let events = stream.writtenText.compactMap { character -> String? in
+      character == "\u{1C}" ? "detach" : nil
+    }
+    XCTAssertEqual(events.count, 2)
+    let attaches = stream.writtenText.components(separatedBy: "attach '").dropFirst().map { $0.prefix(1) }
+    XCTAssertEqual(attaches, ["w", "b", "d"])
+    // Every attach after the first follows its own detach.
+    let order = stream.writtenText.filter { $0 == "\u{1C}" || $0 == "\n" }
+    XCTAssertEqual(String(order), "\n\u{1C}\n\u{1C}\n")
+    XCTAssertEqual(controller.attach, "d")
+    await controller.leave()
+  }
 }

@@ -152,7 +152,16 @@ final class ScriptedByteStream: TerminalByteStream, @unchecked Sendable {
     }
   }
 
-  func write(_ bytes: Data) async throws {}
+  private var writes: [Data] = []
+  /// Everything written to the "host", in order.
+  var writtenText: String {
+    lock.lock(); defer { lock.unlock() }
+    return writes.map { String(decoding: $0, as: UTF8.self) }.joined()
+  }
+
+  func write(_ bytes: Data) async throws {
+    lock.lock(); writes.append(bytes); lock.unlock()
+  }
 
   private var recordedResizes: [[UInt16]] = []
   var resizes: [[UInt16]] { lock.lock(); defer { lock.unlock() }; return recordedResizes }
