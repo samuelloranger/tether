@@ -20,7 +20,7 @@ impl DataDir {
     /// on Linux. Local, not roaming: the secrets the records point at cannot roam with them.
     pub fn default_location() -> io::Result<Self> {
         let dir = Self::new(default_root()?);
-        fs::create_dir_all(dir.root())?;
+        create_private_dir(dir.root())?;
         Ok(dir)
     }
 
@@ -60,6 +60,20 @@ impl DataDir {
         let json = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
         write_atomic(&self.root.join(file), &json)
     }
+}
+
+/// Profiles and host-key pins are for this user alone; on Windows the profile folder already is.
+fn create_private_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+    }
+    #[cfg(not(unix))]
+    fs::create_dir_all(path)
 }
 
 #[cfg(windows)]
@@ -138,6 +152,20 @@ pub(crate) fn unix_now() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+    struct Doc {
+        items: Vec<String>,
+    }
+
+    fn doc(items: &[&str]) -> Doc {
+        Doc {
+            items: items.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
     #[test]
     fn xdg_dir_prefers_an_absolute_variable_over_home() {
         let home = Some(Path::new("/home/u"));
@@ -158,18 +186,15 @@ mod tests {
         assert_eq!(xdg_dir(None, Some(Path::new("")), rel), None);
     }
 
-    use super::*;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
-    struct Doc {
-        items: Vec<String>,
-    }
-
-    fn doc(items: &[&str]) -> Doc {
-        Doc {
-            items: items.iter().map(|s| s.to_string()).collect(),
-        }
+    #[cfg(unix)]
+    #[test]
+    fn the_data_folder_is_private_to_its_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("tether");
+        create_private_dir(&root).unwrap();
+        let mode = fs::metadata(&root).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{mode:o}");
     }
 
     #[test]
