@@ -5,7 +5,7 @@ mod win;
 pub use win::{apply_caption, placement_visible, show_error_box, system_uses_light};
 
 #[cfg(not(windows))]
-pub fn apply_caption(_hwnd: isize, _dark: bool) {}
+pub fn apply_caption(_hwnd: isize, _background: u32, _dark: bool) {}
 
 #[cfg(not(windows))]
 pub fn system_uses_light() -> bool {

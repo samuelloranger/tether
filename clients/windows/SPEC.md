@@ -28,7 +28,7 @@ Apple faces (Menlo, SF Mono, Courier) are not offered. Cascadia takes their plac
 
 ## Window
 
-One window. On Windows 11 the platform title bar is painted with `DWMWA_CAPTION_COLOR` to the scene background (`#08080E` night, `#F1F1F6` light) so it meets the client area, caption "Tether". Windows 10 ignores caption color: there the bar only gets `DWMWA_USE_IMMERSIVE_DARK_MODE` in the night scene. Slint draws everything under that bar.
+One window. On Windows 11 the platform title bar is painted with `DWMWA_CAPTION_COLOR` to the chosen theme's chrome background so it meets the client area, caption "Tether". `DWMWA_USE_IMMERSIVE_DARK_MODE` is set for dark themes. Windows 10 ignores caption color: there the bar only gets the dark mode flag. Slint draws everything under that bar.
 
 Window size and position persist. Minimum client size is 640 × 420.
 
@@ -36,7 +36,7 @@ Opening a machine replaces Home with the terminal. Back returns to Home and drop
 
 Destructive confirms (remove a machine, delete a key, kill a session) are dialogs. Every other form is a page in the window, with Back. Esc is Back on every page except the terminal, where Esc belongs to the PTY.
 
-Night is the default scene. Appearance can follow Windows, or stay Dark, or stay Light. Light uses the light column in `DESIGN.md`.
+Tether (night) is the default theme. The terminal colour scheme colours the whole window, and a light theme gives light chrome. Tether Light is Aurora light.
 
 ## Home
 
@@ -160,7 +160,7 @@ Generate stores an Ed25519 key. The record keeps the OpenSSH public line, the al
 
 One page.
 
-**Appearance.** Theme: System, Dark, Light. System follows the Windows app theme and changes live when Windows does.
+**Appearance.** Colour scheme is the only appearance choice. It colours the whole window, not just the terminal, and changes live. Tether Light is the old Light scene; a saved Light, or System while Windows was light, migrates to it once.
 
 **Terminal.**
 

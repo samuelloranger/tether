@@ -46,11 +46,12 @@ impl AppState {
         data: DataDir,
         secrets: Arc<dyn SecretStore>,
         hostkeys: Arc<dyn HostKeyStore>,
+        system_is_light: bool,
     ) -> Result<Self, AppError> {
         Ok(Self {
             profiles: data.load(PROFILES_FILE)?,
             keys: data.load(KEYS_FILE)?,
-            prefs: Preferences::load(&data)?,
+            prefs: Preferences::load(&data, system_is_light)?,
             data,
             secrets,
             hostkeys,
@@ -187,7 +188,8 @@ mod tests {
     fn state(dir: &std::path::Path) -> (AppState, Arc<MemorySecretStore>, Arc<MemoryHostKeys>) {
         let secrets = Arc::new(MemorySecretStore::default());
         let hostkeys = Arc::new(MemoryHostKeys::default());
-        let s = AppState::load(DataDir::new(dir), secrets.clone(), hostkeys.clone()).unwrap();
+        let s =
+            AppState::load(DataDir::new(dir), secrets.clone(), hostkeys.clone(), false).unwrap();
         (s, secrets, hostkeys)
     }
 

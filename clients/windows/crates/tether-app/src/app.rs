@@ -24,7 +24,7 @@ use crate::{
         app_state::{AppState, save_failed_hint, unix_now},
         home::{self, HomeTab},
         key_forms::{self, GenerateVm, KeyMaterialVm},
-        pickers, placement, scene,
+        pickers, placement,
         server_form::{ServerFormVm, ServerInput},
         settings,
         ssh_import::{self, SshImportVm},
@@ -37,7 +37,6 @@ pub struct App {
     pub router: Router,
     #[allow(dead_code)]
     pub runtime: tokio::runtime::Runtime,
-    pub(crate) system_light: Cell<bool>,
     last_normal: RefCell<Option<WindowPlacement>>,
     home_tab: Cell<HomeTab>,
     server_form: RefCell<Option<ServerFormVm>>,
@@ -114,7 +113,7 @@ impl App {
         };
         let secrets = secret_store(&data);
         let hostkeys = Arc::new(JsonHostKeys::new(DataDir::new(data.root()))?);
-        let state = AppState::load(data, secrets, hostkeys)?;
+        let state = AppState::load(data, secrets, hostkeys, platform::system_uses_light())?;
         crate::extras::init(state.data.root());
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -125,7 +124,6 @@ impl App {
             state: Rc::new(RefCell::new(state)),
             router: Router::new(),
             runtime,
-            system_light: Cell::new(false),
             last_normal: RefCell::new(None),
             home_tab: Cell::new(HomeTab::Machines),
             server_form: RefCell::new(None),
@@ -136,7 +134,6 @@ impl App {
             cursor_on: Cell::new(true),
             blink_timer: slint::Timer::default(),
         });
-        app.system_light.set(platform::system_uses_light());
         app.restore_placement();
         app.install();
         app.refresh();
@@ -240,13 +237,6 @@ impl App {
         keyform.on_save(on(self, |app| app.save_key_material()));
 
         let s = self.ui.global::<SettingsBridge>();
-        let weak = Rc::downgrade(self);
-        s.on_theme_mode_changed(move |i| {
-            if let Some(app) = weak.upgrade() {
-                app.state.borrow_mut().prefs.theme_mode = settings::theme_from_index(i);
-                app.on_prefs_changed();
-            }
-        });
         let weak = Rc::downgrade(self);
         s.on_size_step(move |d| {
             if let Some(app) = weak.upgrade() {
@@ -363,22 +353,42 @@ impl App {
     }
 
     pub fn refresh_scene(&self) {
-        let mode = self.state.borrow().prefs.theme_mode;
-        let dark = scene::is_dark(mode, self.system_light.get());
-        self.ui.global::<Tokens>().set_dark(dark);
+        let theme = theme_named(&self.state.borrow().prefs.terminal.scheme);
+        let c = theme.chrome();
+        let dark = !theme.is_light();
+        let t = self.ui.global::<Tokens>();
+        t.set_dark(dark);
+        t.set_background(Self::rgb(c.background));
+        t.set_surface(Self::rgb(c.surface));
+        t.set_surface_hover(Self::rgb(c.surface_hover));
+        t.set_raised(Self::rgb(c.raised));
+        t.set_input(Self::rgb(c.input));
+        t.set_border(Self::rgb(c.border));
+        t.set_text(Self::rgb(c.text));
+        t.set_text_secondary(Self::rgb(c.text_secondary));
+        t.set_text_faint(Self::rgb(c.text_faint));
+        t.set_placeholder(Self::rgb(c.placeholder));
+        t.set_accent(Self::rgb(c.accent));
+        t.set_on_accent(Self::rgb(c.on_accent));
+        t.set_success(Self::rgb(c.success));
+        t.set_warning(Self::rgb(c.warning));
+        t.set_danger(Self::rgb(c.danger));
+        t.set_on_danger(Self::rgb(c.on_danger));
+        t.set_well(Self::rgb(c.well));
         if let Some(hwnd) = platform::hwnd_of(self.ui.window()) {
-            platform::apply_caption(hwnd, dark);
+            platform::apply_caption(hwnd, c.background, dark);
         }
         self.refresh_home();
     }
 
-    /// `TETHER_DEV_THEME` (dark|light), `TETHER_DEV_SIZE` (WxH logical px) and `TETHER_DEV_PAGE`
+    /// `TETHER_DEV_THEME` (a theme id; dark and light mean tether and tether-light), `TETHER_DEV_SIZE` (WxH logical px) and `TETHER_DEV_PAGE`
     /// put a debug build on one screen for a screenshot. Nothing here is saved.
     pub fn apply_dev_screen(self: &Rc<Self>) {
         if let Some(theme) = dev_env("TETHER_DEV_THEME") {
-            self.state.borrow_mut().prefs.theme_mode = match theme.as_str() {
-                "light" => tether_core::ThemeMode::Light,
-                _ => tether_core::ThemeMode::Dark,
+            self.state.borrow_mut().prefs.terminal.scheme = match theme.as_str() {
+                "dark" => "tether".into(),
+                "light" => "tether-light".into(),
+                id => id.to_string(),
             };
             self.refresh_scene();
         }
@@ -491,10 +501,6 @@ impl App {
             return EventResult::PreventDefault;
         }
         match event {
-            WindowEvent::ThemeChanged(_) => {
-                self.system_light.set(platform::system_uses_light());
-                self.refresh_scene();
-            }
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => self.remember_normal_bounds(),
             WindowEvent::ScaleFactorChanged { .. } => self.refresh_preview(),
             _ => {}
@@ -910,7 +916,6 @@ impl App {
         let prefs = self.state.borrow().prefs.clone();
         let t = &prefs.terminal;
         let b = self.ui.global::<SettingsBridge>();
-        b.set_theme_mode(settings::theme_index(prefs.theme_mode));
         b.set_scheme_name(settings::scheme_label(t).into());
         b.set_font_name(settings::font_label(t).into());
         b.set_size_label(settings::size_label(t).into());

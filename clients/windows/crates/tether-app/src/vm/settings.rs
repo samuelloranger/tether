@@ -1,20 +1,4 @@
-use tether_core::{CursorShape, TerminalPrefs, ThemeMode, font_named, theme_named};
-
-pub fn theme_index(mode: ThemeMode) -> i32 {
-    match mode {
-        ThemeMode::System => 0,
-        ThemeMode::Dark => 1,
-        ThemeMode::Light => 2,
-    }
-}
-
-pub fn theme_from_index(i: i32) -> ThemeMode {
-    match i {
-        1 => ThemeMode::Dark,
-        2 => ThemeMode::Light,
-        _ => ThemeMode::System,
-    }
-}
+use tether_core::{CursorShape, TerminalPrefs, font_named, theme_named};
 
 pub fn cursor_index(shape: CursorShape) -> i32 {
     match shape {
@@ -137,9 +121,6 @@ mod tests {
 
     #[test]
     fn segment_indices_round_trip() {
-        for m in [ThemeMode::System, ThemeMode::Dark, ThemeMode::Light] {
-            assert_eq!(theme_from_index(theme_index(m)), m);
-        }
         for c in [CursorShape::Block, CursorShape::Bar, CursorShape::Underline] {
             assert_eq!(cursor_from_index(cursor_index(c)), c);
         }
