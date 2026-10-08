@@ -1,6 +1,7 @@
-name: Windows release
+name: Desktop release
 
-# Pushing the tag windows-vX.Y.Z releases the Windows client (clients/desktop).
+# Pushing the tag desktop-vX.Y.Z releases the desktop client (clients/desktop).
+# Releases before 0.0.5 were tagged windows-vX.Y.Z.
 # It never matches the iOS release.yml or relay-deploy.yml filter ('v*.*.*'),
 # and its release is never marked latest: `releases/latest` stays the iOS app.
 #
@@ -10,7 +11,7 @@ name: Windows release
 # Manual runs are build-only: they upload a workflow artifact and touch no release.
 on:
   push:
-    tags: ['windows-v*.*.*']
+    tags: ['desktop-v*.*.*']
   workflow_dispatch:
 
 # The build runs third-party build scripts and tools; only the jobs that write
@@ -19,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-release-${{ github.ref }}
+  group: desktop-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -56,7 +57,7 @@ jobs:
             exit 1
           fi
           if [ "${{ github.event_name }}" = "push" ]; then
-            V="${TAG#windows-v}"
+            V="${TAG#desktop-v}"
             if [ "$V" != "$CARGO_VERSION" ]; then
               echo "::error::Tag $TAG but clients/desktop/Cargo.toml is $CARGO_VERSION. Bump the workspace version and re-tag."
               exit 1
@@ -158,8 +159,10 @@ jobs:
       - name: Write notes
         run: |
           set -euo pipefail
-          V="${TAG#windows-v}"
-          PREV="$(git tag -l 'windows-v*.*.*' --sort=-v:refname | grep -vx "$TAG" | head -1 || true)"
+          V="${TAG#desktop-v}"
+          # Highest earlier version under either prefix; the tag prefix changed at 0.0.5.
+          PREV="$(git tag -l 'desktop-v*.*.*' 'windows-v*.*.*' | grep -vx "$TAG" \
+            | sed -E 's/^(desktop|windows)-v(.*)$/\2 &/' | sort -V | tail -1 | cut -d' ' -f2 || true)"
           RANGE="${PREV:+$PREV..}$TAG"
           {
             echo "Tether for Windows $V."
@@ -177,7 +180,7 @@ jobs:
           set -euo pipefail
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --verify-tag --latest=false \
-              --title "Tether for Windows ${TAG#windows-v}" --notes-file notes.md
+              --title "Tether for Windows ${TAG#desktop-v}" --notes-file notes.md
           fi
 
       - name: Upload assets
@@ -215,7 +218,7 @@ jobs:
           if ! gh release view "$FEED" >/dev/null 2>&1; then
             gh release create "$FEED" --prerelease --latest=false --target "$GITHUB_SHA" \
               --title "Windows update feed" \
-              --notes "Read by installed Windows apps to find updates. Download Tether from the windows-v* releases instead."
+              --notes "Read by installed Windows apps to find updates. Download Tether from the desktop-v* releases instead."
           fi
           CURRENT=""
           if gh release download "$FEED" -p releases.win.json -O current.json 2>/dev/null; then

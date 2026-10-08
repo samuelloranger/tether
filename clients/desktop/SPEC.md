@@ -617,7 +617,7 @@ Deleting a machine deletes its password entry. Deleting a key deletes its secret
 
 - `ci.yml` gains a `windows-latest` job: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` for the workspace, and a release build of `tether-app`.
 - The `tether-core`, `tether-ssh`, and `tether-term` tests also run on Linux in CI. Only `tether-app` needs Windows.
-- `windows-release.yml` releases on a `windows-vX.Y.Z` tag, whose version must equal the workspace version. It ships a Velopack installer (per-user, no admin, installed to `%LOCALAPPDATA%\TetherTerminal`, never the data folder) and a portable zip. Neither is code-signed yet; the MSIX is built but not shipped until it is.
+- `desktop-release.yml` releases on a `desktop-vX.Y.Z` tag (`windows-vX.Y.Z` before 0.0.5), whose version must equal the workspace version. It ships a Velopack installer (per-user, no admin, installed to `%LOCALAPPDATA%\TetherTerminal`, never the data folder) and a portable zip. Neither is code-signed yet; the MSIX is built but not shipped until it is.
 - Installed apps update themselves: at launch they read the rolling `windows-feed` release, download a newer version in the background, and apply it on the next launch or from **Settings → About → Restart**. The portable zip does not update.
 - Slint is used under GPLv3, which matches this repo's license.
 

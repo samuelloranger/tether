@@ -40,7 +40,7 @@ See [`clients/apple/README.md`](clients/apple/README.md) for signing and on-devi
 
 ## Install (Windows)
 
-**[Download the installer](https://github.com/samuelloranger/tether/releases?q=windows-v&expanded=true)** — take `Tether-<version>-x64-Setup.exe` from the newest `windows-v*` release. It installs per user (no admin) and the app updates itself from then on. `Tether-<version>-x64-portable.zip` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch.
+**[Download the installer](https://github.com/samuelloranger/tether/releases?q=desktop-v&expanded=true)** — take `Tether-<version>-x64-Setup.exe` from the newest `desktop-v*` release. It installs per user (no admin) and the app updates itself from then on. `Tether-<version>-x64-portable.zip` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch.
 
 Windows 10 22H2 or Windows 11, x64. One window, one tab per zmx session; on top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), Pageant, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette. Build from source with Rust stable: `cargo build --release -p tether-app` in `clients/desktop/` (see [`clients/desktop/SPEC.md`](clients/desktop/SPEC.md)).
 
