@@ -171,6 +171,10 @@ mod unix {
     use std::process::{Child, Command, Stdio};
     use tether_ssh::UnixAgent;
 
+    // A fork holds the parent's sockets until it execs, so a listener closed while another test
+    // spawns ssh-agent can still accept a connect. Forks and the stale-socket check take turns.
+    static FORK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     struct Agent(Child);
     impl Drop for Agent {
         fn drop(&mut self) {
@@ -180,13 +184,16 @@ mod unix {
     }
 
     async fn spawn_agent(sock: &Path) -> Option<Agent> {
-        let child = Command::new("ssh-agent")
-            .args(["-D", "-a"])
-            .arg(sock)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
+        let child = {
+            let _turn = FORK.lock().await;
+            Command::new("ssh-agent")
+                .args(["-D", "-a"])
+                .arg(sock)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()?
+        };
         let agent = Agent(child);
         for _ in 0..100 {
             if sock.exists() {
@@ -231,6 +238,7 @@ mod unix {
             Some(ConnectError::AgentNotRunning)
         );
         let stale: PathBuf = dir.path().join("stale.sock");
+        let _turn = FORK.lock().await;
         drop(std::os::unix::net::UnixListener::bind(&stale).unwrap());
         let refused = UnixAgent {
             socket: Some(stale),
