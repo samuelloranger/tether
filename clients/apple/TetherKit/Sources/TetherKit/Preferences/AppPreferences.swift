@@ -165,6 +165,19 @@ public final class AppPreferences {
   /// The theme decides light or dark for everything the app does not draw itself.
   public var colorScheme: ColorScheme { terminalTheme.isLight ? .light : .dark }
 
+  /// Runs once: the old key is removed after. "System" needs to know what the device showed,
+  /// and the answer is final, so a launch that can't tell leaves it for the next one.
+  static func migrateColorScheme(in defaults: UserDefaults, deviceStyle: UIUserInterfaceStyle) {
+    guard let scheme = defaults.string(forKey: Key.colorScheme) else { return }
+    if scheme == "system", deviceStyle == .unspecified { return }
+    let migrated = migratedThemeID(
+      savedTheme: defaults.string(forKey: Key.terminalTheme), savedScheme: scheme,
+      systemIsLight: deviceStyle == .light
+    )
+    if let migrated { defaults.set(migrated, forKey: Key.terminalTheme) }
+    defaults.removeObject(forKey: Key.colorScheme)
+  }
+
   /// The System / Dark / Light setting is gone: someone who saw the light Tether chrome
   /// keeps it as Tether Light. Nil leaves the saved theme as it is.
   nonisolated static func migratedThemeID(savedTheme: String?, savedScheme: String?, systemIsLight: Bool) -> String? {
@@ -184,14 +197,7 @@ public final class AppPreferences {
 
   public init() {
     let defaults = UserDefaults.standard
-    if let scheme = defaults.string(forKey: Key.colorScheme) {
-      let migrated = Self.migratedThemeID(
-        savedTheme: defaults.string(forKey: Key.terminalTheme), savedScheme: scheme,
-        systemIsLight: UITraitCollection.current.userInterfaceStyle == .light
-      )
-      if let migrated { defaults.set(migrated, forKey: Key.terminalTheme) }
-      defaults.removeObject(forKey: Key.colorScheme)
-    }
+    Self.migrateColorScheme(in: defaults, deviceStyle: UIScreen.main.traitCollection.userInterfaceStyle)
     var fontID = defaults.string(forKey: Key.terminalFont) ?? TerminalFont.menlo.id
     TerminalFonts.registerBundledFonts()
     // A family whose files are gone (or that Core Text refuses) is no longer offered, and

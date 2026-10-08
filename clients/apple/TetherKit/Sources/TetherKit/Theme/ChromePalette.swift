@@ -46,10 +46,17 @@ public struct ChromePalette: Hashable, Sendable {
     // a light theme's three state colours drift into one.
     let pole: UInt32 = theme.isLight ? 0x000000 : 0xFFFFFF
     let surface = mix(bg, fg, 0.05)
+    // Some themes' own foreground is under 4.5:1 on a card; the levels below derive from
+    // the lifted one so secondary text never outranks primary.
+    let text = liftText(fg, against: surface, fg: fg, pole: pole, ratio: 4.5)
     let blue = contrast(ansi[4], bg) >= contrast(ansi[12], bg) ? ansi[4] : ansi[12]
-    let accent = lift(blue, against: bg, toward: pole, ratio: 4.5)
-    let danger = lift(ansi[1], against: bg, toward: pole, ratio: 4.5)
-    func on(_ c: UInt32) -> UInt32 { contrast(bg, c) >= contrast(fg, c) ? bg : fg }
+    // State words and the accent sit on cards as often as on the background.
+    func liftOnBoth(_ c: UInt32) -> UInt32 {
+      lift(lift(c, against: bg, toward: pole, ratio: 4.5), against: surface, toward: pole, ratio: 4.5)
+    }
+    let accent = liftOnBoth(blue)
+    let danger = liftOnBoth(ansi[1])
+    func on(_ c: UInt32) -> UInt32 { contrast(bg, c) >= contrast(text, c) ? bg : text }
     return ChromePalette(
       background: bg,
       surface: surface,
@@ -57,14 +64,14 @@ public struct ChromePalette: Hashable, Sendable {
       raised: mix(bg, fg, 0.10),
       input: mix(bg, fg, 0.03),
       border: mix(bg, fg, 0.16),
-      text: fg,
-      textSecondary: liftText(mix(fg, bg, 0.35), against: surface, fg: fg, pole: pole, ratio: 4.5),
-      textFaint: liftText(mix(fg, bg, 0.55), against: surface, fg: fg, pole: pole, ratio: 3.0),
-      placeholder: mix(fg, bg, 0.62),
+      text: text,
+      textSecondary: liftText(mix(text, bg, 0.35), against: surface, fg: text, pole: pole, ratio: 4.5),
+      textFaint: liftText(mix(text, bg, 0.55), against: surface, fg: text, pole: pole, ratio: 3.0),
+      placeholder: mix(text, bg, 0.62),
       accent: accent,
       onAccent: on(accent),
-      success: lift(ansi[2], against: bg, toward: pole, ratio: 4.5),
-      warning: lift(ansi[3], against: bg, toward: pole, ratio: 4.5),
+      success: liftOnBoth(ansi[2]),
+      warning: liftOnBoth(ansi[3]),
       danger: danger,
       onDanger: on(danger),
       well: bg

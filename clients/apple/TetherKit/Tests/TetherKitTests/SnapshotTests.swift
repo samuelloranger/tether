@@ -180,4 +180,19 @@ final class SnapshotTests: XCTestCase {
   func test_home_in_tether_light() {
     assertHome(in: .tetherLight)
   }
+
+  /// A system Form: its grouped greys must give way to the theme.
+  func test_settings_in_dracula() {
+    let preferences = AppPreferences()
+    let theme = TerminalTheme.named("dracula")
+    ChromeTheme.shared.apply(theme)
+    assertSnapshot(
+      of: TerminalSettingsSheet(preferences: preferences, onDone: {}).preferredColorScheme(.dark),
+      as: .image(
+        precision: 0.99, perceptualPrecision: 0.97,
+        layout: .fixed(width: 390, height: 844),
+        traits: UITraitCollection(userInterfaceStyle: .dark)
+      )
+    )
+  }
 }

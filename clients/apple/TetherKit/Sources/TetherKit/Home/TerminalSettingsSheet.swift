@@ -9,100 +9,104 @@ struct TerminalSettingsSheet: View {
   var body: some View {
     NavigationStack {
       Form {
-        Section("Appearance") {
-          NavigationLink {
-            TerminalThemePicker(preferences: preferences)
-          } label: {
-            HStack {
-              Text("Color scheme")
-              Spacer()
-              Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
-            }
-          }
-          if !TetherPlatform.isMac {
+        Group {
+          Section("Appearance") {
             NavigationLink {
-              AppIconPicker(current: $appIcon)
+              TerminalThemePicker(preferences: preferences)
             } label: {
               HStack {
-                Text("App icon")
+                Text("Color scheme")
                 Spacer()
-                Text(appIcon.name).foregroundStyle(.secondary)
+                Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
+              }
+            }
+            if !TetherPlatform.isMac {
+              NavigationLink {
+                AppIconPicker(current: $appIcon)
+              } label: {
+                HStack {
+                  Text("App icon")
+                  Spacer()
+                  Text(appIcon.name).foregroundStyle(.secondary)
+                }
               }
             }
           }
-        }
-        Section("Terminal") {
-          NavigationLink {
-            TerminalFontPicker(preferences: preferences)
-          } label: {
-            HStack {
-              Text("Font")
-              Spacer()
-              Text(preferences.terminalFont.label).foregroundStyle(.secondary)
-            }
-          }
-          Stepper(value: $preferences.terminalFontSize, in: TerminalFontSizeStep.range, step: TerminalFontSizeStep.step) {
-            HStack {
-              Text("Size")
-              Spacer()
-              Text("\(Int(preferences.terminalFontSize)) pt").foregroundStyle(.secondary)
-                .font(.system(.body, design: .monospaced))
-            }
-          }
-          VStack(alignment: .leading, spacing: 6) {
-            HStack {
-              Text("Line spacing")
-              Spacer()
-              Text(String(format: "%.2f×", preferences.terminalLineSpacing))
-                .foregroundStyle(.secondary)
-                .font(.system(.body, design: .monospaced))
-            }
-            Slider(value: $preferences.terminalLineSpacing, in: TerminalLineSpacing.range, step: 0.05)
-              .accessibilityLabel("Line spacing")
-          }
-          Stepper(value: $preferences.terminalPadding, in: TerminalGridInset.paddingRange, step: 2) {
-            HStack {
-              Text("Padding")
-              Spacer()
-              Text("\(Int(preferences.terminalPadding)) pt").foregroundStyle(.secondary)
-                .font(.system(.body, design: .monospaced))
-            }
-          }
-          Picker("Cursor", selection: $preferences.cursorShape) {
-            ForEach(TerminalCursorStyle.Shape.allCases) { Text($0.label).tag($0) }
-          }
-          Toggle("Blink cursor", isOn: $preferences.cursorBlink)
-          HStack {
-            Text("Preview").foregroundStyle(.secondary)
-            Spacer()
-            TerminalSettingsPreview(preferences: preferences)
-          }
-        }
-        Section {
-          if !TetherPlatform.isMac {
+          Section("Terminal") {
             NavigationLink {
-              KeyBarEditor(preferences: preferences)
+              TerminalFontPicker(preferences: preferences)
             } label: {
               HStack {
-                Text("Key bar")
+                Text("Font")
                 Spacer()
-                Text("\(preferences.keyBar.items.count) keys").foregroundStyle(.secondary)
+                Text(preferences.terminalFont.label).foregroundStyle(.secondary)
               }
             }
-            Picker("Key size", selection: $preferences.compactKeys) {
-              Text("Regular").tag(false)
-              Text("Compact").tag(true)
+            Stepper(value: $preferences.terminalFontSize, in: TerminalFontSizeStep.range, step: TerminalFontSizeStep.step) {
+              HStack {
+                Text("Size")
+                Spacer()
+                Text("\(Int(preferences.terminalFontSize)) pt").foregroundStyle(.secondary)
+                  .font(.system(.body, design: .monospaced))
+              }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+              HStack {
+                Text("Line spacing")
+                Spacer()
+                Text(String(format: "%.2f×", preferences.terminalLineSpacing))
+                  .foregroundStyle(.secondary)
+                  .font(.system(.body, design: .monospaced))
+              }
+              Slider(value: $preferences.terminalLineSpacing, in: TerminalLineSpacing.range, step: 0.05)
+                .accessibilityLabel("Line spacing")
+            }
+            Stepper(value: $preferences.terminalPadding, in: TerminalGridInset.paddingRange, step: 2) {
+              HStack {
+                Text("Padding")
+                Spacer()
+                Text("\(Int(preferences.terminalPadding)) pt").foregroundStyle(.secondary)
+                  .font(.system(.body, design: .monospaced))
+              }
+            }
+            Picker("Cursor", selection: $preferences.cursorShape) {
+              ForEach(TerminalCursorStyle.Shape.allCases) { Text($0.label).tag($0) }
+            }
+            Toggle("Blink cursor", isOn: $preferences.cursorBlink)
+            HStack {
+              Text("Preview").foregroundStyle(.secondary)
+              Spacer()
+              TerminalSettingsPreview(preferences: preferences)
             }
           }
-          Picker("Bell", selection: $preferences.bellMode) {
-            ForEach(BellMode.choices(isMac: TetherPlatform.isMac, including: preferences.bellMode)) { Text($0.label).tag($0) }
+          Section {
+            if !TetherPlatform.isMac {
+              NavigationLink {
+                KeyBarEditor(preferences: preferences)
+              } label: {
+                HStack {
+                  Text("Key bar")
+                  Spacer()
+                  Text("\(preferences.keyBar.items.count) keys").foregroundStyle(.secondary)
+                }
+              }
+              Picker("Key size", selection: $preferences.compactKeys) {
+                Text("Regular").tag(false)
+                Text("Compact").tag(true)
+              }
+            }
+            Picker("Bell", selection: $preferences.bellMode) {
+              ForEach(BellMode.choices(isMac: TetherPlatform.isMac, including: preferences.bellMode)) { Text($0.label).tag($0) }
+            }
+          } header: {
+            Text(TetherPlatform.isMac ? "Alerts" : "Keyboard")
+          } footer: {
+            Text("The bell is what a program rings when it wants your attention. Only the session on screen rings.")
           }
-        } header: {
-          Text(TetherPlatform.isMac ? "Alerts" : "Keyboard")
-        } footer: {
-          Text("The bell is what a program rings when it wants your attention. Only the session on screen rings.")
         }
+        .themedRow()
       }
+      .themedList()
       .onAppear {
         guard !TetherPlatform.isMac else { return }
         appIcon = .current(alternateName: UIApplication.shared.alternateIconName)

@@ -32,13 +32,8 @@ public enum TetherColors {
   /// theme it is the background itself.
   public static var well: Color { color(\.well) }
 
-  /// For UIKit, which keeps the colour it was given: re-applied on a theme change.
-  static func uiColor(_ token: KeyPath<ChromePalette, UInt32>) -> UIColor {
-    uiColor(rgb: ChromeTheme.shared.palette[keyPath: token])
-  }
-
   private static func color(_ token: KeyPath<ChromePalette, UInt32>) -> Color {
-    Color(uiColor: uiColor(token))
+    Color(uiColor: uiColor(rgb: ChromeTheme.shared.palette[keyPath: token]))
   }
 
   static func uiColor(rgb: UInt32) -> UIColor {
@@ -65,6 +60,20 @@ public final class ChromeTheme: @unchecked Sendable {
     palette = next
     isLight = theme.isLight
     TetherMacWindow.applyBarAppearance()
+  }
+}
+
+extension View {
+  /// A system List or Form on the theme's background, not the system's grouped greys.
+  /// Rows take `themedRow()`. Text keeps the system label colours, which follow the
+  /// theme's light or dark; a list-wide foreground style would also repaint its buttons.
+  func themedList() -> some View {
+    scrollContentBackground(.hidden)
+      .background(TetherColors.background)
+  }
+
+  func themedRow() -> some View {
+    listRowBackground(TetherColors.surface)
   }
 }
 

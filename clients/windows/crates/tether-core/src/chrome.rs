@@ -135,24 +135,32 @@ fn lift_text(c: u32, against: u32, fg: u32, pole: u32, ratio: f64) -> u32 {
     }
 }
 
+/// State words and the accent sit on cards as often as on the background.
+fn lift_on_both(c: u32, bg: u32, surface: u32, pole: u32) -> u32 {
+    lift(lift(c, bg, pole, 4.5), surface, pole, 4.5)
+}
+
 pub fn derive(theme: &TerminalTheme) -> ChromePalette {
     let (bg, fg, ansi) = (theme.background, theme.foreground, &theme.ansi);
     // Toward black or white a state colour keeps its hue; toward a tinted foreground,
     // a light theme's three state colours drift into one.
     let pole = if theme.is_light() { 0x000000 } else { 0xFFFFFF };
     let surface = mix(bg, fg, 0.05);
+    // Some themes' own foreground is under 4.5:1 on a card; the levels below derive from
+    // the lifted one so secondary text never outranks primary.
+    let text = lift_text(fg, surface, fg, pole, 4.5);
     let blue = if contrast(ansi[4], bg) >= contrast(ansi[12], bg) {
         ansi[4]
     } else {
         ansi[12]
     };
-    let accent = lift(blue, bg, pole, 4.5);
-    let danger = lift(ansi[1], bg, pole, 4.5);
+    let accent = lift_on_both(blue, bg, surface, pole);
+    let danger = lift_on_both(ansi[1], bg, surface, pole);
     let on = |c: u32| {
-        if contrast(bg, c) >= contrast(fg, c) {
+        if contrast(bg, c) >= contrast(text, c) {
             bg
         } else {
-            fg
+            text
         }
     };
     ChromePalette {
@@ -162,14 +170,14 @@ pub fn derive(theme: &TerminalTheme) -> ChromePalette {
         raised: mix(bg, fg, 0.10),
         input: mix(bg, fg, 0.03),
         border: mix(bg, fg, 0.16),
-        text: fg,
-        text_secondary: lift_text(mix(fg, bg, 0.35), surface, fg, pole, 4.5),
-        text_faint: lift_text(mix(fg, bg, 0.55), surface, fg, pole, 3.0),
-        placeholder: mix(fg, bg, 0.62),
+        text,
+        text_secondary: lift_text(mix(text, bg, 0.35), surface, text, pole, 4.5),
+        text_faint: lift_text(mix(text, bg, 0.55), surface, text, pole, 3.0),
+        placeholder: mix(text, bg, 0.62),
         accent,
         on_accent: on(accent),
-        success: lift(ansi[2], bg, pole, 4.5),
-        warning: lift(ansi[3], bg, pole, 4.5),
+        success: lift_on_both(ansi[2], bg, surface, pole),
+        warning: lift_on_both(ansi[3], bg, surface, pole),
         danger,
         on_danger: on(danger),
         well: bg,
@@ -254,6 +262,11 @@ mod tests {
         for theme in catalog().iter().filter(|t| !t.id.starts_with("tether")) {
             let p = theme.chrome();
             let id = &theme.id;
+            assert!(contrast(p.text, p.surface) >= 4.5, "{id} text");
+            assert!(
+                contrast(p.text, p.surface) >= contrast(p.text_secondary, p.surface),
+                "{id} secondary outranks text"
+            );
             assert!(
                 contrast(p.text_secondary, p.surface) >= 4.5,
                 "{id} secondary"
@@ -266,6 +279,7 @@ mod tests {
                 ("danger", p.danger),
             ] {
                 assert!(contrast(c, p.background) >= 4.5, "{id} {name}");
+                assert!(contrast(c, p.surface) >= 4.5, "{id} {name} on surface");
             }
             assert_eq!(p.background, theme.background);
             assert_eq!(p.well, theme.background);

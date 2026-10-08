@@ -49,10 +49,16 @@ final class ChromePaletteTests: XCTestCase {
   func test_derived_palettes_keep_text_and_states_legible() {
     for theme in TerminalTheme.catalog where !theme.id.hasPrefix("tether") {
       let p = theme.chrome
+      XCTAssertGreaterThanOrEqual(ChromePalette.contrast(p.text, p.surface), 4.5, "\(theme.id) text")
+      XCTAssertGreaterThanOrEqual(
+        ChromePalette.contrast(p.text, p.surface), ChromePalette.contrast(p.textSecondary, p.surface),
+        "\(theme.id) secondary outranks text"
+      )
       XCTAssertGreaterThanOrEqual(ChromePalette.contrast(p.textSecondary, p.surface), 4.5, "\(theme.id) secondary")
       XCTAssertGreaterThanOrEqual(ChromePalette.contrast(p.textFaint, p.surface), 3.0, "\(theme.id) faint")
       for (name, color) in [("accent", p.accent), ("success", p.success), ("warning", p.warning), ("danger", p.danger)] {
         XCTAssertGreaterThanOrEqual(ChromePalette.contrast(color, p.background), 4.5, "\(theme.id) \(name)")
+        XCTAssertGreaterThanOrEqual(ChromePalette.contrast(color, p.surface), 4.5, "\(theme.id) \(name) on surface")
       }
       XCTAssertEqual(p.well, theme.background & 0xFFFFFF)
     }
@@ -78,5 +84,38 @@ final class ChromePaletteTests: XCTestCase {
   func test_dark_and_other_themes_are_left_alone() {
     XCTAssertNil(AppPreferences.migratedThemeID(savedTheme: "tether", savedScheme: "dark", systemIsLight: true))
     XCTAssertNil(AppPreferences.migratedThemeID(savedTheme: "dracula", savedScheme: "light", systemIsLight: true))
+  }
+  @MainActor
+  func test_the_old_setting_migrates_once_and_is_removed() {
+    let defaults = UserDefaults(suiteName: "chrome.migration.\(UUID().uuidString)")!
+    defaults.set("light", forKey: "tether.colorScheme")
+    AppPreferences.migrateColorScheme(in: defaults, deviceStyle: .dark)
+    XCTAssertEqual(defaults.string(forKey: "tether.terminalTheme"), "tether-light")
+    XCTAssertNil(defaults.string(forKey: "tether.colorScheme"))
+  }
+
+  /// Read too early, the device's style can be unknown; guessing would be permanent.
+  @MainActor
+  func test_system_waits_for_a_launch_that_knows_the_device_style() {
+    let defaults = UserDefaults(suiteName: "chrome.migration.\(UUID().uuidString)")!
+    defaults.set("system", forKey: "tether.colorScheme")
+    AppPreferences.migrateColorScheme(in: defaults, deviceStyle: .unspecified)
+    XCTAssertEqual(defaults.string(forKey: "tether.colorScheme"), "system")
+    XCTAssertNil(defaults.string(forKey: "tether.terminalTheme"))
+    AppPreferences.migrateColorScheme(in: defaults, deviceStyle: .light)
+    XCTAssertEqual(defaults.string(forKey: "tether.terminalTheme"), "tether-light")
+    XCTAssertNil(defaults.string(forKey: "tether.colorScheme"))
+  }
+
+  @MainActor
+  func test_choosing_a_theme_repaints_the_chrome() {
+    let preferences = AppPreferences()
+    let saved = preferences.terminalThemeID
+    defer { preferences.terminalThemeID = saved }
+    preferences.terminalTheme = .tetherLight
+    XCTAssertEqual(ChromeTheme.shared.palette, .tetherLight)
+    XCTAssertTrue(ChromeTheme.shared.isLight)
+    preferences.terminalTheme = .named("dracula")
+    XCTAssertEqual(ChromeTheme.shared.palette, TerminalTheme.named("dracula").chrome)
   }
 }
