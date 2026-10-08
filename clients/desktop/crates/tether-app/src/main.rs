@@ -53,7 +53,13 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         p.prepare_identity();
         p
     };
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    terminal::files::set_codec(std::sync::Arc::new(platform::linux::codec::ImageCrateCodec));
+    #[cfg(target_os = "linux")]
+    let platform: std::sync::Arc<dyn platform::Platform> = std::sync::Arc::new(
+        platform::linux::platform::LinuxPlatform::new(app.ui.as_weak()),
+    );
+    #[cfg(not(any(windows, target_os = "linux")))]
     let platform: std::sync::Arc<dyn platform::Platform> =
         std::sync::Arc::new(platform::NullPlatform);
     terminal::glue::init(&app, platform);

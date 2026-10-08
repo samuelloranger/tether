@@ -6,7 +6,8 @@ use tether_core::paste::ClipboardSnapshot;
 
 use crate::AppWindow;
 use crate::platform::Platform;
-use crate::platform::windows::{aumid, clipboard, file_dialog, shell, taskbar, toast};
+use crate::platform::file_dialog;
+use crate::platform::windows::{aumid, clipboard, shell, taskbar, toast};
 
 /// Every method except `read_clipboard` runs on the UI thread (`SlintUi` routes them there).
 pub struct WindowsPlatform {
@@ -77,10 +78,12 @@ impl Platform for WindowsPlatform {
             shell::bring_to_front(h);
         }
     }
-    fn pick_files(&self) -> Vec<PathBuf> {
-        self.window
-            .upgrade()
-            .map(|app| file_dialog::pick_files(app.window()))
-            .unwrap_or_default()
+    fn pick_files(&self, done: Box<dyn FnOnce(Vec<PathBuf>)>) {
+        done(
+            self.window
+                .upgrade()
+                .map(|app| file_dialog::pick_files(app.window()))
+                .unwrap_or_default(),
+        );
     }
 }

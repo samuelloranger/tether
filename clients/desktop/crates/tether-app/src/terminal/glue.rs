@@ -91,7 +91,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         width_px: 640,
         height_px: 384,
     };
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     let network_target = (machine.host.clone(), machine.port);
     set_well_color(&app.ui, style.theme.background);
     crate::extras::set_foreground(&app.ui, style.theme.foreground);
@@ -107,6 +107,8 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
     crate::platform::windows::network::watch(network_target.0, network_target.1);
+    #[cfg(target_os = "linux")]
+    crate::platform::linux::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
@@ -162,10 +164,11 @@ fn wire_callbacks(ui: &AppWindow) {
         vm.set_menu_link("".into());
     });
     vm.on_send_file(|| {
-        let files = platform().pick_files();
-        if !files.is_empty() {
-            send(Msg::SendFiles(files));
-        }
+        platform().pick_files(Box::new(|files| {
+            if !files.is_empty() {
+                send(Msg::SendFiles(files));
+            }
+        }));
     });
     // The same path as Home's gear: it fills the page before showing it.
     vm.on_settings(|| {

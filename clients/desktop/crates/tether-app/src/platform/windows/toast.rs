@@ -1,16 +1,8 @@
-pub fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
+use tether_core::toast::{body_lines, escape};
 
 pub fn toast_xml(header: &str, body: &str, machine: &str, session: &str) -> String {
-    let lines: String = body
-        .lines()
-        .filter(|l| !l.is_empty())
-        .take(2)
+    let lines: String = body_lines(body)
+        .into_iter()
         .map(|l| format!("<text>{}</text>", escape(l)))
         .collect();
     format!(

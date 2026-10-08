@@ -6,23 +6,32 @@ use tether_core::paste::ClipboardSnapshot;
 #[cfg_attr(not(windows), allow(dead_code))]
 pub mod windows;
 
+#[cfg(any(windows, target_os = "linux"))]
+pub mod file_dialog;
+#[cfg(target_os = "linux")]
+pub mod linux;
+
 #[cfg(windows)]
 pub use windows::{apply_caption, placement_visible, show_error_box, system_uses_light};
 
+#[cfg(target_os = "linux")]
+pub use linux::{show_error_box, system_uses_light};
+
+// Linux window decorations follow the winit theme `App::apply_palette` sets, so there is no caption to colour.
 #[cfg(not(windows))]
 pub fn apply_caption(_hwnd: isize, _background: u32, _dark: bool) {}
-
-#[cfg(not(windows))]
-pub fn system_uses_light() -> bool {
-    false
-}
 
 #[cfg(not(windows))]
 pub fn placement_visible(_p: &tether_core::WindowPlacement) -> bool {
     true
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn system_uses_light() -> bool {
+    false
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn show_error_box(_message: &str) {}
 
 pub fn hwnd_of(window: &slint::Window) -> Option<isize> {
@@ -47,8 +56,9 @@ pub trait Platform: Send + Sync + 'static {
     /// Blocking; called off the UI thread.
     fn read_clipboard(&self) -> ClipboardSnapshot;
     fn bring_to_front(&self);
-    /// Modal; called on the UI thread.
-    fn pick_files(&self) -> Vec<PathBuf>;
+    /// Called on the UI thread; `done` runs there too, with nothing picked when cancelled. Windows
+    /// answers before returning (the dialog is modal), Linux when the portal dialog closes.
+    fn pick_files(&self, done: Box<dyn FnOnce(Vec<PathBuf>)>);
 }
 
 pub struct NullPlatform;
@@ -63,7 +73,7 @@ impl Platform for NullPlatform {
         ClipboardSnapshot::Empty
     }
     fn bring_to_front(&self) {}
-    fn pick_files(&self) -> Vec<PathBuf> {
-        Vec::new()
+    fn pick_files(&self, done: Box<dyn FnOnce(Vec<PathBuf>)>) {
+        done(Vec::new());
     }
 }

@@ -1,8 +1,6 @@
 pub mod aumid;
 #[cfg(windows)]
 pub mod clipboard;
-#[cfg(windows)]
-pub mod file_dialog;
 pub mod network;
 #[cfg(windows)]
 pub mod platform;

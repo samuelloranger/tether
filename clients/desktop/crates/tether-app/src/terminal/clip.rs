@@ -14,8 +14,13 @@ pub trait ClipboardSource {
     fn text(&self) -> Option<String>;
     fn files(&self) -> Option<Vec<PathBuf>>;
     fn png(&self) -> Option<Vec<u8>>;
-    fn dibv5(&self) -> Option<Vec<u8>>;
-    fn dib(&self) -> Option<Vec<u8>>;
+    /// Windows-only formats; other platforms have no DIB.
+    fn dibv5(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn dib(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// Another app can hold the clipboard open. Retry briefly, then paste nothing.
