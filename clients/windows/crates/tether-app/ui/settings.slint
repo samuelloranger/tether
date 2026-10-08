@@ -149,12 +149,17 @@ component SettingsForm inherits VerticalLayout {
 
 // The image is drawn at physical pixel size so the preview's glyphs are the terminal's glyphs.
 component PreviewBox inherits Rectangle {
-    width: img.width;
-    height: img.height;
+    width: img.width + 2px;
+    height: img.height + 2px;
     background: SettingsBridge.preview-background;
     border-radius: 10px;
+    // Derived themes paint the well in the page background; the border keeps the box visible.
+    border-width: 1px;
+    border-color: Tokens.border;
     clip: true;
     img := Image {
+        x: 1px;
+        y: 1px;
         source: SettingsBridge.preview;
         width: self.source.width * 1phx;
         height: self.source.height * 1phx;
@@ -172,6 +177,8 @@ export component SettingsPage inherits PageChrome {
         col := VerticalLayout {
             width: scroll.visible-width;
             padding-bottom: 24px;
+            // The scrollbar overlays the content; keep the preview's edge out from under it.
+            padding-right: 16px;
             if root.width >= 800px: HorizontalLayout {
                 spacing: 28px;
                 SettingsForm { horizontal-stretch: 1; }
