@@ -25,6 +25,16 @@ final class SnapshotTests: XCTestCase {
     )
   }
 
+  // The chrome palette is app-wide: every reference is recorded in Tether's unless a test
+  // picks another, and none may leak into the next.
+  override func setUp() async throws {
+    ChromeTheme.shared.apply(.tether)
+  }
+
+  override func tearDown() async throws {
+    ChromeTheme.shared.apply(.tether)
+  }
+
   // MARK: Terminal
 
   private func renderTerminal(_ bytes: String, cols: Int, rows: Int) -> UIImage? {
@@ -100,6 +110,7 @@ final class SnapshotTests: XCTestCase {
 
   /// Laid out at a phone's width and its own height, as it sits in the scroll view.
   private func assertLooks(_ view: some View, dark: Bool, file: StaticString = #filePath, testName: String = #function, line: UInt = #line) {
+    ChromeTheme.shared.apply(dark ? .tether : .tetherLight)
     let framed = view
       .padding(14)
       .frame(width: 375, alignment: .topLeading)
@@ -144,5 +155,44 @@ final class SnapshotTests: XCTestCase {
        }
       """
     assertLooks(DiffReviewView(files: DiffFile.group(GitDiffModel.classify(patch))), dark: true)
+  }
+  // MARK: Theme-wide chrome
+
+  private func assertHome(in theme: TerminalTheme, file: StaticString = #filePath, testName: String = #function, line: UInt = #line) {
+    ChromeTheme.shared.apply(theme)
+    let home = HomeView(model: .preview(), onOpen: { _ in })
+      .preferredColorScheme(theme.isLight ? .light : .dark)
+    assertSnapshot(
+      of: home,
+      as: .image(
+        precision: 0.99, perceptualPrecision: 0.97,
+        layout: .fixed(width: 390, height: 844),
+        traits: UITraitCollection(userInterfaceStyle: theme.isLight ? .light : .dark)
+      ),
+      file: file, testName: testName, line: line
+    )
+  }
+
+  func test_home_in_dracula() {
+    assertHome(in: .named("dracula"))
+  }
+
+  func test_home_in_tether_light() {
+    assertHome(in: .tetherLight)
+  }
+
+  /// A system Form: its grouped greys must give way to the theme.
+  func test_settings_in_dracula() {
+    let preferences = AppPreferences()
+    let theme = TerminalTheme.named("dracula")
+    ChromeTheme.shared.apply(theme)
+    assertSnapshot(
+      of: TerminalSettingsSheet(preferences: preferences, onDone: {}).preferredColorScheme(.dark),
+      as: .image(
+        precision: 0.99, perceptualPrecision: 0.97,
+        layout: .fixed(width: 390, height: 844),
+        traits: UITraitCollection(userInterfaceStyle: .dark)
+      )
+    )
   }
 }

@@ -2,46 +2,78 @@ import SwiftUI
 
 import UIKit
 
-/// Aurora chrome tokens, resolved per appearance. This is the source of truth
-/// for the app's palette; see DESIGN.md for the token table.
+/// The chrome palette of the chosen terminal theme. A view reading a token in `body` is
+/// redrawn when the theme changes; see DESIGN.md for the Tether palettes.
 public enum TetherColors {
-  public static let background = dynamic(dark: 0x08_08_0E, light: 0xF1_F1_F6)
-  public static let surface = dynamic(dark: 0x12_12_1D, light: 0xFF_FF_FF)
-  public static let surfaceRaised = dynamic(dark: 0x19_19_26, light: 0xE9_E9_F2)
-  public static let input = dynamic(dark: 0x0B_0B_13, light: 0xFF_FF_FF)
+  public static var background: Color { color(\.background) }
+  public static var surface: Color { color(\.surface) }
+  public static var surfaceHover: Color { color(\.surfaceHover) }
+  public static var surfaceRaised: Color { color(\.raised) }
+  public static var input: Color { color(\.input) }
 
-  public static let textPrimary = dynamic(dark: 0xED_EE_F6, light: 0x14_14_1B)
-  public static let textSecondary = dynamic(dark: 0x97_97_AC, light: 0x5C_5C_6C)
-  public static let textFaint = dynamic(dark: 0x61_61_7A, light: 0x8A_8A_9C)
+  public static var textPrimary: Color { color(\.text) }
+  public static var textSecondary: Color { color(\.textSecondary) }
+  public static var textFaint: Color { color(\.textFaint) }
+  public static var placeholder: Color { color(\.placeholder) }
 
-  public static let border = dynamic(dark: 0x23_23_33, light: 0xDC_DC_E6)
+  public static var border: Color { color(\.border) }
 
-  public static let accent = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
-  public static let onAccent = dynamic(dark: 0x08_08_0E, light: 0xFF_FF_FF)
+  public static var accent: Color { color(\.accent) }
+  public static var onAccent: Color { color(\.onAccent) }
 
-  public static let success = dynamic(dark: 0x6E_E7_A8, light: 0x1C_7A_4F)
-  public static let warning = dynamic(dark: 0xF2_B3_4C, light: 0x8A_5A_00)
-  public static let danger = dynamic(dark: 0xFF_70_50, light: 0xC4_38_1C)
+  public static var success: Color { color(\.success) }
+  public static var warning: Color { color(\.warning) }
+  public static var danger: Color { color(\.danger) }
+  public static var onDanger: Color { color(\.onDanger) }
 
-  public static let heatCool = dynamic(dark: 0x7C_8C_F8, light: 0x43_53_D0)
+  public static var heatCool: Color { accent }
 
-  /// NOT dynamic. The default terminal theme's background (`TerminalTheme.tether`); a
-  /// terminal view itself follows the chosen theme.
-  public static let terminalBackground = Color(hex: "1E1E2E")
+  /// Behind the terminal grid. Tether's is `#1E1E2E` in `#08080E` chrome; for any other
+  /// theme it is the background itself.
+  public static var well: Color { color(\.well) }
 
-  private static func dynamic(dark: UInt32, light: UInt32) -> Color {
-    return Color(
-      UIColor { traits in
-        traits.userInterfaceStyle == .light ? uiColor(light) : uiColor(dark)
-      })
+  private static func color(_ token: KeyPath<ChromePalette, UInt32>) -> Color {
+    Color(uiColor: uiColor(rgb: ChromeTheme.shared.palette[keyPath: token]))
   }
 
-  private static func uiColor(_ rgb: UInt32) -> UIColor {
+  static func uiColor(rgb: UInt32) -> UIColor {
     UIColor(
       red: CGFloat((rgb >> 16) & 0xFF) / 255,
       green: CGFloat((rgb >> 8) & 0xFF) / 255,
       blue: CGFloat(rgb & 0xFF) / 255,
       alpha: 1)
+  }
+}
+
+/// The palette every `TetherColors` token reads. `AppPreferences` sets it from the terminal
+/// theme; SwiftUI tracks the read, so changing it redraws every view that used a token.
+@Observable
+public final class ChromeTheme: @unchecked Sendable {
+  nonisolated(unsafe) public static let shared = ChromeTheme()
+
+  public private(set) var palette: ChromePalette = .tether
+  public private(set) var isLight = false
+
+  @MainActor public func apply(_ theme: TerminalTheme) {
+    let next = theme.chrome
+    guard next != palette || theme.isLight != isLight else { return }
+    palette = next
+    isLight = theme.isLight
+    TetherMacWindow.applyBarAppearance()
+  }
+}
+
+extension View {
+  /// A system List or Form on the theme's background, not the system's grouped greys.
+  /// Rows take `themedRow()`. Text keeps the system label colours, which follow the
+  /// theme's light or dark; a list-wide foreground style would also repaint its buttons.
+  func themedList() -> some View {
+    scrollContentBackground(.hidden)
+      .background(TetherColors.background)
+  }
+
+  func themedRow() -> some View {
+    listRowBackground(TetherColors.surface)
   }
 }
 

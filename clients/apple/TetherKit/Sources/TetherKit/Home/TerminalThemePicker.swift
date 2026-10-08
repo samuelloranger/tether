@@ -28,7 +28,9 @@ struct TerminalThemePicker: View {
       }
       .accessibilityLabel(theme.name)
       .accessibilityAddTraits(theme.id == preferences.terminalTheme.id ? .isSelected : [])
+      .themedRow()
     }
+    .themedList()
     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
     .navigationTitle("Color scheme")
     .navigationBarTitleDisplayMode(.inline)

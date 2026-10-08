@@ -26,7 +26,7 @@ struct RandomartGridView: View {
     }
     .aspectRatio(17.0 / 9.0, contentMode: .fit)
     .padding(4)
-    .background(TetherColors.terminalBackground, in: RoundedRectangle(cornerRadius: 8))
+    .background(TetherColors.well, in: RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(TetherColors.border))
   }
 
@@ -65,7 +65,7 @@ struct MachineCardView: View {
           Text("saved").font(.caption2.weight(.semibold).monospaced())
             .padding(.horizontal, 8).padding(.vertical, 3)
             .foregroundStyle(TetherColors.textFaint)
-            .background(Color.white.opacity(0.04), in: Capsule())
+            .background(TetherColors.textPrimary.opacity(0.04), in: Capsule())
             .overlay(Capsule().strokeBorder(TetherColors.border))
         }
         detailLayout {

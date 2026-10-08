@@ -104,6 +104,8 @@ public struct TerminalAccessoryBar: View {
 
   private var pasteButton: some View {
     TerminalPasteKey(onPaste: onPaste)
+      // The system control takes its colours once, at creation: a new theme needs a new one.
+      .id(ChromeTheme.shared.palette)
       .frame(width: metrics.keyWidth, height: metrics.keySize)
   }
 

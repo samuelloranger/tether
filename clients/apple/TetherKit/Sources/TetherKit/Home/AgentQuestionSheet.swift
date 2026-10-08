@@ -58,14 +58,17 @@ struct AgentQuestionSheet: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     case .asking:
       Form {
-        ForEach(Array(draft.questions.enumerated()), id: \.offset) { index, question in
-          questionSection(question, at: index)
+        Group {
+          ForEach(Array(draft.questions.enumerated()), id: \.offset) { index, question in
+            questionSection(question, at: index)
+          }
+          if let sendError {
+            Section { Text(sendError).font(.footnote).foregroundStyle(TetherColors.danger) }
+          }
         }
-        if let sendError {
-          Section { Text(sendError).font(.footnote).foregroundStyle(TetherColors.danger) }
-        }
+        .themedRow()
       }
-      .scrollContentBackground(.hidden)
+      .themedList()
       .disabled(sending)
     }
   }

@@ -7,18 +7,23 @@ import XCTest
 /// can't use `TerminalKeyStyle`; these pin it to the same face the other keys wear.
 @MainActor
 final class TerminalPasteKeyTests: XCTestCase {
-  private func resolved(_ color: UIColor?, _ style: UIUserInterfaceStyle) -> UIColor? {
-    color?.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+  private func rgb(_ color: UIColor?) -> UInt32? {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    guard let color, color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+    return UInt32((r * 255).rounded()) << 16 | UInt32((g * 255).rounded()) << 8 | UInt32((b * 255).rounded())
   }
 
+  /// In every theme: the control is rebuilt on a theme change and must take the new face.
   func test_the_paste_key_wears_the_other_keys_face() {
-    let config = TerminalPasteKey.configuration
-    XCTAssertEqual(config.displayMode, .iconOnly)
-    XCTAssertEqual(config.cornerStyle, .fixed)
-    XCTAssertEqual(config.cornerRadius, TerminalKeyStyle.cornerRadius)
-    for style in [UIUserInterfaceStyle.dark, .light] {
-      XCTAssertEqual(resolved(config.baseBackgroundColor, style), resolved(UIColor(TetherColors.surfaceRaised), style))
-      XCTAssertEqual(resolved(config.baseForegroundColor, style), resolved(UIColor(TetherColors.textPrimary), style))
+    defer { ChromeTheme.shared.apply(.tether) }
+    for theme in [TerminalTheme.tether, .tetherLight, .named("dracula")] {
+      ChromeTheme.shared.apply(theme)
+      let config = TerminalPasteKey.configuration
+      XCTAssertEqual(config.displayMode, .iconOnly)
+      XCTAssertEqual(config.cornerStyle, .fixed)
+      XCTAssertEqual(config.cornerRadius, TerminalKeyStyle.cornerRadius)
+      XCTAssertEqual(rgb(config.baseBackgroundColor), theme.chrome.raised, theme.id)
+      XCTAssertEqual(rgb(config.baseForegroundColor), theme.chrome.text, theme.id)
     }
   }
 

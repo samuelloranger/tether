@@ -10,31 +10,8 @@ public final class AppPreferences {
   static let defaultTerminalFontSize: Double = 11
   #endif
 
-  public enum ColorSchemePreference: String, CaseIterable, Identifiable, Sendable {
-    case system
-    case dark
-    case light
-
-    public var id: String { rawValue }
-
-    public var label: String {
-      switch self {
-      case .system: "System"
-      case .dark: "Dark"
-      case .light: "Light"
-      }
-    }
-
-    public var swiftUIColorScheme: ColorScheme? {
-      switch self {
-      case .system: nil
-      case .dark: .dark
-      case .light: .light
-      }
-    }
-  }
-
   private enum Key {
+    /// Gone: the theme decides light or dark. Read once, to migrate.
     static let colorScheme = "tether.colorScheme"
     static let terminalFont = "tether.terminalFont"
     static let terminalFontSize = "tether.terminalFontSize"
@@ -47,12 +24,6 @@ public final class AppPreferences {
     static let compactKeys = "tether.compactKeys"
     static let terminalTheme = "tether.terminalTheme"
     static let downloadedFonts = "tether.downloadedFonts"
-  }
-
-  public var colorSchemePreference: ColorSchemePreference {
-    didSet {
-      UserDefaults.standard.set(colorSchemePreference.rawValue, forKey: Key.colorScheme)
-    }
   }
 
   public var terminalFontID: String {
@@ -187,6 +158,34 @@ public final class AppPreferences {
   public var terminalThemeID: String {
     didSet {
       UserDefaults.standard.set(terminalThemeID, forKey: Key.terminalTheme)
+      ChromeTheme.shared.apply(terminalTheme)
+    }
+  }
+
+  /// The theme decides light or dark for everything the app does not draw itself.
+  public var colorScheme: ColorScheme { terminalTheme.isLight ? .light : .dark }
+
+  /// Runs once: the old key is removed after. "System" needs to know what the device showed,
+  /// and the answer is final, so a launch that can't tell leaves it for the next one.
+  static func migrateColorScheme(in defaults: UserDefaults, deviceStyle: UIUserInterfaceStyle) {
+    guard let scheme = defaults.string(forKey: Key.colorScheme) else { return }
+    if scheme == "system", deviceStyle == .unspecified { return }
+    let migrated = migratedThemeID(
+      savedTheme: defaults.string(forKey: Key.terminalTheme), savedScheme: scheme,
+      systemIsLight: deviceStyle == .light
+    )
+    if let migrated { defaults.set(migrated, forKey: Key.terminalTheme) }
+    defaults.removeObject(forKey: Key.colorScheme)
+  }
+
+  /// The System / Dark / Light setting is gone: someone who saw the light Tether chrome
+  /// keeps it as Tether Light. Nil leaves the saved theme as it is.
+  nonisolated static func migratedThemeID(savedTheme: String?, savedScheme: String?, systemIsLight: Bool) -> String? {
+    guard savedTheme == nil || savedTheme == TerminalTheme.tether.id else { return nil }
+    switch savedScheme {
+    case "light": return TerminalTheme.tetherLight.id
+    case "system" where systemIsLight: return TerminalTheme.tetherLight.id
+    default: return nil
     }
   }
 
@@ -198,9 +197,7 @@ public final class AppPreferences {
 
   public init() {
     let defaults = UserDefaults.standard
-    colorSchemePreference = ColorSchemePreference(
-      rawValue: defaults.string(forKey: Key.colorScheme) ?? ""
-    ) ?? .dark
+    Self.migrateColorScheme(in: defaults, deviceStyle: UIScreen.main.traitCollection.userInterfaceStyle)
     var fontID = defaults.string(forKey: Key.terminalFont) ?? TerminalFont.menlo.id
     TerminalFonts.registerBundledFonts()
     // A family whose files are gone (or that Core Text refuses) is no longer offered, and
@@ -232,5 +229,10 @@ public final class AppPreferences {
     keyBar = defaults.data(forKey: Key.keyBar).flatMap(KeyBarLayout.decode) ?? .default
     compactKeys = defaults.bool(forKey: Key.compactKeys)
     terminalThemeID = defaults.string(forKey: Key.terminalTheme) ?? TerminalTheme.tether.id
+    #if DEBUG
+    // For screenshots: shown, never saved (didSet does not run in init).
+    if let id = ProcessInfo.processInfo.environment["TETHER_THEME"] { terminalThemeID = id }
+    #endif
+    ChromeTheme.shared.apply(terminalTheme)
   }
 }

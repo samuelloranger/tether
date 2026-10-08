@@ -64,6 +64,22 @@ public enum TetherMacWindow {
     bar.standardAppearance = appearance
     bar.scrollEdgeAppearance = appearance
     bar.compactAppearance = appearance
+    // The proxy only reaches bars created from now on; a sheet open while the theme
+    // changes keeps its bar.
+    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+      for window in scene.windows { restyleBars(in: window, with: appearance) }
+    }
     #endif
   }
+
+  #if targetEnvironment(macCatalyst)
+  @MainActor private static func restyleBars(in view: UIView, with appearance: UINavigationBarAppearance) {
+    if let bar = view as? UINavigationBar {
+      bar.standardAppearance = appearance
+      bar.scrollEdgeAppearance = appearance
+      bar.compactAppearance = appearance
+    }
+    for subview in view.subviews { restyleBars(in: subview, with: appearance) }
+  }
+  #endif
 }

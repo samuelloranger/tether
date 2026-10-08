@@ -49,7 +49,9 @@ public struct AppRootView: View {
       }
     }
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen)
-    .preferredColorScheme(preferences.colorSchemePreference.swiftUIColorScheme)
+    .preferredColorScheme(preferences.colorScheme)
+    // Here, not on the app's root: a theme change then redraws this view, not the scene.
+    .tint(TetherColors.accent)
     .onOpenURL { handle($0) }
     .sheet(item: $question, onDismiss: { Task { for each in allControllers { await each.finishAnsweringQuestion() } } }) { target in
       if let questionRunner {

@@ -7,45 +7,49 @@ struct KeyBarEditor: View {
 
   var body: some View {
     List {
-      Section {
-        ForEach(preferences.keyBar.items) { item in
-          row(for: item)
-        }
-        .onMove { preferences.keyBar.items.move(fromOffsets: $0, toOffset: $1) }
-        .onDelete { preferences.keyBar.items.remove(atOffsets: $0) }
-      } header: {
-        Text("In the bar")
-      } footer: {
-        if preferences.keyBar.items.isEmpty {
-          Text("The bar is empty. Add keys below, or reset to the default.")
-        }
-      }
-      Section("Add keys") {
-        ForEach(preferences.keyBar.availableKeys) { key in
-          Button {
-            preferences.keyBar.add(key)
-          } label: {
-            Label {
-              KeyDescription(label: key.label, detail: key.detail)
-            } icon: {
-              Image(systemName: "plus.circle.fill").foregroundStyle(.green)
-            }
+      Group {
+        Section {
+          ForEach(preferences.keyBar.items) { item in
+            row(for: item)
           }
-          .tint(.primary)
+          .onMove { preferences.keyBar.items.move(fromOffsets: $0, toOffset: $1) }
+          .onDelete { preferences.keyBar.items.remove(atOffsets: $0) }
+        } header: {
+          Text("In the bar")
+        } footer: {
+          if preferences.keyBar.items.isEmpty {
+            Text("The bar is empty. Add keys below, or reset to the default.")
+          }
         }
-        Button {
-          editingMacro = MacroKey(label: "", text: "")
-        } label: {
-          Label("New macro key…", systemImage: "plus.circle.fill")
+        Section("Add keys") {
+          ForEach(preferences.keyBar.availableKeys) { key in
+            Button {
+              preferences.keyBar.add(key)
+            } label: {
+              Label {
+                KeyDescription(label: key.label, detail: key.detail)
+              } icon: {
+                Image(systemName: "plus.circle.fill").foregroundStyle(TetherColors.success)
+              }
+            }
+            .tint(.primary)
+          }
+          Button {
+            editingMacro = MacroKey(label: "", text: "")
+          } label: {
+            Label("New macro key…", systemImage: "plus.circle.fill")
+          }
+        }
+        Section {
+          Button("Reset to default", role: .destructive) {
+            preferences.keyBar = .default
+          }
+          .disabled(preferences.keyBar == .default)
         }
       }
-      Section {
-        Button("Reset to default", role: .destructive) {
-          preferences.keyBar = .default
-        }
-        .disabled(preferences.keyBar == .default)
-      }
+      .themedRow()
     }
+    .themedList()
     .environment(\.editMode, .constant(.active))
     .navigationTitle("Key bar")
     .navigationBarTitleDisplayMode(.inline)
@@ -103,28 +107,32 @@ private struct MacroKeyEditor: View {
   var body: some View {
     NavigationStack {
       Form {
-        Section {
-          TextField("Label", text: $macro.label)
-            .onChange(of: macro.label) { _, label in
-              if label.count > MacroKey.maxLabelLength {
-                macro.label = String(label.prefix(MacroKey.maxLabelLength))
+        Group {
+          Section {
+            TextField("Label", text: $macro.label)
+              .onChange(of: macro.label) { _, label in
+                if label.count > MacroKey.maxLabelLength {
+                  macro.label = String(label.prefix(MacroKey.maxLabelLength))
+                }
               }
-            }
-          TextField("Text to send", text: $macro.text, axis: .vertical)
-            .font(.system(.body, design: .monospaced))
-        } footer: {
-          Text("Labels fit \(MacroKey.maxLabelLength) characters.")
+            TextField("Text to send", text: $macro.text, axis: .vertical)
+              .font(.system(.body, design: .monospaced))
+          } footer: {
+            Text("Labels fit \(MacroKey.maxLabelLength) characters.")
+          }
+          Section {
+            Text(bytes.isEmpty ? " " : MacroText.visible(bytes))
+              .font(.system(.body, design: .monospaced))
+              .accessibilityLabel(bytes.isEmpty ? "Nothing" : MacroText.visible(bytes))
+          } header: {
+            Text("Sends")
+          } footer: {
+            Text(verbatim: "\\n or \\r for Return, \\t Tab, \\e Esc, \\cC for Ctrl-C, \\x1b for any byte, \\\\ for a backslash.")
+          }
         }
-        Section {
-          Text(bytes.isEmpty ? " " : MacroText.visible(bytes))
-            .font(.system(.body, design: .monospaced))
-            .accessibilityLabel(bytes.isEmpty ? "Nothing" : MacroText.visible(bytes))
-        } header: {
-          Text("Sends")
-        } footer: {
-          Text(verbatim: "\\n or \\r for Return, \\t Tab, \\e Esc, \\cC for Ctrl-C, \\x1b for any byte, \\\\ for a backslash.")
-        }
+        .themedRow()
       }
+      .themedList()
       .textInputAutocapitalization(.never)
       .autocorrectionDisabled()
       .navigationTitle(isNew ? "New macro key" : "Macro key")

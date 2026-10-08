@@ -15,62 +15,66 @@ struct TerminalFontPicker: View {
 
   var body: some View {
     List {
-      Section("Built in") {
-        ForEach(TerminalFont.builtIn) { row($0) }
-      }
-      if !preferences.downloadedFonts.isEmpty {
-        Section("Downloaded") {
-          ForEach(preferences.downloadedFonts) { font in
-            row(font.terminalFont, proportional: !font.isMonospaced)
-          }
-          .onDelete { offsets in
-            for index in offsets { preferences.removeDownloadedFont(preferences.downloadedFonts[index]) }
-          }
+      Group {
+        Section("Built in") {
+          ForEach(TerminalFont.builtIn) { row($0) }
         }
-      }
-      Section {
-        HStack {
-          TextField("fonts.google.com link or family name", text: $link)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(.URL)
-            .submitLabel(.go)
-            .focused($linkFocused)
-            .onSubmit { download(link) }
-            .accessibilityIdentifier("googleFontLink")
-          if downloading != nil {
-            ProgressView()
-          } else {
-            Button("Add") { download(link) }
-              .disabled(GoogleFonts.family(from: link) == nil)
+        if !preferences.downloadedFonts.isEmpty {
+          Section("Downloaded") {
+            ForEach(preferences.downloadedFonts) { font in
+              row(font.terminalFont, proportional: !font.isMonospaced)
+            }
+            .onDelete { offsets in
+              for index in offsets { preferences.removeDownloadedFont(preferences.downloadedFonts[index]) }
+            }
           }
         }
-        if let failure {
-          Label(failure, systemImage: "exclamationmark.triangle").font(.footnote)
-            .foregroundStyle(TetherColors.danger)
+        Section {
+          HStack {
+            TextField("fonts.google.com link or family name", text: $link)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
+              .keyboardType(.URL)
+              .submitLabel(.go)
+              .focused($linkFocused)
+              .onSubmit { download(link) }
+              .accessibilityIdentifier("googleFontLink")
+            if downloading != nil {
+              ProgressView()
+            } else {
+              Button("Add") { download(link) }
+                .disabled(GoogleFonts.family(from: link) == nil)
+            }
+          }
+          if let failure {
+            Label(failure, systemImage: "exclamationmark.triangle").font(.footnote)
+              .foregroundStyle(TetherColors.danger)
+          }
+        } header: {
+          Text("Add from Google Fonts")
+        } footer: {
+          Text("Paste a family’s page from fonts.google.com. Tether downloads its regular and bold faces from Google.")
         }
-      } header: {
-        Text("Add from Google Fonts")
-      } footer: {
-        Text("Paste a family’s page from fonts.google.com. Tether downloads its regular and bold faces from Google.")
-      }
-      if !suggestions.isEmpty {
-        Section("Monospace families on Google Fonts") {
-          ForEach(suggestions, id: \.self) { family in
-            Button { download(family) } label: {
-              HStack {
-                Text(family).foregroundStyle(TetherColors.textPrimary)
-                Spacer()
-                if downloading == family { ProgressView() } else {
-                  Image(systemName: "arrow.down.circle").foregroundStyle(TetherColors.accent)
+        if !suggestions.isEmpty {
+          Section("Monospace families on Google Fonts") {
+            ForEach(suggestions, id: \.self) { family in
+              Button { download(family) } label: {
+                HStack {
+                  Text(family).foregroundStyle(TetherColors.textPrimary)
+                  Spacer()
+                  if downloading == family { ProgressView() } else {
+                    Image(systemName: "arrow.down.circle").foregroundStyle(TetherColors.accent)
+                  }
                 }
               }
+              .disabled(downloading != nil)
             }
-            .disabled(downloading != nil)
           }
         }
       }
+      .themedRow()
     }
+    .themedList()
     .navigationTitle("Font")
     .navigationBarTitleDisplayMode(.inline)
   }
