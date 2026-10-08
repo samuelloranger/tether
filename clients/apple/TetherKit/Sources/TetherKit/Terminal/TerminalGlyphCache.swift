@@ -59,12 +59,38 @@ final class TerminalGlyphCache {
 
     // Core Text picks the fallback face it would have used inside a CTLine.
     let created = CTFontCreateForString(base, text as CFString, CFRange(location: 0, length: utf16.count))
-    // One object per face, so the renderer can batch glyphs by font identity.
-    let name = "\(CTFontCopyPostScriptName(created))|\(CTFontGetSymbolicTraits(base).rawValue)"
-    let fallback = fallbackFaces[name] ?? created
-    fallbackFaces[name] = fallback
+    // For symbols like ✔ ⏺ ✖ that is Apple Color Emoji, which only has their emoji form: a
+    // colour picture where one is available, its missing-glyph box where not. Their default
+    // presentation is text, and a text face draws that in one cell.
+    if Self.isEmojiOrLastResort(created), !scalar.properties.isEmojiPresentation {
+      let bold = CTFontGetSymbolicTraits(base).contains(.traitBold)
+      for name in bold ? Self.textSymbolFacesBold : Self.textSymbolFaces {
+        let face = shared(CTFontCreateWithName(name as CFString, CTFontGetSize(base), nil), base: base)
+        guard CTFontCopyPostScriptName(face) as String == name else { continue }
+        if let glyph = glyph(for: &utf16, in: face) {
+          return Resolved(glyph: glyph, font: face, advance: advance(of: glyph, in: face))
+        }
+      }
+    }
+    let fallback = shared(created, base: base)
     guard let glyph = glyph(for: &utf16, in: fallback) else { return nil }
     return Resolved(glyph: glyph, font: fallback, advance: advance(of: glyph, in: fallback))
+  }
+
+  /// One object per face, so the renderer can batch glyphs by font identity.
+  private func shared(_ face: CTFont, base: CTFont) -> CTFont {
+    let name = "\(CTFontCopyPostScriptName(face))|\(CTFontGetSymbolicTraits(base).rawValue)"
+    if let existing = fallbackFaces[name] { return existing }
+    fallbackFaces[name] = face
+    return face
+  }
+
+  private static let textSymbolFaces = ["Menlo-Regular", "ZapfDingbatsITC", "STIXTwoMath-Regular", "AppleSymbols"]
+  private static let textSymbolFacesBold = ["Menlo-Bold"] + textSymbolFaces
+
+  private static func isEmojiOrLastResort(_ font: CTFont) -> Bool {
+    let name = CTFontCopyPostScriptName(font) as String
+    return name.contains("AppleColorEmoji") || name.hasPrefix("LastResort")
   }
 
   private func glyph(for utf16: inout [UInt16], in font: CTFont) -> CGGlyph? {
