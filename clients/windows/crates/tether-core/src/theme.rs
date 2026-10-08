@@ -69,9 +69,26 @@ fn tether_theme() -> TerminalTheme {
     }
 }
 
+/// Aurora light's terminal: Catppuccin Latte with Aurora light's accent and state colours.
+fn tether_light_theme() -> TerminalTheme {
+    TerminalTheme {
+        id: "tether-light".into(),
+        name: "Tether Light".into(),
+        background: 0xFBFBFD,
+        foreground: 0x14141B,
+        cursor: 0x14141B,
+        selection: None,
+        ansi: [
+            0x5C5F77, 0xC4381C, 0x1C7A4F, 0x8A5A00, 0x4353D0, 0xEA76CB, 0x179299, 0xACB0BE,
+            0x6C6F85, 0xD20F39, 0x40A02B, 0xDF8E1D, 0x1E66F5, 0xEA76CB, 0x179299, 0xBCC0CC,
+        ],
+    }
+}
+
 static CATALOG: LazyLock<Vec<TerminalTheme>> = LazyLock::new(|| {
     let bundled: Vec<Entry> = serde_json::from_str(THEMES_JSON).unwrap_or_default();
-    std::iter::once(tether_theme())
+    [tether_theme(), tether_light_theme()]
+        .into_iter()
         .chain(bundled.into_iter().filter_map(Entry::theme))
         .collect()
 });
@@ -118,8 +135,10 @@ mod tests {
 
     #[test]
     fn the_shared_catalog_follows_in_its_own_order() {
-        assert_eq!(catalog().len(), 45);
-        assert_eq!(catalog()[1].id, "catppuccin-mocha");
+        assert_eq!(catalog().len(), 46);
+        assert_eq!(catalog()[1].id, "tether-light");
+        assert!(catalog()[1].is_light());
+        assert_eq!(catalog()[2].id, "catppuccin-mocha");
         let mut ids: Vec<&str> = catalog().iter().map(|t| t.id.as_str()).collect();
         ids.sort();
         ids.dedup();
