@@ -6,7 +6,8 @@ use tether_core::paste::ClipboardSnapshot;
 
 use crate::AppWindow;
 use crate::platform::Platform;
-use crate::platform::windows::{aumid, clipboard, file_dialog, shell, taskbar, toast};
+use crate::platform::file_dialog;
+use crate::platform::windows::{aumid, clipboard, shell, taskbar, toast};
 
 /// Every method except `read_clipboard` runs on the UI thread (`SlintUi` routes them there).
 pub struct WindowsPlatform {
