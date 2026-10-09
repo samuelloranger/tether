@@ -11,7 +11,7 @@ use slint::winit_030::{
 };
 use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, SharedString, VecModel};
 use tether_core::{
-    DataDir, JsonHostKeys, KeyOrigin, SecretStore, TerminalPrefs, WindowPlacement,
+    DataDir, JsonHostKeys, KeyOrigin, SecretStore, TerminalPrefs, UpdateChannel, WindowPlacement,
     chrome::ChromePalette, theme_named,
 };
 use uuid::Uuid;
@@ -953,7 +953,19 @@ impl App {
         b.set_spacing(t.line_spacing);
         b.set_cursor(settings::cursor_index(t.cursor));
         b.set_blink(t.blink);
+        b.set_update_channel(settings::channel_index(prefs.update_channel));
         self.refresh_preview();
+    }
+
+    pub fn update_channel(&self) -> UpdateChannel {
+        self.state.borrow().prefs.update_channel
+    }
+
+    /// Only the file and the settings page show the channel; the terminal never reads it.
+    pub fn set_update_channel(&self, channel: UpdateChannel) {
+        self.state.borrow_mut().prefs.update_channel = channel;
+        self.state.borrow().save_prefs();
+        self.refresh_settings();
     }
 
     pub fn update_terminal_prefs(&self, f: impl FnOnce(&mut TerminalPrefs)) {

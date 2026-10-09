@@ -2,7 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { AppBridge, SettingsBridge } from "bridge.slint";
 import { SnippetsBridge } from "extras_bridge.slint";
-import { PageChrome, PrimaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
+import { PageChrome, PrimaryButton, SecondaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
 
 component Section inherits VerticalLayout {
     in property <string> text;
@@ -167,6 +167,26 @@ component SettingsForm inherits VerticalLayout {
     Section { text: "About"; }
     Group {
         Row { label: "Version"; Value { text: SettingsBridge.version-label; } }
+        VerticalLayout {
+            spacing: 8px;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            Label { text: "Update channel"; }
+            Segment {
+                options: ["Stable", "Edge"];
+                selected <=> SettingsBridge.update-channel;
+                changed(i) => { SettingsBridge.update-channel-changed(i); }
+            }
+            Text {
+                text: SettingsBridge.update-channel == 1
+                    ? "A build of every change on main, once it passes CI. Expect rough edges."
+                    : "Releases only. Coming from Edge, you keep your build until a newer release is out.";
+                wrap: word-wrap;
+                font-size: 12px;
+                color: Tokens.text-faint;
+            }
+        }
+        Rectangle { height: 1px; background: Tokens.border; }
         Row {
             label: "Updates";
             last: true;
@@ -174,6 +194,10 @@ component SettingsForm inherits VerticalLayout {
             if SettingsBridge.update-ready: VerticalLayout {
                 alignment: center;
                 PrimaryButton { min-height: 32px; text: "Restart"; clicked => { SettingsBridge.restart-to-update(); } }
+            }
+            if !SettingsBridge.update-ready && SettingsBridge.can-check-updates: VerticalLayout {
+                alignment: center;
+                SecondaryButton { min-height: 32px; text: "Check now"; clicked => { SettingsBridge.check-for-updates(); } }
             }
         }
     }

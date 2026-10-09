@@ -1,4 +1,4 @@
-use tether_core::{CursorShape, TerminalPrefs, font_named, theme_named};
+use tether_core::{CursorShape, TerminalPrefs, UpdateChannel, font_named, theme_named};
 
 pub fn cursor_index(shape: CursorShape) -> i32 {
     match shape {
@@ -13,6 +13,20 @@ pub fn cursor_from_index(i: i32) -> CursorShape {
         1 => CursorShape::Bar,
         2 => CursorShape::Underline,
         _ => CursorShape::Block,
+    }
+}
+
+pub fn channel_index(channel: UpdateChannel) -> i32 {
+    match channel {
+        UpdateChannel::Stable => 0,
+        UpdateChannel::Edge => 1,
+    }
+}
+
+pub fn channel_from_index(i: i32) -> UpdateChannel {
+    match i {
+        1 => UpdateChannel::Edge,
+        _ => UpdateChannel::Stable,
     }
 }
 
@@ -61,6 +75,14 @@ mod tests {
 
     fn prefs() -> TerminalPrefs {
         Preferences::default().terminal
+    }
+
+    #[test]
+    fn channel_segment_maps_both_ways() {
+        for c in [UpdateChannel::Stable, UpdateChannel::Edge] {
+            assert_eq!(channel_from_index(channel_index(c)), c);
+        }
+        assert_eq!(channel_from_index(7), UpdateChannel::Stable);
     }
 
     #[test]

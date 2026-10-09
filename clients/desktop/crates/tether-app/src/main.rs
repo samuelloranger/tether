@@ -19,6 +19,8 @@ fn main() {
     #[cfg(any(windows, target_os = "linux"))]
     updates::startup();
     let log = logging::init();
+    #[cfg(any(windows, target_os = "linux"))]
+    updates::log_startup_failure();
     #[cfg(not(debug_assertions))]
     startup::install_panic_hook();
     if let Err(err) = start() {
@@ -71,34 +73,78 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn watch_updates(app: &app::App) {
+fn watch_updates(app: &std::rc::Rc<app::App>) {
     use slint::ComponentHandle;
     let bridge = app.ui.global::<SettingsBridge>();
     bridge.set_version_label(updates::VERSION.into());
     bridge.set_update_label(updates::UpdateStatus::Unmanaged.label().into());
+    bridge.set_can_check_updates(false);
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let weak = std::rc::Rc::downgrade(app);
+        bridge.on_update_channel_changed(move |i| {
+            if let Some(app) = weak.upgrade() {
+                app.set_update_channel(vm::settings::channel_from_index(i));
+            }
+        });
+    }
     #[cfg(any(windows, target_os = "linux"))]
     {
         let updater = updates::Updater::default();
         let restart = updater.clone();
         let ui = app.ui.as_weak();
+        let weak = std::rc::Rc::downgrade(app);
         bridge.on_restart_to_update(move || {
-            let Some(w) = ui.upgrade() else { return };
-            if restart.apply_on_exit() {
+            let (Some(w), Some(app)) = (ui.upgrade(), weak.upgrade()) else {
+                return;
+            };
+            if restart.apply_on_exit(app.update_channel()) {
                 w.window()
                     .dispatch_event(slint::platform::WindowEvent::CloseRequested);
             } else {
                 let b = w.global::<SettingsBridge>();
                 b.set_update_label(updates::UpdateStatus::InstallFailed.label().into());
                 b.set_update_ready(false);
+                b.set_can_check_updates(updates::UpdateStatus::InstallFailed.can_check());
             }
         });
-        let ui = app.ui.as_weak();
-        updater.spawn(move |status| {
-            let _ = ui.upgrade_in_event_loop(move |w| {
-                let b = w.global::<SettingsBridge>();
-                b.set_update_label(status.label().into());
-                b.set_update_ready(status.is_ready());
-            });
+        // Every check reports into the settings page from the updater's thread.
+        let check = {
+            let ui = app.ui.as_weak();
+            move |updater: &updates::Updater, channel| {
+                let ui = ui.clone();
+                updater.check(channel, move |status| {
+                    let ui = ui.clone();
+                    let _ = ui.upgrade_in_event_loop(move |w| {
+                        let b = w.global::<SettingsBridge>();
+                        b.set_update_label(status.label().into());
+                        b.set_update_ready(status.is_ready());
+                        b.set_can_check_updates(status.can_check());
+                    });
+                });
+            }
+        };
+        let (weak, u, c) = (std::rc::Rc::downgrade(app), updater.clone(), check.clone());
+        bridge.on_check_for_updates(move || {
+            if let Some(app) = weak.upgrade() {
+                c(&u, app.update_channel());
+            }
         });
+        // A new channel is checked straight away, so its builds show up without a restart.
+        let (weak, u, c) = (std::rc::Rc::downgrade(app), updater.clone(), check.clone());
+        bridge.on_update_channel_changed(move |i| {
+            if let Some(app) = weak.upgrade() {
+                let channel = vm::settings::channel_from_index(i);
+                app.set_update_channel(channel);
+                // What the old channel downloaded is gone before Restart can be clicked again.
+                u.forget();
+                let b = app.ui.global::<SettingsBridge>();
+                b.set_update_ready(false);
+                b.set_update_label(updates::UpdateStatus::Checking.label().into());
+                b.set_can_check_updates(false);
+                c(&u, channel);
+            }
+        });
+        check(&updater, app.update_channel());
     }
 }

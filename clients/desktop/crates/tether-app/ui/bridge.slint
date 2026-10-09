@@ -102,7 +102,11 @@ export global SettingsBridge {
     in property <string> version-label;
     in property <string> update-label;
     in property <bool> update-ready;
+    in property <bool> can-check-updates;
+    in-out property <int> update-channel;
     callback restart-to-update();
+    callback check-for-updates();
+    callback update-channel-changed(int);
     callback size-step(int);
     callback spacing-changed(float);
     callback padding-step(int);

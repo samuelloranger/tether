@@ -26,6 +26,26 @@ fn feed_url_with(debug: bool, over: Option<String>) -> String {
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The Velopack channel a setting reads in the OS's feed. Releases sit on Velopack's default
+/// channel, which every install from before the setting existed also reads; edge builds of
+/// main sit on `<os>-edge` (see .github/scripts/update-feed.sh). Always passed explicitly, so
+/// the setting decides, not the channel the running package happened to be built for.
+/// Edge versions always carry a pre-release part (`X.Y.Z-main.N`) and releases never do, so a
+/// version alone says which channel it came from.
+pub fn is_on_channel(version: &str, channel: tether_core::UpdateChannel) -> bool {
+    version.contains('-') == (channel == tether_core::UpdateChannel::Edge)
+}
+
+pub fn velopack_channel(channel: tether_core::UpdateChannel) -> &'static str {
+    use tether_core::UpdateChannel::{Edge, Stable};
+    match (cfg!(windows), channel) {
+        (true, Stable) => "win",
+        (true, Edge) => "win-edge",
+        (false, Stable) => "linux",
+        (false, Edge) => "linux-edge",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStatus {
     /// Portable zip, unpacked binary or dev build: no installer owns the files, so nothing can
@@ -60,6 +80,11 @@ impl UpdateStatus {
     pub fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
+
+    /// Settled and not holding a download, so a manual check makes sense.
+    pub fn can_check(&self) -> bool {
+        matches!(self, Self::UpToDate | Self::Failed | Self::InstallFailed)
+    }
 }
 
 #[cfg(test)]
@@ -79,6 +104,42 @@ mod tests {
         ] {
             assert!(!s.is_ready(), "{s:?}");
         }
+    }
+
+    #[test]
+    fn only_a_settled_updater_offers_a_check() {
+        for s in [
+            UpdateStatus::UpToDate,
+            UpdateStatus::Failed,
+            UpdateStatus::InstallFailed,
+        ] {
+            assert!(s.can_check(), "{s:?}");
+        }
+        for s in [
+            UpdateStatus::Unmanaged,
+            UpdateStatus::Checking,
+            UpdateStatus::Downloading("0.0.2".into()),
+            UpdateStatus::Ready("0.0.2".into()),
+        ] {
+            assert!(!s.can_check(), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn each_setting_reads_its_own_channel_and_stable_is_the_default_one() {
+        use tether_core::UpdateChannel;
+        let os = if cfg!(windows) { "win" } else { "linux" };
+        assert_eq!(velopack_channel(UpdateChannel::Stable), os);
+        assert_eq!(velopack_channel(UpdateChannel::Edge), format!("{os}-edge"));
+    }
+
+    #[test]
+    fn a_version_belongs_to_the_channel_that_builds_it() {
+        use tether_core::UpdateChannel::{Edge, Stable};
+        assert!(is_on_channel("6.0.0", Stable));
+        assert!(!is_on_channel("6.0.0", Edge));
+        assert!(is_on_channel("6.0.1-main.412", Edge));
+        assert!(!is_on_channel("6.0.1-main.412", Stable));
     }
 
     #[test]
@@ -258,78 +319,135 @@ mod private {
 #[cfg(any(windows, target_os = "linux"))]
 mod managed {
     use super::*;
-    use std::sync::{Arc, Mutex};
-    use velopack::sources::HttpSource;
-    use velopack::{UpdateCheck, UpdateManager, VelopackApp, VelopackAsset};
+    use std::sync::{Arc, Mutex, OnceLock};
+    use tether_core::UpdateChannel;
+
+    /// `startup` runs before logging exists; a failed apply waits here to be logged.
+    static STARTUP_FAILURE: OnceLock<String> = OnceLock::new();
+
+    /// Logs what went wrong applying a pending update at launch, if anything. The package
+    /// stays and is tried again next launch, as Velopack's own apply-on-launch would.
+    pub fn log_startup_failure() {
+        if let Some(e) = STARTUP_FAILURE.get() {
+            tracing::warn!("applying the pending update at launch failed: {e}");
+        }
+    }
+    use velopack::sources::{HttpSource, NoneSource};
+    use velopack::{UpdateCheck, UpdateManager, UpdateOptions, VelopackApp, VelopackAsset};
 
     /// Must run before anything else: the installer launches the exe with hook arguments and
     /// expects it to exit, and a downloaded update is applied here on the next launch. Outside
     /// a Velopack package (a dev build, an unpacked AppImage) it does nothing.
+    ///
+    /// Velopack's own apply-on-launch installs the newest package on disk whatever channel it
+    /// came from, so a build downloaded on Edge would still be installed after a switch back
+    /// to Stable. It is off; the pending package is applied here only when the setting's
+    /// channel built it. The restart guard is Velopack's: right after an apply, never again.
     pub fn startup() {
-        let mut app = VelopackApp::build();
+        let restarted = std::env::var_os("VELOPACK_RESTART").is_some();
+        let mut app = VelopackApp::build().set_auto_apply_on_startup(false);
+        #[cfg(windows)]
+        let locator = None;
         #[cfg(windows)]
         {
             app = app.set_app_user_model_id(crate::platform::windows::aumid::AUMID);
         }
         #[cfg(target_os = "linux")]
-        {
+        let locator = {
             let Some(locator) = private::locator() else {
                 return;
             };
-            app = app.set_locator(locator);
-        }
+            app = app.set_locator(locator.clone());
+            Some(locator)
+        };
         app.run();
+        if !restarted {
+            apply_pending(locator);
+        }
+    }
+
+    fn apply_pending(locator: Option<velopack::locator::VelopackLocatorConfig>) {
+        let Ok(manager) = UpdateManager::new(NoneSource {}, None, locator) else {
+            return;
+        };
+        let Some(asset) = manager.get_update_pending_restart() else {
+            return;
+        };
+        let channel = tether_core::DataDir::default_location()
+            .map(|dir| tether_core::stored_update_channel(&dir))
+            .unwrap_or_default();
+        if !is_on_channel(&asset.Version, channel) {
+            return;
+        }
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        // Exits and relaunches on success; on failure the app starts as it is.
+        if let Err(e) = manager.apply_updates_and_restart_with_args(&asset, args) {
+            let _ = STARTUP_FAILURE.set(format!("{} {e}", asset.Version));
+        }
+    }
+
+    type Ready = Arc<Mutex<Option<(UpdateManager, VelopackAsset, UpdateChannel)>>>;
+
+    /// One check at a time: a request made while one runs is kept (the latest wins) and run
+    /// right after, so a channel switch mid-check is never lost.
+    #[derive(Default)]
+    struct Queue {
+        running: bool,
+        next: Option<UpdateChannel>,
     }
 
     #[derive(Clone, Default)]
     pub struct Updater {
-        ready: Arc<Mutex<Option<(UpdateManager, VelopackAsset)>>>,
+        ready: Ready,
+        queue: Arc<Mutex<Queue>>,
     }
 
     impl Updater {
-        /// Checks once, downloads in the background, and reports each step from that thread.
-        pub fn spawn(&self, report: impl Fn(UpdateStatus) + Send + 'static) {
-            let ready = self.ready.clone();
-            std::thread::spawn(move || {
-                #[cfg(target_os = "linux")]
-                let locator = private::locator();
-                #[cfg(target_os = "linux")]
-                if locator.is_none() {
-                    return report(UpdateStatus::Unmanaged);
-                }
-                #[cfg(windows)]
-                let locator = None;
-                let Ok(manager) = UpdateManager::new(HttpSource::new(feed_url()), None, locator)
-                else {
-                    report(UpdateStatus::Unmanaged);
+        /// Checks the channel's feed in the background, downloads a newer version, and
+        /// reports each step from that thread.
+        pub fn check(
+            &self,
+            channel: UpdateChannel,
+            report: impl Fn(UpdateStatus) + Send + 'static,
+        ) {
+            {
+                let mut q = self.queue.lock().unwrap();
+                if q.running {
+                    q.next = Some(channel);
                     return;
-                };
-                report(UpdateStatus::Checking);
-                let info = match manager.check_for_updates() {
-                    Ok(UpdateCheck::UpdateAvailable(info)) => info,
-                    Ok(_) => return report(UpdateStatus::UpToDate),
-                    Err(e) => {
-                        tracing::warn!("update check failed: {e}");
-                        return report(UpdateStatus::Failed);
-                    }
-                };
-                let version = info.TargetFullRelease.Version.clone();
-                report(UpdateStatus::Downloading(version.clone()));
-                if let Err(e) = manager.download_updates(&info, None) {
-                    tracing::warn!("update download failed: {e}");
-                    return report(UpdateStatus::Failed);
                 }
-                *ready.lock().unwrap() = Some((manager, info.TargetFullRelease.clone()));
-                report(UpdateStatus::Ready(version));
+                q.running = true;
+            }
+            let (ready, queue) = (self.ready.clone(), self.queue.clone());
+            std::thread::spawn(move || {
+                let mut channel = channel;
+                loop {
+                    check_once(channel, &ready, &queue, &report);
+                    let mut q = queue.lock().unwrap();
+                    match q.next.take() {
+                        Some(next) => channel = next,
+                        None => {
+                            q.running = false;
+                            break;
+                        }
+                    }
+                }
             });
         }
 
         /// Starts the updater, which waits for this process to exit before swapping the files
         /// and relaunching. The caller then closes the window the normal way, so placement is
         /// saved and sessions detach.
-        pub fn apply_on_exit(&self) -> bool {
+        /// Drops a download waiting for Restart, before the UI offers anything else.
+        pub fn forget(&self) {
+            *self.ready.lock().unwrap() = None;
+        }
+
+        /// Refuses a download that came from another channel than `channel`, the current
+        /// setting: a check for the new one may still be on its way.
+        pub fn apply_on_exit(&self, channel: UpdateChannel) -> bool {
             let ready = self.ready.lock().unwrap();
-            let Some((manager, asset)) = ready.as_ref() else {
+            let Some((manager, asset, _)) = ready.as_ref().filter(|r| r.2 == channel) else {
                 return false;
             };
             manager
@@ -337,6 +455,55 @@ mod managed {
                 .inspect_err(|e| tracing::warn!("update apply failed: {e}"))
                 .is_ok()
         }
+    }
+
+    /// A download from an earlier check is dropped first: after a channel switch, Restart must
+    /// never apply what the old channel fetched. Velopack refuses anything not newer than the
+    /// running version, so going back from edge to stable waits for the next release.
+    fn check_once(
+        channel: UpdateChannel,
+        ready: &Ready,
+        queue: &Mutex<Queue>,
+        report: &impl Fn(UpdateStatus),
+    ) {
+        *ready.lock().unwrap() = None;
+        #[cfg(target_os = "linux")]
+        let locator = private::locator();
+        #[cfg(target_os = "linux")]
+        if locator.is_none() {
+            return report(UpdateStatus::Unmanaged);
+        }
+        #[cfg(windows)]
+        let locator = None;
+        let options = UpdateOptions {
+            ExplicitChannel: Some(velopack_channel(channel).to_string()),
+            ..UpdateOptions::default()
+        };
+        let Ok(manager) = UpdateManager::new(HttpSource::new(feed_url()), Some(options), locator)
+        else {
+            return report(UpdateStatus::Unmanaged);
+        };
+        report(UpdateStatus::Checking);
+        let info = match manager.check_for_updates() {
+            Ok(UpdateCheck::UpdateAvailable(info)) => info,
+            Ok(_) => return report(UpdateStatus::UpToDate),
+            Err(e) => {
+                tracing::warn!("update check failed: {e}");
+                return report(UpdateStatus::Failed);
+            }
+        };
+        let version = info.TargetFullRelease.Version.clone();
+        report(UpdateStatus::Downloading(version.clone()));
+        if let Err(e) = manager.download_updates(&info, None) {
+            tracing::warn!("update download failed: {e}");
+            return report(UpdateStatus::Failed);
+        }
+        // A newer request (another channel) waits: it reports instead of this one.
+        if queue.lock().unwrap().next.is_some() {
+            return;
+        }
+        *ready.lock().unwrap() = Some((manager, info.TargetFullRelease.clone(), channel));
+        report(UpdateStatus::Ready(version));
     }
 }
 #[cfg(any(windows, target_os = "linux"))]
