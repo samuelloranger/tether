@@ -15,7 +15,7 @@ One tag ships every platform: iOS and Mac through TestFlight, and the desktop cl
 
 ## Edge builds come first
 
-Every push to `main` that CI passes already ships: `Release builds` runs on the `edge` lane, uploads iOS and Mac to TestFlight as the next patch version (build of X.Y.Z+1), and puts the desktop client on the edge update channel as `X.Y.Z+1-main.N`. Only platforms whose sources changed since their last edge build are rebuilt (`refs/edge/apple`, `refs/edge/desktop`). No tag and no GitHub release are made.
+Every push to `main` that CI passes already ships: `Release builds` runs on the `edge` lane, uploads iOS and Mac to TestFlight as the next patch version (build of X.Y.Z+1), and puts the desktop client on the edge update channel as `X.Y.Z+1-main.N`. Only platforms whose sources changed since their last edge build are rebuilt (`refs/edge/ios`, `refs/edge/mac`, `refs/edge/desktop`). No tag and no GitHub release are made.
 
 So a fix needs a merge, not a release. Cut a release to collect what has landed into a version for everyone else: weekly, or at a milestone. Never one per fix.
 

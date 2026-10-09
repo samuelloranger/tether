@@ -6069,7 +6069,7 @@ dependencies = [
 
 [[package]]
 name = "tether-app"
-version = "0.1.0"
+version = "5.11.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -6101,7 +6101,7 @@ dependencies = [
 
 [[package]]
 name = "tether-core"
-version = "0.1.0"
+version = "5.11.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",

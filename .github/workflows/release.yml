@@ -13,7 +13,7 @@ name: Release builds
 # patch version (a build of X.Y.Z+1, so it always sits above the last release), and the
 # desktop client goes to the edge update channel as X.Y.Z+1-main.N. No tag, no GitHub release.
 # Only what changed since the last edge build of that platform is rebuilt; the hidden refs
-# refs/edge/apple and refs/edge/desktop record those commits.
+# refs/edge/ios, refs/edge/mac and refs/edge/desktop record those commits.
 #
 # Manual runs are build-only: they upload workflow artifacts without touching a release.
 #
@@ -112,15 +112,28 @@ jobs:
               DESKTOP_VERSION="$VERSION-main.$RUN_NUMBER"
               git fetch --quiet origin '+refs/edge/*:refs/edge/*' || true
               # Builds a platform when anything it is made from changed since the commit its
-              # last edge build shipped, or when there is no such commit to compare with.
+              # last edge build shipped, or when there is no such commit to compare with. CI
+              # runs can finish out of order, so a commit the mark already contains is stale:
+              # building it would ship older code under a newer build number.
               changed() {
-                local base
+                local base files
                 base="$(git rev-parse -q --verify "refs/edge/$1" || true)"
-                if [ -z "$base" ] || ! git merge-base --is-ancestor "$base" "$REF"; then
+                if [ -z "$base" ]; then
                   echo "$1: no earlier edge build to compare with"
                   return 0
                 fi
-                if git diff --name-only "$base" "$REF" | grep -qE "$2"; then
+                if git merge-base --is-ancestor "$REF" "$base"; then
+                  echo "$1: ${base:0:7} already shipped this commit or a later one"
+                  return 1
+                fi
+                if ! git merge-base --is-ancestor "$base" "$REF"; then
+                  echo "$1: ${base:0:7} is not in this history any more"
+                  return 0
+                fi
+                # Listed first: grep -q would stop reading early, and under pipefail the
+                # diff's SIGPIPE would read as "unchanged".
+                files="$(git diff --name-only "$base" "$REF")"
+                if grep -qE "$2" <<< "$files"; then
                   echo "$1: changed since ${base:0:7}"
                   return 0
                 fi
@@ -128,12 +141,10 @@ jobs:
                 return 1
               }
               PIPELINE='^\.github/(workflows/(release|desktop-build)\.yml|scripts/)'
-              if changed apple "^(clients/apple/|package\.json$|scripts/build-ssh-xcframeworks\.sh$)|$PIPELINE"; then
-                IOS=true MAC=true
-              fi
-              if changed desktop "^clients/desktop/|$PIPELINE"; then
-                DESKTOP=true
-              fi
+              APPLE_SOURCES="^(clients/apple/|package\.json$|scripts/build-ssh-xcframeworks\.sh$)|$PIPELINE"
+              if changed ios "$APPLE_SOURCES"; then IOS=true; fi
+              if changed mac "$APPLE_SOURCES"; then MAC=true; fi
+              if changed desktop "^clients/desktop/|$PIPELINE"; then DESKTOP=true; fi
               ;;
             workflow_dispatch)
               LANE=manual
@@ -476,8 +487,11 @@ jobs:
     if: needs.plan.outputs.mac == 'true'
     runs-on: macos-26
     # The Mac app rides along with the iOS build; a Mac failure never holds the
-    # GitHub release in draft.
+    # GitHub release in draft. `shipped` tells the edge marks whether TestFlight got it,
+    # since this job reports success either way.
     continue-on-error: true
+    outputs:
+      shipped: ${{ steps.upload.outcome == 'success' }}
     steps:
       - name: Check signing secrets
         id: signing
@@ -617,10 +631,11 @@ jobs:
           xcrun altool --validate-app -f build/export/Tether.pkg -t macos \
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
-      # continue-on-error for the same reason as the iOS upload.
+      # continue-on-error on a release for the same reason as the iOS upload.
       - name: Upload to TestFlight
+        id: upload
         if: steps.signing.outputs.ready == 'true' && (needs.plan.outputs.lane != 'manual' || inputs.scope == 'mac-testflight')
-        continue-on-error: true
+        continue-on-error: ${{ needs.plan.outputs.lane == 'release' }}
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -741,7 +756,7 @@ jobs:
   # platform only when something it is made from changed. A platform whose build failed
   # keeps its old mark, and the next run tries it again.
   mark-edge:
-    needs: [plan, ios, feeds]
+    needs: [plan, ios, mac, feeds]
     if: always() && needs.plan.result == 'success' && needs.plan.outputs.lane == 'edge'
     runs-on: ubuntu-latest
     steps:
@@ -752,15 +767,15 @@ jobs:
       - name: Move the marks
         env:
           REF: ${{ needs.plan.outputs.ref }}
-          IOS: ${{ needs.ios.result }}
-          FEEDS: ${{ needs.feeds.result }}
+          IOS: ${{ needs.ios.result == 'success' }}
+          MAC: ${{ needs.mac.outputs.shipped == 'true' }}
+          DESKTOP: ${{ needs.feeds.result == 'success' }}
         run: |
           set -euo pipefail
-          if [ "$IOS" = success ]; then
-            git push --force origin "$REF:refs/edge/apple"
-            echo "apple shipped ${REF:0:7}"
-          fi
-          if [ "$FEEDS" = success ]; then
-            git push --force origin "$REF:refs/edge/desktop"
-            echo "desktop shipped ${REF:0:7}"
-          fi
+          # A mark only moves forward: plan skips stale commits, so REF descends from it.
+          for platform in ios mac desktop; do
+            shipped="${platform^^}"
+            [ "${!shipped}" = true ] || continue
+            git push --force origin "$REF:refs/edge/$platform"
+            echo "$platform shipped ${REF:0:7}"
+          done
