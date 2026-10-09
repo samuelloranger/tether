@@ -132,6 +132,22 @@ struct Stored {
     prefs: Preferences,
 }
 
+/// The update channel alone, read before the app starts (the updater decides then whether a
+/// downloaded package may be installed). It never migrates or sets aside the file the way
+/// `Preferences::load` does; a missing or unreadable file reads as Stable.
+pub fn stored_update_channel(dir: &DataDir) -> UpdateChannel {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Only {
+        update_channel: UpdateChannel,
+    }
+    std::fs::read(dir.root().join(PREFERENCES_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Only>(&bytes).ok())
+        .map(|o| o.update_channel)
+        .unwrap_or_default()
+}
+
 impl Preferences {
     /// `system_is_light` only matters for a file that still carries the old `theme_mode`.
     pub fn load(dir: &DataDir, system_is_light: bool) -> io::Result<Self> {
@@ -175,6 +191,19 @@ mod tests {
         assert_eq!((t.cursor, t.blink), (CursorShape::Block, false));
         assert!(p.window.is_none());
         assert_eq!(p.update_channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn the_channel_is_read_alone_without_touching_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = DataDir::new(dir.path());
+        assert_eq!(stored_update_channel(&data), UpdateChannel::Stable);
+        let path = dir.path().join(PREFERENCES_FILE);
+        std::fs::write(&path, r#"{"theme_mode":"light","update_channel":"edge"}"#).unwrap();
+        assert_eq!(stored_update_channel(&data), UpdateChannel::Edge);
+        std::fs::write(&path, "{not json").unwrap();
+        assert_eq!(stored_update_channel(&data), UpdateChannel::Stable);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
     }
 
     #[test]

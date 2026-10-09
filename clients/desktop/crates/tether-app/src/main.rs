@@ -91,9 +91,12 @@ fn watch_updates(app: &std::rc::Rc<app::App>) {
         let updater = updates::Updater::default();
         let restart = updater.clone();
         let ui = app.ui.as_weak();
+        let weak = std::rc::Rc::downgrade(app);
         bridge.on_restart_to_update(move || {
-            let Some(w) = ui.upgrade() else { return };
-            if restart.apply_on_exit() {
+            let (Some(w), Some(app)) = (ui.upgrade(), weak.upgrade()) else {
+                return;
+            };
+            if restart.apply_on_exit(app.update_channel()) {
                 w.window()
                     .dispatch_event(slint::platform::WindowEvent::CloseRequested);
             } else {
@@ -130,6 +133,12 @@ fn watch_updates(app: &std::rc::Rc<app::App>) {
             if let Some(app) = weak.upgrade() {
                 let channel = vm::settings::channel_from_index(i);
                 app.set_update_channel(channel);
+                // What the old channel downloaded is gone before Restart can be clicked again.
+                u.forget();
+                let b = app.ui.global::<SettingsBridge>();
+                b.set_update_ready(false);
+                b.set_update_label(updates::UpdateStatus::Checking.label().into());
+                b.set_can_check_updates(false);
                 c(&u, channel);
             }
         });
