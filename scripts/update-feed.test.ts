@@ -106,12 +106,9 @@ test('an edge build goes on its own channel json', () => {
     'releases.win.json': json([['6.0.0', 'TetherTerminal-6.0.0-full.nupkg']]),
   });
   const dir = packed(root, 'win-edge', '6.0.1-main.41', 'TetherTerminal-6.0.1-main.41-win-edge-full.nupkg');
-  const setup = path.join(dir, 'Tether-6.0.1-main.41-x64-Setup.exe');
-  writeFileSync(setup, 'exe');
-  const r = run(root, ['windows-feed', 'win', 'edge', '6.0.1-main.41', dir, setup, 'Tether-edge-x64-Setup.exe']);
+  const r = run(root, ['windows-feed', 'win', 'edge', '6.0.1-main.41', dir]);
   expect(r.code).toBe(0);
   expect(r.feed('windows-feed')).toEqual([
-    'Tether-edge-x64-Setup.exe',
     'TetherTerminal-6.0.0-full.nupkg',
     'TetherTerminal-6.0.1-main.41-win-edge-full.nupkg',
     'releases.win-edge.json',

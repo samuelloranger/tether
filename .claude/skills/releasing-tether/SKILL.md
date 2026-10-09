@@ -19,7 +19,7 @@ Every push to `main` that CI passes already ships: `Release builds` runs on the 
 
 So a fix needs a merge, not a release. Cut a release to collect what has landed into a version for everyone else: weekly, or at a milestone. Never one per fix.
 
-- A machine joins the desktop edge channel by installing `Tether-edge-x64-Setup.exe` or `Tether-edge-x86_64.AppImage` from the `windows-feed` / `linux-feed` release. It then follows edge on its own; installing a release's file moves it back to stable.
+- A desktop app joins edge from **Settings → About → Update channel**; **Check now** fetches the newest build without waiting for the next launch. There is one installer, the release's.
 - TestFlight internal testers get each edge build once Apple finishes processing it, if the internal group has automatic distribution on.
 - An edge run that failed leaves that platform's mark where it was, so the next green push retries it.
 

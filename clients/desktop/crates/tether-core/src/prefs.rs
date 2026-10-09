@@ -96,11 +96,31 @@ pub struct WindowPlacement {
     pub maximized: bool,
 }
 
+/// Which builds the updater installs: releases, or a build of every change on main.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Edge,
+}
+
+/// A value this version does not know reads as stable rather than failing the whole file.
+impl<'de> Deserialize<'de> for UpdateChannel {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match serde_json::Value::deserialize(d)?.as_str() {
+            Some("edge") => Self::Edge,
+            _ => Self::Stable,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
     pub terminal: TerminalPrefs,
     pub window: Option<WindowPlacement>,
+    pub update_channel: UpdateChannel,
 }
 
 /// What is read from disk: `Preferences` plus the `theme_mode` field it no longer has.
@@ -154,6 +174,28 @@ mod tests {
         assert_eq!((t.size_pt, t.line_spacing, t.padding_pt), (14.0, 1.0, 8.0));
         assert_eq!((t.cursor, t.blink), (CursorShape::Block, false));
         assert!(p.window.is_none());
+        assert_eq!(p.update_channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn update_channel_round_trips_and_unknown_values_read_as_stable() {
+        let edge = Preferences {
+            update_channel: UpdateChannel::Edge,
+            ..Preferences::default()
+        };
+        let json = serde_json::to_string(&edge).unwrap();
+        assert!(json.contains(r#""update_channel":"edge""#), "{json}");
+        let back: Preferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.update_channel, UpdateChannel::Edge);
+        for stored in [
+            r#"{"update_channel":"beta"}"#,
+            r#"{"update_channel":null}"#,
+            r#"{"update_channel":3}"#,
+            "{}",
+        ] {
+            let p: Preferences = serde_json::from_str(stored).unwrap();
+            assert_eq!(p.update_channel, UpdateChannel::Stable, "{stored}");
+        }
     }
 
     #[test]
@@ -247,6 +289,7 @@ mod tests {
                 height: 800,
                 maximized: false,
             }),
+            update_channel: UpdateChannel::Edge,
         };
         p.save(&data).unwrap();
         assert_eq!(Preferences::load(&data, false).unwrap(), p);
@@ -335,6 +378,7 @@ mod tests {
                 height: 700,
                 maximized: true,
             }),
+            update_channel: UpdateChannel::Stable,
         };
         assert_eq!(p, expected);
         assert_eq!(

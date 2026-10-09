@@ -48,7 +48,7 @@ pub use keys::{
     fingerprint, fingerprint_digest, generate_ed25519, import_record, is_encrypted, normalize_pem,
     public_key_body, randomart, short_fingerprint,
 };
-pub use prefs::{CursorShape, Preferences, TerminalPrefs, WindowPlacement};
+pub use prefs::{CursorShape, Preferences, TerminalPrefs, UpdateChannel, WindowPlacement};
 pub use profiles::{
     Auth, Machine, PROFILES_FILE, Profiles, delete_key_warning, keys_subtitle, machines_subtitle,
     used_by_line,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Points one desktop update feed at a freshly packed version.
 #
-#   update-feed.sh <feed> <os> <channel> <version> <dir> [<installer> <published name>]
+#   update-feed.sh <feed> <os> <channel> <version> <dir>
 #
 #   feed       the rolling release installed apps read: windows-feed or linux-feed
 #              (FEED_URL in clients/desktop/crates/tether-app/src/updates.rs)
@@ -10,7 +10,6 @@
 #              edge ones on <os>-edge (releases.<os>-edge.json); both share the feed release.
 #   version    the version just packed
 #   dir        holds the vpk output: releases.<channel>.json and the *-full.nupkg it lists
-#   installer  optional file uploaded to the feed under <published name>, replacing the last one
 #
 # Rules, per channel: never move the feed backwards (runs can finish out of order), and
 # keep the package the previous json named, so a client that read the old feed can still
@@ -43,7 +42,7 @@ json_files() {
 }
 
 main() {
-  local feed=$1 os=$2 channel=$3 version=$4 dir=$5 installer=${6:-} published=${7:-}
+  local feed=$1 os=$2 channel=$3 version=$4 dir=$5
   local vchannel=$os
   [ "$channel" = edge ] && vchannel="$os-edge"
   local json="releases.$vchannel.json"
@@ -73,10 +72,6 @@ main() {
   while read -r f; do
     gh release upload "$feed" "$dir/$f" --clobber
   done < <(json_files "$dir/$json")
-  if [ -n "$installer" ]; then
-    cp "$installer" "$work/$published"
-    gh release upload "$feed" "$work/$published" --clobber
-  fi
   # Last: until the json moves, clients keep reading the previous version.
   gh release upload "$feed" "$dir/$json" --clobber
   echo "$feed now serves $version on $vchannel"

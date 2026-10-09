@@ -26,6 +26,20 @@ fn feed_url_with(debug: bool, over: Option<String>) -> String {
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The Velopack channel a setting reads in the OS's feed. Releases sit on Velopack's default
+/// channel, which every install from before the setting existed also reads; edge builds of
+/// main sit on `<os>-edge` (see .github/scripts/update-feed.sh). Always passed explicitly, so
+/// the setting decides, not the channel the running package happened to be built for.
+pub fn velopack_channel(channel: tether_core::UpdateChannel) -> &'static str {
+    use tether_core::UpdateChannel::{Edge, Stable};
+    match (cfg!(windows), channel) {
+        (true, Stable) => "win",
+        (true, Edge) => "win-edge",
+        (false, Stable) => "linux",
+        (false, Edge) => "linux-edge",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStatus {
     /// Portable zip, unpacked binary or dev build: no installer owns the files, so nothing can
@@ -60,6 +74,11 @@ impl UpdateStatus {
     pub fn is_ready(&self) -> bool {
         matches!(self, Self::Ready(_))
     }
+
+    /// Settled and not holding a download, so a manual check makes sense.
+    pub fn can_check(&self) -> bool {
+        matches!(self, Self::UpToDate | Self::Failed | Self::InstallFailed)
+    }
 }
 
 #[cfg(test)]
@@ -79,6 +98,33 @@ mod tests {
         ] {
             assert!(!s.is_ready(), "{s:?}");
         }
+    }
+
+    #[test]
+    fn only_a_settled_updater_offers_a_check() {
+        for s in [
+            UpdateStatus::UpToDate,
+            UpdateStatus::Failed,
+            UpdateStatus::InstallFailed,
+        ] {
+            assert!(s.can_check(), "{s:?}");
+        }
+        for s in [
+            UpdateStatus::Unmanaged,
+            UpdateStatus::Checking,
+            UpdateStatus::Downloading("0.0.2".into()),
+            UpdateStatus::Ready("0.0.2".into()),
+        ] {
+            assert!(!s.can_check(), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn each_setting_reads_its_own_channel_and_stable_is_the_default_one() {
+        use tether_core::UpdateChannel;
+        let os = if cfg!(windows) { "win" } else { "linux" };
+        assert_eq!(velopack_channel(UpdateChannel::Stable), os);
+        assert_eq!(velopack_channel(UpdateChannel::Edge), format!("{os}-edge"));
     }
 
     #[test]
@@ -259,8 +305,9 @@ mod private {
 mod managed {
     use super::*;
     use std::sync::{Arc, Mutex};
+    use tether_core::UpdateChannel;
     use velopack::sources::HttpSource;
-    use velopack::{UpdateCheck, UpdateManager, VelopackApp, VelopackAsset};
+    use velopack::{UpdateCheck, UpdateManager, UpdateOptions, VelopackApp, VelopackAsset};
 
     /// Must run before anything else: the installer launches the exe with hook arguments and
     /// expects it to exit, and a downloaded update is applied here on the next launch. Outside
@@ -281,46 +328,52 @@ mod managed {
         app.run();
     }
 
+    type Ready = Arc<Mutex<Option<(UpdateManager, VelopackAsset)>>>;
+
+    /// One check at a time: a request made while one runs is kept (the latest wins) and run
+    /// right after, so a channel switch mid-check is never lost.
+    #[derive(Default)]
+    struct Queue {
+        running: bool,
+        next: Option<UpdateChannel>,
+    }
+
     #[derive(Clone, Default)]
     pub struct Updater {
-        ready: Arc<Mutex<Option<(UpdateManager, VelopackAsset)>>>,
+        ready: Ready,
+        queue: Arc<Mutex<Queue>>,
     }
 
     impl Updater {
-        /// Checks once, downloads in the background, and reports each step from that thread.
-        pub fn spawn(&self, report: impl Fn(UpdateStatus) + Send + 'static) {
-            let ready = self.ready.clone();
-            std::thread::spawn(move || {
-                #[cfg(target_os = "linux")]
-                let locator = private::locator();
-                #[cfg(target_os = "linux")]
-                if locator.is_none() {
-                    return report(UpdateStatus::Unmanaged);
-                }
-                #[cfg(windows)]
-                let locator = None;
-                let Ok(manager) = UpdateManager::new(HttpSource::new(feed_url()), None, locator)
-                else {
-                    report(UpdateStatus::Unmanaged);
+        /// Checks the channel's feed in the background, downloads a newer version, and
+        /// reports each step from that thread.
+        pub fn check(
+            &self,
+            channel: UpdateChannel,
+            report: impl Fn(UpdateStatus) + Send + 'static,
+        ) {
+            {
+                let mut q = self.queue.lock().unwrap();
+                if q.running {
+                    q.next = Some(channel);
                     return;
-                };
-                report(UpdateStatus::Checking);
-                let info = match manager.check_for_updates() {
-                    Ok(UpdateCheck::UpdateAvailable(info)) => info,
-                    Ok(_) => return report(UpdateStatus::UpToDate),
-                    Err(e) => {
-                        tracing::warn!("update check failed: {e}");
-                        return report(UpdateStatus::Failed);
-                    }
-                };
-                let version = info.TargetFullRelease.Version.clone();
-                report(UpdateStatus::Downloading(version.clone()));
-                if let Err(e) = manager.download_updates(&info, None) {
-                    tracing::warn!("update download failed: {e}");
-                    return report(UpdateStatus::Failed);
                 }
-                *ready.lock().unwrap() = Some((manager, info.TargetFullRelease.clone()));
-                report(UpdateStatus::Ready(version));
+                q.running = true;
+            }
+            let (ready, queue) = (self.ready.clone(), self.queue.clone());
+            std::thread::spawn(move || {
+                let mut channel = channel;
+                loop {
+                    check_once(channel, &ready, &report);
+                    let mut q = queue.lock().unwrap();
+                    match q.next.take() {
+                        Some(next) => channel = next,
+                        None => {
+                            q.running = false;
+                            break;
+                        }
+                    }
+                }
             });
         }
 
@@ -337,6 +390,46 @@ mod managed {
                 .inspect_err(|e| tracing::warn!("update apply failed: {e}"))
                 .is_ok()
         }
+    }
+
+    /// A download from an earlier check is dropped first: after a channel switch, Restart must
+    /// never apply what the old channel fetched. Velopack refuses anything not newer than the
+    /// running version, so going back from edge to stable waits for the next release.
+    fn check_once(channel: UpdateChannel, ready: &Ready, report: &impl Fn(UpdateStatus)) {
+        *ready.lock().unwrap() = None;
+        #[cfg(target_os = "linux")]
+        let locator = private::locator();
+        #[cfg(target_os = "linux")]
+        if locator.is_none() {
+            return report(UpdateStatus::Unmanaged);
+        }
+        #[cfg(windows)]
+        let locator = None;
+        let options = UpdateOptions {
+            ExplicitChannel: Some(velopack_channel(channel).to_string()),
+            ..UpdateOptions::default()
+        };
+        let Ok(manager) = UpdateManager::new(HttpSource::new(feed_url()), Some(options), locator)
+        else {
+            return report(UpdateStatus::Unmanaged);
+        };
+        report(UpdateStatus::Checking);
+        let info = match manager.check_for_updates() {
+            Ok(UpdateCheck::UpdateAvailable(info)) => info,
+            Ok(_) => return report(UpdateStatus::UpToDate),
+            Err(e) => {
+                tracing::warn!("update check failed: {e}");
+                return report(UpdateStatus::Failed);
+            }
+        };
+        let version = info.TargetFullRelease.Version.clone();
+        report(UpdateStatus::Downloading(version.clone()));
+        if let Err(e) = manager.download_updates(&info, None) {
+            tracing::warn!("update download failed: {e}");
+            return report(UpdateStatus::Failed);
+        }
+        *ready.lock().unwrap() = Some((manager, info.TargetFullRelease.clone()));
+        report(UpdateStatus::Ready(version));
     }
 }
 #[cfg(any(windows, target_os = "linux"))]

@@ -110,41 +110,52 @@ jobs:
               IFS=. read -r MAJOR MINOR PATCH <<< "$APP_VERSION"
               VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
               DESKTOP_VERSION="$VERSION-main.$RUN_NUMBER"
-              git fetch --quiet origin '+refs/edge/*:refs/edge/*' || true
-              # Builds a platform when anything it is made from changed since the commit its
-              # last edge build shipped, or when there is no such commit to compare with. CI
-              # runs can finish out of order, so a commit the mark already contains is stale:
-              # building it would ship older code under a newer build number.
-              changed() {
-                local base files
-                base="$(git rev-parse -q --verify "refs/edge/$1" || true)"
-                if [ -z "$base" ]; then
-                  echo "$1: no earlier edge build to compare with"
-                  return 0
+              # A commit main no longer contains (history rewritten since CI ran) ships nothing.
+              if ! git merge-base --is-ancestor "$REF" origin/main; then
+                echo "${REF:0:7} is no longer on main; nothing to ship"
+              else
+                # The marks decide what is stale, so failing to read them stops the run rather
+                # than reading as "no mark" and rebuilding old code. No marks at all is the
+                # first run, and builds everything.
+                MARKS="$(git ls-remote --refs origin 'refs/edge/*')"
+                if [ -n "$MARKS" ]; then
+                  git fetch --quiet origin '+refs/edge/*:refs/edge/*'
                 fi
-                if git merge-base --is-ancestor "$REF" "$base"; then
-                  echo "$1: ${base:0:7} already shipped this commit or a later one"
+                # Builds a platform when anything it is made from changed since the commit its
+                # last edge build shipped, or when there is no such commit to compare with. CI
+                # runs can finish out of order, so a commit the mark already contains is stale:
+                # building it would ship older code under a newer build number.
+                changed() {
+                  local base files
+                  base="$(git rev-parse -q --verify "refs/edge/$1" || true)"
+                  if [ -z "$base" ]; then
+                    echo "$1: no earlier edge build to compare with"
+                    return 0
+                  fi
+                  if git merge-base --is-ancestor "$REF" "$base"; then
+                    echo "$1: ${base:0:7} already shipped this commit or a later one"
+                    return 1
+                  fi
+                  if ! git merge-base --is-ancestor "$base" "$REF"; then
+                    echo "$1: ${base:0:7} is not in this history any more"
+                    return 0
+                  fi
+                  # Listed first: grep -q would stop reading early, and under pipefail the
+                  # diff's SIGPIPE would read as "unchanged".
+                  files="$(git diff --name-only "$base" "$REF")"
+                  if grep -qE "$2" <<< "$files"; then
+                    echo "$1: changed since ${base:0:7}"
+                    return 0
+                  fi
+                  echo "$1: unchanged since ${base:0:7}"
                   return 1
-                fi
-                if ! git merge-base --is-ancestor "$base" "$REF"; then
-                  echo "$1: ${base:0:7} is not in this history any more"
-                  return 0
-                fi
-                # Listed first: grep -q would stop reading early, and under pipefail the
-                # diff's SIGPIPE would read as "unchanged".
-                files="$(git diff --name-only "$base" "$REF")"
-                if grep -qE "$2" <<< "$files"; then
-                  echo "$1: changed since ${base:0:7}"
-                  return 0
-                fi
-                echo "$1: unchanged since ${base:0:7}"
-                return 1
-              }
-              PIPELINE='^\.github/(workflows/(release|desktop-build)\.yml|scripts/)'
-              APPLE_SOURCES="^(clients/apple/|package\.json$|scripts/build-ssh-xcframeworks\.sh$)|$PIPELINE"
-              if changed ios "$APPLE_SOURCES"; then IOS=true; fi
-              if changed mac "$APPLE_SOURCES"; then MAC=true; fi
-              if changed desktop "^clients/desktop/|$PIPELINE"; then DESKTOP=true; fi
+                }
+                PIPELINE='^\.github/(workflows/(release|desktop-build)\.yml|scripts/)'
+                APPLE_SOURCES="^(clients/apple/|package\.json$|scripts/build-ssh-xcframeworks\.sh$)|$PIPELINE"
+                if changed ios "$APPLE_SOURCES"; then IOS=true; fi
+                if changed mac "$APPLE_SOURCES"; then MAC=true; fi
+                if changed desktop "^clients/desktop/|$PIPELINE"; then DESKTOP=true; fi
+              fi
               ;;
             workflow_dispatch)
               LANE=manual
@@ -704,8 +715,8 @@ jobs:
 
   # Installed apps poll FEED_URL (crates/tether-app/src/updates.rs), each OS its own rolling
   # feed release, each channel its own releases.<channel>.json in it. A release moves the
-  # stable channel once it is published; an edge build moves the edge channel and replaces
-  # the edge installer kept on the feed, which is how an app joins the edge channel.
+  # stable channel once it is published; an edge build moves the edge channel. Which one an
+  # app reads is its Settings → About → Update channel; the installer is the release's.
   feeds:
     needs: [plan, desktop, publish]
     if: >-
@@ -719,11 +730,9 @@ jobs:
           - os: win
             feed: windows-feed
             artifact: tether-windows
-            installer: x64-Setup.exe
           - os: linux
             feed: linux-feed
             artifact: tether-linux
-            installer: x86_64.AppImage
     # One run at a time per feed, across both lanes and every tag.
     concurrency:
       group: ${{ matrix.feed }}
@@ -744,13 +753,7 @@ jobs:
           path: dist
 
       - name: Point the update feed at this version
-        run: |
-          set -euo pipefail
-          INSTALLER=()
-          if [ "$CHANNEL" = edge ]; then
-            INSTALLER=("dist/Tether-$VERSION-${{ matrix.installer }}" "Tether-edge-${{ matrix.installer }}")
-          fi
-          .github/scripts/update-feed.sh "${{ matrix.feed }}" "${{ matrix.os }}" "$CHANNEL" "$VERSION" dist/velopack "${INSTALLER[@]}"
+        run: .github/scripts/update-feed.sh "${{ matrix.feed }}" "${{ matrix.os }}" "$CHANNEL" "$VERSION" dist/velopack
 
   # Records the commit each platform's edge build shipped, so the next edge run rebuilds a
   # platform only when something it is made from changed. A platform whose build failed
