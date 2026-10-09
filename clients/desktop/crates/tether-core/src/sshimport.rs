@@ -34,7 +34,7 @@ fn same_endpoint(a: &Machine, b: &Machine) -> bool {
     a.user == b.user && a.port == b.port && a.host.eq_ignore_ascii_case(&b.host)
 }
 
-/// The default keys Tether looks for when a host names no `IdentityFile`, ed25519 first.
+/// Tether picks one key where OpenSSH would offer them all, so ed25519 comes first.
 pub fn default_identity_files(home: &Path) -> Vec<PathBuf> {
     ["id_ed25519", "id_ecdsa", "id_rsa"]
         .iter()
@@ -42,9 +42,18 @@ pub fn default_identity_files(home: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The keys that stand in for an unset `IdentityFile`. None while an agent offers keys: a key
+/// Tether picks is tried alone, with no agent behind it, and could shadow the agent's working one.
+pub fn default_keys(home: Option<&Path>, agent_offers_keys: bool) -> Vec<PathBuf> {
+    match home {
+        Some(home) if !agent_offers_keys => default_identity_files(home),
+        _ => Vec::new(),
+    }
+}
+
 type KeyChoice = (Auth, Option<ImportKey>, String);
 
-/// Every concrete host, plus a row for each ProxyJump hop that is not an alias.
+/// A row for each host, plus one for each ProxyJump hop that is not an alias.
 /// `read` reads a key file; `default_user` fills hosts with no `User`; `default_keys`
 /// stand in for an unset `IdentityFile` (empty when the agent should be used instead).
 pub fn plan(
@@ -56,13 +65,14 @@ pub fn plan(
     read: &dyn Fn(&Path) -> Option<String>,
 ) -> Vec<ImportRow> {
     let default = default_key(default_keys, keys, read);
+    let choose = |identity: &IdentityFile| match identity {
+        IdentityFile::Path(path) => key_for(path, keys, read),
+        IdentityFile::Unset => default.clone(),
+        IdentityFile::None => agent(),
+    };
     let mut rows: Vec<ImportRow> = Vec::new();
-    for h in hosts {
-        let (auth, key, auth_note) = match &h.identity_file {
-            IdentityFile::Path(path) => key_for(path, keys, read),
-            IdentityFile::Unset => default.clone(),
-            IdentityFile::None => agent(),
-        };
+    for h in hosts.iter().filter(|h| !h.jump_only) {
+        let (auth, key, auth_note) = choose(&h.identity_file);
         let machine = Machine {
             id: Uuid::new_v4(),
             name: h.alias.clone(),
@@ -74,20 +84,24 @@ pub fn plan(
         };
         rows.push(row(h.alias.clone(), machine, key, auth_note, machines));
     }
-    for h in hosts {
+    for h in hosts.iter().filter(|h| !h.jump_only) {
         let mut previous: Option<Uuid> = None;
         for hop in &h.jumps {
             let id = match rows.iter().position(|r| r.label == *hop) {
                 Some(i) => rows[i].machine.id,
                 None => {
-                    let (user, host, port) = parse_hop(hop);
-                    let (auth, key, auth_note) = default.clone();
+                    let resolved = hosts
+                        .iter()
+                        .find(|c| c.jump_only && c.alias == *hop)
+                        .cloned()
+                        .unwrap_or_else(|| unresolved_hop(hop));
+                    let (auth, key, auth_note) = choose(&resolved.identity_file);
                     let machine = Machine {
                         id: Uuid::new_v4(),
                         name: hop.clone(),
-                        host,
-                        port,
-                        user: user.unwrap_or_else(|| default_user.to_string()),
+                        host: resolved.host,
+                        port: resolved.port,
+                        user: resolved.user.unwrap_or_else(|| default_user.to_string()),
                         auth,
                         jump: previous,
                     };
@@ -114,6 +128,20 @@ pub fn plan(
             .map(|(_, n)| n.clone());
     }
     rows
+}
+
+/// A hop `read_config` did not resolve, as if no config block applied to it.
+fn unresolved_hop(hop: &str) -> ConfigHost {
+    let (user, host, port) = parse_hop(hop);
+    ConfigHost {
+        alias: hop.to_string(),
+        host,
+        port: port.unwrap_or(22),
+        user,
+        identity_file: IdentityFile::Unset,
+        jumps: Vec::new(),
+        jump_only: true,
+    }
 }
 
 fn row(
@@ -278,6 +306,7 @@ mod tests {
             user: user.map(Into::into),
             identity_file: IdentityFile::Unset,
             jumps: jumps.iter().map(|s| s.to_string()).collect(),
+            jump_only: false,
         }
     }
 
@@ -329,6 +358,58 @@ mod tests {
         );
         assert_eq!(by("deep").machine.jump, Some(by("bastion").machine.id));
         assert_eq!(rows.len(), 4);
+        assert_eq!(edge.machine.auth, Auth::Agent, "no default keys, no agent");
+        assert_eq!(edge.auth_note, "agent");
+    }
+
+    #[test]
+    fn default_keys_stand_in_only_without_an_agent() {
+        let home = Path::new("h");
+        assert_eq!(
+            default_keys(Some(home), false),
+            default_identity_files(home)
+        );
+        assert!(default_keys(Some(home), true).is_empty());
+        assert!(default_keys(None, false).is_empty());
+    }
+
+    #[test]
+    fn a_resolved_hop_uses_its_own_settings_and_adds_no_row_alone() {
+        let (_, pem) = generate_ed25519("k", 0);
+        let defaults = default_identity_files(Path::new("h"));
+        let read = |p: &Path| (p == defaults[0]).then(|| pem.to_string());
+        let gw = ConfigHost {
+            port: 2022,
+            identity_file: IdentityFile::None,
+            jump_only: true,
+            ..host("gw", "gw.example", Some("ops"), &[])
+        };
+        let unused = ConfigHost {
+            jump_only: true,
+            ..host("unused", "u", None, &[])
+        };
+        let rows = plan(
+            &[host("inner", "10.1.0.2", Some("u"), &["gw"]), gw, unused],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        assert_eq!(rows.len(), 2);
+        let hop = &rows[1];
+        assert_eq!(
+            (
+                hop.label.as_str(),
+                hop.machine.host.as_str(),
+                hop.machine.port
+            ),
+            ("gw", "gw.example", 2022)
+        );
+        assert_eq!(hop.machine.user, "ops");
+        assert_eq!(hop.machine.auth, Auth::Agent, "IdentityFile none");
+        assert_eq!(rows[0].auth_note, "key id_ed25519");
+        assert_eq!(rows[0].via.as_deref(), Some("gw"));
     }
 
     #[test]

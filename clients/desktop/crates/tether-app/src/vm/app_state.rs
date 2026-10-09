@@ -225,6 +225,7 @@ mod tests {
                 user: Some("dev".into()),
                 identity_file: tether_core::sshconfig::IdentityFile::Path("/k/id".into()),
                 jumps: Vec::new(),
+                jump_only: false,
             }],
             &[],
             &s.keys,

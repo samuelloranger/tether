@@ -633,7 +633,22 @@ impl App {
         self.refresh_router();
     }
 
-    pub fn open_ssh_import(&self) {
+    /// The agent check runs off the UI thread; the page opens once it answers.
+    pub fn open_ssh_import(self: &Rc<Self>) {
+        let probe = self.runtime.spawn(async {
+            let agent = tether_ssh::default_agent();
+            tether_ssh::agent_offers_keys(&*agent, std::time::Duration::from_millis(500)).await
+        });
+        let weak = Rc::downgrade(self);
+        let _ = slint::spawn_local(async move {
+            let agent_offers_keys = probe.await.unwrap_or(false);
+            if let Some(app) = weak.upgrade() {
+                app.show_ssh_import(agent_offers_keys);
+            }
+        });
+    }
+
+    fn show_ssh_import(&self, agent_offers_keys: bool) {
         let rows = {
             let s = self.state.borrow();
             let home = ssh_import::home_dir();
@@ -643,27 +658,12 @@ impl App {
                     tether_core::sshconfig::read_config(home, &tether_core::sshconfig::DiskFiles)
                 })
                 .unwrap_or_default();
-            // A key Tether picks is tried alone, with no agent behind it, so the defaults only
-            // stand in when there is no agent for an imported host to fall back on.
-            let agent_ready = self.runtime.block_on(async {
-                tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
-                    tether_ssh::agent_offers_keys(&*tether_ssh::default_agent()),
-                )
-                .await
-                .unwrap_or(false)
-            });
-            let default_keys = home
-                .as_deref()
-                .filter(|_| !agent_ready)
-                .map(tether_core::sshimport::default_identity_files)
-                .unwrap_or_default();
             tether_core::sshimport::plan(
                 &hosts,
                 &s.profiles.machines,
                 &s.keys,
                 &ssh_import::default_user(),
-                &default_keys,
+                &tether_core::sshimport::default_keys(home.as_deref(), agent_offers_keys),
                 &|p| std::fs::read_to_string(p).ok(),
             )
         };

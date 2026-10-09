@@ -119,6 +119,7 @@ mod tests {
             user: Some("u".into()),
             identity_file: tether_core::sshconfig::IdentityFile::Unset,
             jumps: jumps.iter().map(|s| s.to_string()).collect(),
+            jump_only: false,
         }
     }
 
