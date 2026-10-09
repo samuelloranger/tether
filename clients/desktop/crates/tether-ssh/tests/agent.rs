@@ -7,7 +7,9 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::{PrivateKey, ssh_key::Algorithm};
 use support::server::{Options, start};
 use tether_core::connect::{ConnectError, Connection, Credential, Transport};
-use tether_ssh::{AgentConnector, AgentStreamBox, RusshTransport, map_agent_io_error};
+use tether_ssh::{
+    AgentConnector, AgentStreamBox, RusshTransport, agent_offers_keys, map_agent_io_error,
+};
 
 struct FakeAgent {
     keys: Vec<PrivateKey>,
@@ -121,6 +123,13 @@ fn missing_pipe_maps_to_agent_not_running() {
         map_agent_io_error(&other),
         ConnectError::Transport(_)
     ));
+}
+
+#[tokio::test]
+async fn only_an_agent_holding_a_key_offers_keys() {
+    assert!(agent_offers_keys(&FakeAgent { keys: vec![key()] }).await);
+    assert!(!agent_offers_keys(&FakeAgent { keys: Vec::new() }).await);
+    assert!(!agent_offers_keys(&DeadAgent).await);
 }
 
 #[cfg(windows)]

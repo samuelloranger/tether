@@ -10,9 +10,18 @@ pub struct ConfigHost {
     pub host: String,
     pub port: u16,
     pub user: Option<String>,
-    pub identity_file: Option<PathBuf>,
+    pub identity_file: IdentityFile,
     /// ProxyJump hops, first hop first. Each is an alias or `[user@]host[:port]`.
     pub jumps: Vec<String>,
+}
+
+/// `None` is `IdentityFile none`: OpenSSH then adds no default keys and offers the agent's only.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum IdentityFile {
+    #[default]
+    Unset,
+    None,
+    Path(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -244,9 +253,11 @@ fn resolve(blocks: &[Block], home: &Path) -> Vec<ConfigHost> {
                     .unwrap_or_else(|| alias.clone()),
                 port: get("port").and_then(|p| p.parse().ok()).unwrap_or(22),
                 user: get("user"),
-                identity_file: get("identityfile")
-                    .filter(|f| !f.eq_ignore_ascii_case("none"))
-                    .map(|f| expand_home(&f, home)),
+                identity_file: match get("identityfile") {
+                    None => IdentityFile::Unset,
+                    Some(f) if f.eq_ignore_ascii_case("none") => IdentityFile::None,
+                    Some(f) => IdentityFile::Path(expand_home(&f, home)),
+                },
                 jumps,
                 alias,
             }
@@ -314,6 +325,16 @@ mod tests {
     }
 
     #[test]
+    fn identity_file_none_is_kept_apart_from_unset() {
+        let hosts = read(&[(
+            ".ssh/config",
+            "Host agentonly\n  IdentityFile none\nHost plain\n  HostName p\n",
+        )]);
+        assert_eq!(hosts[0].identity_file, IdentityFile::None);
+        assert_eq!(hosts[1].identity_file, IdentityFile::Unset);
+    }
+
+    #[test]
     fn concrete_hosts_get_their_settings_and_wildcards_give_defaults() {
         let hosts = read(&[(
             ".ssh/config",
@@ -327,11 +348,17 @@ mod tests {
         let dev = &hosts[0];
         assert_eq!((dev.host.as_str(), dev.port), ("10.0.0.5", 2222));
         assert_eq!(dev.user.as_deref(), Some("sam"));
-        assert_eq!(dev.identity_file, Some(home().join(".ssh/id_dev")));
+        assert_eq!(
+            dev.identity_file,
+            IdentityFile::Path(home().join(".ssh/id_dev"))
+        );
         let db = &hosts[1];
         assert_eq!((db.host.as_str(), db.port), ("db1", 22));
         assert_eq!(db.user.as_deref(), Some("ops"), "the first value wins");
-        assert_eq!(db.identity_file, Some(home().join(".ssh/id_default")));
+        assert_eq!(
+            db.identity_file,
+            IdentityFile::Path(home().join(".ssh/id_default"))
+        );
     }
 
     #[test]
@@ -448,6 +475,9 @@ mod tests {
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].alias, "box");
         assert_eq!(hosts[0].user.as_deref(), Some("fallback"));
-        assert_eq!(hosts[0].identity_file, Some(ssh.join("id_box")));
+        assert_eq!(
+            hosts[0].identity_file,
+            IdentityFile::Path(ssh.join("id_box"))
+        );
     }
 }

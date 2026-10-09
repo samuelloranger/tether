@@ -223,7 +223,7 @@ mod tests {
                 host: "192.0.2.20".into(),
                 port: 22,
                 user: Some("dev".into()),
-                identity_file: Some("/k/id".into()),
+                identity_file: tether_core::sshconfig::IdentityFile::Path("/k/id".into()),
                 jumps: Vec::new(),
             }],
             &[],

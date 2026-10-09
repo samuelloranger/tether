@@ -151,6 +151,17 @@ impl AgentConnector for FallbackAgent {
     }
 }
 
+/// Whether the agent answers and holds at least one key.
+pub async fn agent_offers_keys(connector: &dyn AgentConnector) -> bool {
+    let Ok(mut agent) = connector.connect().await else {
+        return false;
+    };
+    agent
+        .request_identities()
+        .await
+        .is_ok_and(|ids| !ids.is_empty())
+}
+
 pub(crate) async fn authenticate_with_agent(
     handle: &mut client::Handle<ClientHandler>,
     user: &str,

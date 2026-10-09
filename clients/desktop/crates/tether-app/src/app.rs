@@ -643,8 +643,19 @@ impl App {
                     tether_core::sshconfig::read_config(home, &tether_core::sshconfig::DiskFiles)
                 })
                 .unwrap_or_default();
+            // A key Tether picks is tried alone, with no agent behind it, so the defaults only
+            // stand in when there is no agent for an imported host to fall back on.
+            let agent_ready = self.runtime.block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    tether_ssh::agent_offers_keys(&*tether_ssh::default_agent()),
+                )
+                .await
+                .unwrap_or(false)
+            });
             let default_keys = home
                 .as_deref()
+                .filter(|_| !agent_ready)
                 .map(tether_core::sshimport::default_identity_files)
                 .unwrap_or_default();
             tether_core::sshimport::plan(
