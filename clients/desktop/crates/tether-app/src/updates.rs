@@ -319,8 +319,19 @@ mod private {
 #[cfg(any(windows, target_os = "linux"))]
 mod managed {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use tether_core::UpdateChannel;
+
+    /// `startup` runs before logging exists; a failed apply waits here to be logged.
+    static STARTUP_FAILURE: OnceLock<String> = OnceLock::new();
+
+    /// Logs what went wrong applying a pending update at launch, if anything. The package
+    /// stays and is tried again next launch, as Velopack's own apply-on-launch would.
+    pub fn log_startup_failure() {
+        if let Some(e) = STARTUP_FAILURE.get() {
+            tracing::warn!("applying the pending update at launch failed: {e}");
+        }
+    }
     use velopack::sources::{HttpSource, NoneSource};
     use velopack::{UpdateCheck, UpdateManager, UpdateOptions, VelopackApp, VelopackAsset};
 
@@ -369,8 +380,10 @@ mod managed {
             return;
         }
         let args: Vec<String> = std::env::args().skip(1).collect();
-        // Exits and relaunches on success; on failure the app simply starts as it is.
-        let _ = manager.apply_updates_and_restart_with_args(&asset, args);
+        // Exits and relaunches on success; on failure the app starts as it is.
+        if let Err(e) = manager.apply_updates_and_restart_with_args(&asset, args) {
+            let _ = STARTUP_FAILURE.set(format!("{} {e}", asset.Version));
+        }
     }
 
     type Ready = Arc<Mutex<Option<(UpdateManager, VelopackAsset, UpdateChannel)>>>;

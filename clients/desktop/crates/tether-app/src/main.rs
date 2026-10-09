@@ -19,6 +19,8 @@ fn main() {
     #[cfg(any(windows, target_os = "linux"))]
     updates::startup();
     let log = logging::init();
+    #[cfg(any(windows, target_os = "linux"))]
+    updates::log_startup_failure();
     #[cfg(not(debug_assertions))]
     startup::install_panic_hook();
     if let Err(err) = start() {
@@ -103,6 +105,7 @@ fn watch_updates(app: &std::rc::Rc<app::App>) {
                 let b = w.global::<SettingsBridge>();
                 b.set_update_label(updates::UpdateStatus::InstallFailed.label().into());
                 b.set_update_ready(false);
+                b.set_can_check_updates(updates::UpdateStatus::InstallFailed.can_check());
             }
         });
         // Every check reports into the settings page from the updater's thread.
