@@ -229,6 +229,7 @@ mod tests {
             &[],
             &s.keys,
             "w",
+            &[],
             &|_| Some(pem.clone()),
         );
         assert_eq!(s.import_hosts(&rows, &[0], 1).unwrap(), 1);

@@ -636,16 +636,23 @@ impl App {
     pub fn open_ssh_import(&self) {
         let rows = {
             let s = self.state.borrow();
-            let hosts = ssh_import::home_dir()
+            let home = ssh_import::home_dir();
+            let hosts = home
+                .as_deref()
                 .map(|home| {
-                    tether_core::sshconfig::read_config(&home, &tether_core::sshconfig::DiskFiles)
+                    tether_core::sshconfig::read_config(home, &tether_core::sshconfig::DiskFiles)
                 })
+                .unwrap_or_default();
+            let default_keys = home
+                .as_deref()
+                .map(tether_core::sshimport::default_identity_files)
                 .unwrap_or_default();
             tether_core::sshimport::plan(
                 &hosts,
                 &s.profiles.machines,
                 &s.keys,
                 &ssh_import::default_user(),
+                &default_keys,
                 &|p| std::fs::read_to_string(p).ok(),
             )
         };

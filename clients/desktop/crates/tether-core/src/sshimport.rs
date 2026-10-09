@@ -1,6 +1,6 @@
 //! Turns `~/.ssh/config` hosts into machines and keys, without touching storage.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -34,18 +34,31 @@ fn same_endpoint(a: &Machine, b: &Machine) -> bool {
     a.user == b.user && a.port == b.port && a.host.eq_ignore_ascii_case(&b.host)
 }
 
+/// The keys OpenSSH tries when a host names no `IdentityFile`, in the order Tether picks one.
+pub fn default_identity_files(home: &Path) -> Vec<PathBuf> {
+    ["id_ed25519", "id_ecdsa", "id_rsa"]
+        .iter()
+        .map(|name| home.join(".ssh").join(name))
+        .collect()
+}
+
 /// Every concrete host, plus a row for each ProxyJump hop that is not an alias.
-/// `read` reads a key file; `default_user` fills hosts with no `User`.
+/// `read` reads a key file; `default_user` fills hosts with no `User`; `default_keys`
+/// stand in for a missing `IdentityFile`.
 pub fn plan(
     hosts: &[ConfigHost],
     machines: &[Machine],
     keys: &KeyRecords,
     default_user: &str,
+    default_keys: &[PathBuf],
     read: &dyn Fn(&Path) -> Option<String>,
 ) -> Vec<ImportRow> {
     let mut rows: Vec<ImportRow> = Vec::new();
     for h in hosts {
-        let (auth, key, auth_note) = key_for(h.identity_file.as_deref(), keys, read);
+        let (auth, key, auth_note) = match h.identity_file.as_deref() {
+            Some(path) => key_for(Some(path), keys, read),
+            None => default_key(default_keys, keys, read),
+        };
         let machine = Machine {
             id: Uuid::new_v4(),
             name: h.alias.clone(),
@@ -64,17 +77,18 @@ pub fn plan(
                 Some(i) => rows[i].machine.id,
                 None => {
                     let (user, host, port) = parse_hop(hop);
+                    let (auth, key, auth_note) = default_key(default_keys, keys, read);
                     let machine = Machine {
                         id: Uuid::new_v4(),
                         name: hop.clone(),
                         host,
                         port,
                         user: user.unwrap_or_else(|| default_user.to_string()),
-                        auth: Auth::Agent,
+                        auth,
                         jump: previous,
                     };
                     let id = machine.id;
-                    rows.push(row(hop.clone(), machine, None, "agent".into(), machines));
+                    rows.push(row(hop.clone(), machine, key, auth_note, machines));
                     id
                 }
             };
@@ -118,6 +132,24 @@ fn row(
         auth_note,
         via: None,
     }
+}
+
+/// The first default key Tether can use, else the agent with the reason the nearest one was
+/// skipped. A missing default is no reason: OpenSSH skips it silently too.
+fn default_key(
+    paths: &[PathBuf],
+    keys: &KeyRecords,
+    read: &dyn Fn(&Path) -> Option<String>,
+) -> (Auth, Option<ImportKey>, String) {
+    let mut fallback = None;
+    for path in paths.iter().filter(|p| read(p).is_some()) {
+        let found = key_for(Some(path), keys, read);
+        if matches!(found.0, Auth::Key { .. }) {
+            return found;
+        }
+        fallback.get_or_insert(found);
+    }
+    fallback.unwrap_or_else(|| key_for(None, keys, read))
 }
 
 fn key_for(
@@ -251,6 +283,7 @@ mod tests {
             &[],
             &KeyRecords::default(),
             "winuser",
+            &[],
             &none,
         );
         assert_eq!(rows.len(), 1);
@@ -274,6 +307,7 @@ mod tests {
             &[],
             &KeyRecords::default(),
             "w",
+            &[],
             &none,
         );
         let by = |l: &str| rows.iter().find(|r| r.label == l).unwrap();
@@ -307,6 +341,7 @@ mod tests {
             std::slice::from_ref(&saved),
             &KeyRecords::default(),
             "w",
+            &[],
             &none,
         );
         assert!(rows[0].existing);
@@ -328,6 +363,7 @@ mod tests {
             &[],
             &KeyRecords::default(),
             "w",
+            &[],
             &none,
         );
         assert_eq!(with_jumps(&rows, &[1]), [0, 1]);
@@ -368,6 +404,7 @@ mod tests {
             &[],
             &keys,
             "w",
+            &[],
             &read,
         );
         let picked = [0, 1, 2, 3, 4];
@@ -381,5 +418,63 @@ mod tests {
         assert_eq!(rows[3].auth_note, "agent (id_locked has a passphrase)");
         assert_eq!(machines[4].auth, Auth::Agent);
         assert_eq!(rows[4].auth_note, "agent (missing not found)");
+    }
+
+    #[test]
+    fn without_an_identity_file_the_first_usable_default_key_is_used() {
+        let (_, pem) = generate_ed25519("k", 0);
+        let public = derive_public_line(&pem).unwrap();
+        let defaults = default_identity_files(Path::new("h"));
+        let files: HashMap<PathBuf, String> = HashMap::from([
+            (
+                defaults[0].clone(),
+                "-----BEGIN ENCRYPTED PRIVATE KEY-----\nx\n-----END ENCRYPTED PRIVATE KEY-----\n"
+                    .into(),
+            ),
+            (defaults[2].clone(), pem.to_string()),
+        ]);
+        let read = |p: &Path| files.get(p).cloned();
+        let rows = plan(
+            &[host("inner", "10.1.0.2", Some("u"), &["me@edge"])],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        for r in &rows {
+            assert_eq!(r.auth_note, "key id_rsa", "{}", r.label);
+            assert!(matches!(r.machine.auth, Auth::Key { .. }));
+        }
+        let picked = [0, 1];
+        assert_eq!(keys_to_add(&rows, &picked).len(), 1);
+        assert_eq!(keys_to_add(&rows, &picked)[0].public_line, public);
+    }
+
+    #[test]
+    fn without_an_identity_file_or_usable_default_key_the_agent_is_used() {
+        let locked =
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nx\n-----END ENCRYPTED PRIVATE KEY-----\n";
+        let defaults = default_identity_files(Path::new("h"));
+        let read = |p: &Path| (p == defaults[0]).then(|| locked.to_string());
+        let rows = plan(
+            &[host("box", "b", None, &[])],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        assert_eq!(rows[0].machine.auth, Auth::Agent);
+        assert_eq!(rows[0].auth_note, "agent (id_ed25519 has a passphrase)");
+        let rows = plan(
+            &[host("box", "b", None, &[])],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &none,
+        );
+        assert_eq!(rows[0].auth_note, "agent");
     }
 }

@@ -128,6 +128,7 @@ mod tests {
             saved,
             &KeyRecords::default(),
             "w",
+            &[],
             &|_| None,
         );
         SshImportVm::new(rows)
