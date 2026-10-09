@@ -40,7 +40,7 @@ See [`clients/apple/README.md`](clients/apple/README.md) for signing and on-devi
 
 ## Install (desktop: Windows and Linux)
 
-One app for both systems, built from one codebase and released together: take the file for your OS from the newest [`desktop-v*` release](https://github.com/samuelloranger/tether/releases?q=desktop-v&expanded=true). One window, one tab per zmx session. On top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), SSH agent auth, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette.
+One app for both systems, built from one codebase and released together: take the file for your OS from the [latest release](https://github.com/samuelloranger/tether/releases/latest). One window, one tab per zmx session. On top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), SSH agent auth, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette.
 
 | | Windows | Linux |
 |---|---|---|

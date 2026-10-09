@@ -7,11 +7,21 @@ description: Use when cutting, publishing, or rolling back a tether release — 
 
 ## Overview
 
-Tether v5 ships one artifact: the native iOS app. One command cuts a release: `scripts/release.sh --patch|--minor|--major`. It bumps the version (root `package.json` + the Xcode `project.pbxproj`), gates on CI, pushes, and pushes the tag `vX.Y.Z`. The tag starts `Release builds`, which opens a **draft** release, builds + signs the iOS archive, uploads it to TestFlight, and publishes the release only if the iOS job succeeds.
+One tag ships every platform: iOS and Mac through TestFlight, and the desktop client for Windows and Linux as files on the GitHub release. One command cuts a release: `scripts/release.sh --patch|--minor|--major`. It bumps the version (root `package.json`, the Xcode `project.pbxproj`, and `clients/desktop/Cargo.toml` + `Cargo.lock`), gates on CI, pushes, and pushes the tag `vX.Y.Z`. The tag starts `Release builds`, which opens a **draft** release, uploads the iOS and Mac builds to TestFlight, attaches the Windows and Linux installers, and publishes the release only if the iOS and desktop builds succeed. The stable desktop update feeds move after it is published.
 
 **Core invariant: a release becomes public only after the build succeeds.** A failed build leaves the previous release as `latest`, not a broken one.
 
-> iOS iteration does NOT go through here. To test a change, build + install to the device (see `tether-ios-headless-device-install`). A release is for TestFlight distribution — cut one only when actually distributing.
+> iOS iteration does NOT go through here. To test a change, build + install to the device (see `tether-ios-headless-device-install`).
+
+## Edge builds come first
+
+Every push to `main` that CI passes already ships: `Release builds` runs on the `edge` lane, uploads iOS and Mac to TestFlight as the next patch version (build of X.Y.Z+1), and puts the desktop client on the edge update channel as `X.Y.Z+1-main.N`. Only platforms whose sources changed since their last edge build are rebuilt (`refs/edge/apple`, `refs/edge/desktop`). No tag and no GitHub release are made.
+
+So a fix needs a merge, not a release. Cut a release to collect what has landed into a version for everyone else: weekly, or at a milestone. Never one per fix.
+
+- A machine joins the desktop edge channel by installing `Tether-edge-x64-Setup.exe` or `Tether-edge-x86_64.AppImage` from the `windows-feed` / `linux-feed` release. It then follows edge on its own; installing a release's file moves it back to stable.
+- TestFlight internal testers get each edge build once Apple finishes processing it, if the internal group has automatic distribution on.
+- An edge run that failed leaves that platform's mark where it was, so the next green push retries it.
 
 ## The Procedure
 
@@ -24,7 +34,7 @@ gh run watch $(gh run list --workflow 'Release builds' --limit 1 --json database
 
 ## Writing the Release Notes
 
-The `draft` job fills the release with GitHub's generated notes: one PR title per line. Those notes are never the finished text. Replace them while the build runs. `publish` only flips `--draft=false` and a re-run reuses the draft, so edited notes survive both.
+The `draft` job fills the release with a `### Downloads` section (the desktop files and what each needs) followed by GitHub's generated notes: one PR title per line. Keep the Downloads section as it is, at the top. The generated part is never the finished text. Replace them while the build runs. `publish` only flips `--draft=false` and a re-run reuses the draft, so edited notes survive both.
 
 ```bash
 gh release edit vX.Y.Z --notes-file notes.md   # on the draft, or after publish if you missed it
@@ -64,7 +74,7 @@ Pull requests: #A, #B, #C
 - **List the pull requests in number order.** Keep the Full Changelog link from the generated notes.
 - **The notes are public.** Describe the code and the general failure mode, never a particular instance: no hostnames, IPs, usernames, library contents, counts or dates from a real setup.
 - **A patch release can be a single section.** v5.5.1 is only `### Fixed` with one item.
-- **Reference releases:** v5.3.0, v5.5.0 and v5.6.0 are good examples (`gh release view vX.Y.Z`).
+- **Reference releases:** read the latest one (`gh release view`) before writing; releases before 6.0.0 were removed when the release lanes merged.
 
 ## Quick Reference
 
@@ -107,4 +117,4 @@ The release stays a draft — no emergency. Fix forward:
 
 ## Version Files (bumped by the script)
 
-`package.json` (the source of truth the script reads the current version from) and `clients/apple/Tether.xcodeproj/project.pbxproj`.
+`package.json` (the source of truth the script reads the current version from), `clients/apple/Tether.xcodeproj/project.pbxproj`, and the desktop workspace: `clients/desktop/Cargo.toml` plus the `Cargo.lock` entries of the crates that inherit its version. The tag's version must equal both, or the `plan` job stops the release before anything builds.

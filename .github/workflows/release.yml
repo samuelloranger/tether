@@ -1,10 +1,21 @@
 name: Release builds
 
-# scripts/release.sh pushes the tag vX.Y.Z, which starts this workflow. The
-# `draft` job opens a DRAFT release, `ios` and `mac` upload their builds, and
-# only when the iOS one succeeds does `publish` take it out of draft. A failed build therefore
-# never becomes the public `releases/latest`. Manual runs are build-only: they
-# upload workflow artifacts without touching a release.
+# Two lanes build the same apps: iOS and Mac (clients/apple, uploaded to TestFlight) and the
+# desktop client for Windows and Linux (clients/desktop, through desktop-build.yml).
+#
+# Release lane: scripts/release.sh pushes the tag vX.Y.Z. The `draft` job opens a DRAFT
+# release, iOS and Mac upload to TestFlight, the desktop installers attach to the draft, and
+# only when the iOS and desktop builds succeed does `publish` take it out of draft. A failed
+# build therefore never becomes the public `releases/latest`. The stable desktop update feeds
+# move after that.
+#
+# Edge lane: every push to main that CI passes. iOS and Mac go to TestFlight as the next
+# patch version (a build of X.Y.Z+1, so it always sits above the last release), and the
+# desktop client goes to the edge update channel as X.Y.Z+1-main.N. No tag, no GitHub release.
+# Only what changed since the last edge build of that platform is rebuilt; the hidden refs
+# refs/edge/apple and refs/edge/desktop record those commits.
+#
+# Manual runs are build-only: they upload workflow artifacts without touching a release.
 #
 # Why a tag push and not a `release` event: GitHub does not run workflows for
 # draft releases, so CI cannot be triggered BY a draft; it has to CREATE the
@@ -12,6 +23,10 @@ name: Release builds
 on:
   push:
     tags: ['v*.*.*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       scope:
@@ -22,73 +37,185 @@ on:
           - testflight
           - mac
           - mac-testflight
+          - desktop
         default: ios
 
 permissions:
   contents: write
 
-# On a tag push github.ref_name IS vX.Y.Z; on a manual run it is the branch.
+# Edge runs queue behind each other so each one diffs against the commits the previous one
+# shipped; releases never wait on them.
+concurrency:
+  group: ${{ github.event_name == 'workflow_run' && 'release-edge' || format('release-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+# On a tag push github.ref_name IS vX.Y.Z; on the other events it is a branch.
 env:
   TAG: ${{ github.ref_name }}
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
 
 jobs:
-  # Opens the draft the ios job uploads into, and hands it its id. Runs on manual
-  # dispatch too (as a no-op) so `needs: draft` never resolves to "skipped".
+  # Decides the lane, the commit, the versions and which platforms build. The edge lane
+  # starts only from a green CI run of a push to this repository's main, and skips the
+  # release commit itself: its tag already builds everything.
+  plan:
+    if: >-
+      github.event_name != 'workflow_run' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        !startsWith(github.event.workflow_run.head_commit.message, 'release: v'))
+    runs-on: ubuntu-latest
+    outputs:
+      lane: ${{ steps.plan.outputs.lane }}
+      ref: ${{ steps.plan.outputs.ref }}
+      version: ${{ steps.plan.outputs.version }}
+      desktop_version: ${{ steps.plan.outputs.desktop_version }}
+      channel: ${{ steps.plan.outputs.channel }}
+      ios: ${{ steps.plan.outputs.ios }}
+      mac: ${{ steps.plan.outputs.mac }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SCOPE: ${{ inputs.scope }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          REF="$(git rev-parse HEAD)"
+          APP_VERSION="$(jq -r .version package.json)"
+          CARGO_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/ s/^version = "\(.*\)"$/\1/p' clients/desktop/Cargo.toml | head -1)"
+          IOS=false MAC=false DESKTOP=false CHANNEL=stable
+          case "$EVENT" in
+            push)
+              LANE=release
+              VERSION="${TAG#v}"
+              DESKTOP_VERSION="$VERSION"
+              IOS=true MAC=true DESKTOP=true
+              if [ "$APP_VERSION" != "$VERSION" ] || [ "$CARGO_VERSION" != "$VERSION" ]; then
+                echo "::error::Tag $TAG but package.json is $APP_VERSION and clients/desktop/Cargo.toml is $CARGO_VERSION. scripts/release.sh bumps both."
+                exit 1
+              fi
+              ;;
+            workflow_run)
+              LANE=edge CHANNEL=edge
+              IFS=. read -r MAJOR MINOR PATCH <<< "$APP_VERSION"
+              VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              DESKTOP_VERSION="$VERSION-main.$RUN_NUMBER"
+              git fetch --quiet origin '+refs/edge/*:refs/edge/*' || true
+              # Builds a platform when anything it is made from changed since the commit its
+              # last edge build shipped, or when there is no such commit to compare with.
+              changed() {
+                local base
+                base="$(git rev-parse -q --verify "refs/edge/$1" || true)"
+                if [ -z "$base" ] || ! git merge-base --is-ancestor "$base" "$REF"; then
+                  echo "$1: no earlier edge build to compare with"
+                  return 0
+                fi
+                if git diff --name-only "$base" "$REF" | grep -qE "$2"; then
+                  echo "$1: changed since ${base:0:7}"
+                  return 0
+                fi
+                echo "$1: unchanged since ${base:0:7}"
+                return 1
+              }
+              PIPELINE='^\.github/(workflows/(release|desktop-build)\.yml|scripts/)'
+              if changed apple "^(clients/apple/|package\.json$|scripts/build-ssh-xcframeworks\.sh$)|$PIPELINE"; then
+                IOS=true MAC=true
+              fi
+              if changed desktop "^clients/desktop/|$PIPELINE"; then
+                DESKTOP=true
+              fi
+              ;;
+            workflow_dispatch)
+              LANE=manual
+              VERSION="$APP_VERSION"
+              DESKTOP_VERSION="$CARGO_VERSION"
+              case "$SCOPE" in
+                ios | testflight) IOS=true ;;
+                mac | mac-testflight) MAC=true ;;
+                desktop) DESKTOP=true ;;
+              esac
+              ;;
+            *)
+              echo "::error::Unexpected event $EVENT"
+              exit 1
+              ;;
+          esac
+          {
+            echo "lane=$LANE"
+            echo "ref=$REF"
+            echo "version=$VERSION"
+            echo "desktop_version=$DESKTOP_VERSION"
+            echo "channel=$CHANNEL"
+            echo "ios=$IOS"
+            echo "mac=$MAC"
+            echo "desktop=$DESKTOP"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  # Opens the draft the builds upload into, and hands it its id. Runs on every lane (as a
+  # no-op off the release lane) so `needs: draft` never resolves to "skipped". The text
+  # given here goes above GitHub's generated notes.
   draft:
+    needs: plan
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.open.outputs.id }}
     steps:
       - name: Open draft release
         id: open
-        if: github.event_name == 'push'
+        if: needs.plan.outputs.lane == 'release'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
+          set -euo pipefail
           # Idempotent: a re-run of a failed workflow reuses the existing draft
           # rather than erroring on a duplicate tag.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Reusing existing release $TAG"
           else
-            gh release create "$TAG" --draft --verify-tag --generate-notes
+            cat > downloads.md <<NOTES
+          ### Downloads
+
+          - **iPhone, iPad and Mac:** through TestFlight.
+          - **Windows:** install with \`Tether-$VERSION-x64-Setup.exe\` (per-user, no admin); the app then updates itself. \`Tether-$VERSION-x64-portable.zip\` runs without installing but does not update. Neither is code-signed yet, so SmartScreen may warn on first launch.
+          - **Linux (x86_64):** download \`Tether-$VERSION-x86_64.AppImage\`, make it executable (\`chmod +x\`) and run it; the app then updates itself in place. It needs FUSE 2 (\`libfuse2\`) to run directly, a Secret Service keyring for saved passwords and key passphrases, and \`SSH_AUTH_SOCK\` for agent authentication.
+          - \`SHA256SUMS.txt\` covers every file.
+          NOTES
+            gh release create "$TAG" --draft --verify-tag --title "Tether $VERSION" \
+              --notes-file downloads.md --generate-notes
           fi
           echo "id=$(gh release view "$TAG" --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
 
-  # iOS = the native Swift client in clients/apple, the only shipping product.
-  # It uploads to App Store Connect (6800525706, com.samuelloranger.tether-mobile),
-  # so build numbers must never repeat: github.run_number is monotonic per
-  # workflow and survives re-runs of the same tag.
+  # iOS = the native Swift client in clients/apple. It uploads to App Store Connect
+  # (6800525706, com.samuelloranger.tether-mobile), so build numbers must never repeat:
+  # github.run_number is monotonic per workflow, shared by both lanes, and survives
+  # re-runs. `plan` picks the marketing version.
   #
-  # `publish` needs this job, so the TestFlight upload is continue-on-error: a
-  # rejected or flaky Apple upload must never hold back the GitHub release.
+  # On a release `publish` needs this job, so the TestFlight upload is continue-on-error
+  # there: a rejected or flaky Apple upload must never hold back the GitHub release. On the
+  # edge lane the upload IS the point, so a failure fails the job and the next edge run
+  # retries it.
   ios:
-    needs: draft
-    if: github.event_name == 'push' || inputs.scope == 'ios' || inputs.scope == 'testflight'
+    needs: [plan, draft]
+    if: needs.plan.outputs.ios == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
 
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
-
-      # Marketing version comes from the tag; a manual run has no tag, so it
-      # falls back to the repo version rather than whatever is committed in the
-      # Xcode project.
-      - name: Resolve version and build number
-        id: ver
-        env:
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ]; then
-            V="${TAG#v}"
-          else
-            V="$(jq -r .version package.json)"
-          fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "build=$RUN_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "Building $V ($RUN_NUMBER)"
 
       # altool discovers the key by ID under ~/.appstoreconnect/private_keys;
       # xcodebuild wants an explicit path. Write it once, satisfy both.
@@ -188,8 +315,8 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          MARKETING_VERSION: ${{ steps.ver.outputs.version }}
-          CURRENT_PROJECT_VERSION: ${{ steps.ver.outputs.build }}
+          MARKETING_VERSION: ${{ needs.plan.outputs.version }}
+          CURRENT_PROJECT_VERSION: ${{ github.run_number }}
           SIGN_MODE: ${{ steps.signing.outputs.mode }}
         run: |
           set -euo pipefail
@@ -308,12 +435,12 @@ jobs:
           xcrun altool --validate-app -f "$IPA" -t ios \
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
-      # continue-on-error: `publish` gates on this job, and a rejected upload
-      # (duplicate build number, Apple outage, review rule) must not strand the
+      # continue-on-error on a release only: `publish` gates on this job, and a rejected
+      # upload (duplicate build number, Apple outage, review rule) must not strand the
       # release in draft. scope=testflight uploads on a manual run too.
       - name: Upload to TestFlight
-        if: github.event_name == 'push' || inputs.scope == 'testflight'
-        continue-on-error: true
+        if: needs.plan.outputs.lane != 'manual' || inputs.scope == 'testflight'
+        continue-on-error: ${{ needs.plan.outputs.lane == 'release' }}
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -345,10 +472,10 @@ jobs:
   # certificate against the app profile and fails. productbuild packages the
   # already signed .app instead.
   mac:
-    needs: draft
-    if: github.event_name == 'push' || inputs.scope == 'mac' || inputs.scope == 'mac-testflight'
+    needs: [plan, draft]
+    if: needs.plan.outputs.mac == 'true'
     runs-on: macos-26
-    # The Mac app rides along with the iOS release; a Mac failure never holds the
+    # The Mac app rides along with the iOS build; a Mac failure never holds the
     # GitHub release in draft.
     continue-on-error: true
     steps:
@@ -366,27 +493,13 @@ jobs:
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: steps.signing.outputs.ready == 'true'
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
 
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         if: steps.signing.outputs.ready == 'true'
         with:
           xcode-version: latest-stable
-
-      - name: Resolve version and build number
-        if: steps.signing.outputs.ready == 'true'
-        id: ver
-        env:
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ]; then
-            V="${TAG#v}"
-          else
-            V="$(jq -r .version package.json)"
-          fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "build=$RUN_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "Building $V ($RUN_NUMBER)"
 
       - name: Install App Store Connect API key
         if: steps.signing.outputs.ready == 'true'
@@ -458,8 +571,8 @@ jobs:
         timeout-minutes: 45
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          MARKETING_VERSION: ${{ steps.ver.outputs.version }}
-          CURRENT_PROJECT_VERSION: ${{ steps.ver.outputs.build }}
+          MARKETING_VERSION: ${{ needs.plan.outputs.version }}
+          CURRENT_PROJECT_VERSION: ${{ github.run_number }}
         run: |
           set -euo pipefail
           xcodebuild -project clients/apple/Tether.xcodeproj \
@@ -506,7 +619,7 @@ jobs:
 
       # continue-on-error for the same reason as the iOS upload.
       - name: Upload to TestFlight
-        if: steps.signing.outputs.ready == 'true' && (github.event_name == 'push' || inputs.scope == 'mac-testflight')
+        if: steps.signing.outputs.ready == 'true' && (needs.plan.outputs.lane != 'manual' || inputs.scope == 'mac-testflight')
         continue-on-error: true
         env:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -522,16 +635,132 @@ jobs:
           name: tether-mac-${{ github.sha }}
           path: build/export/Tether.pkg
 
-  # The gate: the ios build must succeed before the release leaves draft. It also
-  # waits for mac, which is continue-on-error, so the Mac upload lands first.
-  # Publishing is also what makes the tag public; until then `releases/latest`
-  # still points at the previous good release.
+  # Windows and Linux, on the stable channel for a release and the edge channel otherwise.
+  desktop:
+    needs: plan
+    if: needs.plan.outputs.desktop == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ needs.plan.outputs.ref }}
+      version: ${{ needs.plan.outputs.desktop_version }}
+      channel: ${{ needs.plan.outputs.channel }}
+
+  # The installers a person downloads, with one checksum file for all of them, written next
+  # to them so the names carry no path.
+  desktop-assets:
+    needs: [plan, draft, desktop]
+    if: needs.plan.outputs.lane == 'release'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.plan.outputs.desktop_version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tether-windows-${{ needs.plan.outputs.desktop_version }}
+          path: dist/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tether-linux-${{ needs.plan.outputs.desktop_version }}
+          path: dist/linux
+
+      - name: Attach to the draft
+        run: |
+          set -euo pipefail
+          mkdir assets
+          cp "dist/windows/Tether-$VERSION-x64-portable.zip" "dist/windows/Tether-$VERSION-x64-Setup.exe" \
+            "dist/linux/Tether-$VERSION-x86_64.AppImage" assets/
+          (cd assets && sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release upload "$TAG" assets/* --clobber
+
+  # The gate: the iOS build and the desktop installers must both land before the release
+  # leaves draft. It also waits for mac, which is continue-on-error, so the Mac upload lands
+  # first. Publishing is also what makes the tag public; until then `releases/latest` still
+  # points at the previous good release.
   publish:
-    if: github.event_name == 'push'
-    needs: [ios, mac]
+    needs: [plan, ios, mac, desktop-assets]
+    if: needs.plan.outputs.lane == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Publish the release
-        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+        run: gh release edit "$TAG" --draft=false --latest
+
+  # Installed apps poll FEED_URL (crates/tether-app/src/updates.rs), each OS its own rolling
+  # feed release, each channel its own releases.<channel>.json in it. A release moves the
+  # stable channel once it is published; an edge build moves the edge channel and replaces
+  # the edge installer kept on the feed, which is how an app joins the edge channel.
+  feeds:
+    needs: [plan, desktop, publish]
+    if: >-
+      always() && needs.plan.result == 'success' && needs.desktop.result == 'success' &&
+      (needs.plan.outputs.lane == 'edge' || (needs.plan.outputs.lane == 'release' && needs.publish.result == 'success'))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: win
+            feed: windows-feed
+            artifact: tether-windows
+            installer: x64-Setup.exe
+          - os: linux
+            feed: linux-feed
+            artifact: tether-linux
+            installer: x86_64.AppImage
+    # One run at a time per feed, across both lanes and every tag.
+    concurrency:
+      group: ${{ matrix.feed }}
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.plan.outputs.desktop_version }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ needs.plan.outputs.desktop_version }}
+          path: dist
+
+      - name: Point the update feed at this version
+        run: |
+          set -euo pipefail
+          INSTALLER=()
+          if [ "$CHANNEL" = edge ]; then
+            INSTALLER=("dist/Tether-$VERSION-${{ matrix.installer }}" "Tether-edge-${{ matrix.installer }}")
+          fi
+          .github/scripts/update-feed.sh "${{ matrix.feed }}" "${{ matrix.os }}" "$CHANNEL" "$VERSION" dist/velopack "${INSTALLER[@]}"
+
+  # Records the commit each platform's edge build shipped, so the next edge run rebuilds a
+  # platform only when something it is made from changed. A platform whose build failed
+  # keeps its old mark, and the next run tries it again.
+  mark-edge:
+    needs: [plan, ios, feeds]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.lane == 'edge'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - name: Move the marks
         env:
-          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.plan.outputs.ref }}
+          IOS: ${{ needs.ios.result }}
+          FEEDS: ${{ needs.feeds.result }}
+        run: |
+          set -euo pipefail
+          if [ "$IOS" = success ]; then
+            git push --force origin "$REF:refs/edge/apple"
+            echo "apple shipped ${REF:0:7}"
+          fi
+          if [ "$FEEDS" = success ]; then
+            git push --force origin "$REF:refs/edge/desktop"
+            echo "desktop shipped ${REF:0:7}"
+          fi

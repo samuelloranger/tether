@@ -202,6 +202,43 @@ update_json() {
 
 update_json "package.json" ".version = \$v"
 
+# The desktop client shares the app's version: one tag releases every platform. The workspace
+# version lives in Cargo.toml, and Cargo.lock repeats it for each crate that inherits it, so
+# both move together or `cargo build --locked` refuses the tree.
+bump_desktop_version() {
+  local dir=$1 version=$2
+  sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = "[^"]*"/version = "'"$version"'"/' "$dir/Cargo.toml"
+  local manifest crate
+  for manifest in "$dir"/crates/*/Cargo.toml; do
+    grep -qE '^version\.workspace = true' "$manifest" || continue
+    crate=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$manifest" | head -1)
+    awk -v crate="$crate" -v version="$version" '
+      $0 == "name = \"" crate "\"" { hit = 1; print; next }
+      hit && /^version = / { print "version = \"" version "\""; hit = 0; next }
+      { hit = 0; print }
+    ' "$dir/Cargo.lock" > "$dir/Cargo.lock.tmp" && mv "$dir/Cargo.lock.tmp" "$dir/Cargo.lock"
+  done
+}
+
+if [ "$DRY_RUN" = true ]; then
+  echo "[dry-run] Would update the desktop workspace to version $TARGET_VERSION"
+else
+  bump_desktop_version clients/desktop "$TARGET_VERSION"
+  echo "Updated clients/desktop/Cargo.toml and Cargo.lock"
+  # Offline, so a machine without the crates cached only gets a warning; a lock that no longer
+  # matches the manifests is the one failure that stops the release.
+  if command -v cargo >/dev/null 2>&1; then
+    if ! LOCK_ERR=$(cd clients/desktop && cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null); then
+      if grep -q 'cannot update the lock file' <<< "$LOCK_ERR"; then
+        echo "Error: clients/desktop/Cargo.lock no longer matches after the bump:" >&2
+        echo "$LOCK_ERR" >&2
+        exit 1
+      fi
+      echo "Warning: could not check clients/desktop/Cargo.lock offline; CI builds with --locked." >&2
+    fi
+  fi
+fi
+
 if [ "$DRY_RUN" = true ]; then
   echo "[dry-run] Would update Xcode to version $TARGET_VERSION"
 else
@@ -216,6 +253,8 @@ fi
 VERSION_FILES=(
   package.json
   clients/apple/Tether.xcodeproj/project.pbxproj
+  clients/desktop/Cargo.toml
+  clients/desktop/Cargo.lock
 )
 
 echo "Running validation checks (lint & format)..."
@@ -283,8 +322,8 @@ echo "Release process completed successfully!"
 if [ "$DRY_RUN" = false ]; then
   echo
   echo "Tag v$TARGET_VERSION pushed. Builds are running now."
-  echo "A draft release is opened, filled, and published automatically once every"
-  echo "artifact is attached. Nothing is user-visible until then."
+  echo "A draft release is opened, filled with the iOS, Mac, Windows and Linux builds, and"
+  echo "published automatically once they all land. Nothing is user-visible until then."
   echo "  Watch:   gh run watch \$(gh run list --workflow 'Release builds' --limit 1 --json databaseId -q '.[0].databaseId')"
   echo "  Inspect: gh release view v$TARGET_VERSION"
 fi

@@ -38,7 +38,10 @@ foreach ($logo in @{ 'Square44x44Logo.png' = 44; 'Square150x150Logo.png' = 150; 
     $g.Dispose(); $bmp.Dispose()
 }
 $icon.Dispose()
-$msixVersion = if ($Version -match '^\d+\.\d+\.\d+$') { "$Version.0" } else { $Version }
+# MSIX wants four numeric parts: 1.2.3 -> 1.2.3.0, and an edge build 1.2.3-main.45 -> 1.2.3.45.
+$msixVersion = if ($Version -match '^(\d+\.\d+\.\d+)$') { "$($Matches[1]).0" }
+    elseif ($Version -match '^(\d+\.\d+\.\d+)-[0-9A-Za-z.-]*?\.(\d+)$') { "$($Matches[1]).$($Matches[2])" }
+    else { throw "unsupported version $Version" }
 (Get-Content "$PSScriptRoot/AppxManifest.xml" -Raw).Replace('$VERSION$', $msixVersion) | Set-Content "$msix/AppxManifest.xml" -Encoding utf8
 
 $makeappx = Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/bin/*/x64/makeappx.exe' -ErrorAction SilentlyContinue |

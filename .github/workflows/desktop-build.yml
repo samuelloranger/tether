@@ -1,0 +1,221 @@
+name: Desktop build
+
+# Builds the desktop client (clients/desktop) for Windows and Linux and uploads each OS's
+# installers and Velopack update package as a workflow artifact. It never touches a release:
+# release.yml calls it for both lanes and does the publishing.
+#
+#   - Release lane (a vX.Y.Z tag): channel `stable`, version = the tag, which must equal the
+#     workspace version in clients/desktop/Cargo.toml. Packed on Velopack's default channel,
+#     so installed apps keep reading releases.win.json / releases.linux.json.
+#   - Edge lane (every green push to main): channel `edge`, version X.Y.Z-main.N. Packed on
+#     the win-edge / linux-edge channel. An app installed from an edge package remembers that
+#     channel and only ever updates from it.
+#
+# A manual run builds the workspace version on the stable channel, for a look at the
+# artifacts.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build
+        type: string
+        required: true
+      version:
+        description: Package version
+        type: string
+        required: true
+      channel:
+        description: stable or edge
+        type: string
+        required: true
+  workflow_dispatch:
+
+# The build runs third-party build scripts and tools; it only ever gets a read token.
+permissions:
+  contents: read
+
+env:
+  # Windows only: Velopack installs to %LOCALAPPDATA%\<packId> and empties it on uninstall, so
+  # it must never be "Tether": that folder holds the app's profiles, keys and
+  # secrets. Changing it later orphans every existing install. The Linux pack id is
+  # set in packaging/linux/package.sh.
+  PACK_ID: TetherTerminal
+  REF: ${{ inputs.ref || github.sha }}
+  INPUT_VERSION: ${{ inputs.version }}
+  CHANNEL: ${{ inputs.channel || 'stable' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clients/desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+
+      # The exe's FileVersion comes from Cargo, so a stable package whose version disagrees
+      # with the workspace version would ship a binary that reports another version. Edge
+      # packages carry a pre-release suffix on top of it on purpose.
+      # tr: the Windows checkout may have CRLF line endings.
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          CARGO_VERSION="$(tr -d '\r' < Cargo.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)"
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "::error::No version found in clients/desktop/Cargo.toml"
+            exit 1
+          fi
+          V="${INPUT_VERSION:-$CARGO_VERSION}"
+          if [ "$CHANNEL" = stable ] && [ "$V" != "$CARGO_VERSION" ]; then
+            echo "::error::Releasing $V but clients/desktop/Cargo.toml is $CARGO_VERSION. scripts/release.sh bumps both."
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building $V ($CHANNEL)"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop
+          # Restores what CI saved on main; a release's own cache would never be read again.
+          shared-key: desktop-windows
+          save-if: false
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Clippy is CI's gate on main, where every release is cut.
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Release build of the app
+        run: cargo build --release --locked -p tether-app
+
+      - name: Package
+        shell: pwsh
+        run: ./packaging/package.ps1 -Version ${{ steps.ver.outputs.version }} -SkipBuild
+
+      - name: Check the package
+        shell: pwsh
+        run: ./packaging/check-package.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      # vpk refuses an exe that never calls VelopackApp, so this also proves the
+      # updater is wired in. --aumid matches the app's own, or toasts lose their identity.
+      # Stable stays on Velopack's default channel ("win"): every installed app reads it.
+      - name: Installer and update package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          $channel = if ($env:CHANNEL -eq 'edge') { @('--channel', 'win-edge') } else { @() }
+          vpk pack --packId $env:PACK_ID --packVersion $env:VERSION `
+            --packDir dist/Tether --mainExe Tether.exe --packTitle Tether `
+            --icon assets/icons/tether.ico --aumid Tether.Terminal `
+            --noPortable --outputDir dist/velopack @channel
+          if ($LASTEXITCODE) { throw 'vpk pack failed' }
+          $setup = @(Get-ChildItem dist/velopack -Filter '*-Setup.exe')
+          if ($setup.Count -ne 1) { throw "expected one Setup.exe, found $($setup.Count)" }
+          Copy-Item $setup[0].FullName "dist/Tether-$env:VERSION-x64-Setup.exe"
+          Get-ChildItem dist/velopack
+
+      # The MSIX is unsigned and its manifest publisher is not the unsigned-package
+      # OID, so Windows will not install it; it does not ship.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-windows-${{ steps.ver.outputs.version }}
+          path: |
+            clients/desktop/dist/Tether-*-x64-portable.zip
+            clients/desktop/dist/Tether-*-x64-Setup.exe
+            clients/desktop/dist/velopack/*-full.nupkg
+            clients/desktop/dist/velopack/releases.*.json
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    defaults:
+      run:
+        # A container job runs steps with sh, which has no pipefail.
+        shell: bash
+        working-directory: clients/desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "::error::No version found in clients/desktop/Cargo.toml"
+            exit 1
+          fi
+          V="${INPUT_VERSION:-$CARGO_VERSION}"
+          if [ "$CHANNEL" = stable ] && [ "$V" != "$CARGO_VERSION" ]; then
+            echo "::error::Releasing $V but clients/desktop/Cargo.toml is $CARGO_VERSION. scripts/release.sh bumps both."
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building $V ($CHANNEL)"
+
+      # The build runs in ubuntu:24.04 so the binary links glibc 2.39 and starts on every distro
+      # at least that recent; a container keeps that floor fixed while ubuntu-latest moves on. fontconfig is the only system library
+      # linked at build time (it brings the freetype and expat headers); the windowing, GL and
+      # D-Bus libraries are loaded at run time. squashfs-tools and the .NET SDK are for vpk, and the
+      # colour emoji font is what the glyph test expects a desktop to have.
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config libfontconfig1-dev \
+            squashfs-tools dotnet-sdk-8.0 fonts-noto-color-emoji
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop
+          shared-key: desktop-linux
+          save-if: false
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Clippy is CI's gate on main, where every release is cut.
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Release build of the app
+        run: cargo build --release --locked -p tether-app
+
+      # vpk refuses a binary that never calls VelopackApp, so this also proves the updater
+      # is wired in; package.sh checks the AppImage's desktop entry.
+      - name: AppImage and update package
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          CHANNEL_ARG=()
+          [ "$CHANNEL" = edge ] && CHANNEL_ARG=(--channel linux-edge)
+          PATH="$HOME/.dotnet/tools:$PATH" packaging/linux/package.sh ${{ steps.ver.outputs.version }} --skip-build "${CHANNEL_ARG[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-linux-${{ steps.ver.outputs.version }}
+          path: |
+            clients/desktop/dist/Tether-*-x86_64.AppImage
+            clients/desktop/dist/velopack/*-full.nupkg
+            clients/desktop/dist/velopack/releases.*.json
+          if-no-files-found: error

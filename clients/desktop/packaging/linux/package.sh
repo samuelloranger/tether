@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Builds the Linux AppImage and the Velopack update package from a release build of tether-app.
-#   packaging/linux/package.sh [version] [--skip-build]
+#   packaging/linux/package.sh [version] [--skip-build] [--channel <name>]
 # Output in dist/: Tether-<version>-x86_64.AppImage, and in dist/velopack/ the
-# *-full.nupkg and releases.linux.json that installed apps update from.
+# *-full.nupkg and releases.<channel>.json that installed apps update from. Without
+# --channel the package goes on Velopack's default "linux" channel, which every stable
+# install reads; an AppImage packed on another channel only ever updates from that one.
 # Needs vpk 1.2.161 on PATH (dotnet tool install -g vpk --version 1.2.161), or set VPK.
 set -euo pipefail
 
@@ -11,11 +13,18 @@ root="$(cd "$here/../.." && pwd)"
 repo="$(cd "$root/../.." && pwd)"
 version=""
 build=1
-for arg in "$@"; do
-  case "$arg" in
+channel=()
+while [ $# -gt 0 ]; do
+  case "$1" in
     --skip-build) build=0 ;;
-    *) version="$arg" ;;
+    --channel)
+      [ -n "${2:-}" ] || { echo "--channel needs a name" >&2; exit 1; }
+      channel=(--channel "$2")
+      shift
+      ;;
+    *) version="$1" ;;
   esac
+  shift
 done
 version="${version:-$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -1)}"
 vpk="${VPK:-vpk}"
@@ -42,10 +51,16 @@ cp "$release"/licenses/* "$pack/licenses/"
   --packDir "$pack" --mainExe tether --packTitle Tether \
   --icon "$here/icons/hicolor/256x256/apps/tether.png" \
   --categories "System;TerminalEmulator" \
-  --outputDir "$dist/velopack"
+  --outputDir "$dist/velopack" "${channel[@]}"
 
 appimage="$dist/Tether-$version-x86_64.AppImage"
-mv "$dist/velopack/$pack_id.AppImage" "$appimage"
+# vpk names it <pack id>.AppImage, or <pack id>-<channel>.AppImage off the default channel.
+built=("$dist"/velopack/*.AppImage)
+if [ ${#built[@]} != 1 ] || [ ! -f "${built[0]}" ]; then
+  echo "expected one AppImage in $dist/velopack" >&2
+  exit 1
+fi
+mv "${built[0]}" "$appimage"
 
 # vpk writes the entry itself; fail the build if it stops matching the window's app_id.
 check="$(mktemp -d)"
