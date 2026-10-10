@@ -52,38 +52,48 @@ enum GitWorkspaceScript {
   /// The commits section when HEAD is where it was.
   static let unchanged = "="
   static let git = "git -c core.quotePath=false --no-pager"
+  /// Whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` say, the parser reads `a/`
+  /// and `b/` paths.
+  static let patchOptions = "--no-ext-diff --no-color --src-prefix=a/ --dst-prefix=b/"
 
-  /// `cd` into the shell's live cwd (or the one it last reported), then print it, so every
-  /// command after this runs where the user is. Prints `noCwd` and stops when there is none.
+  /// Where `enterCwd` found the directory.
+  enum CwdSource: Equatable { case live, fallback }
+
+  /// `cd` into the shell's live cwd (or, given one, the directory it last reported), then
+  /// announce it, so every command after this runs where the user is. Prints `noCwd` and
+  /// stops when there is none.
   static func enterCwd(pid: Int, fallback: String?, announce: Bool = true) -> String {
     let fallbackWord = fallback.map(shellQuote) ?? "''"
-    return "d=$(readlink /proc/\(pid)/cwd 2>/dev/null); [ -n \"$d\" ] || d=\(fallbackWord); "
+    return "s=P; d=$(readlink /proc/\(pid)/cwd 2>/dev/null); [ -n \"$d\" ] || { s=F; d=\(fallbackWord); }; "
       + "if [ -z \"$d\" ] || ! cd \"$d\" 2>/dev/null; then printf '%s' \(noCwd); exit 0; fi; "
-      + (announce ? "printf '%s\\034' \"$d\"; " : "")
+      + (announce ? "printf '%s%s\\034' \"$s\" \"$d\"; " : "")
   }
 
   /// Splits `enterCwd`'s announcement from the command's output; nil when there was no cwd.
-  static func splitCwd(_ output: String) -> (cwd: String, output: String)? {
-    guard output != noCwd, let marker = output.firstIndex(of: "\u{1C}") else { return nil }
-    return (String(output[..<marker]), String(output[output.index(after: marker)...]))
+  static func splitCwd(_ output: String) -> (cwd: String, source: CwdSource, output: String)? {
+    guard output != noCwd, let marker = output.firstIndex(of: "\u{1C}"), let flag = output.first else { return nil }
+    let cwd = String(output[output.index(after: output.startIndex)..<marker])
+    return (cwd, flag == "F" ? .fallback : .live, String(output[output.index(after: marker)...]))
   }
 
-  /// Head-capped so a huge patch can't flood the link or the phone.
+  /// Head-capped so a huge patch can't flood the link or the phone. Stderr stays out: a
+  /// warning written mid-patch would land inside a hunk.
   static func capping(_ command: String) -> String {
-    "\(command) 2>&1 | head -c \(byteCap + 1)"
+    "\(command) 2>/dev/null | head -c \(byteCap + 1)"
   }
 
   /// The working tree against HEAD: staged and unstaged together. An unborn branch has no
   /// HEAD, so it diffs against the empty tree instead.
   static let workingTreeDiff = capping(
     "base=$(git rev-parse -q --verify HEAD 2>/dev/null || git hash-object -t tree /dev/null); "
-      + "\(git) diff \"$base\" --no-ext-diff --no-color")
+      + "\(git) diff \"$base\" \(patchOptions)")
 
   /// Branch, untracked files, commits, then the patch last: a patch may hold any byte,
   /// including the section separator, so nothing is parsed after it.
   static func workspace(diff: Bool, commits: Bool, knownHead: String?) -> String {
+    // From the top, like the patch: run in a subdirectory, ls-files would list only that one.
     let untracked = diff
-      ? "\(git) ls-files --others --exclude-standard 2>/dev/null | head -n \(untrackedCap + 1)"
+      ? "\(git) ls-files --others --exclude-standard --full-name -- ':/' 2>/dev/null | head -n \(untrackedCap + 1)"
       : "printf ''"
     let log: String
     if commits {
@@ -94,21 +104,25 @@ enum GitWorkspaceScript {
     } else {
       log = "printf ''"
     }
+    // A detached HEAD has no branch name; its short hash stands in.
     return "if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
-      + "git branch --show-current; printf '\\035'; "
+      + "b=$(git branch --show-current 2>/dev/null); [ -n \"$b\" ] || b=$(git rev-parse --short HEAD 2>/dev/null); "
+      + "printf '%s\\035' \"$b\"; "
       + "\(untracked); printf '\\035'; "
       + "{ \(log); }; printf '\\035'; "
       + "\(diff ? "{ \(workingTreeDiff); }" : "printf ''"); "
       + "else printf '%s' \(notRepository); fi"
   }
 
+  /// `path` is from the top of the repository, as `ls-files --full-name` gave it.
   static func untrackedDiff(_ path: String) -> String {
-    capping("\(git) diff --no-index --no-ext-diff --no-color -- /dev/null \(shellQuote(path))")
+    "cd \"$(git rev-parse --show-toplevel)\" && "
+      + capping("\(git) diff --no-index \(patchOptions) -- /dev/null \(shellQuote(path))")
   }
 
   static func commitDiff(_ id: String) -> String {
     // %x1e ends the message: git's own `---` separator reads as a removed line.
-    capping("\(git) show \(shellQuote(id)) --patch --no-ext-diff --no-color --format=%b%x1e")
+    capping("\(git) show \(shellQuote(id)) --patch \(patchOptions) --format=%b%x1e")
   }
 
   static func pullRequestDiff(_ number: Int) -> String {

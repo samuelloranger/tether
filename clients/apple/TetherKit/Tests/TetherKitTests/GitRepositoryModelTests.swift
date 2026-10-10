@@ -63,8 +63,11 @@ final class GitRepositoryModelTests: XCTestCase {
   }
 
   func test_the_cwd_announcement_is_split_from_the_output() {
-    XCTAssertEqual(GitWorkspaceScript.splitCwd("/home/me/repo\u{1C}rest")?.cwd, "/home/me/repo")
-    XCTAssertEqual(GitWorkspaceScript.splitCwd("/home/me/repo\u{1C}rest")?.output, "rest")
+    let live = GitWorkspaceScript.splitCwd("P/home/me/repo\u{1C}rest")
+    XCTAssertEqual(live?.cwd, "/home/me/repo")
+    XCTAssertEqual(live?.source, .live)
+    XCTAssertEqual(live?.output, "rest")
+    XCTAssertEqual(GitWorkspaceScript.splitCwd("F/srv\u{1C}")?.source, .fallback)
     XCTAssertNil(GitWorkspaceScript.splitCwd(GitWorkspaceScript.noCwd))
   }
 

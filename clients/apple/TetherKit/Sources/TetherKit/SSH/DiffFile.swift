@@ -20,15 +20,22 @@ public struct DiffFile: Equatable, Identifiable, Sendable {
   public let added: Int
   public let removed: Int
   public let rows: [DiffRow]
+  /// Digits in the largest line number, so the gutter fits it at any size. Stored: every
+  /// drawn row reads it.
+  public let lineDigits: Int
+
+  public init(path: String, added: Int, removed: Int, rows: [DiffRow]) {
+    self.path = path
+    self.added = added
+    self.removed = removed
+    self.rows = rows
+    let largest = rows.reduce(0) { max($0, $1.newLine ?? $1.oldLine ?? 0) }
+    lineDigits = max(2, String(largest).count)
+  }
 
   public var id: String { path.isEmpty ? "__preamble__" : path }
   /// `git show` prints a message and a stat block before the first file.
   public var isPreamble: Bool { path.isEmpty }
-  /// Digits in the largest line number, so the gutter fits it at any size.
-  public var lineDigits: Int {
-    let largest = rows.reduce(0) { max($0, $1.newLine ?? $1.oldLine ?? 0) }
-    return max(2, String(largest).count)
-  }
 
   public static func group(_ lines: [GitDiffLine]) -> [DiffFile] {
     var files: [DiffFile] = []

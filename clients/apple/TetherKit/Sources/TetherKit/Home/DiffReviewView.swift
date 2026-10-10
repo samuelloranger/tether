@@ -7,7 +7,7 @@ struct DiffReviewView: View {
   var truncated = false
   var untracked: [String] = []
   var untrackedTruncated = false
-  var loadUntracked: ((String) async -> GitPatch)?
+  var loadUntracked: ((String) async -> GitPatch?)?
 
   /// A file this long starts folded, and opens a page at a time: every row is a view, and a
   /// lockfile's worth of them at once stalls the scroll.
@@ -17,6 +17,7 @@ struct DiffReviewView: View {
   @State private var toggled: Set<String> = []
   @State private var shownRows: [String: Int] = [:]
   @State private var untrackedPatches: [String: GitPatch] = [:]
+  @State private var untrackedFailed: Set<String> = []
   @State private var viewportWidth: CGFloat = 0
   @State private var showCopied = false
 
@@ -129,11 +130,17 @@ struct DiffReviewView: View {
       } else {
         notice("Nothing to show for this file.")
       }
+    } else if untrackedFailed.contains(path) {
+      pageButton("Couldn't load this file — try again") { untrackedFailed.remove(path) }
     } else {
       ProgressView().tint(TetherColors.accent).frame(maxWidth: .infinity).padding(.vertical, 10)
         .task {
           guard let loadUntracked else { return }
-          untrackedPatches[path] = await loadUntracked(path)
+          if let patch = await loadUntracked(path) {
+            untrackedPatches[path] = patch
+          } else {
+            untrackedFailed.insert(path)
+          }
         }
     }
   }

@@ -137,6 +137,12 @@ public final class SSHTerminalController {
   public private(set) var gitError: String?
   public private(set) var gitActionMessage: String?
   public private(set) var gitLoading = false
+  /// A repository has been read for this screen; until then an error replaces the content.
+  public private(set) var gitLoaded = false
+  /// False once a host turned out to have no `/proc`: its cwd comes from the shell's report.
+  @ObservationIgnored private var hostHasProc = true
+  /// The directory `gitPullRequests` was listed in.
+  @ObservationIgnored private var pullRequestsCwd: String?
   /// One load per payload at a time: a second caller waits for the one in flight.
   @ObservationIgnored private var gitLoads: [GitWorkspacePayload: Task<Void, Never>] = [:]
   /// The patch `gitFiles` was parsed from: an unchanged poll skips the parse and the redraw.
@@ -145,7 +151,7 @@ public final class SSHTerminalController {
   @ObservationIgnored private var gitHead: String?
   @ObservationIgnored private var gitCwd: String?
   @ObservationIgnored private var commitPatches: [String: GitPatch] = [:]
-  @ObservationIgnored private var pullRequestPatches: [Int: (patch: GitPatch, at: Date)] = [:]
+  @ObservationIgnored private var pullRequestPatches: [String: (patch: GitPatch, at: Date)] = [:]
   public private(set) var transfer: TransferState = .idle
   public private(set) var reachability: NetworkReachability?
   public private(set) var agentStatuses: [String: AgentStatus] = [:]
@@ -522,8 +528,9 @@ public final class SSHTerminalController {
   }
 
   private func performGitLoad(_ payload: GitWorkspacePayload) async {
-    gitLoading = true
-    defer { gitLoading = false }
+    // Only a first load shows a spinner; flipping this on every poll redrew the whole screen.
+    if !gitLoaded { gitLoading = true }
+    defer { if gitLoading { gitLoading = false } }
     switch payload {
     case .all:
       async let local: Void = loadLocalGit(diff: true, commits: true)
@@ -564,7 +571,9 @@ public final class SSHTerminalController {
         gitCwd = sections.cwd
         gitRawDiff = nil
         gitHead = nil
+        pullRequestPatches.removeAll()
       }
+      if !gitLoaded { gitLoaded = true }
       if gitBranch != sections.branch { gitBranch = sections.branch }
       if diff {
         if gitRawDiff != sections.diff {
@@ -587,25 +596,28 @@ public final class SSHTerminalController {
   private func loadPullRequests() async {
     let result: GitRepositoryModel.PullRequestResult
     do {
-      guard let output = try await execInSessionCwd(GitWorkspaceScript.pullRequests, on: ghControl)?.output else {
-        return
+      guard let read = try await execInSessionCwd(GitWorkspaceScript.pullRequests, on: ghControl) else { return }
+      // Another repository's list must not stand in for this one's, even when this one fails.
+      if pullRequestsCwd != read.cwd {
+        pullRequestsCwd = read.cwd
+        if !gitPullRequests.isEmpty { gitPullRequests = [] }
       }
-      result = GitRepositoryModel.pullRequestResult(from: output)
+      result = GitRepositoryModel.pullRequestResult(from: read.output)
     } catch {
       result = .failed(Self.describe(error))
     }
     switch result {
     case let .list(pulls):
       if gitPullRequests != pulls { gitPullRequests = pulls }
-      gitPullRequestNotice = nil
+      if gitPullRequestNotice != nil { gitPullRequestNotice = nil }
     case .toolMissing:
       gitPullRequests = []
       gitPullRequestNotice = "GitHub CLI isn't installed on this host."
     case let .failed(reason):
-      // A list already on screen stays; the notice only explains an empty one.
-      if gitPullRequests.isEmpty { gitPullRequestNotice = reason }
+      // A list already on screen stays, with the notice saying it could not be refreshed.
+      if gitPullRequestNotice != reason { gitPullRequestNotice = reason }
     }
-    gitPullRequestsLoaded = true
+    if !gitPullRequestsLoaded { gitPullRequestsLoaded = true }
   }
 
   private func setGitError(_ error: String?) {
@@ -613,6 +625,7 @@ public final class SSHTerminalController {
   }
 
   private func clearGitWorkspace() {
+    gitLoaded = false
     gitFiles = []
     gitUntracked = []
     gitUntrackedTruncated = false
@@ -631,25 +644,31 @@ public final class SSHTerminalController {
     _ command: String, on connection: ControlConnection? = nil
   ) async throws -> (cwd: String, output: String)? {
     for attempt in 0..<2 {
-      guard let enter = await sessionCwdScript(refreshing: attempt > 0) else { return nil }
+      let refreshing = attempt > 0
+      guard let enter = await sessionCwdScript(refreshing: refreshing) else { return nil }
       let output = try await (connection ?? control).exec(enter + command)
-      if let split = GitWorkspaceScript.splitCwd(output) { return split }
+      guard let split = GitWorkspaceScript.splitCwd(output) else { continue }
+      // A fresh pid whose cwd still can't be read: this host has no /proc.
+      if refreshing, split.source == .fallback { hostHasProc = false }
+      return (split.cwd, split.output)
     }
     return nil
   }
 
-  /// The `cd` prefix for the attached session. A stale pid falls back to the directory the
-  /// shell last reported; when that fails too, a second try reads a fresh `zmx ls`.
+  /// The `cd` prefix for the attached session. The live cwd comes first: the directory the
+  /// shell last reported is only tried once a fresh `zmx ls` shows the pid is not stale, or
+  /// on a host without /proc.
   private func sessionCwdScript(refreshing: Bool, announce: Bool = true) async -> String? {
     if refreshing || !sessions.contains(where: { $0.name == attach }) { await refreshSessions() }
     guard let session = sessions.first(where: { $0.name == attach }) else { return nil }
-    let fallback = terminalReport.cwd ?? (session.displayCwd.hasPrefix("/") ? session.displayCwd : nil)
+    let reported = terminalReport.cwd ?? (session.displayCwd.hasPrefix("/") ? session.displayCwd : nil)
+    let fallback = refreshing || !hostHasProc ? reported : nil
     return GitWorkspaceScript.enterCwd(pid: session.pid, fallback: fallback, announce: announce)
   }
 
-  /// An untracked file's contents as an all-added patch.
-  public func untrackedDiff(_ path: String) async -> GitPatch {
-    guard let raw = try? await execInSessionCwd(GitWorkspaceScript.untrackedDiff(path))?.output else { return .empty }
+  /// An untracked file's contents as an all-added patch; nil when it could not be read.
+  public func untrackedDiff(_ path: String) async -> GitPatch? {
+    guard let raw = try? await execInSessionCwd(GitWorkspaceScript.untrackedDiff(path))?.output else { return nil }
     return await GitPatch.parse(raw)
   }
 
@@ -659,7 +678,7 @@ public final class SSHTerminalController {
     _ pullRequest: GitPullRequest,
     onSnapshot: @escaping @MainActor ([GitCheck]) -> Void
   ) async -> Bool {
-    guard let enter = await sessionCwdScript(refreshing: false, announce: false) else { return false }
+    guard let enter = await sessionCwdScript(refreshing: !hostHasProc, announce: false) else { return false }
     let command = enter + "gh pr checks \(pullRequest.number) --watch --interval 15 2>&1"
     // The stream arrives in chunks that do not respect snapshot boundaries, so
     // accumulate and emit each block only once the next header proves it whole.
@@ -721,6 +740,8 @@ public final class SSHTerminalController {
       return .empty
     }
     let patch = await GitPatch.parse(raw, splittingCommitMessage: true)
+    // An empty read may be a failure (a gone object, a dropped link); only a real patch is kept.
+    guard !patch.files.isEmpty else { return patch }
     if commitPatches.count >= 32 { commitPatches.removeAll() }
     commitPatches[key] = patch
     return patch
@@ -729,13 +750,14 @@ public final class SSHTerminalController {
   /// The pull request's own patch. Reused for a minute: reopening it right away is the
   /// common case, and a push in between is rare enough to wait for.
   public func pullRequestDiff(_ pullRequest: GitPullRequest) async -> GitPatch {
-    if let cached = pullRequestPatches[pullRequest.number], clock().timeIntervalSince(cached.at) < 60 {
+    let key = "\(gitCwd ?? "")\u{1F}\(pullRequest.number)"
+    if let cached = pullRequestPatches[key], clock().timeIntervalSince(cached.at) < 60 {
       return cached.patch
     }
     guard let raw = try? await execInSessionCwd(GitWorkspaceScript.pullRequestDiff(pullRequest.number), on: ghControl)?.output
     else { return .empty }
     let patch = await GitPatch.parse(raw)
-    pullRequestPatches[pullRequest.number] = (patch, clock())
+    if !patch.files.isEmpty { pullRequestPatches[key] = (patch, clock()) }
     return patch
   }
 
@@ -744,29 +766,29 @@ public final class SSHTerminalController {
     await runGitAction(
       "Checking out #\(pullRequest.number)…",
       "git fetch origin pull/\(pullRequest.number)/head:\(branch) && git switch \(branch)",
-      reload: .changes)
+      reload: [.changes, .commits])
   }
 
   public func updatePullRequest(_ pullRequest: GitPullRequest) async {
     let branch = shellQuote("tether/pr/\(pullRequest.number)")
     await runGitAction(
       "Updating #\(pullRequest.number)…", "git fetch origin pull/\(pullRequest.number)/head:\(branch)",
-      reload: .changes)
+      reload: [.changes, .commits])
   }
 
   public func closePullRequest(_ pullRequest: GitPullRequest) async {
-    await runGitAction("Closing #\(pullRequest.number)…", "gh pr close \(pullRequest.number)", reload: .pullRequests)
+    await runGitAction("Closing #\(pullRequest.number)…", "gh pr close \(pullRequest.number)", reload: [.pullRequests])
   }
 
   @discardableResult
   public func mergePullRequest(_ pullRequest: GitPullRequest, method: GitMergeMethod) async -> Bool {
     await runGitAction(
-      "Merging #\(pullRequest.number)…", "gh pr merge \(pullRequest.number) \(method.flag)", reload: .pullRequests)
+      "Merging #\(pullRequest.number)…", "gh pr merge \(pullRequest.number) \(method.flag)", reload: [.pullRequests])
   }
 
   /// Reloads only what the action changed: a full reload waited on `gh pr list` too.
   @discardableResult
-  private func runGitAction(_ message: String, _ command: String, reload: GitWorkspacePayload) async -> Bool {
+  private func runGitAction(_ message: String, _ command: String, reload: [GitWorkspacePayload]) async -> Bool {
     gitActionMessage = message
     do {
       guard try await execInSessionCwd(command, on: ghControl) != nil else {
@@ -774,7 +796,7 @@ public final class SSHTerminalController {
         return false
       }
       gitActionMessage = nil
-      await loadGitWorkspace(payload: reload)
+      for payload in reload { await loadGitWorkspace(payload: payload) }
       return true
     } catch { gitActionMessage = Self.describe(error); return false }
   }

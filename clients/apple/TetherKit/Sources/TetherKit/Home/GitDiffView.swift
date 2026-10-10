@@ -21,16 +21,16 @@ struct GitDiffView: View {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
             .opacity(loadedOnce ? 1 : 0.5)
-          if !loadedOnce && !controller.gitBranch.isEmpty { ProgressView().controlSize(.mini).tint(TetherColors.accent) }
+          if !loadedOnce && controller.gitLoaded { ProgressView().controlSize(.mini).tint(TetherColors.accent) }
           Spacer()
           Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         }.padding(.horizontal, 16).padding(.vertical, 12).background(TetherColors.surface)
         Picker("Git section", selection: $tab) { ForEach(Tab.allCases) { Text($0.rawValue).tag($0) } }
           .pickerStyle(.segmented).padding(12)
-        if let error = controller.gitError, !controller.gitBranch.isEmpty { staleBanner(error) }
+        if let error = controller.gitError, controller.gitLoaded { staleBanner(error) }
         Group {
-          if controller.gitLoading && controller.gitBranch.isEmpty { ProgressView().tint(TetherColors.accent) }
-          else if let error = controller.gitError, controller.gitBranch.isEmpty { errorState(error) }
+          if controller.gitLoading && !controller.gitLoaded { ProgressView().tint(TetherColors.accent) }
+          else if let error = controller.gitError, !controller.gitLoaded { errorState(error) }
           else { content }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
       }
@@ -129,6 +129,11 @@ struct GitDiffView: View {
             .foregroundStyle(TetherColors.textSecondary)
         }
       } else {
+        if let notice = controller.gitPullRequestNotice {
+          Label("Couldn't refresh: \(notice)", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+            .listRowBackground(TetherColors.warning.opacity(0.1))
+        }
         ForEach(controller.gitPullRequests) { pullRequest in
         NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest) } label: {
           VStack(alignment: .leading, spacing: 5) {

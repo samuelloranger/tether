@@ -195,5 +195,17 @@ final class DiffFileTests: XCTestCase {
     let file = DiffFile.group(GitDiffModel.classify("diff --git a/x b/x\n@@ -99998,2 +99998,2 @@\n a\n-b\n+c"))[0]
     XCTAssertEqual(file.lineDigits, 5)
   }
+
+  func test_a_stray_line_inside_a_hunk_is_shown_and_the_hunk_goes_on() {
+    let rows = DiffFile.group(GitDiffModel.classify(
+      "diff --git a/x b/x\n@@ -1,2 +1,2 @@\n-a\nwarning: CRLF will be replaced\n+b\n c"))[0].rows
+    XCTAssertEqual(rows.map(\.kind), [.hunk, .removed, .plain, .added, .context])
+    XCTAssertEqual(rows.last?.newLine, 2)
+  }
+
+  func test_a_combined_hunk_keeps_going_past_a_no_newline_marker() {
+    let lines = GitDiffModel.classify("diff --cc f\n@@@ -1,1 -1,1 +1,2 @@@\n- a\n\\ No newline at end of file\n++c")
+    XCTAssertEqual(lines.map(\.kind), [.fileHeader, .hunk, .removed, .note, .added])
+  }
 }
 

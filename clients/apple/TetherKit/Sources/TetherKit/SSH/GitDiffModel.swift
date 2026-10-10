@@ -46,8 +46,11 @@ public enum GitDiffModel {
           case UInt8(ascii: "-"): kind = .removed; oldLeft -= 1
           case UInt8(ascii: " "), nil: kind = .context; oldLeft -= 1; newLeft -= 1
           case UInt8(ascii: "\\"): kind = .note
-          default: inHunk = false
+          // A stray line (a warning on the same pipe) is shown, not allowed to end the hunk
+          // and take the rest of its lines with it.
+          default: kind = leavesHunk(bytes) ? nil : .note
           }
+          if kind == nil { inHunk = false }
           if let kind {
             lines.append(GitDiffLine(id: index, kind: kind, text: text))
             if oldLeft <= 0, newLeft <= 0 { inHunk = false }
@@ -55,6 +58,9 @@ public enum GitDiffModel {
           }
         } else if let combined = combinedKind(bytes, parents: parents) {
           lines.append(GitDiffLine(id: index, kind: combined, text: text, markerWidth: parents))
+          continue
+        } else if !leavesHunk(bytes) {
+          lines.append(GitDiffLine(id: index, kind: .note, text: text))
           continue
         } else {
           inHunk = false
@@ -93,6 +99,11 @@ public enum GitDiffModel {
       String(output[output.startIndex..<marker]).trimmingCharacters(in: .whitespacesAndNewlines),
       String(patch)
     )
+  }
+
+  /// Only the next file or the next hunk ends a hunk early.
+  private static func leavesHunk(_ bytes: Substring.UTF8View) -> Bool {
+    bytes.first == UInt8(ascii: "@") || bytes.starts(with: "diff ".utf8)
   }
 
   /// `@@ -a,b +c,d @@`: the lines the hunk spans on each side (a missing count means one).
