@@ -64,6 +64,11 @@ public struct TerminalSelection: Equatable, Sendable {
         lines.append("")
       }
     }
-    return lines.joined(separator: "\n")
+    return lines.joined(separator: "\n").filter { $0 != TerminalRunBuilder.wideTail }
+  }
+
+  /// The same cells, `lines` further up the screen (down when negative).
+  func shifted(up lines: Int) -> TerminalSelection {
+    TerminalSelection(startRow: startRow - lines, startCol: startCol, endRow: endRow - lines, endCol: endCol)
   }
 }

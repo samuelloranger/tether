@@ -84,6 +84,12 @@ actor TerminalPipeline {
   /// What the PTY was last told: the surface reports every settle (a size that went and came
   /// back still owes its rebuild), but the host only hears about a real change.
   private var ptySize: (cols: UInt16, rows: UInt16)?
+  /// Rows an alt-screen program has not painted since the grid grew: it repaints on the
+  /// SIGWINCH the settled size sends. Only until then are blank bottom rows drawn as slack
+  /// above the grid; trimming them always pushed nvim's empty command line off the bottom.
+  private var unpaintedGrow = false
+  private var growSettled = false
+  private var lastPublishedTrim = false
   /// Output publishes at most once per display frame: a flood would otherwise rebuild the
   /// grid for every SSH chunk, only for all but the newest to be dropped.
   static let publishInterval = Duration.milliseconds(8)
@@ -119,6 +125,9 @@ actor TerminalPipeline {
     emulatorKey = key
     lastRenderedGeneration = nil
     lastAltScreen = attached.grid.lastAltScreen
+    // A cached alt-screen grid stays as it was until the program redraws on reattach.
+    unpaintedGrow = lastAltScreen
+    growSettled = true
     eventSink.yield(.altScreen(lastAltScreen))
     if attached.reused {
       publishSnapshot()
@@ -331,6 +340,10 @@ actor TerminalPipeline {
     if changed {
       cols = newCols
       rows = newRows
+      if emulator?.isAltScreen ?? lastAltScreen, newRows > oldRows {
+        unpaintedGrow = true
+        growSettled = false
+      }
       // From the emulator, not `lastAltScreen`: that follows the throttled publish.
       if TerminalResizeStrategy.shouldRebuildFromBuffer(
         altScreen: emulator?.isAltScreen ?? lastAltScreen,
@@ -339,6 +352,7 @@ actor TerminalPipeline {
         rebuildPending = true
       }
     }
+    if settled, unpaintedGrow { growSettled = true }
     if settled, rebuildPending, !outputBuffer.data.isEmpty {
       rebuildPending = false
       rebuildCount += 1
@@ -380,11 +394,12 @@ actor TerminalPipeline {
       let buffer = TerminalOutputBuffer(byteBudget: max(data.count, 1))
       buffer.append(data)
       let frame = buffer.replay(cols: cols, rows: tall, eagerGrid: false).frame()
-      return TerminalGridText.plainText(header: frame.header, cells: frame.cells)
+      return TerminalGridText.plainText(header: frame.header, cells: frame.cells, clusters: frame.clusters)
     }.value
   }
 
   private func applyOutput(_ bytes: Data) {
+    if unpaintedGrow, growSettled { unpaintedGrow = false }
     outputBuffer.append(bytes)
     if let emulator {
       emulator.feed(bytes)
@@ -468,13 +483,17 @@ actor TerminalPipeline {
   @discardableResult
   private func publishSnapshot() -> Bool {
     guard let emulator else { return false }
-    let frame = emulator.frame()
+    var frame = emulator.frame()
+    if !frame.header.altScreen { unpaintedGrow = false }
+    frame.header.trimsBlankRows = unpaintedGrow
     watchImages(frame.images.isEmpty ? nil : emulator)
     // Mouse mode can flip without a viewport change (e.g. vim entering or
     // leaving mouse tracking). Keep the surface's input path in sync either way.
     syncMouseModes(from: emulator)
-    guard frame.header.generation != lastRenderedGeneration else { return false }
+    guard frame.header.generation != lastRenderedGeneration || frame.header.trimsBlankRows != lastPublishedTrim
+    else { return false }
     lastRenderedGeneration = frame.header.generation
+    lastPublishedTrim = frame.header.trimsBlankRows
     publishCount += 1
     // Output or an animation frame: watch closely again.
     speedUpImageWatch()

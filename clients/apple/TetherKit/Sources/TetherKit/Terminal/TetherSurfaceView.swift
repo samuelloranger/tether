@@ -73,17 +73,29 @@ public final class TetherSurfaceView: UIView {
   public private(set) var cellWidth: CGFloat = 8
   public private(set) var cellHeight: CGFloat = 16
 
+  /// In screen rows as of when it was made; `shownSelection` follows the text since.
   public var selection: TerminalSelection? {
     didSet {
       guard selection != oldValue else { return }
+      selectionFirstLine = header?.firstLine
       if selection != nil { TerminalCopySource.shared.surface = self }
       updateSelectionLayers()
     }
   }
+  /// The screen's first line when `selection` was set.
+  private var selectionFirstLine: Int?
+
+  /// The selection where its text is now: output or a scroll moves the text, and a highlight
+  /// left on the screen rows would cover (and copy) whatever took their place.
+  private var shownSelection: TerminalSelection? {
+    guard let selection, let header, let origin = selectionFirstLine else { return selection }
+    let moved = header.firstLine - origin
+    return moved == 0 ? selection : selection.shifted(up: moved)
+  }
 
   /// The selected cells' text, nil when nothing is selected.
   var selectedText: String? {
-    guard let selection else { return nil }
+    guard let selection = shownSelection else { return nil }
     let text = selection.text(from: cachedRowTexts)
     return text.isEmpty ? nil : text
   }
@@ -124,6 +136,10 @@ public final class TetherSurfaceView: UIView {
   private var cells: [GridSnapshot.Cell] = []
   private var images = TerminalImageLayer.empty
   private var hyperlinks: [[LinkSpan]] = []
+  private var clusters: [Int: String] = [:]
+  private var cursorImage: CGImage?
+  /// The default background the last frame was drawn on (the theme's, or OSC 11's).
+  private var shownBackground: UInt32?
   /// Rows the current bitmap anchors to the bottom; set with each committed frame.
   private var drawRows = 0
   /// Row text and link spans are worked out when a tap or a selection needs them, not for
@@ -134,7 +150,7 @@ public final class TetherSurfaceView: UIView {
   private var cachedRowTexts: [String] {
     if let lazyRowTexts { return lazyRowTexts }
     guard let header else { return [] }
-    let texts = TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows))
+    let texts = TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows), clusters: clusters)
     lazyRowTexts = texts
     return texts
   }
@@ -212,11 +228,15 @@ public final class TetherSurfaceView: UIView {
   public func apply(theme: TerminalTheme) {
     guard theme != self.theme else { return }
     self.theme = theme
-    backgroundColor = theme.uiBackground
     withoutAnimations { updateCursorLayer() }
     selectionLayer.fillColor = (theme.selection.map { TerminalTheme.uiColor($0, alpha: 0.45) }
       ?? UIColor.systemBlue.withAlphaComponent(0.35)).cgColor
-    requestRepaint()
+    // With a grid on screen, the gutter takes the new colour with the first frame drawn in it;
+    // repainting the old cells over a new fill flashed both for a frame.
+    if header == nil {
+      backgroundColor = theme.uiBackground
+      requestRepaint()
+    }
   }
 
   private func commonInit() {
@@ -327,6 +347,8 @@ public final class TetherSurfaceView: UIView {
     cells = []
     images = .empty
     hyperlinks = []
+    clusters = [:]
+    cursorImage = nil
     drawRows = 0
     lazyRowTexts = nil
     lazyLinkSpans = nil
@@ -403,7 +425,13 @@ public final class TetherSurfaceView: UIView {
     cells = output.cells
     images = output.images
     hyperlinks = output.hyperlinks
+    clusters = output.clusters
     drawRows = output.drawRows
+    cursorImage = output.cursorImage
+    if let background = output.defaultBackground, background != shownBackground {
+      shownBackground = background
+      backgroundColor = TerminalTheme.uiColor(background)
+    }
     lazyRowTexts = nil
     lazyLinkSpans = nil
 
@@ -432,7 +460,8 @@ public final class TetherSurfaceView: UIView {
       scale: scale,
       font: font,
       boldFont: boldFont,
-      background: (backgroundColor ?? .black).cgColor
+      background: (backgroundColor ?? .black).cgColor,
+      cursor: theme.cursor
     )
   }
 
@@ -463,15 +492,21 @@ public final class TetherSurfaceView: UIView {
     let cell = CGRect(
       x: CGFloat(header.cursorCol) * cellWidth + gridOriginX,
       y: CGFloat(header.cursorRow) * cellHeight + gridOriginY,
-      width: cellWidth,
+      width: cellWidth * (header.cursorWide ? 2 : 1),
       height: cellHeight
     )
     cursorLayer.isHidden = false
     cursorLayer.frame = style.frame(inCell: cell)
-    // A block covers the glyph, so it stays see-through; a thin bar or underline doesn't.
-    cursorLayer.backgroundColor = TerminalTheme.uiColor(
-      theme.cursor, alpha: style.shape == .block ? 0.4 : 1
-    ).cgColor
+    // A block is the cell drawn solid with its glyph knocked out in the background colour,
+    // so the character stays readable; a bar or an underline is a plain solid line.
+    if style.shape == .block, let cursorImage {
+      cursorLayer.contents = cursorImage
+      cursorLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+      cursorLayer.backgroundColor = nil
+    } else {
+      cursorLayer.contents = nil
+      cursorLayer.backgroundColor = TerminalTheme.uiColor(header.cursorColor ?? theme.cursor, alpha: 1).cgColor
+    }
 
     let blinks = style.blink && !UIAccessibility.isReduceMotionEnabled
     let shown = ShownCursor(col: header.cursorCol, row: header.cursorRow, blinks: blinks)
@@ -505,7 +540,7 @@ public final class TetherSurfaceView: UIView {
   }
 
   private func updateSelectionLayers() {
-    guard let selection, let header else {
+    guard let selection = shownSelection, let header else {
       withoutAnimations {
         selectionLayer.isHidden = true
         startHandleLayer.isHidden = true
@@ -591,10 +626,13 @@ public final class TetherSurfaceView: UIView {
     requestRepaint()
   }
 
+  /// A Mac window moved to a display of another scale: the cell sizes are in device pixels,
+  /// so they, the grid and the bitmap's scale all follow.
   public override func traitCollectionDidChange(_ previous: UITraitCollection?) {
     super.traitCollectionDidChange(previous)
     guard traitCollection.displayScale != previous?.displayScale else { return }
-    requestRepaint()
+    invalidateMetrics()
+    setNeedsLayout()
   }
 
   private func reportGridSize() {
@@ -655,15 +693,16 @@ public final class TetherSurfaceView: UIView {
     guard let header, cellWidth > 0 else { return 0 }
     return TerminalGridInset.originX(
       viewWidth: bounds.width, cellWidth: cellWidth, cols: Int(header.cols),
-      padding: horizontalPadding
+      padding: horizontalPadding, scale: traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
     )
   }
 
   private func invalidateMetrics() {
     font = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false)
     boldFont = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: true)
-    cellWidth = ceil(font.advancement(for: "M"))
-    cellHeight = TerminalLineSpacing.cellHeight(lineHeight: font.lineHeight, spacing: lineSpacing)
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+    cellWidth = TerminalLineSpacing.cellWidth(advance: font.advancement(for: "M"), scale: scale)
+    cellHeight = TerminalLineSpacing.cellHeight(lineHeight: font.lineHeight, spacing: lineSpacing, scale: scale)
     invalidateIntrinsicContentSize()
     requestRepaint()
     reportGridSize()
@@ -769,7 +808,7 @@ public final class TetherSurfaceView: UIView {
       if mouseMode != .off, let header {
         let point = gesture.location(in: self)
         let cell = MouseSeq.cellFromPoint(
-          x: point.x - gridOriginX, y: point.y, bounds: bounds,
+          x: point.x - gridOriginX, y: point.y - gridOriginY, bounds: bounds,
           cols: Int(header.cols), rows: Int(header.rows),
           cellWidth: cellWidth, cellHeight: cellHeight
         )
@@ -802,7 +841,7 @@ public final class TetherSurfaceView: UIView {
   private func handleMousePan(_ gesture: UIPanGestureRecognizer, point: CGPoint) {
     guard let header else { return }
     let cell = MouseSeq.cellFromPoint(
-      x: point.x - gridOriginX, y: point.y, bounds: bounds,
+      x: point.x - gridOriginX, y: point.y - gridOriginY, bounds: bounds,
       cols: Int(header.cols), rows: Int(header.rows),
       cellWidth: cellWidth, cellHeight: cellHeight
     )
