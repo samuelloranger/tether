@@ -175,6 +175,7 @@ public struct SSHTerminalView: View {
     .onChange(of: drawerOpen) { _, open in
       if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer { focused = true }
     }
+    .onChange(of: drawerProgress > 0, initial: true) { _, showing in accessory.visible = !showing }
     .onChange(of: modalOpen) { _, open in
       guard tabs != nil else { return }
       if open { focused = false } else { refocusOnMac() }
@@ -270,8 +271,10 @@ public struct SSHTerminalView: View {
             onHideKeyboard: { focused = false }
           )
         ),
-        // Kept while the drawer is open: dropping it resized the grid under the drawer.
+        // Kept while the drawer is open (dropping it resized the grid under the drawer), but
+        // faded: it lives in the keyboard's window, so it would draw over the drawer.
         showsAccessory: !TetherPlatform.isMac,
+        accessoryInteractive: drawerProgress == 0,
         compactAccessory: preferences.compactKeys,
         onSubmitBytes: submit,
         isFocused: $focused
