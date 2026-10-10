@@ -63,7 +63,8 @@ final class TetherSurfaceMetricsTests: XCTestCase {
     relayout(view, height: 600)
     view.freezesGrid = false
     settle()
-    XCTAssertEqual(settled, [UInt16(600 / view.cellHeight)])
+    XCTAssertFalse(settled.contains(UInt16(900 / view.cellHeight)), "\(settled)")
+    XCTAssertEqual(settled.last, UInt16(600 / view.cellHeight))
   }
 
   func testAFontChangeStillResizesAFrozenGrid() {

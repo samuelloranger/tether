@@ -42,6 +42,9 @@ final class TerminalGridRenderer {
   /// What the bitmap shows now, so the next frame repaints only the rows that differ.
   private var paintedCells: [GridSnapshot.Cell] = []
   private var paintedOriginY: CGFloat = -1
+  private var paintedSize: (cols: Int, rows: Int) = (0, 0)
+  /// Rows the last partial render repainted.
+  private(set) var repaintedRows = 0
   /// Rows anchored to the bottom in the last render.
   private(set) var drawRows = 0
   /// Decoded once per image content; dropped when no placement shows it any more.
@@ -92,10 +95,13 @@ final class TerminalGridRenderer {
     // Same geometry and no images on either frame: only rows whose cells changed are
     // repainted, each clipped to its own band. Anything else repaints the whole bitmap, which
     // is also what keeps a resize from leaving torn rows behind.
-    if images.isEmpty, !imageShowsPlacements, originY == paintedOriginY, paintedCells.count == cells.count {
+    if images.isEmpty, !imageShowsPlacements, originY == paintedOriginY, paintedCells.count == cells.count,
+      paintedSize == (cols, rows) {
+      repaintedRows = 0
       for row in 0..<drawRows {
         let range = (row * cols)..<((row + 1) * cols)
         guard cells[range] != paintedCells[range] else { continue }
+        repaintedRows += 1
         paintRow(row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
       }
       paintedCells = cells
@@ -131,6 +137,8 @@ final class TerminalGridRenderer {
     imageShowsPlacements = !images.isEmpty
     paintedCells = cells
     paintedOriginY = originY
+    paintedSize = (cols, rows)
+    repaintedRows = drawRows
 
     image = context.makeImage()
     return image

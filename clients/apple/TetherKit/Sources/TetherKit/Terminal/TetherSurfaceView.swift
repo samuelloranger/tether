@@ -626,10 +626,10 @@ public final class TetherSurfaceView: UIView {
         return
       }
       self.setLocalGrid(settled)
-      if self.serverGrid?.cols != settled.cols || self.serverGrid?.rows != settled.rows {
-        self.serverGrid = settled
-        self.onGridSizeSettled?(settled.cols, settled.rows)
-      }
+      // Reported even when unchanged: a size that went and came back still owes the local
+      // rebuild. The pipeline only resizes the PTY for a real change.
+      self.serverGrid = settled
+      self.onGridSizeSettled?(settled.cols, settled.rows)
     }
     gridSettleWork = work
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.gridSettleDelay, execute: work)

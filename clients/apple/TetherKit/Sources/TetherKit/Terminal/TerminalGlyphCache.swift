@@ -48,7 +48,7 @@ final class TerminalGlyphCache {
     // Core Text picks the fallback face it would have used inside a CTLine.
     let created = CTFontCreateForString(base, text as CFString, CFRange(location: 0, length: utf16.count))
     // One object per face, so the renderer can batch glyphs by font identity.
-    let name = CTFontCopyPostScriptName(created) as String
+    let name = "\(CTFontCopyPostScriptName(created))|\(CTFontGetSymbolicTraits(base).rawValue)"
     let fallback = fallbackFaces[name] ?? created
     fallbackFaces[name] = fallback
     guard let glyph = glyph(for: &utf16, in: fallback) else { return nil }

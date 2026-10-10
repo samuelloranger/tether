@@ -71,6 +71,19 @@ final class TerminalRenderPacingTests: XCTestCase {
     XCTAssertEqual(settled, 1)
   }
 
+  /// A keyboard dismiss that bounces back settles on the size it started from; the in-place
+  /// resizes on the way still owe the replay.
+  func test_a_size_that_goes_and_comes_back_still_rebuilds() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 40, rows: 25)
+    await pipeline.feedForTest(Data("\u{1B}[?1049hfull screen".utf8))
+    await pipeline.resizeForTest(cols: 40, rows: 28, settled: false)
+    await pipeline.resizeForTest(cols: 40, rows: 25, settled: false)
+    await pipeline.resizeForTest(cols: 40, rows: 25, settled: true)
+    let rebuilds = await pipeline.rebuildsForTest
+    XCTAssertEqual(rebuilds, 1)
+  }
+
   // MARK: Renderer: a partial repaint draws what a full one would
 
   func test_repainting_only_the_changed_row_matches_a_full_repaint() throws {
@@ -84,6 +97,7 @@ final class TerminalRenderPacingTests: XCTestCase {
     let reused = TerminalGridRenderer()
     _ = reused.render(header: header, cells: first, metrics: metrics)
     let partial = try XCTUnwrap(reused.render(header: header, cells: second, metrics: metrics))
+    XCTAssertEqual(reused.repaintedRows, 1, "the partial path was not taken")
     let full = try XCTUnwrap(TerminalGridRenderer().render(header: header, cells: second, metrics: metrics))
     XCTAssertEqual(pixels(partial), pixels(full))
   }

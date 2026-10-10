@@ -141,6 +141,7 @@ final class TerminalEngine {
   }
 
   var bracketedPaste: Bool { locked { terminal.bracketedPasteMode } }
+  var isAltScreen: Bool { locked { terminal.isCurrentBufferAlternate } }
 
   var mouseMode: MouseMode {
     locked {

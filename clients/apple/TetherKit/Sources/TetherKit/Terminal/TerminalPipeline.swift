@@ -77,13 +77,20 @@ actor TerminalPipeline {
   private var rows: UInt16 = 24
   /// A rebuild replays the whole output buffer, so it waits for the settled size: during a
   /// keyboard animation it ran once per frame. Until then the emulator resizes in place.
-  private var rebuildPending = false
+  private var rebuildPending: Bool {
+    get { currentGrid?.rebuildPending ?? false }
+    set { currentGrid?.rebuildPending = newValue }
+  }
+  /// What the PTY was last told: the surface reports every settle (a size that went and came
+  /// back still owes its rebuild), but the host only hears about a real change.
+  private var ptySize: (cols: UInt16, rows: UInt16)?
   /// Output publishes at most once per display frame: a flood would otherwise rebuild the
   /// grid for every SSH chunk, only for all but the newest to be dropped.
   static let publishInterval = Duration.milliseconds(8)
   private var lastOutputPublish: ContinuousClock.Instant?
   private var publishCount = 0
   private var rebuildCount = 0
+  private var ptyResizeCount = 0
   private var scheduledPublish: Task<Void, Never>?
 
   /// `theme` is the one the first grid is created in, so the first frame is never drawn in
@@ -107,7 +114,7 @@ actor TerminalPipeline {
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
     currentGrid = attached.grid
-    rebuildPending = false
+    ptySize = nil
     if let cellPixelSize { attached.grid.emulator.setCellPixelSize(width: cellPixelSize.width, height: cellPixelSize.height) }
     emulatorKey = key
     lastRenderedGeneration = nil
@@ -308,7 +315,9 @@ actor TerminalPipeline {
       // Settled size → the PTY. Apply locally too in case the socket was nil
       // while the emulator resized (reconnect).
       applyLocalResize(cols: newCols, rows: newRows, settled: true)
-      if let transport = sshTransport {
+      if let transport = sshTransport, ptySize?.cols != newCols || ptySize?.rows != newRows {
+        ptySize = (newCols, newRows)
+        ptyResizeCount += 1
         await transport.resize(cols: newCols, rows: newRows)
       }
     }
@@ -322,8 +331,9 @@ actor TerminalPipeline {
     if changed {
       cols = newCols
       rows = newRows
+      // From the emulator, not `lastAltScreen`: that follows the throttled publish.
       if TerminalResizeStrategy.shouldRebuildFromBuffer(
-        altScreen: lastAltScreen,
+        altScreen: emulator?.isAltScreen ?? lastAltScreen,
         oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
       ) {
         rebuildPending = true
@@ -437,6 +447,7 @@ actor TerminalPipeline {
   var publishesForTest: Int { publishCount }
   var publishedGenerationForTest: UInt64? { lastRenderedGeneration }
   var rebuildsForTest: Int { rebuildCount }
+  var ptyResizesForTest: Int { ptyResizeCount }
   func resizeForTest(cols: UInt16, rows: UInt16, settled: Bool) {
     applyLocalResize(cols: cols, rows: rows, settled: settled)
   }

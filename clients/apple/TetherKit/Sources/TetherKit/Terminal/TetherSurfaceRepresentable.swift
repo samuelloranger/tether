@@ -129,7 +129,10 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
         if let latest = frames.latest { uiView.updateSnapshot(latest) }
       }
     }
-    if context.coordinator.feed !== frames { context.coordinator.subscribe(uiView, to: frames) }
+    // Another surface for the same feed may have subscribed and gone away since.
+    if context.coordinator.feed !== frames || frames.owner != ObjectIdentifier(context.coordinator) {
+      context.coordinator.subscribe(uiView, to: frames)
+    }
   }
 
   private func bindCallbacks(_ view: TetherSurfaceView, context: Context) {
