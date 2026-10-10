@@ -73,17 +73,33 @@ public final class TetherSurfaceView: UIView {
   public private(set) var cellWidth: CGFloat = 8
   public private(set) var cellHeight: CGFloat = 16
 
+  /// In screen rows as of when it was made; `shownSelection` follows the text since.
   public var selection: TerminalSelection? {
     didSet {
       guard selection != oldValue else { return }
+      selectionFirstLine = header?.firstLine
+      selectionEpoch = header?.lineEpoch
       if selection != nil { TerminalCopySource.shared.surface = self }
       updateSelectionLayers()
     }
   }
+  /// The screen's first line when `selection` was set.
+  private var selectionFirstLine: Int?
+  private var selectionEpoch: UInt32?
+
+  /// The selection where its text is now: output or a scroll moves the text, and a highlight
+  /// left on the screen rows would cover (and copy) whatever took their place.
+  private var shownSelection: TerminalSelection? {
+    guard let selection, let header, let origin = selectionFirstLine else { return selection }
+    // Line numbers restarted under it: the text it covered is gone.
+    guard header.lineEpoch == selectionEpoch else { return nil }
+    let moved = header.firstLine - origin
+    return moved == 0 ? selection : selection.shifted(up: moved)
+  }
 
   /// The selected cells' text, nil when nothing is selected.
   var selectedText: String? {
-    guard let selection else { return nil }
+    guard let selection = shownSelection else { return nil }
     let text = selection.text(from: cachedRowTexts)
     return text.isEmpty ? nil : text
   }
@@ -93,11 +109,71 @@ public final class TetherSurfaceView: UIView {
   /// Size the server PTY was last told — updated only when the bounds settle.
   private var serverGrid: (cols: UInt16, rows: UInt16)?
   private var gridSettleWork: DispatchWorkItem?
+  /// Holds the grid at its last size while something covers the terminal (a sheet, the
+  /// drawer). Those take the keyboard with them, so the host would see one resize going in
+  /// and another coming back, and a TUI would redraw twice for nothing.
+  public var freezesGrid = false {
+    didSet { if oldValue, !freezesGrid { reportGridSize() } }
+  }
+  private var covered: Bool {
+    // A Mac sheet leaves the window and the keyboard alone; a held grid would only lag a resize.
+    guard !TetherPlatform.isMac else { return false }
+    return freezesGrid || window?.rootViewController?.presentedViewController != nil
+  }
+  /// Cell size the local grid was last computed with.
+  private var localCell: CGSize?
+
+  /// Only the keyboard's height change is held back. A new width (rotation, an iPad window) or
+  /// a new font changes what the grid can hold, and the old one drawn in it would clip.
+  private func holds(_ size: (cols: UInt16, rows: UInt16)) -> Bool {
+    guard let localGrid, covered else { return false }
+    return size.cols == localGrid.cols && localCell == CGSize(width: cellWidth, height: cellHeight)
+  }
+
+  private func setLocalGrid(_ size: (cols: UInt16, rows: UInt16)) {
+    localCell = CGSize(width: cellWidth, height: cellHeight)
+    guard localGrid?.cols != size.cols || localGrid?.rows != size.rows else { return }
+    localGrid = size
+    onGridSizeChange?(size.cols, size.rows)
+  }
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
   private var images = TerminalImageLayer.empty
-  private var cachedRowTexts: [String] = []
-  private var linkSpans: [[LinkSpan]] = []
+  private var hyperlinks: [[LinkSpan]] = []
+  private var clusters: [Int: String] = [:]
+  private var cursorImage: CGImage?
+  /// The default background the last frame was drawn on (the theme's, or OSC 11's).
+  private var shownBackground: UInt32?
+  /// Rows the current bitmap anchors to the bottom; set with each committed frame.
+  private var drawRows = 0
+  /// Row text and link spans are worked out when a tap or a selection needs them, not for
+  /// every frame: detection runs several regexes over the whole screen.
+  private var lazyRowTexts: [String]?
+  private var lazyLinkSpans: [[LinkSpan]]?
+
+  private var cachedRowTexts: [String] {
+    if let lazyRowTexts { return lazyRowTexts }
+    guard let header else { return [] }
+    let texts = TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows), clusters: clusters)
+    lazyRowTexts = texts
+    return texts
+  }
+
+  private var linkSpans: [[LinkSpan]] {
+    if let lazyLinkSpans { return lazyLinkSpans }
+    guard let header else { return [] }
+    // The wide-glyph placeholder is a column, not text: as a space it ends a URL as before.
+    let texts = cachedRowTexts.map { String($0.map { $0 == TerminalRunBuilder.wideTail ? " " : $0 }) }
+    // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in LinkSpans still runs.
+    let spans = LinkSpans.merging(
+      explicit: hyperlinks,
+      detected: LinkSpans.compute(
+        texts: texts, wrapped: Array(repeating: false, count: texts.count), cols: Int(header.cols)
+      )
+    )
+    lazyLinkSpans = spans
+    return spans
+  }
 
   private var font: UIFont = .monospacedSystemFont(ofSize: 14, weight: .regular)
   private var boldFont: UIFont = .monospacedSystemFont(ofSize: 14, weight: .bold)
@@ -157,10 +233,14 @@ public final class TetherSurfaceView: UIView {
   public func apply(theme: TerminalTheme) {
     guard theme != self.theme else { return }
     self.theme = theme
-    backgroundColor = theme.uiBackground
     withoutAnimations { updateCursorLayer() }
     selectionLayer.fillColor = (theme.selection.map { TerminalTheme.uiColor($0, alpha: 0.45) }
       ?? UIColor.systemBlue.withAlphaComponent(0.35)).cgColor
+    // With a grid on screen, the gutter takes the new colour with the first frame drawn in it;
+    // repainting the old cells over a new fill flashed both for a frame.
+    if header == nil { backgroundColor = theme.uiBackground }
+    // Safe with a grid up: the bitmap's fill comes from the frame, so this only redraws the
+    // cursor cell in the new colour.
     requestRepaint()
   }
 
@@ -271,9 +351,15 @@ public final class TetherSurfaceView: UIView {
     header = nil
     cells = []
     images = .empty
-    cachedRowTexts = []
+    hyperlinks = []
+    clusters = [:]
+    cursorImage = nil
+    shownBackground = nil
+    backgroundColor = theme.uiBackground
+    drawRows = 0
+    lazyRowTexts = nil
+    lazyLinkSpans = nil
     shownCursor = nil
-    linkSpans = []
     renderQueue.async { [worker] in
       worker.reset()
     }
@@ -341,11 +427,20 @@ public final class TetherSurfaceView: UIView {
     }
     guard let output else { return }
 
+    let gridChanged = header?.cols != output.header.cols || header?.rows != output.header.rows
     header = output.header
     cells = output.cells
     images = output.images
-    cachedRowTexts = output.rowTexts
-    linkSpans = output.linkSpans
+    hyperlinks = output.hyperlinks
+    clusters = output.clusters
+    drawRows = output.drawRows
+    cursorImage = output.cursorImage
+    if let background = output.defaultBackground, background != shownBackground {
+      shownBackground = background
+      backgroundColor = TerminalTheme.uiColor(background)
+    }
+    lazyRowTexts = nil
+    lazyLinkSpans = nil
 
     withoutAnimations {
       if let image = output.image {
@@ -358,7 +453,8 @@ public final class TetherSurfaceView: UIView {
       updateCursorLayer()
       updateSelectionLayers()
     }
-    invalidateIntrinsicContentSize()
+    // Only the grid's size feeds the intrinsic size; invalidating per frame re-ran layout.
+    if gridChanged { invalidateIntrinsicContentSize() }
   }
 
   private func currentMetrics() -> TerminalRenderMetrics? {
@@ -371,7 +467,8 @@ public final class TetherSurfaceView: UIView {
       scale: scale,
       font: font,
       boldFont: boldFont,
-      background: (backgroundColor ?? .black).cgColor
+      background: (backgroundColor ?? .black).cgColor,
+      cursor: theme.cursor
     )
   }
 
@@ -402,15 +499,21 @@ public final class TetherSurfaceView: UIView {
     let cell = CGRect(
       x: CGFloat(header.cursorCol) * cellWidth + gridOriginX,
       y: CGFloat(header.cursorRow) * cellHeight + gridOriginY,
-      width: cellWidth,
+      width: cellWidth * (header.cursorWide ? 2 : 1),
       height: cellHeight
     )
     cursorLayer.isHidden = false
     cursorLayer.frame = style.frame(inCell: cell)
-    // A block covers the glyph, so it stays see-through; a thin bar or underline doesn't.
-    cursorLayer.backgroundColor = TerminalTheme.uiColor(
-      theme.cursor, alpha: style.shape == .block ? 0.4 : 1
-    ).cgColor
+    // A block is the cell drawn solid with its glyph knocked out in the background colour,
+    // so the character stays readable; a bar or an underline is a plain solid line.
+    if style.shape == .block, let cursorImage {
+      cursorLayer.contents = cursorImage
+      cursorLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+      cursorLayer.backgroundColor = nil
+    } else {
+      cursorLayer.contents = nil
+      cursorLayer.backgroundColor = TerminalTheme.uiColor(header.cursorColor ?? theme.cursor, alpha: 1).cgColor
+    }
 
     let blinks = style.blink && !UIAccessibility.isReduceMotionEnabled
     let shown = ShownCursor(col: header.cursorCol, row: header.cursorRow, blinks: blinks)
@@ -444,7 +547,7 @@ public final class TetherSurfaceView: UIView {
   }
 
   private func updateSelectionLayers() {
-    guard let selection, let header else {
+    guard let selection = shownSelection, let header else {
       withoutAnimations {
         selectionLayer.isHidden = true
         startHandleLayer.isHidden = true
@@ -508,31 +611,35 @@ public final class TetherSurfaceView: UIView {
   /// Bottom-anchored so the leftover height sits under the title bar like empty scrollback,
   /// not as a gap between the newest line and the key bar.
   private var gridOriginY: CGFloat {
-    guard let header else { return 0 }
-    let cols = Int(header.cols)
-    let rows = Int(header.rows)
-    let drawRows = TerminalGridLayout.paintedRows(
-      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen, images: images
-    )
-    let drawn = CGFloat(drawRows) * cellHeight
-    return max(0, bounds.height - drawn)
+    guard header != nil else { return 0 }
+    return max(0, bounds.height - CGFloat(drawRows) * cellHeight)
   }
+
+  /// Bounds and scale the bitmap was last laid out for: a layout pass that changes neither
+  /// has nothing to repaint.
+  private var laidOut: (size: CGSize, scale: CGFloat)?
 
   public override func layoutSubviews() {
     super.layoutSubviews()
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
     withoutAnimations {
       contentLayer.frame = bounds
       textLayer.frame = CGRect(x: gridOriginX, y: 0, width: bounds.width, height: bounds.height)
-      textLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+      textLayer.contentsScale = scale
     }
     reportGridSize()
+    guard laidOut?.size != bounds.size || laidOut?.scale != scale else { return }
+    laidOut = (bounds.size, scale)
     requestRepaint()
   }
 
+  /// A Mac window moved to a display of another scale: the cell sizes are in device pixels,
+  /// so they, the grid and the bitmap's scale all follow.
   public override func traitCollectionDidChange(_ previous: UITraitCollection?) {
     super.traitCollectionDidChange(previous)
     guard traitCollection.displayScale != previous?.displayScale else { return }
-    requestRepaint()
+    invalidateMetrics()
+    setNeedsLayout()
   }
 
   private func reportGridSize() {
@@ -547,24 +654,27 @@ public final class TetherSurfaceView: UIView {
 
     // Local emulator follows the view immediately, every frame: the rendered
     // grid must match the bounds or a keyboard shrink leaves blank rows.
-    if localGrid?.cols != size.cols || localGrid?.rows != size.rows {
-      localGrid = size
-      onGridSizeChange?(size.cols, size.rows)
-    }
+    if !holds(size) { setLocalGrid(size) }
+    scheduleGridSettle()
+  }
 
+  private func scheduleGridSettle() {
     // Re-assert the local grid too: the dedupe guard above can leave it at a transient
     // keyboard-animation height, clipping the newest rows under the key bar.
     gridSettleWork?.cancel()
     let work = DispatchWorkItem { [weak self] in
       guard let self, let settled = self.currentGridSize() else { return }
-      if self.localGrid?.cols != settled.cols || self.localGrid?.rows != settled.rows {
-        self.localGrid = settled
-        self.onGridSizeChange?(settled.cols, settled.rows)
+      if self.holds(settled) {
+        // A sheet presented from elsewhere (a notification tap) has no flag that clears;
+        // look again until it is gone. `freezesGrid` re-reports when it turns off.
+        if !self.freezesGrid { self.scheduleGridSettle() }
+        return
       }
-      if self.serverGrid?.cols != settled.cols || self.serverGrid?.rows != settled.rows {
-        self.serverGrid = settled
-        self.onGridSizeSettled?(settled.cols, settled.rows)
-      }
+      self.setLocalGrid(settled)
+      // Reported even when unchanged: a size that went and came back still owes the local
+      // rebuild. The pipeline only resizes the PTY for a real change.
+      self.serverGrid = settled
+      self.onGridSizeSettled?(settled.cols, settled.rows)
     }
     gridSettleWork = work
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.gridSettleDelay, execute: work)
@@ -590,15 +700,16 @@ public final class TetherSurfaceView: UIView {
     guard let header, cellWidth > 0 else { return 0 }
     return TerminalGridInset.originX(
       viewWidth: bounds.width, cellWidth: cellWidth, cols: Int(header.cols),
-      padding: horizontalPadding
+      padding: horizontalPadding, scale: traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
     )
   }
 
   private func invalidateMetrics() {
     font = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: false)
     boldFont = TerminalFonts.font(postScriptName: fontName, size: fontSize, bold: true)
-    cellWidth = ceil(font.advancement(for: "M"))
-    cellHeight = TerminalLineSpacing.cellHeight(lineHeight: font.lineHeight, spacing: lineSpacing)
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+    cellWidth = TerminalLineSpacing.cellWidth(advance: font.advancement(for: "M"), scale: scale)
+    cellHeight = TerminalLineSpacing.cellHeight(lineHeight: font.lineHeight, spacing: lineSpacing, scale: scale)
     invalidateIntrinsicContentSize()
     requestRepaint()
     reportGridSize()
@@ -631,6 +742,7 @@ public final class TetherSurfaceView: UIView {
     case .began:
       lastPanY = point.y
       scrollRemainder = 0
+      scheduler?.interactive = true
     case .changed:
       let delta = lastPanY - point.y
       lastPanY = point.y
@@ -647,6 +759,7 @@ public final class TetherSurfaceView: UIView {
       applyScrollOffset()
     case .ended, .cancelled, .failed:
       scrollRemainder = 0
+      scheduler?.interactive = false
       applyScrollOffset()
     default:
       break
@@ -691,6 +804,7 @@ public final class TetherSurfaceView: UIView {
       // A mouse wheel tick arrives as a `.began` that already carries its whole movement.
       lastScrollY = 0
       scrollRemainder = 0
+      scheduler?.interactive = true
       fallthrough
     case .changed:
       let delta = lastScrollY - y
@@ -701,7 +815,7 @@ public final class TetherSurfaceView: UIView {
       if mouseMode != .off, let header {
         let point = gesture.location(in: self)
         let cell = MouseSeq.cellFromPoint(
-          x: point.x - gridOriginX, y: point.y, bounds: bounds,
+          x: point.x - gridOriginX, y: point.y - gridOriginY, bounds: bounds,
           cols: Int(header.cols), rows: Int(header.rows),
           cellWidth: cellWidth, cellHeight: cellHeight
         )
@@ -714,6 +828,7 @@ public final class TetherSurfaceView: UIView {
       }
     case .ended, .cancelled, .failed:
       scrollRemainder = 0
+      scheduler?.interactive = false
     default:
       break
     }
@@ -733,7 +848,7 @@ public final class TetherSurfaceView: UIView {
   private func handleMousePan(_ gesture: UIPanGestureRecognizer, point: CGPoint) {
     guard let header else { return }
     let cell = MouseSeq.cellFromPoint(
-      x: point.x - gridOriginX, y: point.y, bounds: bounds,
+      x: point.x - gridOriginX, y: point.y - gridOriginY, bounds: bounds,
       cols: Int(header.cols), rows: Int(header.rows),
       cellWidth: cellWidth, cellHeight: cellHeight
     )

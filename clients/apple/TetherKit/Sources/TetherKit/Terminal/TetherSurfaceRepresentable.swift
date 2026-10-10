@@ -1,8 +1,26 @@
 import SwiftUI
 import UIKit
 
+/// Frames go from the controller straight to the surface. Through Observation every chunk of
+/// output was a SwiftUI transaction that re-ran the representable's whole update.
+@MainActor
+public final class TerminalFrameFeed {
+  public private(set) var latest: TerminalFrame?
+  fileprivate var subscriber: ((TerminalFrame?) -> Void)?
+  /// The coordinator `subscriber` belongs to: a surface torn down after its replacement
+  /// subscribed must not unsubscribe the replacement.
+  fileprivate var owner: ObjectIdentifier?
+
+  public init() {}
+
+  public func publish(_ frame: TerminalFrame?) {
+    latest = frame
+    subscriber?(frame)
+  }
+}
+
 public struct TetherSurfaceRepresentable: UIViewRepresentable {
-  @Binding public var snapshot: TerminalFrame?
+  public var frames: TerminalFrameFeed
   public var sessionKey: String
   public var fontName: String
   public var fontSize: CGFloat
@@ -22,9 +40,10 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var onMouseBytes: (String) -> Void
   public var mouseMode: MouseMode
   public var mouseSgr: Bool
+  public var freezesGrid: Bool
 
   public init(
-    snapshot: Binding<TerminalFrame?>,
+    frames: TerminalFrameFeed,
     sessionKey: String = "",
     fontName: String,
     fontSize: CGFloat,
@@ -43,9 +62,10 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     onCopyLink: @escaping (String) -> Void = { _ in },
     onMouseBytes: @escaping (String) -> Void = { _ in },
     mouseMode: MouseMode = .off,
-    mouseSgr: Bool = true
+    mouseSgr: Bool = true,
+    freezesGrid: Bool = false
   ) {
-    _snapshot = snapshot
+    self.frames = frames
     self.sessionKey = sessionKey
     self.fontName = fontName
     self.fontSize = fontSize
@@ -65,6 +85,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.onMouseBytes = onMouseBytes
     self.mouseMode = mouseMode
     self.mouseSgr = mouseSgr
+    self.freezesGrid = freezesGrid
   }
 
   public func makeCoordinator() -> Coordinator {
@@ -83,6 +104,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     view.onGridSizeSettled = { cols, rows in onGridSizeSettled(cols, rows) }
     view.onCellPixelSize = { width, height in onCellPixelSize(width, height) }
     bindCallbacks(view, context: context)
+    context.coordinator.subscribe(view, to: frames)
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     return view
@@ -98,22 +120,18 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     uiView.cursorPreference = cursorStyle
     uiView.mouseMode = mouseMode
     uiView.mouseSgr = mouseSgr
+    if uiView.freezesGrid != freezesGrid { uiView.freezesGrid = freezesGrid }
     bindCallbacks(uiView, context: context)
     if context.coordinator.sessionKey != sessionKey {
       context.coordinator.sessionKey = sessionKey
       if !sessionKey.isEmpty {
-        context.coordinator.pushedSnapshot = nil
         uiView.prepareForSessionChange()
+        if let latest = frames.latest { uiView.updateSnapshot(latest) }
       }
     }
-    if let snapshot {
-      if context.coordinator.pushedSnapshot != snapshot {
-        context.coordinator.pushedSnapshot = snapshot
-        uiView.updateSnapshot(snapshot)
-      }
-    } else {
-      context.coordinator.pushedSnapshot = nil
-      uiView.clearSnapshot()
+    // Another surface for the same feed may have subscribed and gone away since.
+    if context.coordinator.feed !== frames || frames.owner != ObjectIdentifier(context.coordinator) {
+      context.coordinator.subscribe(uiView, to: frames)
     }
   }
 
@@ -146,12 +164,28 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public final class Coordinator {
     var parent: TetherSurfaceRepresentable
     var sessionKey: String = ""
-    /// Any state write on the owning view re-runs updateUIView; re-pushing an unchanged grid
-    /// costs a full rasterization.
-    var pushedSnapshot: TerminalFrame?
+    fileprivate weak var feed: TerminalFrameFeed?
 
     init(parent: TetherSurfaceRepresentable) {
       self.parent = parent
     }
+
+    @MainActor
+    fileprivate func subscribe(_ view: TetherSurfaceView, to feed: TerminalFrameFeed) {
+      if let old = self.feed, old.owner == ObjectIdentifier(self) { old.subscriber = nil }
+      self.feed = feed
+      feed.owner = ObjectIdentifier(self)
+      feed.subscriber = { [weak view] frame in
+        guard let view else { return }
+        if let frame { view.updateSnapshot(frame) } else { view.clearSnapshot() }
+      }
+      if let latest = feed.latest { view.updateSnapshot(latest) }
+    }
+  }
+
+  public static func dismantleUIView(_ uiView: TetherSurfaceView, coordinator: Coordinator) {
+    guard let feed = coordinator.feed, feed.owner == ObjectIdentifier(coordinator) else { return }
+    feed.subscriber = nil
+    feed.owner = nil
   }
 }

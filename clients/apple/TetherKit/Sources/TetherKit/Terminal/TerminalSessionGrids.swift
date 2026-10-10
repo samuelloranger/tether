@@ -5,6 +5,8 @@ final class TerminalSessionGrid {
   var emulator: TerminalEngine
   let buffer: TerminalOutputBuffer
   var lastAltScreen = false
+  /// A size change this grid's buffer should be replayed for once the size settles.
+  var rebuildPending = false
 
   init(cols: UInt16, rows: UInt16, theme: TerminalTheme = .tether) {
     emulator = TerminalEngine(cols: cols, rows: rows, theme: theme)

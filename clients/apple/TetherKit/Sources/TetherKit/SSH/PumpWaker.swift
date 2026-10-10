@@ -30,12 +30,14 @@ final class PumpWaker: @unchecked Sendable {
     var events: Int16 = 0
     if readable { events |= Int16(POLLIN) }
     if writable { events |= Int16(POLLOUT) }
+    // A socket asked for nothing is left out: poll reports a hang-up on it regardless, and a
+    // paused pump would wake on that at once and spin.
     var fds = [
-      pollfd(fd: socket, events: events, revents: 0),
       pollfd(fd: readFD, events: Int16(POLLIN), revents: 0),
+      pollfd(fd: socket, events: events, revents: 0),
     ]
-    _ = poll(&fds, 2, Int32(clamping: timeoutMs))
-    if fds[1].revents & Int16(POLLIN) != 0 { drain() }
+    _ = poll(&fds, events == 0 ? 1 : 2, Int32(clamping: timeoutMs))
+    if fds[0].revents & Int16(POLLIN) != 0 { drain() }
   }
 
   /// POLLOUT means at least the send low-water mark (2 KB by default) is free,

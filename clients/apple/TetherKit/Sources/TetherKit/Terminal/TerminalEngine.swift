@@ -13,6 +13,8 @@ final class TerminalEngine {
   /// Rebuilt only when a program repaints the palette (OSC 4/104) or the theme changes.
   private var palette: [UInt32] = []
   private var theme: TerminalTheme
+  /// The theme with whatever a program set over it with OSC 10/11/12.
+  private var effectiveTheme: TerminalTheme
   private var paletteOverrides = PaletteOverrides()
   private var reports = OSCReports()
   private var needsRefresh = false
@@ -23,6 +25,8 @@ final class TerminalEngine {
   /// Set by anything that can add, move or remove a kitty image, so an unchanged screen
   /// doesn't rebuild the graphics snapshot every refresh.
   private var graphicsDirty = true
+  /// A chunk that ended on ESC may continue an APC in the next one.
+  private var endedOnEscape = false
   private let imageOwner = TerminalEngine.nextImageOwner()
   private static let ownerLock = NSLock()
   nonisolated(unsafe) private static var lastImageOwner: UInt64 = 0
@@ -37,8 +41,12 @@ final class TerminalEngine {
   /// `buffer.yDisp` at the live bottom. SwiftTerm's yDisp follows output only while there,
   /// so it is restored before every feed and resize.
   private var liveTop = 0
+  /// Bumped when line numbers restart (RIS, ED 3), so a selection kept by line drops.
+  private var lineEpoch: UInt32 = 0
 
-  init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000, theme: TerminalTheme = .tether) {
+  /// `eagerGrid: false` defers the first grid to the first `frame()`: a tall replay engine
+  /// would otherwise build it twice.
+  init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000, theme: TerminalTheme = .tether, eagerGrid: Bool = true) {
     self.theme = theme
     let delegate = EngineDelegate()
     self.delegate = delegate
@@ -54,9 +62,18 @@ final class TerminalEngine {
     terminal = Terminal(delegate: delegate, options: options)
     TerminalPalette.install(theme, on: terminal)
     palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
-    let grid = buildGrid()
-    cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks, images: .empty)
-    terminal.clearUpdateRange()
+    effectiveTheme = theme
+    installColorResets()
+    if eagerGrid {
+      let grid = buildGrid()
+      cached = TerminalFrame(
+        header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks, images: .empty,
+        clusters: grid.clusters, defaultBackground: effectiveTheme.background)
+      terminal.clearUpdateRange()
+    } else {
+      cached = TerminalFrame(header: currentHeader(), cells: [])
+      needsRefresh = true
+    }
   }
 
   func frame() -> TerminalFrame {
@@ -132,6 +149,7 @@ final class TerminalEngine {
   }
 
   var bracketedPaste: Bool { locked { terminal.bracketedPasteMode } }
+  var isAltScreen: Bool { locked { terminal.isCurrentBufferAlternate } }
 
   var mouseMode: MouseMode {
     locked {
@@ -295,12 +313,19 @@ final class TerminalEngine {
   }
 
   private func feedLocked(_ bytes: Data) {
-    graphicsDirty = true
+    // Kitty graphics arrive as APC (`ESC _`); anything else that moves an image also marks
+    // rows, which rebuilds the image layer on its own.
+    if Self.mayCarryGraphics(bytes, afterEscape: endedOnEscape) { graphicsDirty = true }
+    endedOnEscape = bytes.last == 0x1B
     let pinned = scrollOffset
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
     returnToLive()
+    let topBefore = screenTopLine()
     feedMarkingCommands([UInt8](bytes))
+    // The top only moves back when the buffer was reset or its scrollback cleared: line
+    // numbers from before mean something else now.
+    if screenTopLine() < topBefore { lineEpoch &+= 1 }
     liveTop = terminal.buffer.yDisp
     guard pinned > 0, !terminal.isCurrentBufferAlternate else {
       scrollOffset = 0
@@ -318,6 +343,16 @@ final class TerminalEngine {
     terminal.buffer.yDisp = top
     scrollOffset = liveTop - top
     needsRefresh = true
+  }
+
+  static func mayCarryGraphics(_ bytes: Data, afterEscape: Bool) -> Bool {
+    if afterEscape, bytes.first == 0x5F { return true }
+    var previous: UInt8 = 0
+    for byte in bytes {
+      if previous == 0x1B, byte == 0x5F { return true }
+      previous = byte
+    }
+    return false
   }
 
   private func resizeLocked(cols: UInt16, rows: UInt16) {
@@ -463,12 +498,40 @@ final class TerminalEngine {
   private func returnToLive() {
     guard scrollOffset > 0, !terminal.isCurrentBufferAlternate else { return }
     terminal.buffer.yDisp = liveTop
+    // The view moved without any row being marked: the next grid must be built whole.
+    needsRefresh = true
+  }
+
+  /// SwiftTerm sets OSC 10/11/12 but has no OSC 110/111/112: a program that restores the
+  /// defaults on exit would otherwise leave its colours behind.
+  private func installColorResets() {
+    terminal.registerOscHandler(code: 110) { [weak self] _ in
+      guard let self else { return }
+      self.terminal.foregroundColor = TerminalPalette.color(self.theme.foreground)
+    }
+    terminal.registerOscHandler(code: 111) { [weak self] _ in
+      guard let self else { return }
+      self.terminal.backgroundColor = TerminalPalette.color(self.theme.background)
+    }
+    terminal.registerOscHandler(code: 112) { [weak self] _ in self?.terminal.cursorColor = nil }
+  }
+
+  /// Recomputes the program-set defaults; true when they changed and every cell must be re-read.
+  private func refreshEffectiveTheme() -> Bool {
+    var effective = theme
+    effective.foreground = TerminalPalette.pack(terminal.foregroundColor)
+    effective.background = TerminalPalette.pack(terminal.backgroundColor)
+    effective.cursor = terminal.cursorColor.map(TerminalPalette.pack) ?? theme.cursor
+    guard effective != effectiveTheme else { return false }
+    effectiveTheme = effective
+    return true
   }
 
   private func refresh() {
     // A synchronized update (DECSET 2026) shows only once complete; the dirty
     // range survives, so the frame after it rebuilds.
     guard !terminal.synchronizedOutputActive else { return }
+    if refreshEffectiveTheme() { needsRefresh = true }
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
     // An animation tick marks the screen for update without any output.
@@ -482,24 +545,50 @@ final class TerminalEngine {
     guard needsRefresh || stateChanged || imagesChanged || delegate.paletteChanged
       || terminal.getUpdateRange() != nil
     else { return }
+    let dirty = terminal.getUpdateRange()
+    // Only rows SwiftTerm marked are re-read; a new size, palette or viewport rebuilds all.
+    let rebuildAll = needsRefresh || delegate.paletteChanged
+      || header.cols != cached.header.cols || header.rows != cached.header.rows
+      || cached.cells.count != Int(header.cols) * Int(header.rows)
     needsRefresh = false
     if delegate.paletteChanged {
       palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
       delegate.paletteChanged = false
     }
     terminal.clearUpdateRange()
-    let grid = buildGrid()
-    if stateChanged || imagesChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks {
+    let grid: Grid
+    if rebuildAll {
+      grid = buildGrid()
+    } else if let dirty {
+      grid = buildGrid(rows: dirty.startY...dirty.endY, over: cached)
+    } else {
+      grid = Grid(cells: cached.cells, hyperlinks: cached.hyperlinks, clusters: cached.clusters)
+    }
+    if stateChanged || imagesChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks
+      || grid.clusters != cached.clusters || effectiveTheme.background != cached.defaultBackground {
       generationCounter &+= 1
     }
     var stamped = header
     stamped.generation = generationCounter
-    cached = TerminalFrame(header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks, images: images)
+    let cursorIndex = Int(header.cursorRow) * Int(header.cols) + Int(header.cursorCol)
+    stamped.cursorWide = grid.cells.indices.contains(cursorIndex)
+      && grid.cells[cursorIndex].attrs & GridSnapshot.attrWide != 0
+    cached = TerminalFrame(
+      header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks, images: images,
+      clusters: grid.clusters, defaultBackground: effectiveTheme.background)
+  }
+
+  private struct Grid {
+    var cells: [GridSnapshot.Cell]
+    var hyperlinks: [[LinkSpan]]
+    var clusters: [Int: String]
   }
 
   private static func sameState(_ lhs: GridSnapshot.Header, _ rhs: GridSnapshot.Header) -> Bool {
     var lhs = lhs
     lhs.generation = rhs.generation
+    // Set from the grid after it is built; a fresh header never has it.
+    lhs.cursorWide = rhs.cursorWide
     return lhs == rhs
   }
 
@@ -515,38 +604,67 @@ final class TerminalEngine {
       // Scrolled back past it, the cursor is below the view, not on a history line.
       cursorVisible: delegate.cursorVisible && cursor.y + scrollOffset < dims.rows,
       altScreen: terminal.isCurrentBufferAlternate,
-      programCursor: TerminalCursorStyle(program: terminal.options.cursorStyle))
+      programCursor: TerminalCursorStyle(program: terminal.options.cursorStyle),
+      firstLine: terminal.buffer.yDisp + terminal.buffer.totalLinesTrimmed,
+      lineEpoch: lineEpoch,
+      cursorColor: terminal.cursorColor.map(TerminalPalette.pack))
   }
 
-  private func buildGrid() -> (cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]]) {
+  private func buildGrid() -> Grid {
     let dims = terminal.getDims()
-    var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell(for: theme), count: dims.cols * dims.rows)
-    var hyperlinks: [[LinkSpan]] = []
+    var grid = Grid(
+      cells: [GridSnapshot.Cell](repeating: TerminalPalette.blankCell(for: effectiveTheme), count: dims.cols * dims.rows),
+      hyperlinks: [], clusters: [:])
     for row in 0..<dims.rows {
-      guard let line = terminal.getLine(row: row) else { continue }
-      var open: (start: Int, target: LinkTarget)?
-      func close(at end: Int) {
-        guard let run = open else { return }
-        if hyperlinks.isEmpty { hyperlinks = Array(repeating: [], count: dims.rows) }
-        hyperlinks[row].append(LinkSpan(start: run.start, end: end, target: run.target))
-        open = nil
-      }
-      for col in 0..<min(dims.cols, line.count) {
-        let data = line[col]
-        var cell = Self.cell(data, palette: palette, theme: theme)
-        // A wide glyph's tail carries no payload of its own; it belongs to the head's link.
-        let target = data.width == 0 ? open?.target : Self.hyperlinkTarget(data)
-        if target != open?.target { close(at: col) }
-        if let target {
-          if open == nil { open = (col, target) }
-          // Shown underlined: an OSC 8 link's text need not look like a URL.
-          cell.attrs |= GridSnapshot.attrUnderline
-        }
-        cells[row * dims.cols + col] = cell
-      }
-      close(at: min(dims.cols, line.count))
+      readRow(row, cols: dims.cols, rows: dims.rows, into: &grid)
     }
-    return (cells, hyperlinks)
+    return grid
+  }
+
+  /// Re-reads `marked` (clamped to the screen) and keeps every other row of `previous`.
+  private func buildGrid(rows marked: ClosedRange<Int>, over previous: TerminalFrame) -> Grid {
+    let dims = terminal.getDims()
+    var grid = Grid(cells: previous.cells, hyperlinks: previous.hyperlinks, clusters: previous.clusters)
+    let blank = TerminalPalette.blankCell(for: effectiveTheme)
+    let first = max(0, marked.lowerBound)
+    let last = min(dims.rows - 1, marked.upperBound)
+    guard first <= last else { return grid }
+    for row in first...last {
+      let start = row * dims.cols
+      let span = start..<(start + dims.cols)
+      grid.cells.replaceSubrange(span, with: repeatElement(blank, count: dims.cols))
+      if !grid.hyperlinks.isEmpty { grid.hyperlinks[row] = [] }
+      if !grid.clusters.isEmpty { grid.clusters = grid.clusters.filter { !span.contains($0.key) } }
+      readRow(row, cols: dims.cols, rows: dims.rows, into: &grid)
+    }
+    return grid
+  }
+
+  private func readRow(_ row: Int, cols: Int, rows: Int, into grid: inout Grid) {
+    guard let line = terminal.getLine(row: row) else { return }
+    var open: (start: Int, target: LinkTarget)?
+    func close(at end: Int) {
+      guard let run = open else { return }
+      if grid.hyperlinks.isEmpty { grid.hyperlinks = Array(repeating: [], count: rows) }
+      grid.hyperlinks[row].append(LinkSpan(start: run.start, end: end, target: run.target))
+      open = nil
+    }
+    for col in 0..<min(cols, line.count) {
+      let data = line[col]
+      let index = row * cols + col
+      var cell = Self.cell(data, palette: palette, theme: effectiveTheme)
+      if data.width != 0, let cluster = Self.cluster(data) { grid.clusters[index] = cluster }
+      // A wide glyph's tail carries no payload of its own; it belongs to the head's link.
+      let target = data.width == 0 ? open?.target : Self.hyperlinkTarget(data)
+      if target != open?.target { close(at: col) }
+      if let target {
+        if open == nil { open = (col, target) }
+        // Shown underlined: an OSC 8 link's text need not look like a URL.
+        cell.attrs |= GridSnapshot.attrUnderline
+      }
+      grid.cells[index] = cell
+    }
+    close(at: min(cols, line.count))
   }
 
   private static func hyperlinkTarget(_ data: CharData) -> LinkTarget? {
@@ -559,11 +677,32 @@ final class TerminalEngine {
     var bits = attrs(attribute.style)
     // Resolved colors can't tell "never painted" from "painted the default color".
     if case .defaultColor = attribute.bg { bits |= GridSnapshot.attrDefaultBackground }
+    if data.width == 2 { bits |= GridSnapshot.attrWide }
+    if data.width == 0 { bits |= GridSnapshot.attrWideTail }
+    let underline = UInt32(attribute.underlineStyle.rawValue)
+    if underline != 0 { bits |= GridSnapshot.attrUnderline }
+    if bits & GridSnapshot.attrUnderline != 0 {
+      bits |= (underline == 0 ? GridSnapshot.UnderlineStyle.single.rawValue : underline) << GridSnapshot.underlineStyleShift
+    }
     return GridSnapshot.Cell(
       codepoint: codepoint(data),
       foreground: TerminalPalette.resolve(attribute.fg, isForeground: true, palette: palette, theme: theme),
       background: TerminalPalette.resolve(attribute.bg, isForeground: false, palette: palette, theme: theme),
-      attrs: bits)
+      attrs: bits,
+      underlineColor: attribute.underlineColor.map {
+        TerminalPalette.resolve($0, isForeground: true, palette: palette, theme: theme)
+      } ?? 0)
+  }
+
+  /// The whole grapheme when one scalar can't stand for it: `codepoint` alone would draw a
+  /// family emoji as its first person, a flag as one letter, a keycap as a bare digit.
+  private static func cluster(_ data: CharData) -> String? {
+    guard !data.isSimpleRune else { return nil }
+    let text = data.getText()
+    var scalars = text.unicodeScalars.makeIterator()
+    guard scalars.next() != nil, scalars.next() != nil else { return nil }
+    let composed = text.precomposedStringWithCanonicalMapping
+    return composed.unicodeScalars.count == 1 ? nil : text
   }
 
   /// One codepoint per cell: combining marks NFC-compose into their base;
@@ -590,6 +729,7 @@ final class TerminalEngine {
     if style.contains(.inverse) { bits |= GridSnapshot.attrInverse }
     if style.contains(.dim) { bits |= GridSnapshot.attrDim }
     if style.contains(.crossedOut) { bits |= GridSnapshot.attrStrikethrough }
+    if style.contains(.invisible) { bits |= GridSnapshot.attrHidden }
     return bits
   }
 }

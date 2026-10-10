@@ -154,6 +154,15 @@ final class ScriptedByteStream: TerminalByteStream, @unchecked Sendable {
 
   func write(_ bytes: Data) async throws {}
 
+  private var recordedResizes: [[UInt16]] = []
+  var resizes: [[UInt16]] { lock.lock(); defer { lock.unlock() }; return recordedResizes }
+
+  func resize(cols: UInt16, rows: UInt16) async {
+    lock.lock()
+    recordedResizes.append([cols, rows])
+    lock.unlock()
+  }
+
   func close() async {
     lock.lock()
     isClosed = true

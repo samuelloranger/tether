@@ -18,12 +18,14 @@ public enum TerminalGridInset {
     return max(1, Int(available / cellWidth))
   }
 
+  /// Snapped to the device pixel grid: on a half point the whole bitmap is resampled, and
+  /// every glyph softens.
   static func originX(
-    viewWidth: CGFloat, cellWidth: CGFloat, cols: Int, padding: CGFloat = defaultPadding
+    viewWidth: CGFloat, cellWidth: CGFloat, cols: Int, padding: CGFloat = defaultPadding, scale: CGFloat = 1
   ) -> CGFloat {
     let available = viewWidth - padding * 2
     let leftover = max(0, available - CGFloat(cols) * cellWidth)
-    return padding + leftover / 2
+    return ((padding + leftover / 2) * scale).rounded(.down) / scale
   }
 }
 
@@ -35,8 +37,15 @@ enum TerminalLineSpacing {
     min(max(spacing, range.lowerBound), range.upperBound)
   }
 
-  static func cellHeight(lineHeight: CGFloat, spacing: CGFloat) -> CGFloat {
-    ceil(lineHeight * CGFloat(clamped(Double(spacing))))
+  /// Rounded up to whole device pixels (whole points at scale 1), so rows tile with no seam.
+  static func cellHeight(lineHeight: CGFloat, spacing: CGFloat, scale: CGFloat = 1) -> CGFloat {
+    ceil(lineHeight * CGFloat(clamped(Double(spacing))) * scale) / scale
+  }
+
+  /// A cell's width in whole device pixels: whole points over-rounded by up to a pixel and a
+  /// half on a 3× screen, which opened gaps between cells.
+  static func cellWidth(advance: CGFloat, scale: CGFloat) -> CGFloat {
+    ceil(advance * scale) / scale
   }
 }
 

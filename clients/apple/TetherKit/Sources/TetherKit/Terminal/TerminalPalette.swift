@@ -44,11 +44,15 @@ enum TerminalPalette {
     }
   }
 
-  private static func color(_ argb: UInt32) -> Color {
+  static func color(_ argb: UInt32) -> Color {
     Color(
       red8: UInt16((argb >> 16) & 0xFF),
       green8: UInt16((argb >> 8) & 0xFF),
       blue8: UInt16(argb & 0xFF))
+  }
+
+  static func pack(_ color: Color) -> UInt32 {
+    pack(UInt8(color.red >> 8), UInt8(color.green >> 8), UInt8(color.blue >> 8))
   }
 
   private static func pack(_ red: UInt8, _ green: UInt8, _ blue: UInt8) -> UInt32 {

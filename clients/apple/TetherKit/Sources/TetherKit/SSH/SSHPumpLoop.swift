@@ -45,12 +45,17 @@ final class SSHPumpLoop {
   /// Bytes of `outbound` already written.
   private var sent = 0
   private var queuedResize: (cols: Int32, rows: Int32)?
-  private var buffer = [UInt8](repeating: 0, count: 32 * 1024)
+  private var buffer = [UInt8](repeating: 0, count: 128 * 1024)
   private let io: SSHPumpIO
   private let deliver: (Data) -> Void
+  /// True while the consumer is too far behind: the socket is left unread.
+  private let readPaused: () -> Bool
+  /// How often a paused loop looks again in case no wake comes.
+  static let pausedWaitMs = 50
 
-  init(io: SSHPumpIO, deliver: @escaping (Data) -> Void) {
+  init(io: SSHPumpIO, readPaused: @escaping () -> Bool = { false }, deliver: @escaping (Data) -> Void) {
     self.io = io
+    self.readPaused = readPaused
     self.deliver = deliver
   }
 
@@ -89,19 +94,24 @@ final class SSHPumpLoop {
       sleepMs = max(1, next) * 1000
     }
 
-    let count = readOnce()
-    if count > 0 {
-      progressed = true
-    } else if count == 0 {
-      if io.isEOF() { return .ended(.eof) }
-    } else if count == LibSSH2Const.eagain {
-      if io.blockedOutbound() { return park(.read) }
-    } else {
-      return .ended(.transport(count))
+    let paused = readPaused()
+    if !paused {
+      let count = readOnce()
+      if count > 0 {
+        progressed = true
+      } else if count == 0 {
+        if io.isEOF() { return .ended(.eof) }
+      } else if count == LibSSH2Const.eagain {
+        if io.blockedOutbound() { return park(.read) }
+      } else {
+        return .ended(.transport(count))
+      }
     }
 
     if !progressed {
-      io.wait(readable: true, writable: queuedResize != nil, timeoutMs: sleepMs)
+      io.wait(
+        readable: !paused, writable: queuedResize != nil,
+        timeoutMs: paused ? min(sleepMs, Self.pausedWaitMs) : sleepMs)
     }
     return .running
   }

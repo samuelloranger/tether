@@ -11,24 +11,64 @@ final class GitRepositoryModelTests: XCTestCase {
     ])
   }
 
-  func test_one_command_carries_all_four_workspace_sections() {
-    let output = "PATCH\u{1D}feat/x\n\u{1D}abc\u{1F}s\u{1F}a\u{1F}1\u{1E}\u{1D}[]"
-    let sections = GitRepositoryModel.workspaceSections(output)
-    XCTAssertEqual(sections?.diff, "PATCH")
-    XCTAssertEqual(sections?.branch, "feat/x\n")
-    XCTAssertEqual(sections?.commits, "abc\u{1F}s\u{1F}a\u{1F}1\u{1E}")
-    XCTAssertEqual(sections?.pullRequests, "[]")
-    XCTAssertNil(GitRepositoryModel.workspaceSections("only\u{1D}two"))
+  func test_one_command_carries_every_workspace_section() {
+    let output = "feat/x\n\u{1D}new.txt\n\"tab\\there.txt\"\n\u{1D}abc999\nabc\u{1F}s\u{1F}a\u{1F}1\u{1E}\u{1D}PATCH"
+    guard case let .repository(sections) = GitWorkspaceScript.parse(cwd: "/repo", output) else {
+      return XCTFail("expected a repository")
+    }
+    XCTAssertEqual(sections.cwd, "/repo")
+    XCTAssertEqual(sections.branch, "feat/x")
+    XCTAssertEqual(sections.untracked, ["new.txt", "tab\there.txt"])
+    XCTAssertEqual(sections.commits, .list(head: "abc999", [GitCommit(id: "abc", subject: "s", author: "a", timestamp: 1)]))
+    XCTAssertEqual(sections.diff, "PATCH")
+    XCTAssertEqual(GitWorkspaceScript.parse(cwd: "/x", "only\u{1D}two"), .unreadable)
+    XCTAssertEqual(GitWorkspaceScript.parse(cwd: "/x", GitWorkspaceScript.notRepository), .notRepository(cwd: "/x"))
   }
 
-  func test_a_record_separator_inside_a_section_does_not_split_it() {
-    // The commit format ends every record with 0x1e, and a patch may contain
-    // one: neither may be mistaken for the boundary between sections.
-    let commits = "a\u{1F}s\u{1F}n\u{1F}1\u{1E}b\u{1F}t\u{1F}n\u{1F}2\u{1E}"
-    let sections = GitRepositoryModel.workspaceSections("+a\u{1E}b\u{1D}main\n\u{1D}\(commits)\u{1D}[]")
-    XCTAssertEqual(sections?.diff, "+a\u{1E}b")
-    XCTAssertEqual(sections?.commits, commits)
-    XCTAssertEqual(GitRepositoryModel.commits(from: sections?.commits ?? "").count, 2)
+  func test_a_separator_inside_the_patch_does_not_split_it() {
+    // The patch comes last, so whatever bytes it holds are never read as a boundary.
+    let commits = "h\na\u{1F}s\u{1F}n\u{1F}1\u{1E}b\u{1F}t\u{1F}n\u{1F}2\u{1E}"
+    guard case let .repository(sections) = GitWorkspaceScript.parse(cwd: "/r", "main\n\u{1D}\u{1D}\(commits)\u{1D}+a\u{1D}\u{1E}b") else {
+      return XCTFail("expected a repository")
+    }
+    XCTAssertEqual(sections.diff, "+a\u{1D}\u{1E}b")
+    guard case let .list(_, list) = sections.commits else { return XCTFail("expected commits") }
+    XCTAssertEqual(list.count, 2)
+  }
+
+  func test_an_unmoved_head_skips_the_commit_list() {
+    guard case let .repository(sections) = GitWorkspaceScript.parse(cwd: "/r", "main\n\u{1D}\u{1D}=\u{1D}") else {
+      return XCTFail("expected a repository")
+    }
+    XCTAssertEqual(sections.commits, .unchanged)
+  }
+
+  func test_untracked_files_past_the_cap_are_counted_not_listed() {
+    let paths = (0...GitWorkspaceScript.untrackedCap).map { "f\($0)" }.joined(separator: "\n")
+    guard case let .repository(sections) = GitWorkspaceScript.parse(cwd: "/r", "main\u{1D}\(paths)\u{1D}=\u{1D}") else {
+      return XCTFail("expected a repository")
+    }
+    XCTAssertEqual(sections.untracked.count, GitWorkspaceScript.untrackedCap)
+    XCTAssertTrue(sections.untrackedTruncated)
+  }
+
+  func test_a_capped_patch_keeps_whole_lines_only() {
+    let line = String(repeating: "x", count: 1023) + "\n"
+    let output = String(repeating: line, count: 2049)
+    let (kept, truncated) = GitWorkspaceScript.capped(output)
+    XCTAssertTrue(truncated)
+    XCTAssertTrue(kept.utf8.count <= GitWorkspaceScript.byteCap)
+    XCTAssertTrue(kept.hasSuffix("x"))
+    XCTAssertEqual(GitWorkspaceScript.capped("small\n").1, false)
+  }
+
+  func test_the_cwd_announcement_is_split_from_the_output() {
+    let live = GitWorkspaceScript.splitCwd("P/home/me/repo\u{1C}rest")
+    XCTAssertEqual(live?.cwd, "/home/me/repo")
+    XCTAssertEqual(live?.source, .live)
+    XCTAssertEqual(live?.output, "rest")
+    XCTAssertEqual(GitWorkspaceScript.splitCwd("F/srv\u{1C}")?.source, .fallback)
+    XCTAssertNil(GitWorkspaceScript.splitCwd(GitWorkspaceScript.noCwd))
   }
 
   func test_parses_open_pull_requests_from_gh_json() throws {

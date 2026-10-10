@@ -108,4 +108,104 @@ final class DiffFileTests: XCTestCase {
     XCTAssertEqual(DiffFile.stat(files).added, 2)
     XCTAssertEqual(DiffFile.stat(files).removed, 1)
   }
+
+  func test_a_removed_sql_comment_is_a_removal_not_a_file_header() {
+    let files = DiffFile.group(GitDiffModel.classify("diff --git a/q.sql b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+++ new increment\n kept"))
+    XCTAssertEqual(files.count, 1)
+    XCTAssertEqual(files[0].rows.filter { $0.kind == .removed }.map(\.text), ["-- old comment"])
+    XCTAssertEqual(files[0].rows.filter { $0.kind == .added }.map(\.text), ["++ new increment"])
+    XCTAssertEqual(files[0].rows.last?.oldLine, 2)
+    XCTAssertEqual(files[0].rows.last?.newLine, 2)
+  }
+
+  func test_a_binary_file_says_so_instead_of_rendering_a_numbered_line() {
+    let files = DiffFile.group(GitDiffModel.classify(
+      "diff --git a/img.png b/img.png\nindex 1..2 100644\nBinary files a/img.png and b/img.png differ"))
+    XCTAssertEqual(files.map(\.path), ["img.png"])
+    XCTAssertEqual(files[0].rows.map(\.kind), [.plain])
+    XCTAssertEqual(files[0].rows[0].text, "Binary files a/img.png and b/img.png differ")
+  }
+
+  func test_no_newline_at_end_of_file_does_not_shift_the_numbers() {
+    let rows = DiffFile.group(GitDiffModel.classify(
+      "diff --git a/x b/x\n@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n\\ No newline at end of file"))[0].rows
+    XCTAssertEqual(rows.first { $0.kind == .added }?.newLine, 1)
+    XCTAssertEqual(rows.filter { $0.kind == .plain }.count, 2)
+  }
+
+  func test_a_trailing_newline_adds_no_blank_row() {
+    let rows = DiffFile.group(GitDiffModel.classify("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n"))[0].rows
+    XCTAssertEqual(rows.map(\.kind), [.hunk, .removed, .added])
+  }
+
+  func test_a_quoted_path_is_unquoted() {
+    let files = DiffFile.group(GitDiffModel.classify(
+      "diff --git \"a/caf\\303\\251.txt\" \"b/caf\\303\\251.txt\"\n--- \"a/caf\\303\\251.txt\"\n+++ \"b/caf\\303\\251.txt\"\n@@ -1 +1 @@\n-a\n+b"))
+    XCTAssertEqual(files.map(\.path), ["café.txt"])
+  }
+
+  func test_a_path_with_a_space_is_read_whole() {
+    let files = DiffFile.group(GitDiffModel.classify(
+      "diff --git a/my b/file.txt b/my b/file.txt\n--- a/my b/file.txt\t\n+++ b/my b/file.txt\t\n@@ -1 +1 @@\n-a\n+b"))
+    XCTAssertEqual(files.map(\.path), ["my b/file.txt"])
+    XCTAssertEqual(DiffFile.gitHeaderPath("diff --git a/my b/file.txt b/my b/file.txt"), "my b/file.txt")
+  }
+
+  func test_a_pure_rename_or_mode_change_is_shown_not_dropped() {
+    let files = DiffFile.group(GitDiffModel.classify("""
+    diff --git a/old.txt b/new.txt
+    similarity index 100%
+    rename from old.txt
+    rename to new.txt
+    diff --git a/run.sh b/run.sh
+    old mode 100644
+    new mode 100755
+    """))
+    XCTAssertEqual(files.map(\.path), ["new.txt", "run.sh"])
+    XCTAssertEqual(files[0].rows.map(\.text), ["Renamed from old.txt"])
+    XCTAssertEqual(files[1].rows.map(\.text), ["Mode 100644 → 100755"])
+  }
+
+  func test_a_deleted_file_is_named_by_its_old_path() {
+    let files = DiffFile.group(GitDiffModel.classify(
+      "diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-a"))
+    XCTAssertEqual(files.map(\.path), ["gone.txt"])
+    XCTAssertEqual(files[0].removed, 1)
+  }
+
+  func test_a_combined_merge_diff_strips_one_marker_per_parent() {
+    let lines = GitDiffModel.classify("diff --cc f\n@@@ -1,2 -1,2 +1,2 @@@\n- a\n -b\n++c\n  d")
+    XCTAssertEqual(lines.map(\.kind), [.fileHeader, .hunk, .removed, .removed, .added, .context])
+    let rows = DiffFile.group(lines)[0].rows
+    XCTAssertEqual(rows.dropFirst().map(\.text), ["a", "b", "c", "d"])
+  }
+
+  func test_row_ids_restart_per_file() {
+    let files = DiffFile.group(GitDiffModel.classify(patch))
+    XCTAssertEqual(files[1].rows.first?.id, 0)
+  }
+
+  func test_a_hunk_copies_as_a_patch() {
+    let file = DiffFile.group(GitDiffModel.classify(patch))[1]
+    XCTAssertEqual(file.hunkPatch(startingAt: 0), "@@ -1,2 +1,1 @@\n-old\n kept\n")
+    XCTAssertTrue(file.patchText.hasPrefix("--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,1 @@\n"))
+  }
+
+  func test_the_gutter_is_as_wide_as_the_largest_line_number() {
+    let file = DiffFile.group(GitDiffModel.classify("diff --git a/x b/x\n@@ -99998,2 +99998,2 @@\n a\n-b\n+c"))[0]
+    XCTAssertEqual(file.lineDigits, 5)
+  }
+
+  func test_a_stray_line_inside_a_hunk_is_shown_and_the_hunk_goes_on() {
+    let rows = DiffFile.group(GitDiffModel.classify(
+      "diff --git a/x b/x\n@@ -1,2 +1,2 @@\n-a\nwarning: CRLF will be replaced\n+b\n c"))[0].rows
+    XCTAssertEqual(rows.map(\.kind), [.hunk, .removed, .plain, .added, .context])
+    XCTAssertEqual(rows.last?.newLine, 2)
+  }
+
+  func test_a_combined_hunk_keeps_going_past_a_no_newline_marker() {
+    let lines = GitDiffModel.classify("diff --cc f\n@@@ -1,1 -1,1 +1,2 @@@\n- a\n\\ No newline at end of file\n++c")
+    XCTAssertEqual(lines.map(\.kind), [.fileHeader, .hunk, .removed, .note, .added])
+  }
 }
+

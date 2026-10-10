@@ -16,19 +16,20 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   private var pendingResize: (cols: Int32, rows: Int32)?
   private var stopped = false
 
-  private let inbound: AsyncStream<Data>
-  private let sink: AsyncStream<Data>.Continuation
-  private var iterator: AsyncStream<Data>.AsyncIterator
+  /// Output the pipeline has not taken yet. Whatever piled up while it was busy goes out as
+  /// one chunk, so a flood costs one feed per pass rather than one per socket read.
+  private var inbound = Data()
+  private var inboundFinished = false
+  private var reader: CheckedContinuation<Data?, Never>?
+  /// Past this the pump stops reading the socket: the SSH window fills and the host waits,
+  /// instead of the phone buffering output it cannot draw (and a Ctrl-C queueing behind it).
+  static let inboundHighWater = 1 << 20
 
   init(session: OpaquePointer, channel: OpaquePointer, socket: Int32, socketGuard: SocketGuard) {
     self.session = session
     self.channel = channel
     self.socket = socket
     self.socketGuard = socketGuard
-    var continuation: AsyncStream<Data>.Continuation!
-    self.inbound = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
-    self.sink = continuation
-    self.iterator = inbound.makeAsyncIterator()
 
     let thread = Thread { [weak self] in self?.pump() }
     thread.name = "tether.ssh.pump"
@@ -37,7 +38,60 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   }
 
   // Single-consumer: only the pipeline's SSH read loop calls this, serially.
-  func read() async -> Data? { await iterator.next() }
+  func read() async -> Data? {
+    await withTaskCancellationHandler {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+        self.lock.lock()
+        if !self.inbound.isEmpty {
+          let chunk = self.inbound
+          let wasPaused = chunk.count >= Self.inboundHighWater
+          self.inbound = Data()
+          self.lock.unlock()
+          if wasPaused { self.waker.wake() }
+          continuation.resume(returning: chunk)
+        } else if self.inboundFinished || Task.isCancelled {
+          self.lock.unlock()
+          continuation.resume(returning: nil)
+        } else {
+          self.reader = continuation
+          self.lock.unlock()
+        }
+      }
+    } onCancel: {
+      self.lock.lock()
+      let waiting = self.reader
+      self.reader = nil
+      self.lock.unlock()
+      waiting?.resume(returning: nil)
+    }
+  }
+
+  private func deliver(_ data: Data) {
+    lock.lock()
+    if let waiting = reader {
+      reader = nil
+      lock.unlock()
+      waiting.resume(returning: data)
+      return
+    }
+    inbound.append(data)
+    lock.unlock()
+  }
+
+  private var readPaused: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return inbound.count >= Self.inboundHighWater
+  }
+
+  private func finishInbound() {
+    lock.lock()
+    inboundFinished = true
+    let waiting = reader
+    reader = nil
+    lock.unlock()
+    waiting?.resume(returning: nil)
+  }
 
   func write(_ bytes: Data) async {
     guard !bytes.isEmpty else { return }
@@ -64,7 +118,7 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
   private func pump() {
     libssh2_session_set_blocking(session, 0)
     let io = LibSSH2PumpIO(session: session, channel: channel, socket: socket, waker: waker)
-    let loop = SSHPumpLoop(io: io) { [sink] data in _ = sink.yield(data) }
+    let loop = SSHPumpLoop(io: io, readPaused: { [unowned self] in self.readPaused }) { [unowned self] data in self.deliver(data) }
     while true {
       lock.lock()
       let done = stopped
@@ -93,6 +147,6 @@ final class SSHSessionPump: TerminalByteStream, @unchecked Sendable {
     tether_libssh2_session_disconnect(session, "tether closing")
     libssh2_session_free(session)
     socketGuard.close()
-    sink.finish()
+    finishInbound()
   }
 }

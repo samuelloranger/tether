@@ -5,13 +5,23 @@ import UIKit
 struct TerminalRenderOutput {
   var header: GridSnapshot.Header
   var cells: [GridSnapshot.Cell]
-  var rowTexts: [String]
-  var linkSpans: [[LinkSpan]]
+  var hyperlinks: [[LinkSpan]]
   var images: TerminalImageLayer
+  var clusters: [Int: String] = [:]
+  var defaultBackground: UInt32?
   var image: CGImage?
+  /// Rows the bitmap anchors to the bottom of the view.
+  var drawRows: Int
+  /// The cell under the cursor drawn as a solid block, for a block cursor.
+  var cursorImage: CGImage?
+
+  /// Plain text per row. Computed on demand: only selection and link taps read it.
+  var rowTexts: [String] {
+    TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows), clusters: clusters)
+  }
 }
 
-/// Link detection and rasterization for one surface, off the main thread.
+/// Rasterization for one surface, off the main thread.
 /// Touch only from the surface's serial render queue.
 final class TerminalRenderWorker {
   private let renderer = TerminalGridRenderer()
@@ -19,9 +29,10 @@ final class TerminalRenderWorker {
   private var lastMetrics: TerminalRenderMetrics?
   private var lastHeader: GridSnapshot.Header?
   private var lastCells: [GridSnapshot.Cell] = []
-  private var lastRowTexts: [String] = []
-  private var lastLinkSpans: [[LinkSpan]] = []
+  private var lastHyperlinks: [[LinkSpan]] = []
   private var lastImages = TerminalImageLayer.empty
+  private var lastClusters: [Int: String] = [:]
+  private var lastDefaultBackground: UInt32?
 
   func reset() {
     renderer.invalidate()
@@ -29,9 +40,10 @@ final class TerminalRenderWorker {
     lastMetrics = nil
     lastHeader = nil
     lastCells = []
-    lastRowTexts = []
-    lastLinkSpans = []
+    lastHyperlinks = []
     lastImages = .empty
+    lastClusters = [:]
+    lastDefaultBackground = nil
   }
 
   /// Keeps the last image but lets a new session's generation 1 through.
@@ -44,24 +56,16 @@ final class TerminalRenderWorker {
     let header = frame.header
     // A metrics change has to repaint even when the grid contents are identical,
     // so the generation shortcut only applies while the geometry holds still.
-    if header.generation == lastGeneration, metrics == lastMetrics {
+    if header.generation == lastGeneration, header.trimsBlankRows == lastHeader?.trimsBlankRows, metrics == lastMetrics {
       return nil
     }
     lastGeneration = header.generation
     lastHeader = header
     lastCells = frame.cells
+    lastHyperlinks = frame.hyperlinks
     lastImages = frame.images
-    let cols = Int(header.cols)
-    let rows = Int(header.rows)
-    lastRowTexts = TerminalRunBuilder.rowTexts(cells: lastCells, cols: cols, rows: rows)
-    // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in
-    // LinkSpans still runs.
-    lastLinkSpans = LinkSpans.merging(
-      explicit: frame.hyperlinks,
-      detected: LinkSpans.compute(
-        texts: lastRowTexts, wrapped: Array(repeating: false, count: lastRowTexts.count), cols: cols
-      )
-    )
+    lastClusters = frame.clusters
+    lastDefaultBackground = frame.defaultBackground
     return rasterize(metrics: metrics)
   }
 
@@ -75,14 +79,20 @@ final class TerminalRenderWorker {
   private func rasterize(metrics: TerminalRenderMetrics) -> TerminalRenderOutput? {
     guard let header = lastHeader else { return nil }
     lastMetrics = metrics
-    let image = renderer.render(header: header, cells: lastCells, images: lastImages, metrics: metrics)
+    let image = renderer.render(
+      header: header, cells: lastCells, images: lastImages, clusters: lastClusters,
+      defaultBackground: lastDefaultBackground, metrics: metrics)
     return TerminalRenderOutput(
       header: header,
       cells: lastCells,
-      rowTexts: lastRowTexts,
-      linkSpans: lastLinkSpans,
+      hyperlinks: lastHyperlinks,
       images: lastImages,
-      image: image
+      clusters: lastClusters,
+      defaultBackground: lastDefaultBackground,
+      image: image,
+      drawRows: renderer.drawRows,
+      cursorImage: header.cursorVisible
+        ? renderer.cursorImage(header: header, cells: lastCells, clusters: lastClusters, metrics: metrics) : nil
     )
   }
 }

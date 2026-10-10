@@ -81,14 +81,6 @@ public enum GitMergeMethod: String, Equatable, Sendable, Identifiable {
 /// Parses machine-readable output from the remote repository commands.
 public enum GitRepositoryModel {
   /// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e.
-  public static func workspaceSections(
-    _ output: String
-  ) -> (diff: String, branch: String, commits: String, pullRequests: String)? {
-    let parts = output.components(separatedBy: "\u{1D}")
-    guard parts.count == 4 else { return nil }
-    return (parts[0], parts[1], parts[2], parts[3])
-  }
-
   public static func branch(from output: String) -> String {
     output.trimmingCharacters(in: .whitespacesAndNewlines)
   }

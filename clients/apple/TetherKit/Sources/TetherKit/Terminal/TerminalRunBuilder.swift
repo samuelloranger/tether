@@ -44,9 +44,57 @@ public enum TerminalRunBuilder {
     return (cell.foreground, cell.background)
   }
 
-  /// A cell with nothing to draw: NUL from an untouched grid, or a space.
+  /// A cell with no glyph to draw: NUL from an untouched grid, a space, or concealed text.
   public static func isBlank(_ cell: GridSnapshot.Cell) -> Bool {
-    cell.codepoint == 0 || cell.codepoint == 0x20
+    cell.codepoint == 0 || cell.codepoint == 0x20 || cell.attrs & GridSnapshot.attrHidden != 0
+  }
+
+  /// An underline or strikethrough over a stretch of cells. Built from attributes, not glyph
+  /// runs, so it carries across spaces the way a terminal underlines a whole span.
+  public struct DecorationSpan: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+      case underline(GridSnapshot.UnderlineStyle)
+      case strikethrough
+    }
+
+    public var startCol: Int
+    public var length: Int
+    public var color: UInt32
+    public var kind: Kind
+  }
+
+  public static func decorations(
+    cells: [GridSnapshot.Cell],
+    rowStart: Int,
+    cols: Int
+  ) -> [DecorationSpan] {
+    guard cols > 0, rowStart >= 0, rowStart + cols <= cells.count else { return [] }
+    var spans: [DecorationSpan] = []
+    var underline: DecorationSpan?
+    var strike: DecorationSpan?
+    func extend(_ span: inout DecorationSpan?, with next: DecorationSpan?, at col: Int) {
+      if let current = span, let next, current.kind == next.kind, current.color == next.color,
+        current.startCol + current.length == col {
+        span?.length += 1
+        return
+      }
+      if let current = span { spans.append(current) }
+      span = next
+    }
+    for col in 0..<cols {
+      let cell = cells[rowStart + col]
+      let hidden = cell.attrs & GridSnapshot.attrHidden != 0
+      let fg = resolved(cell).fg
+      let style = hidden ? nil : GridSnapshot.underlineStyle(cell.attrs)
+      extend(&underline, with: style.map {
+        DecorationSpan(startCol: col, length: 1, color: cell.underlineColor != 0 ? cell.underlineColor : fg, kind: .underline($0))
+      }, at: col)
+      let struck = !hidden && cell.attrs & GridSnapshot.attrStrikethrough != 0
+      extend(&strike, with: struck ? DecorationSpan(startCol: col, length: 1, color: fg, kind: .strikethrough) : nil, at: col)
+    }
+    if let underline { spans.append(underline) }
+    if let strike { spans.append(strike) }
+    return spans
   }
 
   public static func backgrounds(
@@ -107,13 +155,25 @@ public enum TerminalRunBuilder {
   public static func rowText(
     cells: [GridSnapshot.Cell],
     rowStart: Int,
-    cols: Int
+    cols: Int,
+    clusters: [Int: String] = [:]
   ) -> String {
     guard cols > 0, rowStart >= 0, rowStart + cols <= cells.count else { return "" }
     var line = ""
     line.reserveCapacity(cols)
     for col in 0..<cols {
-      let cp = cells[rowStart + col].codepoint
+      let cell = cells[rowStart + col]
+      // A wide glyph's second cell keeps its column (selection and links index by column) but
+      // is not a space in the text: `wideTail` is dropped wherever text leaves the terminal.
+      if cell.attrs & GridSnapshot.attrWideTail != 0 {
+        line.append(wideTail)
+        continue
+      }
+      if let cluster = clusters[rowStart + col] {
+        line.append(cluster)
+        continue
+      }
+      let cp = cell.codepoint
       if cp == 0 {
         line.append(" ")
       } else if let scalar = Unicode.Scalar(cp) {
@@ -122,20 +182,24 @@ public enum TerminalRunBuilder {
         line.append(" ")
       }
     }
-    while line.last == " " { line.removeLast() }
+    while line.last == " " || line.last == wideTail { line.removeLast() }
     return line
   }
+
+  /// Stands in for a wide glyph's second column in row text.
+  public static let wideTail: Character = "\u{0}"
 
   public static func rowTexts(
     cells: [GridSnapshot.Cell],
     cols: Int,
-    rows: Int
+    rows: Int,
+    clusters: [Int: String] = [:]
   ) -> [String] {
     guard cols > 0, rows > 0 else { return [] }
     var out: [String] = []
     out.reserveCapacity(rows)
     for row in 0..<rows {
-      out.append(rowText(cells: cells, rowStart: row * cols, cols: cols))
+      out.append(rowText(cells: cells, rowStart: row * cols, cols: cols, clusters: clusters))
     }
     return out
   }

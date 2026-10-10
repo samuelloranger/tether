@@ -8,6 +8,10 @@ struct GitDiffView: View {
   var onDone: () -> Void
   @Environment(\.scenePhase) private var scenePhase
   @State private var tab: Tab = .changes
+  /// Only a refresh someone asked for spins; the poll stays out of sight.
+  @State private var refreshing = false
+  /// What shows before the first load of this visit may be another directory's repository.
+  @State private var loadedOnce = false
   private var stat: (added: Int, removed: Int) { DiffFile.stat(controller.gitFiles) }
 
   var body: some View {
@@ -16,30 +20,41 @@ struct GitDiffView: View {
         HStack(spacing: 9) {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
+            .opacity(loadedOnce ? 1 : 0.5)
+          if !loadedOnce && controller.gitLoaded { ProgressView().controlSize(.mini).tint(TetherColors.accent) }
           Spacer()
           Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         }.padding(.horizontal, 16).padding(.vertical, 12).background(TetherColors.surface)
         Picker("Git section", selection: $tab) { ForEach(Tab.allCases) { Text($0.rawValue).tag($0) } }
           .pickerStyle(.segmented).padding(12)
+        if let error = controller.gitError, controller.gitLoaded { staleBanner(error) }
         Group {
-          if controller.gitLoading && controller.gitBranch.isEmpty { ProgressView().tint(TetherColors.accent) }
-          else if let error = controller.gitError, controller.gitBranch.isEmpty { errorState(error) }
+          if controller.gitLoading && !controller.gitLoaded { ProgressView().tint(TetherColors.accent) }
+          else if let error = controller.gitError, !controller.gitLoaded { errorState(error) }
           else { content }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       .background(TetherColors.background).navigationTitle("Git").navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("Done", action: onDone) }
-        ToolbarItem(placement: .principal) { if tab == .changes && !controller.gitFiles.isEmpty { Text("+\(stat.added)  −\(stat.removed)").font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.success) } }
+        ToolbarItem(placement: .principal) {
+          if tab == .changes && !controller.gitFiles.isEmpty {
+            HStack(spacing: 8) {
+              Text("+\(stat.added)").foregroundStyle(TetherColors.success)
+              Text("−\(stat.removed)").foregroundStyle(TetherColors.danger)
+            }
+            .font(.caption.weight(.semibold).monospaced())
+          }
+        }
         ToolbarItem(placement: .primaryAction) {
-          Button { Task { await refreshVisiblePayload() } } label: {
-            if controller.gitLoading {
+          Button { Task { await manualRefresh() } } label: {
+            if refreshing {
               ProgressView().controlSize(.small).tint(TetherColors.accent)
             } else {
               Image(systemName: "arrow.clockwise")
             }
           }
-          .disabled(controller.gitLoading)
+          .disabled(refreshing)
           .accessibilityLabel("Refresh Git workspace")
         }
       }
@@ -47,6 +62,7 @@ struct GitDiffView: View {
       .task(id: "\(tab.rawValue)-\(scenePhase == .active)") {
         while !Task.isCancelled, scenePhase == .active {
           await refreshVisiblePayload()
+          loadedOnce = true
           try? await Task.sleep(nanoseconds: tab == .pullRequests ? 60_000_000_000 : 15_000_000_000)
         }
       }
@@ -58,11 +74,34 @@ struct GitDiffView: View {
   }
 
   @ViewBuilder private var changes: some View {
-    if controller.gitFiles.isEmpty {
+    if controller.gitFiles.isEmpty && controller.gitUntracked.isEmpty {
       ContentUnavailableView("No uncommitted changes", systemImage: "checkmark.circle", description: Text("The current working directory is clean.")).foregroundStyle(TetherColors.textSecondary)
     } else {
-      ScrollView { DiffReviewView(files: controller.gitFiles).padding(.vertical, 6) }
+      ScrollView {
+        DiffReviewView(
+          files: controller.gitFiles,
+          truncated: controller.gitDiffTruncated,
+          untracked: controller.gitUntracked,
+          untrackedTruncated: controller.gitUntrackedTruncated,
+          loadUntracked: { await controller.untrackedDiff($0) }
+        )
+        .padding(.vertical, 6)
+      }
     }
+  }
+
+  /// The last good read stays on screen; this says it may be out of date.
+  private func staleBanner(_ error: String) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(TetherColors.warning)
+      Text("Couldn't refresh: \(error)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+        .lineLimit(2)
+      Spacer(minLength: 4)
+      Button("Retry") { Task { await manualRefresh() } }.font(.caption.weight(.semibold))
+    }
+    .padding(.horizontal, 14).padding(.vertical, 8)
+    .background(TetherColors.warning.opacity(0.1))
+    .accessibilityElement(children: .combine)
   }
 
   private var commits: some View {
@@ -90,6 +129,11 @@ struct GitDiffView: View {
             .foregroundStyle(TetherColors.textSecondary)
         }
       } else {
+        if let notice = controller.gitPullRequestNotice {
+          Label("Couldn't refresh: \(notice)", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+            .listRowBackground(TetherColors.warning.opacity(0.1))
+        }
         ForEach(controller.gitPullRequests) { pullRequest in
         NavigationLink { PullRequestDetailView(controller: controller, pullRequest: pullRequest) } label: {
           VStack(alignment: .leading, spacing: 5) {
@@ -141,7 +185,14 @@ struct GitDiffView: View {
     await controller.loadGitWorkspace(payload: workspacePayload)
   }
 
-  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await refreshVisiblePayload() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
+  private func manualRefresh() async {
+    guard !refreshing else { return }
+    refreshing = true
+    defer { refreshing = false }
+    await refreshVisiblePayload()
+  }
+
+  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await manualRefresh() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
 }
 
 private struct PullRequestDetailView: View {
@@ -153,7 +204,7 @@ private struct PullRequestDetailView: View {
   @State private var confirmMerge = false
   @State private var merging = false
   @State private var showCopied = false
-  @State private var diffFiles: [DiffFile] = []
+  @State private var diffPatch = GitPatch.empty
   @State private var blocks: [MarkdownBlock] = []
   @State private var loadingDiff = false
   @State private var showDiff = false
@@ -173,7 +224,7 @@ private struct PullRequestDetailView: View {
     .background(TetherColors.background)
     .copyConfirmation(isPresented: $showCopied)
     .sheet(isPresented: $showDiff) {
-      PatchSheet(title: "#\(pullRequest.number)", files: diffFiles)
+      PatchSheet(title: "#\(pullRequest.number)", patch: diffPatch)
     }
     .task {
       refreshDescription(detail.body)
@@ -458,7 +509,7 @@ private struct PullRequestDetailView: View {
     guard !loadingDiff else { return }
     loadingDiff = true
     Task {
-      diffFiles = DiffFile.group(await controller.pullRequestDiff(pullRequest))
+      diffPatch = await controller.pullRequestDiff(pullRequest)
       loadingDiff = false
       showDiff = true
     }
@@ -535,9 +586,7 @@ private struct CommitDetailView: View {
   @Bindable var controller: SSHTerminalController
   let commit: GitCommit
 
-  @State private var lines: [GitDiffLine] = []
-  @State private var files: [DiffFile] = []
-  @State private var message = ""
+  @State private var patch = GitPatch.empty
   @State private var loading = true
 
   var body: some View {
@@ -548,8 +597,8 @@ private struct CommitDetailView: View {
           Text(commit.id).font(.caption.monospaced()).foregroundStyle(TetherColors.accent)
           Text("\(commit.author) · \(Date(timeIntervalSince1970: TimeInterval(commit.timestamp)).formatted(date: .abbreviated, time: .shortened))")
             .font(.caption).foregroundStyle(TetherColors.textSecondary)
-          if !message.isEmpty {
-            Text(message).font(.callout).foregroundStyle(TetherColors.textSecondary)
+          if !patch.body.isEmpty {
+            Text(patch.body).font(.callout).foregroundStyle(TetherColors.textSecondary)
               .textSelection(.enabled).padding(.top, 4)
           }
         }
@@ -557,12 +606,12 @@ private struct CommitDetailView: View {
 
         if loading {
           ProgressView().tint(TetherColors.accent).frame(maxWidth: .infinity).padding(.top, 24)
-        } else if lines.isEmpty {
+        } else if patch.files.isEmpty {
           ContentUnavailableView("No diff for this commit", systemImage: "doc.text",
             description: Text("It may be a merge commit, or the repository is no longer at this path."))
             .foregroundStyle(TetherColors.textSecondary)
         } else {
-          DiffReviewView(files: files)
+          DiffReviewView(files: patch.files, truncated: patch.truncated)
         }
       }
       .padding(.vertical, 10)
@@ -570,10 +619,7 @@ private struct CommitDetailView: View {
     }
     .background(TetherColors.background)
     .task {
-      let shown = await controller.commitDiff(commit)
-      message = shown.body
-      lines = shown.lines
-      files = DiffFile.group(shown.lines)
+      patch = await controller.commitDiff(commit)
       loading = false
     }
   }
@@ -582,10 +628,11 @@ private struct CommitDetailView: View {
 /// A patch shown over whatever opened it, so closing it returns you there.
 private struct PatchSheet: View {
   let title: String
-  let files: [DiffFile]
+  let patch: GitPatch
 
   @Environment(\.dismiss) private var dismiss
 
+  private var files: [DiffFile] { patch.files }
   private var stat: (added: Int, removed: Int) { DiffFile.stat(files) }
 
   var body: some View {
@@ -596,7 +643,7 @@ private struct PatchSheet: View {
             description: Text("This pull request has no diff against its base."))
             .foregroundStyle(TetherColors.textSecondary)
         } else {
-          ScrollView { DiffReviewView(files: files).padding(.vertical, 6) }
+          ScrollView { DiffReviewView(files: files, truncated: patch.truncated).padding(.vertical, 6) }
         }
       }
       .background(TetherColors.background)
@@ -607,8 +654,11 @@ private struct PatchSheet: View {
         ToolbarItem(placement: .principal) {
           VStack(spacing: 1) {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-            Text("+\(stat.added)  −\(stat.removed)").font(.caption2.monospaced())
-              .foregroundStyle(TetherColors.textSecondary)
+            HStack(spacing: 6) {
+              Text("+\(stat.added)").foregroundStyle(TetherColors.success)
+              Text("−\(stat.removed)").foregroundStyle(TetherColors.danger)
+            }
+            .font(.caption2.monospaced())
           }
         }
       }

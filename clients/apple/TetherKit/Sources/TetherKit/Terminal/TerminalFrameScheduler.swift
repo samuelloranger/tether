@@ -8,6 +8,11 @@ final class TerminalFrameScheduler: NSObject {
   private let onFrame: () -> Bool
   private var link: CADisplayLink?
   private var idleTicks = 0
+  /// A finger on the screen gets ProMotion's full rate; output alone is held to 60 Hz, since
+  /// every tick repaints the bitmap and a flood would otherwise do it 120 times a second.
+  var interactive = false {
+    didSet { if interactive != oldValue { link?.preferredFrameRateRange = Self.range(interactive: interactive) } }
+  }
 
   /// Long enough that a stream of small writes never pays the restart cost,
   /// short enough that an idle session stops waking the display link.
@@ -36,10 +41,16 @@ final class TerminalFrameScheduler: NSObject {
   private func start() {
     let link = CADisplayLink(target: self, selector: #selector(tick))
     // Without this the range defaults to the display's minimum and a ProMotion
-    // panel is left running the terminal at 60Hz.
-    link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+    // panel is left running a scroll at 60Hz.
+    link.preferredFrameRateRange = Self.range(interactive: interactive)
     link.add(to: .main, forMode: .common)
     self.link = link
+  }
+
+  static func range(interactive: Bool) -> CAFrameRateRange {
+    interactive
+      ? CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+      : CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
   }
 
   @objc private func tick() {
