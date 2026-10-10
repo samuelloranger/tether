@@ -31,6 +31,9 @@ public enum GitDiffModel {
     lines.reserveCapacity(raw.count)
     var inFile = false
     var inHunk = false
+    /// A hunk has started in this file: a +/-/context line after one whose counts ran out is
+    /// still code (a miscounted header), unless it reads as the next file's header.
+    var afterHunk = false
     var parents = 1
     var oldLeft = 0
     var newLeft = 0
@@ -70,12 +73,16 @@ public enum GitDiffModel {
       let kind: GitDiffLineKind
       if text.hasPrefix("diff ") || text.hasPrefix("--- ") || text.hasPrefix("+++ ") {
         inFile = true
+        afterHunk = false
         kind = .fileHeader
+      } else if afterHunk, parents == 1, first == UInt8(ascii: "+") || first == UInt8(ascii: "-") || first == UInt8(ascii: " ") {
+        kind = first == UInt8(ascii: "+") ? .added : first == UInt8(ascii: "-") ? .removed : .context
       } else if inFile, first == UInt8(ascii: "@") {
         let ats = bytes.prefix { $0 == UInt8(ascii: "@") }.count
         parents = max(1, ats - 1)
         (oldLeft, newLeft) = hunkCounts(text)
         inHunk = parents > 1 || oldLeft > 0 || newLeft > 0
+        afterHunk = true
         kind = .hunk
       } else if text.hasPrefix("Binary files ") || first == UInt8(ascii: "\\") {
         kind = .note

@@ -49,8 +49,9 @@ struct DiffReviewView: View {
   }
 
   private func isOpen(_ file: DiffFile) -> Bool {
+    // A short file is open until folded; a long one is folded until opened.
     let long = file.rows.count > Self.pageSize
-    return toggled.contains(file.id) != long
+    return toggled.contains(file.id) == long
   }
 
   private func rows(of file: DiffFile) -> some View {
