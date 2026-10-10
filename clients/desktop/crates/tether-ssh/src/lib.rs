@@ -8,8 +8,8 @@ mod transport;
 #[cfg(unix)]
 pub use agent::UnixAgent;
 pub use agent::{
-    AgentConnector, AgentStreamBox, FallbackAgent, NamedPipeAgent, PageantAgent, default_agent,
-    map_agent_io_error,
+    AgentConnector, AgentStreamBox, FallbackAgent, NamedPipeAgent, PageantAgent, agent_offers_keys,
+    default_agent, map_agent_io_error,
 };
 pub use connection::{ConnectionEvent, RusshConnection};
 pub use pty::{PtyChannel, PtyEvent, PtyWriter};

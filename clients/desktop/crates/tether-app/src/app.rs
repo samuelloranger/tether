@@ -633,12 +633,29 @@ impl App {
         self.refresh_router();
     }
 
-    pub fn open_ssh_import(&self) {
+    /// The agent check runs off the UI thread; the page opens once it answers.
+    pub fn open_ssh_import(self: &Rc<Self>) {
+        let probe = self.runtime.spawn(async {
+            let agent = tether_ssh::default_agent();
+            tether_ssh::agent_offers_keys(&*agent, std::time::Duration::from_millis(500)).await
+        });
+        let weak = Rc::downgrade(self);
+        let _ = slint::spawn_local(async move {
+            let agent_offers_keys = probe.await.unwrap_or(false);
+            if let Some(app) = weak.upgrade() {
+                app.show_ssh_import(agent_offers_keys);
+            }
+        });
+    }
+
+    fn show_ssh_import(&self, agent_offers_keys: bool) {
         let rows = {
             let s = self.state.borrow();
-            let hosts = ssh_import::home_dir()
+            let home = ssh_import::home_dir();
+            let hosts = home
+                .as_deref()
                 .map(|home| {
-                    tether_core::sshconfig::read_config(&home, &tether_core::sshconfig::DiskFiles)
+                    tether_core::sshconfig::read_config(home, &tether_core::sshconfig::DiskFiles)
                 })
                 .unwrap_or_default();
             tether_core::sshimport::plan(
@@ -646,6 +663,7 @@ impl App {
                 &s.profiles.machines,
                 &s.keys,
                 &ssh_import::default_user(),
+                &tether_core::sshimport::default_keys(home.as_deref(), agent_offers_keys),
                 &|p| std::fs::read_to_string(p).ok(),
             )
         };

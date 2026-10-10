@@ -7,7 +7,9 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::{PrivateKey, ssh_key::Algorithm};
 use support::server::{Options, start};
 use tether_core::connect::{ConnectError, Connection, Credential, Transport};
-use tether_ssh::{AgentConnector, AgentStreamBox, RusshTransport, map_agent_io_error};
+use tether_ssh::{
+    AgentConnector, AgentStreamBox, RusshTransport, agent_offers_keys, map_agent_io_error,
+};
 
 struct FakeAgent {
     keys: Vec<PrivateKey>,
@@ -121,6 +123,32 @@ fn missing_pipe_maps_to_agent_not_running() {
         map_agent_io_error(&other),
         ConnectError::Transport(_)
     ));
+}
+
+/// Connects, then never answers.
+struct SilentAgent;
+impl AgentConnector for SilentAgent {
+    fn connect(&self) -> BoxFuture<'static, Result<AgentClient<AgentStreamBox>, ConnectError>> {
+        Box::pin(async {
+            let (client_end, server_end) = tokio::io::duplex(64 * 1024);
+            std::mem::forget(server_end);
+            Ok(AgentClient::connect(client_end).dynamic())
+        })
+    }
+}
+
+#[tokio::test]
+async fn only_an_agent_holding_a_key_offers_keys() {
+    let wait = std::time::Duration::from_secs(5);
+    assert!(agent_offers_keys(&FakeAgent { keys: vec![key()] }, wait).await);
+    assert!(!agent_offers_keys(&FakeAgent { keys: Vec::new() }, wait).await);
+    assert!(!agent_offers_keys(&DeadAgent, wait).await);
+}
+
+#[tokio::test]
+async fn an_agent_too_slow_to_list_its_keys_still_counts() {
+    let wait = std::time::Duration::from_millis(50);
+    assert!(agent_offers_keys(&SilentAgent, wait).await);
 }
 
 #[cfg(windows)]

@@ -117,8 +117,9 @@ mod tests {
             host: format!("{alias}.lan"),
             port: 22,
             user: Some("u".into()),
-            identity_file: None,
+            identity_file: tether_core::sshconfig::IdentityFile::Unset,
             jumps: jumps.iter().map(|s| s.to_string()).collect(),
+            jump_only: false,
         }
     }
 
@@ -128,6 +129,7 @@ mod tests {
             saved,
             &KeyRecords::default(),
             "w",
+            &[],
             &|_| None,
         );
         SshImportVm::new(rows)

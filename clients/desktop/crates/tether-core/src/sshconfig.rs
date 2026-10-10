@@ -10,9 +10,22 @@ pub struct ConfigHost {
     pub host: String,
     pub port: u16,
     pub user: Option<String>,
-    pub identity_file: Option<PathBuf>,
+    pub identity_file: IdentityFile,
     /// ProxyJump hops, first hop first. Each is an alias or `[user@]host[:port]`.
     pub jumps: Vec<String>,
+    /// A hop no `Host` line names, resolved the way OpenSSH resolves the jump: wildcard blocks
+    /// apply to its host name, and a user or port written in the hop wins. `alias` is the hop as
+    /// written.
+    pub jump_only: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum IdentityFile {
+    #[default]
+    Unset,
+    /// `IdentityFile none`: OpenSSH then adds no default keys and offers the agent's only.
+    None,
+    Path(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -52,8 +65,9 @@ impl ConfigFiles for DiskFiles {
     }
 }
 
-/// `~/.ssh/config` and everything it includes, as the hosts it names explicitly.
-/// Wildcard-only `Host` lines feed defaults to those hosts but are not hosts themselves.
+/// `~/.ssh/config` and everything it includes, as the hosts it names explicitly, then the
+/// ProxyJump hops it does not. Wildcard-only `Host` lines feed defaults to those hosts but are
+/// not hosts themselves.
 pub fn read_config(home: &Path, files: &dyn ConfigFiles) -> Vec<ConfigHost> {
     let ssh_dir = home.join(".ssh");
     let mut blocks = Vec::new();
@@ -217,45 +231,68 @@ fn resolve(blocks: &[Block], home: &Path) -> Vec<ConfigHost> {
             }
         }
     }
-    aliases
+    let mut hosts: Vec<ConfigHost> = aliases
         .into_iter()
-        .map(|alias| {
-            // First value wins, in file order.
-            let get = |key: &str| {
-                blocks
-                    .iter()
-                    .filter(|b| !b.is_match && block_applies(&b.patterns, &alias))
-                    .flat_map(|b| b.settings.iter())
-                    .find(|(k, _)| k == key)
-                    .map(|(_, v)| v.clone())
-            };
-            let jumps = get("proxyjump")
-                .filter(|j| !j.eq_ignore_ascii_case("none"))
-                .map(|j| {
-                    j.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            ConfigHost {
-                host: get("hostname")
-                    .map(|h| h.replace("%h", &alias))
-                    .unwrap_or_else(|| alias.clone()),
-                port: get("port").and_then(|p| p.parse().ok()).unwrap_or(22),
-                user: get("user"),
-                identity_file: get("identityfile")
-                    .filter(|f| !f.eq_ignore_ascii_case("none"))
-                    .map(|f| expand_home(&f, home)),
-                jumps,
-                alias,
-            }
+        .map(|alias| settings_for(blocks, home, alias))
+        .collect();
+    let mut hops: Vec<ConfigHost> = Vec::new();
+    for hop in hosts.iter().flat_map(|h| &h.jumps) {
+        if hosts.iter().chain(&hops).any(|h| h.alias == *hop) {
+            continue;
+        }
+        let (user, name, port) = parse_hop(hop);
+        let found = settings_for(blocks, home, name);
+        hops.push(ConfigHost {
+            alias: hop.clone(),
+            port: port.unwrap_or(found.port),
+            user: user.or(found.user),
+            jumps: Vec::new(),
+            jump_only: true,
+            ..found
+        });
+    }
+    hosts.extend(hops);
+    hosts
+}
+
+fn settings_for(blocks: &[Block], home: &Path, alias: String) -> ConfigHost {
+    // First value wins, in file order.
+    let get = |key: &str| {
+        blocks
+            .iter()
+            .filter(|b| !b.is_match && block_applies(&b.patterns, &alias))
+            .flat_map(|b| b.settings.iter())
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+    };
+    let jumps = get("proxyjump")
+        .filter(|j| !j.eq_ignore_ascii_case("none"))
+        .map(|j| {
+            j.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
         })
-        .collect()
+        .unwrap_or_default();
+    ConfigHost {
+        host: get("hostname")
+            .map(|h| h.replace("%h", &alias))
+            .unwrap_or_else(|| alias.clone()),
+        port: get("port").and_then(|p| p.parse().ok()).unwrap_or(22),
+        user: get("user"),
+        identity_file: match get("identityfile") {
+            None => IdentityFile::Unset,
+            Some(f) if f.eq_ignore_ascii_case("none") => IdentityFile::None,
+            Some(f) => IdentityFile::Path(expand_home(&f, home)),
+        },
+        jumps,
+        jump_only: false,
+        alias,
+    }
 }
 
 /// A ProxyJump hop that is not an alias: `[user@]host[:port]`, or `[v6]:port`.
-pub fn parse_hop(hop: &str) -> (Option<String>, String, u16) {
+pub fn parse_hop(hop: &str) -> (Option<String>, String, Option<u16>) {
     let (user, rest) = match hop.rsplit_once('@') {
         Some((u, r)) => (Some(u.to_string()), r),
         None => (None, hop),
@@ -263,17 +300,12 @@ pub fn parse_hop(hop: &str) -> (Option<String>, String, u16) {
     if let Some(v6) = rest.strip_prefix('[')
         && let Some((host, tail)) = v6.split_once(']')
     {
-        let port = tail
-            .strip_prefix(':')
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(22);
+        let port = tail.strip_prefix(':').and_then(|p| p.parse().ok());
         return (user, host.to_string(), port);
     }
     match rest.rsplit_once(':') {
-        Some((host, port)) if !host.contains(':') => {
-            (user, host.to_string(), port.parse().unwrap_or(22))
-        }
-        _ => (user, rest.to_string(), 22),
+        Some((host, port)) if !host.contains(':') => (user, host.to_string(), port.parse().ok()),
+        _ => (user, rest.to_string(), None),
     }
 }
 
@@ -314,6 +346,55 @@ mod tests {
     }
 
     #[test]
+    fn hops_no_host_line_names_get_wildcard_settings_and_keep_their_own_user_and_port() {
+        let hosts = read(&[(
+            ".ssh/config",
+            "Host inner\n  ProxyJump me@edge.example:2200,gw,bastion\n\
+             Host bastion\n  HostName b.example\n\
+             Host *.example\n  User ops\n  Port 2022\n  IdentityFile ~/.ssh/id_work\n\
+             Host *\n  IdentityFile none\n",
+        )]);
+        let names: Vec<_> = hosts
+            .iter()
+            .map(|h| (h.alias.as_str(), h.jump_only))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("inner", false),
+                ("bastion", false),
+                ("me@edge.example:2200", true),
+                ("gw", true)
+            ]
+        );
+        let edge = &hosts[2];
+        assert_eq!(
+            (edge.host.as_str(), edge.port, edge.user.as_deref()),
+            ("edge.example", 2200, Some("me"))
+        );
+        assert_eq!(
+            edge.identity_file,
+            IdentityFile::Path(home().join(".ssh/id_work"))
+        );
+        let gw = &hosts[3];
+        assert_eq!(
+            (gw.host.as_str(), gw.port, gw.user.as_deref()),
+            ("gw", 22, None)
+        );
+        assert_eq!(gw.identity_file, IdentityFile::None);
+    }
+
+    #[test]
+    fn identity_file_none_is_kept_apart_from_unset() {
+        let hosts = read(&[(
+            ".ssh/config",
+            "Host agentonly\n  IdentityFile none\nHost plain\n  HostName p\n",
+        )]);
+        assert_eq!(hosts[0].identity_file, IdentityFile::None);
+        assert_eq!(hosts[1].identity_file, IdentityFile::Unset);
+    }
+
+    #[test]
     fn concrete_hosts_get_their_settings_and_wildcards_give_defaults() {
         let hosts = read(&[(
             ".ssh/config",
@@ -327,11 +408,17 @@ mod tests {
         let dev = &hosts[0];
         assert_eq!((dev.host.as_str(), dev.port), ("10.0.0.5", 2222));
         assert_eq!(dev.user.as_deref(), Some("sam"));
-        assert_eq!(dev.identity_file, Some(home().join(".ssh/id_dev")));
+        assert_eq!(
+            dev.identity_file,
+            IdentityFile::Path(home().join(".ssh/id_dev"))
+        );
         let db = &hosts[1];
         assert_eq!((db.host.as_str(), db.port), ("db1", 22));
         assert_eq!(db.user.as_deref(), Some("ops"), "the first value wins");
-        assert_eq!(db.identity_file, Some(home().join(".ssh/id_default")));
+        assert_eq!(
+            db.identity_file,
+            IdentityFile::Path(home().join(".ssh/id_default"))
+        );
     }
 
     #[test]
@@ -418,13 +505,13 @@ mod tests {
 
     #[test]
     fn hops_parse_user_host_and_port() {
-        assert_eq!(parse_hop("edge"), (None, "edge".into(), 22));
+        assert_eq!(parse_hop("edge"), (None, "edge".into(), None));
         assert_eq!(
             parse_hop("me@edge:2200"),
-            (Some("me".into()), "edge".into(), 2200)
+            (Some("me".into()), "edge".into(), Some(2200))
         );
-        assert_eq!(parse_hop("[::1]:2222"), (None, "::1".into(), 2222));
-        assert_eq!(parse_hop("fe80::1"), (None, "fe80::1".into(), 22));
+        assert_eq!(parse_hop("[::1]:2222"), (None, "::1".into(), Some(2222)));
+        assert_eq!(parse_hop("fe80::1"), (None, "fe80::1".into(), None));
     }
 
     // Unix paths.
@@ -448,6 +535,9 @@ mod tests {
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].alias, "box");
         assert_eq!(hosts[0].user.as_deref(), Some("fallback"));
-        assert_eq!(hosts[0].identity_file, Some(ssh.join("id_box")));
+        assert_eq!(
+            hosts[0].identity_file,
+            IdentityFile::Path(ssh.join("id_box"))
+        );
     }
 }

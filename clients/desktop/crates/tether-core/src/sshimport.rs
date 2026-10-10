@@ -1,13 +1,13 @@
 //! Turns `~/.ssh/config` hosts into machines and keys, without touching storage.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::keys::{KeyRecords, derive_public_line, fingerprint, is_encrypted, normalize_pem};
 use crate::profiles::{Auth, Machine};
-use crate::sshconfig::{ConfigHost, parse_hop};
+use crate::sshconfig::{ConfigHost, IdentityFile, parse_hop};
 
 #[derive(Debug, Clone)]
 pub struct ImportKey {
@@ -34,18 +34,45 @@ fn same_endpoint(a: &Machine, b: &Machine) -> bool {
     a.user == b.user && a.port == b.port && a.host.eq_ignore_ascii_case(&b.host)
 }
 
-/// Every concrete host, plus a row for each ProxyJump hop that is not an alias.
-/// `read` reads a key file; `default_user` fills hosts with no `User`.
+/// Tether picks one key where OpenSSH would offer them all, so ed25519 comes first.
+pub fn default_identity_files(home: &Path) -> Vec<PathBuf> {
+    ["id_ed25519", "id_ecdsa", "id_rsa"]
+        .iter()
+        .map(|name| home.join(".ssh").join(name))
+        .collect()
+}
+
+/// The keys that stand in for an unset `IdentityFile`. None while an agent offers keys: a key
+/// Tether picks is tried alone, with no agent behind it, and could shadow the agent's working one.
+pub fn default_keys(home: Option<&Path>, agent_offers_keys: bool) -> Vec<PathBuf> {
+    match home {
+        Some(home) if !agent_offers_keys => default_identity_files(home),
+        _ => Vec::new(),
+    }
+}
+
+type KeyChoice = (Auth, Option<ImportKey>, String);
+
+/// A row for each host, plus one for each ProxyJump hop that is not an alias.
+/// `read` reads a key file; `default_user` fills hosts with no `User`; `default_keys`
+/// stand in for an unset `IdentityFile` (empty when the agent should be used instead).
 pub fn plan(
     hosts: &[ConfigHost],
     machines: &[Machine],
     keys: &KeyRecords,
     default_user: &str,
+    default_keys: &[PathBuf],
     read: &dyn Fn(&Path) -> Option<String>,
 ) -> Vec<ImportRow> {
+    let default = default_key(default_keys, keys, read);
+    let choose = |identity: &IdentityFile| match identity {
+        IdentityFile::Path(path) => key_for(path, keys, read),
+        IdentityFile::Unset => default.clone(),
+        IdentityFile::None => agent(),
+    };
     let mut rows: Vec<ImportRow> = Vec::new();
-    for h in hosts {
-        let (auth, key, auth_note) = key_for(h.identity_file.as_deref(), keys, read);
+    for h in hosts.iter().filter(|h| !h.jump_only) {
+        let (auth, key, auth_note) = choose(&h.identity_file);
         let machine = Machine {
             id: Uuid::new_v4(),
             name: h.alias.clone(),
@@ -57,24 +84,29 @@ pub fn plan(
         };
         rows.push(row(h.alias.clone(), machine, key, auth_note, machines));
     }
-    for h in hosts {
+    for h in hosts.iter().filter(|h| !h.jump_only) {
         let mut previous: Option<Uuid> = None;
         for hop in &h.jumps {
             let id = match rows.iter().position(|r| r.label == *hop) {
                 Some(i) => rows[i].machine.id,
                 None => {
-                    let (user, host, port) = parse_hop(hop);
+                    let resolved = hosts
+                        .iter()
+                        .find(|c| c.jump_only && c.alias == *hop)
+                        .cloned()
+                        .unwrap_or_else(|| unresolved_hop(hop));
+                    let (auth, key, auth_note) = choose(&resolved.identity_file);
                     let machine = Machine {
                         id: Uuid::new_v4(),
                         name: hop.clone(),
-                        host,
-                        port,
-                        user: user.unwrap_or_else(|| default_user.to_string()),
-                        auth: Auth::Agent,
+                        host: resolved.host,
+                        port: resolved.port,
+                        user: resolved.user.unwrap_or_else(|| default_user.to_string()),
+                        auth,
                         jump: previous,
                     };
                     let id = machine.id;
-                    rows.push(row(hop.clone(), machine, None, "agent".into(), machines));
+                    rows.push(row(hop.clone(), machine, key, auth_note, machines));
                     id
                 }
             };
@@ -96,6 +128,20 @@ pub fn plan(
             .map(|(_, n)| n.clone());
     }
     rows
+}
+
+/// A hop `read_config` did not resolve, as if no config block applied to it.
+fn unresolved_hop(hop: &str) -> ConfigHost {
+    let (user, host, port) = parse_hop(hop);
+    ConfigHost {
+        alias: hop.to_string(),
+        host,
+        port: port.unwrap_or(22),
+        user,
+        identity_file: IdentityFile::Unset,
+        jumps: Vec::new(),
+        jump_only: true,
+    }
 }
 
 fn row(
@@ -120,37 +166,59 @@ fn row(
     }
 }
 
-fn key_for(
-    path: Option<&Path>,
+fn agent() -> KeyChoice {
+    (Auth::Agent, None, "agent".into())
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "imported".into())
+}
+
+/// The first default key Tether can use, else the agent with the reason the nearest one was
+/// skipped. A missing default is no reason: OpenSSH skips it silently too.
+fn default_key(
+    paths: &[PathBuf],
     keys: &KeyRecords,
     read: &dyn Fn(&Path) -> Option<String>,
-) -> (Auth, Option<ImportKey>, String) {
-    let Some(path) = path else {
-        return (Auth::Agent, None, "agent".into());
-    };
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "imported".into());
-    let Some(private) = read(path).map(Zeroizing::new) else {
-        return (Auth::Agent, None, format!("agent ({name} not found)"));
-    };
-    if is_encrypted(&private) {
+) -> KeyChoice {
+    let mut fallback = None;
+    for path in paths {
+        let Some(private) = read(path).map(Zeroizing::new) else {
+            continue;
+        };
+        let found = key_from(file_name(path), &private, keys);
+        if matches!(found.0, Auth::Key { .. }) {
+            return found;
+        }
+        fallback.get_or_insert(found);
+    }
+    fallback.unwrap_or_else(agent)
+}
+
+fn key_for(path: &Path, keys: &KeyRecords, read: &dyn Fn(&Path) -> Option<String>) -> KeyChoice {
+    let name = file_name(path);
+    match read(path).map(Zeroizing::new) {
+        Some(private) => key_from(name, &private, keys),
+        None => (Auth::Agent, None, format!("agent ({name} not found)")),
+    }
+}
+
+fn key_from(name: String, private: &str, keys: &KeyRecords) -> KeyChoice {
+    if is_encrypted(private) {
         return (
             Auth::Agent,
             None,
             format!("agent ({name} has a passphrase)"),
         );
     }
-    let public_line = match derive_public_line(&private) {
-        Ok(line) => line,
-        Err(_) => {
-            return (
-                Auth::Agent,
-                None,
-                format!("agent ({name} isn't a key Tether reads)"),
-            );
-        }
+    let Ok(public_line) = derive_public_line(private) else {
+        return (
+            Auth::Agent,
+            None,
+            format!("agent ({name} isn't a key Tether reads)"),
+        );
     };
     let print = fingerprint(&public_line);
     if let Some(k) = keys
@@ -161,13 +229,14 @@ fn key_for(
         return (Auth::Key { id: k.id }, None, format!("key {}", k.name));
     }
     let id = Uuid::new_v4();
+    let note = format!("key {name}");
     let key = ImportKey {
         id,
-        name: name.clone(),
-        private: Zeroizing::new(normalize_pem(&private)),
+        name,
+        private: Zeroizing::new(normalize_pem(private)),
         public_line,
     };
-    (Auth::Key { id }, Some(key), format!("key {name}"))
+    (Auth::Key { id }, Some(key), note)
 }
 
 /// The chosen rows, plus every row they jump through that is not already saved.
@@ -235,8 +304,9 @@ mod tests {
             host: hostname.into(),
             port: 22,
             user: user.map(Into::into),
-            identity_file: None,
+            identity_file: IdentityFile::Unset,
             jumps: jumps.iter().map(|s| s.to_string()).collect(),
+            jump_only: false,
         }
     }
 
@@ -251,6 +321,7 @@ mod tests {
             &[],
             &KeyRecords::default(),
             "winuser",
+            &[],
             &none,
         );
         assert_eq!(rows.len(), 1);
@@ -274,6 +345,7 @@ mod tests {
             &[],
             &KeyRecords::default(),
             "w",
+            &[],
             &none,
         );
         let by = |l: &str| rows.iter().find(|r| r.label == l).unwrap();
@@ -286,6 +358,58 @@ mod tests {
         );
         assert_eq!(by("deep").machine.jump, Some(by("bastion").machine.id));
         assert_eq!(rows.len(), 4);
+        assert_eq!(edge.machine.auth, Auth::Agent, "no default keys, no agent");
+        assert_eq!(edge.auth_note, "agent");
+    }
+
+    #[test]
+    fn default_keys_stand_in_only_without_an_agent() {
+        let home = Path::new("h");
+        assert_eq!(
+            default_keys(Some(home), false),
+            default_identity_files(home)
+        );
+        assert!(default_keys(Some(home), true).is_empty());
+        assert!(default_keys(None, false).is_empty());
+    }
+
+    #[test]
+    fn a_resolved_hop_uses_its_own_settings_and_adds_no_row_alone() {
+        let (_, pem) = generate_ed25519("k", 0);
+        let defaults = default_identity_files(Path::new("h"));
+        let read = |p: &Path| (p == defaults[0]).then(|| pem.to_string());
+        let gw = ConfigHost {
+            port: 2022,
+            identity_file: IdentityFile::None,
+            jump_only: true,
+            ..host("gw", "gw.example", Some("ops"), &[])
+        };
+        let unused = ConfigHost {
+            jump_only: true,
+            ..host("unused", "u", None, &[])
+        };
+        let rows = plan(
+            &[host("inner", "10.1.0.2", Some("u"), &["gw"]), gw, unused],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        assert_eq!(rows.len(), 2);
+        let hop = &rows[1];
+        assert_eq!(
+            (
+                hop.label.as_str(),
+                hop.machine.host.as_str(),
+                hop.machine.port
+            ),
+            ("gw", "gw.example", 2022)
+        );
+        assert_eq!(hop.machine.user, "ops");
+        assert_eq!(hop.machine.auth, Auth::Agent, "IdentityFile none");
+        assert_eq!(rows[0].auth_note, "key id_ed25519");
+        assert_eq!(rows[0].via.as_deref(), Some("gw"));
     }
 
     #[test]
@@ -307,6 +431,7 @@ mod tests {
             std::slice::from_ref(&saved),
             &KeyRecords::default(),
             "w",
+            &[],
             &none,
         );
         assert!(rows[0].existing);
@@ -328,6 +453,7 @@ mod tests {
             &[],
             &KeyRecords::default(),
             "w",
+            &[],
             &none,
         );
         assert_eq!(with_jumps(&rows, &[1]), [0, 1]);
@@ -351,7 +477,7 @@ mod tests {
         ]);
         let read = |p: &Path| files.get(p).cloned();
         let with = |alias: &str, file: &str| ConfigHost {
-            identity_file: Some(PathBuf::from(file)),
+            identity_file: IdentityFile::Path(PathBuf::from(file)),
             ..host(alias, alias, Some("u"), &[])
         };
         let keys = KeyRecords {
@@ -368,6 +494,7 @@ mod tests {
             &[],
             &keys,
             "w",
+            &[],
             &read,
         );
         let picked = [0, 1, 2, 3, 4];
@@ -381,5 +508,117 @@ mod tests {
         assert_eq!(rows[3].auth_note, "agent (id_locked has a passphrase)");
         assert_eq!(machines[4].auth, Auth::Agent);
         assert_eq!(rows[4].auth_note, "agent (missing not found)");
+    }
+
+    #[test]
+    fn without_an_identity_file_the_first_usable_default_key_is_used() {
+        let (_, pem) = generate_ed25519("k", 0);
+        let public = derive_public_line(&pem).unwrap();
+        let defaults = default_identity_files(Path::new("h"));
+        let files: HashMap<PathBuf, String> = HashMap::from([
+            (
+                defaults[0].clone(),
+                "-----BEGIN ENCRYPTED PRIVATE KEY-----\nx\n-----END ENCRYPTED PRIVATE KEY-----\n"
+                    .into(),
+            ),
+            (defaults[2].clone(), pem.to_string()),
+        ]);
+        let read = |p: &Path| files.get(p).cloned();
+        let rows = plan(
+            &[host("inner", "10.1.0.2", Some("u"), &["me@edge"])],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        for r in &rows {
+            assert_eq!(r.auth_note, "key id_rsa", "{}", r.label);
+            assert!(matches!(r.machine.auth, Auth::Key { .. }));
+        }
+        let picked = [0, 1];
+        assert_eq!(keys_to_add(&rows, &picked).len(), 1);
+        assert_eq!(keys_to_add(&rows, &picked)[0].public_line, public);
+    }
+
+    #[test]
+    fn without_an_identity_file_or_usable_default_key_the_agent_is_used() {
+        let locked =
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nx\n-----END ENCRYPTED PRIVATE KEY-----\n";
+        let defaults = default_identity_files(Path::new("h"));
+        let read = |p: &Path| (p == defaults[0]).then(|| locked.to_string());
+        let rows = plan(
+            &[host("box", "b", None, &[])],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        assert_eq!(rows[0].machine.auth, Auth::Agent);
+        assert_eq!(rows[0].auth_note, "agent (id_ed25519 has a passphrase)");
+        let rows = plan(
+            &[host("box", "b", None, &[])],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &none,
+        );
+        assert_eq!(rows[0].auth_note, "agent");
+    }
+
+    #[test]
+    fn identity_file_none_and_a_missing_explicit_file_ignore_the_default_keys() {
+        let (_, pem) = generate_ed25519("k", 0);
+        let defaults = default_identity_files(Path::new("h"));
+        let read = |p: &Path| (p == defaults[0]).then(|| pem.to_string());
+        let rows = plan(
+            &[
+                ConfigHost {
+                    identity_file: IdentityFile::None,
+                    ..host("agentonly", "a", Some("u"), &[])
+                },
+                ConfigHost {
+                    identity_file: IdentityFile::Path(PathBuf::from("/k/missing")),
+                    ..host("gone", "g", Some("u"), &[])
+                },
+            ],
+            &[],
+            &KeyRecords::default(),
+            "w",
+            &defaults,
+            &read,
+        );
+        assert_eq!(rows[0].machine.auth, Auth::Agent);
+        assert_eq!(rows[0].auth_note, "agent");
+        assert_eq!(rows[1].machine.auth, Auth::Agent);
+        assert_eq!(rows[1].auth_note, "agent (missing not found)");
+    }
+
+    #[test]
+    fn a_default_key_already_in_the_vault_is_reused() {
+        let (_, pem) = generate_ed25519("k", 0);
+        let vault: KeyRecord = import_record(
+            "mine",
+            &derive_public_line(&pem).unwrap(),
+            KeyOrigin::Imported,
+            0,
+        );
+        let defaults = default_identity_files(Path::new("h"));
+        let read = |p: &Path| (p == defaults[2]).then(|| pem.to_string());
+        let rows = plan(
+            &[host("box", "b", None, &[])],
+            &[],
+            &KeyRecords {
+                keys: vec![vault.clone()],
+            },
+            "w",
+            &defaults,
+            &read,
+        );
+        assert_eq!(rows[0].machine.auth, Auth::Key { id: vault.id });
+        assert!(rows[0].key.is_none());
+        assert_eq!(rows[0].auth_note, "key mine");
     }
 }

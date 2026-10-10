@@ -151,6 +151,18 @@ impl AgentConnector for FallbackAgent {
     }
 }
 
+/// Whether an agent is there with at least one key. One that connects but is too slow to list
+/// its keys (forwarded, or waiting on an unlock prompt) counts: it may hold the key a host needs.
+pub async fn agent_offers_keys(connector: &dyn AgentConnector, wait: std::time::Duration) -> bool {
+    let Ok(Ok(mut agent)) = tokio::time::timeout(wait, connector.connect()).await else {
+        return false;
+    };
+    match tokio::time::timeout(wait, agent.request_identities()).await {
+        Ok(listed) => listed.is_ok_and(|ids| !ids.is_empty()),
+        Err(_) => true,
+    }
+}
+
 pub(crate) async fn authenticate_with_agent(
     handle: &mut client::Handle<ClientHandler>,
     user: &str,
