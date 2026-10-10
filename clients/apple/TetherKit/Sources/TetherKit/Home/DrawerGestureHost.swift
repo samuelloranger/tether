@@ -6,6 +6,9 @@ import UIKit
 struct DrawerGestureHost: UIViewRepresentable {
   /// Read when a gesture starts, not when this view is built.
   var isOpen: () -> Bool
+  /// Where, in the window, an edge swipe belongs to something else (the key bar scrolls and
+  /// its dpad drags sideways).
+  var excluded: () -> CGRect = { .zero }
   var onBegan: () -> Void
   var onChanged: (CGFloat) -> Void
   var onEnded: (CGFloat, CGFloat) -> Void
@@ -104,6 +107,11 @@ struct DrawerGestureHost: UIViewRepresentable {
         velocity: CGSize(width: velocity.x, height: velocity.y)
       ) else { return false }
       return true
+    }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+      guard recognizer === edgePan, let window else { return true }
+      return !host.excluded().contains(touch.location(in: window))
     }
 
     func gestureRecognizer(

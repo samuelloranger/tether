@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import PhotosUI
+import GameController
 
 /// The terminal screen: header + slide-over session sidebar + terminal, backed by
 /// SSH + zmx. Home is reached from the bottom of the sidebar.
@@ -20,6 +21,11 @@ public struct SSHTerminalView: View {
   /// The bar shows while any keyboard is up, the drawer's name field's included, so the
   /// keyboard and bar together never change height under the drawer.
   @State private var keyboardUp = false
+  /// A hardware keyboard shows no on-screen one, so no keyboard notification ever comes; the
+  /// bar then follows the terminal's focus instead.
+  @State private var hardwareKeyboard = GCKeyboard.coalesced != nil
+  /// The bar's frame in the window, kept clear of the drawer's edge swipe.
+  @State private var keyBarFrame = CGRect.zero
   /// The drawer's name field takes the keyboard; closing the drawer hands it back.
   @State private var focusedBeforeDrawer = false
   /// Live horizontal drag on the drawer, `nil` when no finger is on it.
@@ -76,10 +82,6 @@ public struct SSHTerminalView: View {
           .transition(TetherMotion.drawerTransition(reduceMotion: reduceMotion))
       }
     }
-    .overlay(alignment: .bottom) {
-      transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
-    }
-    .copyConfirmation(isPresented: $showCopyConfirmation)
     .overlay(alignment: .top) {
       if let promptNotice {
         transferPill { Label(promptNotice, systemImage: "text.line.first.and.arrowtriangle.forward") }
@@ -175,13 +177,18 @@ public struct SSHTerminalView: View {
     .onChange(of: windowTitle, initial: true) { _, title in
       if tabs != nil { MacWindowTitle.set(title) }
     }
-    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-      keyboardUp = true
+    // Only this app's keyboard: beside another app in Split View, that app's keyboard posts here too.
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+      if Self.isLocal(note) { keyboardUp = true }
     }
-    // Did, not will: the bar rides the keyboard down and leaves once it is gone, inside the
-    // same settle window, so the host sees one resize.
-    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
-      keyboardUp = false
+    // Will, not did: the bar leaves in the same layout pass the keyboard starts leaving in, so
+    // the grid changes once and the host sees one resize.
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+      if Self.isLocal(note) { keyboardUp = false }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }
+    .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
+      hardwareKeyboard = GCKeyboard.coalesced != nil
     }
     .onChange(of: drawerOpen) { _, open in
       if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer { focused = true }
@@ -264,6 +271,12 @@ public struct SSHTerminalView: View {
         bellFlashOverlay
       }
       .overlay(alignment: .bottom) { heldQuestionBanner }
+      // On the terminal, not the whole screen: the key bar sits under it now, and a pill at
+      // the screen's bottom would cover its keys.
+      .overlay(alignment: .bottom) {
+        transferBanner.animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.transfer)
+      }
+      .copyConfirmation(isPresented: $showCopyConfirmation)
       // Over the terminal, not above it: in the stack it took rows from the grid, and the
       // host saw a resize when it came and another when it expired.
       .overlay(alignment: .top) { agentAlertBanner }
@@ -274,7 +287,7 @@ public struct SSHTerminalView: View {
       // In the app's own hierarchy, sitting on the keyboard through the keyboard safe area, not
       // the keyboard's accessory: that lives in the keyboard's window, above every app view, so
       // the drawer could not cover it.
-      if keyboardUp && !TetherPlatform.isMac {
+      if showsKeyBar {
         TerminalAccessoryBar(
           model: accessory,
           onKey: { controller.sendInput($0) },
@@ -282,11 +295,9 @@ public struct SSHTerminalView: View {
           onArrow: { controller.sendInput($0.escapeSequence) },
           onHideKeyboard: { focused = false }
         )
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { keyBarFrame = $0 }
       }
       TerminalInputBridge(
-        accessory: AnyView(EmptyView()),
-        showsAccessory: false,
-        compactAccessory: preferences.compactKeys,
         onSubmitBytes: submit,
         isFocused: $focused
       )
@@ -578,6 +589,14 @@ public struct SSHTerminalView: View {
     if let tabs { tabs.select(name) } else { Task { await controller.switchSession(to: name) } }
   }
 
+  private var showsKeyBar: Bool {
+    !TetherPlatform.isMac && (keyboardUp || (hardwareKeyboard && focused))
+  }
+
+  private static func isLocal(_ note: Notification) -> Bool {
+    (note.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool) ?? true
+  }
+
   private var windowTitle: String { "\(controller.title) · \(controller.attach)" }
 
   private var modalOpen: Bool {
@@ -638,6 +657,7 @@ public struct SSHTerminalView: View {
   private var drawerGestures: some View {
     DrawerGestureHost(
       isOpen: { drawerOpen },
+      excluded: { keyBarFrame },
       onBegan: { dragTranslation = 0 },
       onChanged: { dragTranslation = $0 },
       onEnded: { translation, velocity in

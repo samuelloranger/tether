@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Mutable state of the key bar. An @Observable class, not a Binding: the bar is
-/// hosted in a UIHostingController accessory, and reassigning rootView to refresh it spun the main thread.
+/// Mutable state of the key bar, shared by the bar and the screen that sends its keys.
 @Observable
 public final class TerminalAccessoryModel {
   public var ctrlArmed = false
@@ -11,8 +10,6 @@ public final class TerminalAccessoryModel {
   public var compact = false
   /// The keys the bar shows, in order.
   public var layout = KeyBarLayout.default
-  /// Drives the bar's own slide-out.
-  public var visible = true
   public init() {}
 }
 
@@ -58,14 +55,6 @@ public struct TerminalAccessoryBar: View {
     // Confine the material to its bounds: the default .all bled into the indicator
     // strip and the bar read half again as tall.
     .background(.ultraThinMaterial, ignoresSafeAreaEdges: [])
-    // Slide the whole row clear of the bottom edge, not just UIKit's own-height
-    // nudge. Reduce Motion keeps the fade and drops the travel.
-    .offset(y: model.visible || reduceMotion ? 0 : metrics.keySize * 2.4)
-    .opacity(model.visible ? 1 : 0)
-    .animation(
-      TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion),
-      value: model.visible
-    )
   }
 
 
@@ -192,26 +181,13 @@ public struct TerminalAccessoryBar: View {
   }
 }
 
-/// Bridges the system keyboard to PTY input with an accessory toolbar.
+/// Bridges the system keyboard to PTY input. Keep it mounted: a `.focused()` view that
+/// appears and disappears makes SwiftUI and UIKit focus machinery loop at 100% CPU.
 public struct TerminalInputBridge: UIViewRepresentable {
-  public var accessory: AnyView
-  /// Gate the ACCESSORY, never the bridge's existence: a `.focused()` view that
-  /// appears and disappears makes SwiftUI and UIKit focus machinery loop at 100% CPU.
-  public var showsAccessory: Bool = true
-  public var compactAccessory = false
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
 
-  public init(
-    accessory: AnyView,
-    showsAccessory: Bool = true,
-    compactAccessory: Bool = false,
-    onSubmitBytes: @escaping (String) -> Void,
-    isFocused: Binding<Bool>
-  ) {
-    self.accessory = accessory
-    self.showsAccessory = showsAccessory
-    self.compactAccessory = compactAccessory
+  public init(onSubmitBytes: @escaping (String) -> Void, isFocused: Binding<Bool>) {
     self.onSubmitBytes = onSubmitBytes
     self.isFocused = isFocused
   }
@@ -241,22 +217,12 @@ public struct TerminalInputBridge: UIViewRepresentable {
     // Lets an XCUITest target the input to type into a session. Harmless in prod.
     view.accessibilityIdentifier = "terminalInput"
     view.isAccessibilityElement = true
-    view.accessoryHosting.rootView = accessory
-    view.showsAccessory = showsAccessory
-    view.compactAccessory = compactAccessory
     Self.wire(view, onSubmitBytes: onSubmitBytes)
     view.refillFiller()
     return view
   }
 
   public func updateUIView(_ uiView: TerminalInputTextView, context: Context) {
-    // rootView is set once in makeUIView. Reassigning it here is what made
-    // reloadInputViews() rebuild SwiftUI inside a SwiftUI update.
-    uiView.compactAccessory = compactAccessory
-    if uiView.showsAccessory != showsAccessory {
-      uiView.showsAccessory = showsAccessory
-      uiView.reloadInputViews()
-    }
     // The document is invisible filler that keeps the delete key repeating (see
     // `refillFiller`); syncing a text binding here would wipe it on every update.
     uiView.refillFiller()
@@ -267,8 +233,8 @@ public struct TerminalInputBridge: UIViewRepresentable {
     }
   }
 
-  // SwiftUI doesn't resign a removed host view's first responder, and the key bar lives in
-  // the keyboard window: a lingering responder keeps the bar docked and doubles input.
+  // SwiftUI doesn't resign a removed host view's first responder: a lingering one keeps the
+  // keyboard up and doubles input.
   public static func dismantleUIView(_ uiView: TerminalInputTextView, coordinator: Coordinator) {
     uiView.resignFirstResponder()
   }
@@ -417,7 +383,6 @@ enum TerminalKeyMap {
 }
 
 public final class TerminalInputTextView: UITextView {
-  let accessoryHosting = UIHostingController<AnyView>(rootView: AnyView(EmptyView()))
 
   /// Receives the bytes for any hardware key the terminal claims.
   var onKeyBytes: ((String) -> Void)?
@@ -502,54 +467,6 @@ public final class TerminalInputTextView: UITextView {
     if !unhandled.isEmpty {
       super.pressesBegan(unhandled, with: event)
     }
-  }
-
-  /// Configured once, not on every getter call — UIKit asks for the accessory often.
-  private lazy var accessoryContainer: UIView = {
-    let view = accessoryHosting.view!
-    view.frame.size.height = fittedAccessoryHeight(view)
-    view.backgroundColor = .clear
-    return view
-  }()
-
-  /// Ask the bar its height rather than asserting 52pt: a fixed assertion clipped
-  /// 4pt off the row and reserved the wrong amount of terminal.
-  private func fittedAccessoryHeight(_ view: UIView) -> CGFloat {
-    let width = view.window?.bounds.width
-      ?? (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width
-      ?? 390
-    let fitted = accessoryHosting.sizeThatFits(
-      in: CGSize(width: width, height: .greatestFiniteMagnitude))
-    guard fitted.height <= 0 else { return fitted.height }
-    return (compactAccessory ? TerminalKeyMetrics.compact : .regular).barHeight
-  }
-
-  /// The container keeps the height it was first measured at, so a key-size change
-  /// re-measures it — after the next pass, once the hosted bar has laid out at the new size.
-  var compactAccessory = false {
-    didSet {
-      guard compactAccessory != oldValue else { return }
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        self.accessoryContainer.frame.size.height = self.fittedAccessoryHeight(self.accessoryContainer)
-        if self.isFirstResponder { self.reloadInputViews() }
-      }
-    }
-  }
-
-
-  private var assignedAccessoryView: UIView?
-
-  /// Set false when there is no session, so the key bar does not sit on screen
-  /// with nothing to act on.
-  var showsAccessory = true
-
-  public override var inputAccessoryView: UIView? {
-    get {
-      guard showsAccessory else { return assignedAccessoryView }
-      return assignedAccessoryView ?? accessoryContainer
-    }
-    set { assignedAccessoryView = newValue }
   }
 
   public override var canBecomeFirstResponder: Bool { true }
