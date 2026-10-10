@@ -112,7 +112,8 @@ final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
   }
 
   func execStream(_ command: String, onChunk: (String) -> Bool) throws {
-    try runCommand(command, deadline: nil) { onChunk(String(decoding: $0, as: UTF8.self)) }
+    var decoder = UTF8StreamDecoder()
+    try runCommand(command, deadline: nil) { onChunk(decoder.decode($0)) }
   }
 
   private func runCommand(

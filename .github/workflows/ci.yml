@@ -110,6 +110,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO
         working-directory: clients/apple/TetherKit
 
+      # A reference deleted for an intended change is re-recorded by the run that fails on it;
+      # this hands the new image back for review and commit.
+      - name: Upload recorded snapshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots
+          path: clients/apple/TetherKit/Tests/TetherKitTests/__Snapshots__
+          if-no-files-found: ignore
+
   # The Windows client. Lints and tests the whole workspace and builds the app
   # in release; tether-app is the only crate that needs Windows.
   windows-build:

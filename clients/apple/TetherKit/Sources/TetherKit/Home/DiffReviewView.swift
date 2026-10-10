@@ -4,22 +4,78 @@ import SwiftUI
 /// leading `+`/`-`, which costs a column of code on a phone.
 struct DiffReviewView: View {
   let files: [DiffFile]
-  @State private var collapsed: Set<String> = []
+  var truncated = false
+  var untracked: [String] = []
+  var untrackedTruncated = false
+  var loadUntracked: ((String) async -> GitPatch)?
+
+  /// A file this long starts folded, and opens a page at a time: every row is a view, and a
+  /// lockfile's worth of them at once stalls the scroll.
+  static let pageSize = 400
+
+  /// Small files the user folded, and long files the user opened.
+  @State private var toggled: Set<String> = []
+  @State private var shownRows: [String: Int] = [:]
+  @State private var untrackedPatches: [String: GitPatch] = [:]
+  @State private var viewportWidth: CGFloat = 0
+  @State private var showCopied = false
 
   var body: some View {
     LazyVStack(alignment: .leading, spacing: 10, pinnedViews: [.sectionHeaders]) {
       ForEach(files) { file in
         Section {
-          if !collapsed.contains(file.id) {
-            ScrollView(.horizontal, showsIndicators: false) {
-              VStack(alignment: .leading, spacing: 0) {
-                ForEach(file.rows) { row in DiffRowView(row: row) }
-              }
-              .padding(.vertical, 4)
-            }
+          if isOpen(file) {
+            rows(of: file)
+          } else if file.rows.count > Self.pageSize {
+            pageButton("Show \(file.rows.count) lines") { toggled.insert(file.id) }
           }
         } header: {
           if !file.isPreamble { fileHeader(file) }
+        }
+      }
+      ForEach(untracked, id: \.self) { path in
+        Section {
+          if toggled.contains(untrackedKey(path)) { untrackedRows(path) }
+        } header: {
+          untrackedHeader(path)
+        }
+      }
+      if truncated { notice("The patch is over 2 MB; the rest is not shown.") }
+      if untrackedTruncated { notice("More untracked files than are listed here.") }
+    }
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewportWidth = $0 }
+    .copyConfirmation(isPresented: $showCopied)
+  }
+
+  private func isOpen(_ file: DiffFile) -> Bool {
+    let long = file.rows.count > Self.pageSize
+    return toggled.contains(file.id) != long
+  }
+
+  private func rows(of file: DiffFile) -> some View {
+    let limit = shownRows[file.id] ?? Self.pageSize
+    return VStack(alignment: .leading, spacing: 0) {
+      ScrollView(.horizontal, showsIndicators: false) {
+        // Sized to the widest row (and at least the screen), so every band spans the same width.
+        VStack(alignment: .leading, spacing: 0) {
+          ForEach(file.rows.prefix(limit)) { row in
+            DiffRowView(row: row, digits: file.lineDigits, minWidth: viewportWidth)
+              .contextMenu {
+                if row.kind == .hunk {
+                  Button { copy(file.hunkPatch(startingAt: row.id)) } label: {
+                    Label("Copy hunk", systemImage: "doc.on.doc")
+                  }
+                }
+                Button { copy(file.patchText) } label: { Label("Copy file", systemImage: "doc.on.doc") }
+              }
+          }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.vertical, 4)
+      }
+      if file.rows.count > limit {
+        pageButton("Show \(min(Self.pageSize, file.rows.count - limit)) more lines") {
+          shownRows[file.id] = limit + Self.pageSize
         }
       }
     }
@@ -27,18 +83,9 @@ struct DiffReviewView: View {
 
   private func fileHeader(_ file: DiffFile) -> some View {
     Button {
-      withAnimation(.snappy(duration: 0.2)) {
-        if collapsed.contains(file.id) { collapsed.remove(file.id) } else { collapsed.insert(file.id) }
-      }
+      withAnimation(.snappy(duration: 0.2)) { toggle(file.id) }
     } label: {
-      HStack(spacing: 8) {
-        Image(systemName: collapsed.contains(file.id) ? "chevron.right" : "chevron.down")
-          .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
-          .frame(width: 10)
-        Text(file.path)
-          .font(.caption.monospaced()).foregroundStyle(TetherColors.textPrimary)
-          .lineLimit(1).truncationMode(.head)
-        Spacer(minLength: 8)
+      headerLabel(path: file.path, open: isOpen(file)) {
         if file.added > 0 {
           Text("+\(file.added)").font(.caption2.monospaced()).foregroundStyle(TetherColors.success)
         }
@@ -46,46 +93,124 @@ struct DiffReviewView: View {
           Text("−\(file.removed)").font(.caption2.monospaced()).foregroundStyle(TetherColors.danger)
         }
       }
-      .padding(.horizontal, 12).padding(.vertical, 9)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(TetherColors.surfaceRaised)
-      .overlay(alignment: .bottom) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
-      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .contextMenu {
+      Button { copy(file.patchText) } label: { Label("Copy file", systemImage: "doc.on.doc") }
+    }
     .accessibilityLabel("\(file.path), \(file.added) added, \(file.removed) removed")
-    .accessibilityHint(collapsed.contains(file.id) ? "Expands this file" : "Collapses this file")
+    .accessibilityHint(isOpen(file) ? "Collapses this file" : "Expands this file")
+  }
+
+  private func untrackedKey(_ path: String) -> String { "untracked:\(path)" }
+
+  private func untrackedHeader(_ path: String) -> some View {
+    let open = toggled.contains(untrackedKey(path))
+    return Button {
+      withAnimation(.snappy(duration: 0.2)) { toggle(untrackedKey(path)) }
+    } label: {
+      headerLabel(path: path, open: open) {
+        Text("NEW").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
+          .padding(.horizontal, 6).padding(.vertical, 2)
+          .background(TetherColors.success.opacity(0.15), in: Capsule())
+      }
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("\(path), untracked")
+    .accessibilityHint(open ? "Collapses this file" : "Shows its contents")
+  }
+
+  @ViewBuilder
+  private func untrackedRows(_ path: String) -> some View {
+    if let patch = untrackedPatches[path] {
+      if let file = patch.files.first {
+        rows(of: file)
+        if patch.truncated { notice("Over 2 MB; the rest is not shown.") }
+      } else {
+        notice("Nothing to show for this file.")
+      }
+    } else {
+      ProgressView().tint(TetherColors.accent).frame(maxWidth: .infinity).padding(.vertical, 10)
+        .task {
+          guard let loadUntracked else { return }
+          untrackedPatches[path] = await loadUntracked(path)
+        }
+    }
+  }
+
+  private func headerLabel(path: String, open: Bool, @ViewBuilder trailing: () -> some View) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: open ? "chevron.down" : "chevron.right")
+        .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        .frame(width: 10)
+      Text(path)
+        .font(.caption.monospaced()).foregroundStyle(TetherColors.textPrimary)
+        .lineLimit(1).truncationMode(.head)
+      Spacer(minLength: 8)
+      trailing()
+    }
+    .padding(.horizontal, 12).padding(.vertical, 9)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(TetherColors.surfaceRaised)
+    .overlay(alignment: .bottom) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+    .contentShape(Rectangle())
+  }
+
+  private func pageButton(_ title: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+        .frame(maxWidth: .infinity).padding(.vertical, 10)
+    }
+    .buttonStyle(.plain)
+  }
+
+  private func notice(_ text: String) -> some View {
+    Text(text).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+      .padding(.horizontal, 12).padding(.vertical, 6)
+  }
+
+  private func toggle(_ key: String) {
+    if toggled.contains(key) { toggled.remove(key) } else { toggled.insert(key) }
+  }
+
+  private func copy(_ text: String) {
+    acknowledgeCopy(text, into: $showCopied)
   }
 }
 
 private struct DiffRowView: View {
   let row: DiffRow
+  let digits: Int
+  let minWidth: CGFloat
 
   var body: some View {
+    content.frame(minWidth: minWidth, maxWidth: .infinity, alignment: .leading)
+      .background(tint)
+  }
+
+  @ViewBuilder
+  private var content: some View {
     switch row.kind {
     case .hunk:
       Text(row.text.isEmpty ? "⋯" : row.text)
         .font(.caption2.monospaced()).foregroundStyle(TetherColors.accent)
         .padding(.horizontal, 12).padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TetherColors.accent.opacity(0.07))
     case .plain:
       Text(row.text.isEmpty ? " " : row.text)
         .font(.caption2.monospaced()).foregroundStyle(TetherColors.textSecondary)
         .padding(.horizontal, 12).padding(.vertical, 1)
     default:
-      HStack(spacing: 0) {
-        Text(number)
+      HStack(alignment: .firstTextBaseline, spacing: 0) {
+        // A template of the widest number reserves the gutter, so it scales with the text.
+        Text(String(repeating: "0", count: digits)).hidden()
+          .overlay(alignment: .trailing) { Text(number) }
           .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
-          .frame(width: 34, alignment: .trailing)
-          .padding(.trailing, 8)
-        Rectangle().fill(edge).frame(width: 2)
+          .padding(.leading, 6).padding(.trailing, 8)
         Text(row.text.isEmpty ? " " : row.text)
           .font(.caption.monospaced()).foregroundStyle(TetherColors.textPrimary)
-          .textSelection(.enabled)
-          .padding(.leading, 8).padding(.vertical, 1)
+          .padding(.leading, 8).padding(.trailing, 12).padding(.vertical, 1)
+          .overlay(alignment: .leading) { Rectangle().fill(edge).frame(width: 2) }
       }
-      .background(tint)
     }
   }
 
@@ -103,7 +228,12 @@ private struct DiffRowView: View {
     }
   }
 
-  private var tint: Color { edge.opacity(0.10) }
+  private var tint: Color {
+    switch row.kind {
+    case .hunk: TetherColors.accent.opacity(0.07)
+    default: edge.opacity(0.10)
+    }
+  }
 }
 
 struct MarkdownBodyView: View {
