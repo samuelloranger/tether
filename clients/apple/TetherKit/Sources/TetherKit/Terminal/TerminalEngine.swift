@@ -278,6 +278,7 @@ final class TerminalEngine {
       switch event {
       case let .reset(end):
         feed(through: end)
+        clearAlternateScreen()
         commandMarks.removeAll()
       case let .osc("133", body, end):
         let kind: CommandMark.Kind
@@ -303,6 +304,17 @@ final class TerminalEngine {
       }
     }
     if start < bytes.count { feed(through: bytes.count) }
+  }
+
+  /// SwiftTerm's RIS leaves the alt screen's cells in place and `?1049h` never clears on entry,
+  /// so the next full-screen program would draw over the last one's rows. zmx sends RIS on
+  /// every detach, and an attach replays a TUI onto the alt screen without erasing. Leaving the
+  /// alt screen with 1047 is the only public path that clears it; it also shows the cursor.
+  private func clearAlternateScreen() {
+    guard !terminal.isCurrentBufferAlternate else { return }
+    let cursorWasVisible = delegate.cursorVisible
+    terminal.feed(buffer: Array("\u{1B}[?1047h\u{1B}[?1047l".utf8)[...])
+    if !cursorWasVisible { terminal.feed(buffer: Array("\u{1B}[?25l".utf8)[...]) }
   }
 
   /// The first screen row as a line count from the start of output. While output arrives

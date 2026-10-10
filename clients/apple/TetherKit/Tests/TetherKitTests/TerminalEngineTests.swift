@@ -397,6 +397,27 @@ final class TerminalEngineReviewFixTests: XCTestCase {
     XCTAssertEqual(rowText(engine.frame(), 0), "hi")
   }
 
+  func test_a_tui_entering_the_alt_screen_after_a_full_reset_never_shows_the_last_ones_rows() {
+    let engine = TerminalEngine(cols: 20, rows: 3)
+    engine.feed("\u{1B}[?1049h\u{1B}[HOLD-ROW-ONE-LONG\r\nOLD-ROW-TWO-LONG")
+    // A zmx detach resets the terminal; the next attach clears the main screen and replays
+    // the other session's TUI onto the alt screen, row by row with no erase.
+    engine.feed("\u{1B}c$ zmx attach b\r\n\u{1B}[2J\u{1B}[H")
+    engine.feed("\u{1B}[?1049h\u{1B}[Hnew\r\nb")
+    let frame = engine.frame()
+    XCTAssertTrue(frame.header.altScreen)
+    XCTAssertEqual(rowText(frame, 0), "new")
+    XCTAssertEqual(rowText(frame, 1), "b")
+    XCTAssertEqual(rowText(frame, 2), "")
+  }
+
+  func test_clearing_the_alt_screen_on_a_full_reset_leaves_a_hidden_cursor_hidden() {
+    let engine = TerminalEngine(cols: 20, rows: 3)
+    engine.feed("\u{1B}[?1049h\u{1B}[?25lTUI")
+    engine.feed("\u{1B}[?1049l\u{1B}[?25l\u{1B}c")
+    XCTAssertFalse(engine.frame().header.cursorVisible)
+  }
+
   func test_synchronized_output_is_shown_only_once_complete() {
     let engine = TerminalEngine(cols: 20, rows: 5)
     engine.feed("hello")
