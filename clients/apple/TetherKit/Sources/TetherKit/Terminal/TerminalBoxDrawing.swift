@@ -15,7 +15,7 @@ enum TerminalBoxDrawing {
     context.setFillColor(color)
     context.setStrokeColor(color)
     switch codepoint {
-    case 0x2580...0x259F: block(codepoint, in: cell, color: color, context: context)
+    case 0x2580...0x259F: block(codepoint, in: cell, color: color, pixel: pixel, context: context)
     case 0xE0B0...0xE0B7: powerline(codepoint, in: cell, pixel: pixel, context: context)
     case 0x2504...0x250B, 0x254C...0x254F: dashed(codepoint, in: cell, pixel: pixel, context: context)
     case 0x256D...0x2570: arc(codepoint, in: cell, pixel: pixel, context: context)
@@ -35,16 +35,18 @@ enum TerminalBoxDrawing {
     var left: UInt8 = 0
   }
 
+  /// An even number of device pixels, so a light line and a heavy one (twice as wide) both
+  /// centre on the same pixel boundary and neither edge lands on half a pixel.
   static func lightWidth(_ cell: CGRect, pixel: CGFloat) -> CGFloat {
-    max(pixel, (cell.width / 8 / pixel).rounded() * pixel)
+    max(pixel * 2, (cell.width / 8 / (pixel * 2)).rounded() * pixel * 2)
   }
 
   private static func lines(_ arms: Arms, in cell: CGRect, pixel: CGFloat, context: CGContext) {
     let light = lightWidth(cell, pixel: pixel)
     let widths: [UInt8: CGFloat] = [1: light, 2: light * 2, 3: light]
-    // Centre snapped to the pixel grid so a light line is never smeared over two pixels.
-    let cx = snap(cell.midX - light / 2, pixel) + light / 2
-    let cy = snap(cell.midY - light / 2, pixel) + light / 2
+    // Centre on a pixel boundary: with even widths, every edge then lands on a whole pixel.
+    let cx = snap(cell.midX, pixel)
+    let cy = snap(cell.midY, pixel)
     let gap = light
     func half(_ weight: UInt8) -> CGFloat {
       switch weight {
@@ -149,8 +151,8 @@ enum TerminalBoxDrawing {
 
   private static func arc(_ codepoint: UInt32, in cell: CGRect, pixel: CGFloat, context: CGContext) {
     let light = lightWidth(cell, pixel: pixel)
-    let cx = snap(cell.midX - light / 2, pixel) + light / 2
-    let cy = snap(cell.midY - light / 2, pixel) + light / 2
+    let cx = snap(cell.midX, pixel)
+    let cy = snap(cell.midY, pixel)
     let radius = min(cell.width, cell.height) / 2
     let path = CGMutablePath()
     // ╭ down+right, ╮ down+left, ╯ up+left, ╰ up+right.
@@ -179,11 +181,17 @@ enum TerminalBoxDrawing {
 
   // MARK: Blocks
 
-  private static func block(_ codepoint: UInt32, in cell: CGRect, color: CGColor, context: CGContext) {
+  private static func block(_ codepoint: UInt32, in cell: CGRect, color: CGColor, pixel: CGFloat, context: CGContext) {
     let w = cell.width
     let h = cell.height
+    // Split points on whole pixels: a half-block boundary blended over one pixel row stripes
+    // block-character images.
     func rect(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) {
-      context.fill(CGRect(x: cell.minX + x * w, y: cell.minY + y * h, width: width * w, height: height * h))
+      let x0 = snap(cell.minX + x * w, pixel)
+      let y0 = snap(cell.minY + y * h, pixel)
+      let x1 = snap(cell.minX + (x + width) * w, pixel)
+      let y1 = snap(cell.minY + (y + height) * h, pixel)
+      context.fill(CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
     }
     switch codepoint {
     case 0x2580: rect(0, 0, 1, 0.5)
@@ -227,12 +235,13 @@ enum TerminalBoxDrawing {
       path.addLine(to: CGPoint(x: tip, y: cell.midY))
       path.addLine(to: CGPoint(x: base, y: cell.maxY))
     default:
-      let radius = min(cell.width, cell.height / 2)
-      path.move(to: CGPoint(x: base, y: cell.minY))
+      // A half ellipse the cell's full width and height, so the cap meets the segment beside it
+      // at any line spacing.
+      let halfHeight = cell.height / 2
+      let stretch = CGAffineTransform(translationX: base, y: cell.midY).scaledBy(x: cell.width / halfHeight, y: 1)
       path.addArc(
-        center: CGPoint(x: base, y: cell.midY), radius: radius,
-        startAngle: -.pi / 2, endAngle: .pi / 2, clockwise: !pointsRight)
-      path.addLine(to: CGPoint(x: base, y: cell.maxY))
+        center: .zero, radius: halfHeight, startAngle: -.pi / 2, endAngle: .pi / 2,
+        clockwise: !pointsRight, transform: stretch)
     }
     if solid {
       path.closeSubpath()

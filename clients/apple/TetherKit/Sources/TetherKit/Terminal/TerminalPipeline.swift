@@ -89,6 +89,9 @@ actor TerminalPipeline {
   /// above the grid; trimming them always pushed nvim's empty command line off the bottom.
   private var unpaintedGrow = false
   private var growSettled = false
+  /// Rows before the grow: settling back to them (a keyboard toggled quickly) sends no
+  /// SIGWINCH and needs no repaint, so nothing is left to trim.
+  private var rowsBeforeGrow: UInt16 = 0
   private var lastPublishedTrim = false
   /// Output publishes at most once per display frame: a flood would otherwise rebuild the
   /// grid for every SSH chunk, only for all but the newest to be dropped.
@@ -341,6 +344,7 @@ actor TerminalPipeline {
       cols = newCols
       rows = newRows
       if emulator?.isAltScreen ?? lastAltScreen, newRows > oldRows {
+        if !unpaintedGrow { rowsBeforeGrow = oldRows }
         unpaintedGrow = true
         growSettled = false
       }
@@ -352,7 +356,10 @@ actor TerminalPipeline {
         rebuildPending = true
       }
     }
-    if settled, unpaintedGrow { growSettled = true }
+    if settled, unpaintedGrow {
+      growSettled = true
+      if newRows <= rowsBeforeGrow { unpaintedGrow = false }
+    }
     if settled, rebuildPending, !outputBuffer.data.isEmpty {
       rebuildPending = false
       rebuildCount += 1
@@ -463,6 +470,7 @@ actor TerminalPipeline {
   var publishedGenerationForTest: UInt64? { lastRenderedGeneration }
   var rebuildsForTest: Int { rebuildCount }
   var ptyResizesForTest: Int { ptyResizeCount }
+  var trimsBlankRowsForTest: Bool { unpaintedGrow }
   func resizeForTest(cols: UInt16, rows: UInt16, settled: Bool) {
     applyLocalResize(cols: cols, rows: rows, settled: settled)
   }

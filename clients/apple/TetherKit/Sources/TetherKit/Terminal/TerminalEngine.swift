@@ -41,6 +41,8 @@ final class TerminalEngine {
   /// `buffer.yDisp` at the live bottom. SwiftTerm's yDisp follows output only while there,
   /// so it is restored before every feed and resize.
   private var liveTop = 0
+  /// Bumped when line numbers restart (RIS, ED 3), so a selection kept by line drops.
+  private var lineEpoch: UInt32 = 0
 
   /// `eagerGrid: false` defers the first grid to the first `frame()`: a tall replay engine
   /// would otherwise build it twice.
@@ -319,7 +321,11 @@ final class TerminalEngine {
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
     returnToLive()
+    let topBefore = screenTopLine()
     feedMarkingCommands([UInt8](bytes))
+    // The top only moves back when the buffer was reset or its scrollback cleared: line
+    // numbers from before mean something else now.
+    if screenTopLine() < topBefore { lineEpoch &+= 1 }
     liveTop = terminal.buffer.yDisp
     guard pinned > 0, !terminal.isCurrentBufferAlternate else {
       scrollOffset = 0
@@ -581,6 +587,8 @@ final class TerminalEngine {
   private static func sameState(_ lhs: GridSnapshot.Header, _ rhs: GridSnapshot.Header) -> Bool {
     var lhs = lhs
     lhs.generation = rhs.generation
+    // Set from the grid after it is built; a fresh header never has it.
+    lhs.cursorWide = rhs.cursorWide
     return lhs == rhs
   }
 
@@ -598,6 +606,7 @@ final class TerminalEngine {
       altScreen: terminal.isCurrentBufferAlternate,
       programCursor: TerminalCursorStyle(program: terminal.options.cursorStyle),
       firstLine: terminal.buffer.yDisp + terminal.buffer.totalLinesTrimmed,
+      lineEpoch: lineEpoch,
       cursorColor: terminal.cursorColor.map(TerminalPalette.pack))
   }
 

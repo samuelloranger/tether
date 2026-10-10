@@ -78,17 +78,21 @@ public final class TetherSurfaceView: UIView {
     didSet {
       guard selection != oldValue else { return }
       selectionFirstLine = header?.firstLine
+      selectionEpoch = header?.lineEpoch
       if selection != nil { TerminalCopySource.shared.surface = self }
       updateSelectionLayers()
     }
   }
   /// The screen's first line when `selection` was set.
   private var selectionFirstLine: Int?
+  private var selectionEpoch: UInt32?
 
   /// The selection where its text is now: output or a scroll moves the text, and a highlight
   /// left on the screen rows would cover (and copy) whatever took their place.
   private var shownSelection: TerminalSelection? {
     guard let selection, let header, let origin = selectionFirstLine else { return selection }
+    // Line numbers restarted under it: the text it covered is gone.
+    guard header.lineEpoch == selectionEpoch else { return nil }
     let moved = header.firstLine - origin
     return moved == 0 ? selection : selection.shifted(up: moved)
   }
@@ -158,7 +162,8 @@ public final class TetherSurfaceView: UIView {
   private var linkSpans: [[LinkSpan]] {
     if let lazyLinkSpans { return lazyLinkSpans }
     guard let header else { return [] }
-    let texts = cachedRowTexts
+    // The wide-glyph placeholder is a column, not text: as a space it ends a URL as before.
+    let texts = cachedRowTexts.map { String($0.map { $0 == TerminalRunBuilder.wideTail ? " " : $0 }) }
     // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in LinkSpans still runs.
     let spans = LinkSpans.merging(
       explicit: hyperlinks,
@@ -233,10 +238,10 @@ public final class TetherSurfaceView: UIView {
       ?? UIColor.systemBlue.withAlphaComponent(0.35)).cgColor
     // With a grid on screen, the gutter takes the new colour with the first frame drawn in it;
     // repainting the old cells over a new fill flashed both for a frame.
-    if header == nil {
-      backgroundColor = theme.uiBackground
-      requestRepaint()
-    }
+    if header == nil { backgroundColor = theme.uiBackground }
+    // Safe with a grid up: the bitmap's fill comes from the frame, so this only redraws the
+    // cursor cell in the new colour.
+    requestRepaint()
   }
 
   private func commonInit() {
@@ -349,6 +354,8 @@ public final class TetherSurfaceView: UIView {
     hyperlinks = []
     clusters = [:]
     cursorImage = nil
+    shownBackground = nil
+    backgroundColor = theme.uiBackground
     drawRows = 0
     lazyRowTexts = nil
     lazyLinkSpans = nil

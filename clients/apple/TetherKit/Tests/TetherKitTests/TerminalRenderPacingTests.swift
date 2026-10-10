@@ -84,6 +84,35 @@ final class TerminalRenderPacingTests: XCTestCase {
     XCTAssertEqual(rebuilds, 1)
   }
 
+  // MARK: Pipeline: blank rows are slack only until the program repaints
+
+  func test_rows_grown_on_the_alt_screen_are_slack_until_output_after_the_settle() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 40, rows: 10)
+    await pipeline.feedForTest(Data("\u{1B}[?1049hfull screen".utf8))
+    await pipeline.resizeForTest(cols: 40, rows: 14, settled: false)
+    var trims = await pipeline.trimsBlankRowsForTest
+    XCTAssertTrue(trims)
+    await pipeline.feedForTest(Data("tick".utf8))
+    trims = await pipeline.trimsBlankRowsForTest
+    XCTAssertTrue(trims, "output from before the host saw the new size is not the repaint")
+    await pipeline.resizeForTest(cols: 40, rows: 14, settled: true)
+    await pipeline.feedForTest(Data("\u{1B}[Hrepainted".utf8))
+    trims = await pipeline.trimsBlankRowsForTest
+    XCTAssertFalse(trims)
+  }
+
+  func test_a_grow_that_settles_back_leaves_nothing_to_trim() async {
+    let pipeline = TerminalPipeline()
+    await pipeline.attachForTest(cols: 40, rows: 10)
+    await pipeline.feedForTest(Data("\u{1B}[?1049hfull screen".utf8))
+    await pipeline.resizeForTest(cols: 40, rows: 14, settled: false)
+    await pipeline.resizeForTest(cols: 40, rows: 10, settled: false)
+    await pipeline.resizeForTest(cols: 40, rows: 10, settled: true)
+    let trims = await pipeline.trimsBlankRowsForTest
+    XCTAssertFalse(trims)
+  }
+
   // MARK: Renderer: a partial repaint draws what a full one would
 
   func test_repainting_only_the_changed_row_matches_a_full_repaint() throws {

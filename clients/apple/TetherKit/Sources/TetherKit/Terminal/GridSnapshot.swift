@@ -42,6 +42,8 @@ public enum GridSnapshot {
     /// The top row's line number counted from the start of output, so a selection can stay
     /// on its text while the screen scrolls.
     public var firstLine = 0
+    /// Changes when line numbers restart (a reset, a cleared scrollback).
+    public var lineEpoch: UInt32 = 0
     /// Set by OSC 12; nil means the theme's.
     public var cursorColor: UInt32? = nil
     /// Rows the program has not painted since the grid grew: drawn as slack above the grid,

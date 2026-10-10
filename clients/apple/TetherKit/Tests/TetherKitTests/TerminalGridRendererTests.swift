@@ -46,10 +46,10 @@ final class TerminalGridRendererTests: XCTestCase {
     return cells
   }
 
-  private func header(cols: Int, rows: Int, generation: UInt64, altScreen: Bool = false)
+  private func header(cols: Int, rows: Int, generation: UInt64, altScreen: Bool = false, trims: Bool = false)
     -> GridSnapshot.Header
   {
-    GridSnapshot.Header(
+    var header = GridSnapshot.Header(
       cols: UInt16(cols),
       rows: UInt16(rows),
       cursorCol: 0,
@@ -58,6 +58,8 @@ final class TerminalGridRendererTests: XCTestCase {
       cursorVisible: false,
       altScreen: altScreen
     )
+    header.trimsBlankRows = trims
+    return header
   }
 
   /// Pixels that are not the background colour.
@@ -175,8 +177,8 @@ final class TerminalGridRendererTests: XCTestCase {
     XCTAssertEqual(inkedPixels(gap), 0)
   }
 
-  /// Alt-screen trailing empty rows are unpainted slack: they sit against the title bar so
-  /// the painted TUI stays on the key bar.
+  /// Alt-screen trailing empty rows the program has not painted since a grow are slack: they
+  /// sit against the title bar so the painted TUI stays on the key bar.
   func testAltScreenTrailingEmptyRowsSitAsSlackAtTheTop() {
     let renderer = TerminalGridRenderer()
     let cols = 8
@@ -189,7 +191,7 @@ final class TerminalGridRendererTests: XCTestCase {
     }
     guard
       let image = renderer.render(
-        header: header(cols: cols, rows: rows, generation: 1, altScreen: true),
+        header: header(cols: cols, rows: rows, generation: 1, altScreen: true, trims: true),
         cells: cells,
         metrics: m
       )
@@ -381,5 +383,22 @@ final class TerminalGridRendererTests: XCTestCase {
   private func inkMass(_ image: CGImage) -> Int {
     let m = channelMass(image)
     return m.r + m.g + m.b
+  }
+
+  /// Without an unpainted grow, a blank bottom row is the program's (vim's empty command line):
+  /// the grid keeps its rows where they are.
+  func testAltScreenBlankRowsStayInPlaceOnceThePageIsPainted() throws {
+    let renderer = TerminalGridRenderer()
+    let cols = 8
+    let rows = 4
+    let m = metrics(cols: cols, rows: rows)
+    var cells = grid("", cols: cols, rows: rows)
+    cells[0].codepoint = 0x48
+    let image = try XCTUnwrap(renderer.render(
+      header: header(cols: cols, rows: rows, generation: 1, altScreen: true), cells: cells, metrics: m))
+    XCTAssertEqual(renderer.drawRows, rows)
+    let rowHeightPx = Int((m.cellHeight * m.scale).rounded())
+    let top = try XCTUnwrap(image.cropping(to: CGRect(x: 0, y: 0, width: image.width, height: rowHeightPx)))
+    XCTAssertGreaterThan(inkedPixels(top), 0)
   }
 }
