@@ -242,4 +242,27 @@ final class SSHPumpLoopTests: XCTestCase {
     io.reads = [.init(rc: 0)]
     XCTAssertEqual(freshPass(), .running)
   }
+
+  // MARK: backpressure
+
+  func test_a_consumer_too_far_behind_leaves_the_socket_unread() {
+    var paused = true
+    loop = SSHPumpLoop(io: io, readPaused: { paused }) { [unowned self] in self.delivered.append($0) }
+    io.reads = [.init(rc: 4)]
+
+    _ = freshPass()
+    XCTAssertFalse(io.log.contains("read"))
+    XCTAssertEqual(io.log.last, "wait(,\(SSHPumpLoop.pausedWaitMs))")
+
+    paused = false
+    _ = freshPass()
+    XCTAssertEqual(delivered, Data("xxxx".utf8))
+  }
+
+  func test_input_still_goes_out_while_reads_are_paused() {
+    loop = SSHPumpLoop(io: io, readPaused: { true }) { [unowned self] in self.delivered.append($0) }
+    loop.enqueue(Data("\u{3}".utf8))
+    _ = freshPass()
+    XCTAssertEqual(io.log.first, "write(1)")
+  }
 }

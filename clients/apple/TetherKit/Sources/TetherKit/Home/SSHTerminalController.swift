@@ -100,7 +100,8 @@ public final class SSHTerminalController {
 
   public static let defaultAttach = "default"
 
-  public var snapshot: TerminalFrame?
+  /// Newest grid, handed to the surface without going through Observation.
+  public let frames = TerminalFrameFeed()
   public private(set) var status: Status = .connecting
   public private(set) var mouseMode: MouseMode = .off
   public private(set) var mouseSgr = true
@@ -229,7 +230,7 @@ public final class SSHTerminalController {
   private func observe() {
     Task { [weak self] in
       guard let snapshots = self?.pipeline.snapshots else { return }
-      for await snapshot in snapshots { self?.snapshot = snapshot }
+      for await snapshot in snapshots { self?.frames.publish(snapshot) }
     }
     Task { [weak self] in
       guard let events = self?.pipeline.events else { return }
@@ -967,10 +968,13 @@ public final class SSHTerminalController {
     }
   }
 
+  /// A transcript is one attributed string in a text view; its tail is what anyone reads.
+  static let historyLines = 10_000
+
   /// zmx runs an alt-screen session, so the local buffer only holds the current screen;
   /// `zmx history` is the real transcript.
   public func historyText() async -> String {
-    if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach))"),
+    if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach)) | tail -n \(Self.historyLines)"),
       !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return out
     }

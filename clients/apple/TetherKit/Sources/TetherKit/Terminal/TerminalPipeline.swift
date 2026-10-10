@@ -50,7 +50,20 @@ actor TerminalPipeline {
   private var outputBuffer: TerminalOutputBuffer { currentGrid?.buffer ?? TerminalOutputBuffer() }
   /// Which session key `emulator` holds the scrollback for.
   private var emulatorKey: String?
-  private var sshTransport: (any TerminalByteStream)?
+  private var sshTransport: (any TerminalByteStream)? {
+    didSet {
+      let bracketed = emulator?.bracketedPaste ?? false
+      writeTarget.value = sshTransport.map { WriteTarget(transport: $0, key: emulatorKey, bracketedPaste: bracketed) }
+    }
+  }
+  /// Where the outbound pump writes, readable without the actor: typed input never waits
+  /// behind output being parsed and drawn.
+  private struct WriteTarget {
+    var transport: any TerminalByteStream
+    var key: String?
+    var bracketedPaste: Bool
+  }
+  private nonisolated let writeTarget = LockedBox<WriteTarget?>(nil)
   private var sshReadTask: Task<Void, Never>?
   private var outboundTask: Task<Void, Never>?
   private var lastRenderedGeneration: UInt64?
@@ -62,6 +75,16 @@ actor TerminalPipeline {
   /// later resize must agree or the rendered grid will not match the PTY.
   private var cols: UInt16 = 80
   private var rows: UInt16 = 24
+  /// A rebuild replays the whole output buffer, so it waits for the settled size: during a
+  /// keyboard animation it ran once per frame. Until then the emulator resizes in place.
+  private var rebuildPending = false
+  /// Output publishes at most once per display frame: a flood would otherwise rebuild the
+  /// grid for every SSH chunk, only for all but the newest to be dropped.
+  static let publishInterval = Duration.milliseconds(8)
+  private var lastOutputPublish: ContinuousClock.Instant?
+  private var publishCount = 0
+  private var rebuildCount = 0
+  private var scheduledPublish: Task<Void, Never>?
 
   /// `theme` is the one the first grid is created in, so the first frame is never drawn in
   /// the default colors.
@@ -84,6 +107,7 @@ actor TerminalPipeline {
     startOutboundPumpIfNeeded()
     let attached = sessionGrids.attach(key: key, cols: cols, rows: rows)
     currentGrid = attached.grid
+    rebuildPending = false
     if let cellPixelSize { attached.grid.emulator.setCellPixelSize(width: cellPixelSize.width, height: cellPixelSize.height) }
     emulatorKey = key
     lastRenderedGeneration = nil
@@ -232,65 +256,82 @@ actor TerminalPipeline {
 
   // MARK: - Outbound
 
+  /// One consumer keeps every frame in order; only resizes need the actor.
   private func startOutboundPumpIfNeeded() {
     guard outboundTask == nil else { return }
     let frames = outboundFrames
-    outboundTask = Task { [weak self] in
+    let target = writeTarget
+    outboundTask = Task.detached { [weak self] in
       for await frame in frames {
-        await self?.handleOutbound(frame)
+        switch frame {
+        case let .input(text, key):
+          await Self.write(Data(text.utf8), key: key, to: target, onFailure: self)
+        case let .paste(text, key):
+          let bracketed = target.value?.bracketedPaste ?? false
+          await Self.write(Data(PastePayload.make(text, bracketed: bracketed).utf8), key: key, to: target, onFailure: self)
+        case let .reply(bytes, key):
+          await Self.write(bytes, key: key, to: target, onFailure: self)
+        case .localResize, .serverResize:
+          await self?.handleOutbound(frame)
+        }
       }
     }
   }
 
+  /// A frame keyed to another session is dropped: it was typed into the one that was replaced.
+  private static func write(
+    _ bytes: Data, key: String?, to target: LockedBox<WriteTarget?>, onFailure pipeline: TerminalPipeline?
+  ) async {
+    guard let current = target.value, key == nil || key == current.key else { return }
+    do {
+      try await current.transport.write(bytes)
+    } catch {
+      await pipeline?.writeFailed(error.localizedDescription, key: current.key)
+    }
+  }
+
+  private func writeFailed(_ message: String, key: String?) {
+    guard sshTransport != nil, key == emulatorKey else { return }
+    sshTransport = nil
+    eventSink.yield(.error(message))
+  }
+
   private func handleOutbound(_ frame: OutboundFrame) async {
     switch frame {
-    case let .input(text, key):
-      await write(Data(text.utf8), key: key)
-    case let .paste(text, key):
-      await write(Data((emulator?.pastePayload(text) ?? text).utf8), key: key)
-    case let .reply(bytes, key):
-      await write(bytes, key: key)
+    case .input, .paste, .reply:
+      break
     case let .localResize(newCols, newRows):
       // Local emulator only — no PTY resize, so no SIGWINCH. Keeps the rendered
       // grid matching the view through a keyboard animation's every frame.
-      applyLocalResize(cols: newCols, rows: newRows)
+      applyLocalResize(cols: newCols, rows: newRows, settled: false)
     case let .serverResize(newCols, newRows):
       // Settled size → the PTY. Apply locally too in case the socket was nil
       // while the emulator resized (reconnect).
-      applyLocalResize(cols: newCols, rows: newRows)
+      applyLocalResize(cols: newCols, rows: newRows, settled: true)
       if let transport = sshTransport {
         await transport.resize(cols: newCols, rows: newRows)
       }
     }
   }
 
-  private func write(_ bytes: Data, key: String?) async {
-    guard let transport = sshTransport, stillCurrent(key) else { return }
-    do {
-      try await transport.write(bytes)
-    } catch {
-      sshTransport = nil
-      eventSink.yield(.error(error.localizedDescription))
-    }
-  }
-
-  /// Whether a queued frame still belongs to the terminal on screen.
-  private func stillCurrent(_ key: String?) -> Bool {
-    guard let key else { return true }
-    return key == emulatorKey
-  }
-
   @discardableResult
-  private func applyLocalResize(cols newCols: UInt16, rows newRows: UInt16) -> Bool {
+  private func applyLocalResize(cols newCols: UInt16, rows newRows: UInt16, settled: Bool) -> Bool {
     let oldCols = cols
     let oldRows = rows
-    guard newCols != cols || newRows != rows else { return false }
-    cols = newCols
-    rows = newRows
-    if TerminalResizeStrategy.shouldRebuildFromBuffer(
-      altScreen: lastAltScreen,
-      oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
-    ), !outputBuffer.data.isEmpty {
+    let changed = newCols != cols || newRows != rows
+    if changed {
+      cols = newCols
+      rows = newRows
+      if TerminalResizeStrategy.shouldRebuildFromBuffer(
+        altScreen: lastAltScreen,
+        oldCols: oldCols, oldRows: oldRows, newCols: newCols, newRows: newRows
+      ) {
+        rebuildPending = true
+      }
+    }
+    if settled, rebuildPending, !outputBuffer.data.isEmpty {
+      rebuildPending = false
+      rebuildCount += 1
       let carried = currentGrid?.emulator.paletteOverrideEntries() ?? []
       let carriedCursor = currentGrid?.emulator.programCursor
       let rebuilt = outputBuffer.replay(
@@ -304,6 +345,7 @@ actor TerminalPipeline {
       publishSnapshot()
       return true
     }
+    guard changed else { return false }
     emulator?.resize(cols: newCols, rows: newRows)
     // An empty buffer means we are still waiting on output and a cached grid is
     // on screen — publishing the empty emulator would flash blank.
@@ -317,13 +359,19 @@ actor TerminalPipeline {
   }
 
   /// Replays into an emulator tall enough to hold the whole history, since a frame only covers
-  /// the visible rows. The buffer is byte-capped, so a long session yields only its tail.
-  func historyText() -> String {
-    guard let buffer = currentGrid?.buffer, !buffer.data.isEmpty else { return "" }
-    let newlines = buffer.data.reduce(into: 0) { if $1 == 0x0A { $0 += 1 } }
-    let tall = UInt16(min(20_000, max(Int(rows), newlines + Int(rows) + 2)))
-    let frame = buffer.replay(cols: cols, rows: tall).frame()
-    return TerminalGridText.plainText(header: frame.header, cells: frame.cells)
+  /// the visible rows. The buffer is byte-capped, so a long session yields only its tail. The
+  /// replay runs off the actor: live output would wait behind a grid this tall.
+  func historyText() async -> String {
+    guard let data = currentGrid?.buffer.data, !data.isEmpty else { return "" }
+    let (cols, rows) = (cols, rows)
+    return await Task.detached(priority: .userInitiated) {
+      let newlines = data.reduce(into: 0) { if $1 == 0x0A { $0 += 1 } }
+      let tall = UInt16(min(20_000, max(Int(rows), newlines + Int(rows) + 2)))
+      let buffer = TerminalOutputBuffer(byteBudget: max(data.count, 1))
+      buffer.append(data)
+      let frame = buffer.replay(cols: cols, rows: tall, eagerGrid: false).frame()
+      return TerminalGridText.plainText(header: frame.header, cells: frame.cells)
+    }.value
   }
 
   private func applyOutput(_ bytes: Data) {
@@ -335,9 +383,34 @@ actor TerminalPipeline {
         outbound.yield(.reply(Data(replies), key: emulatorKey))
       }
       if emulator.takeBells() > 0 { eventSink.yield(.bell) }
+      let bracketed = emulator.bracketedPaste
+      writeTarget.update { if $0 != nil, $0?.bracketedPaste != bracketed { $0?.bracketedPaste = bracketed } }
       for text in emulator.takeClipboard() { eventSink.yield(.clipboard(text)) }
       syncReport(from: emulator)
     }
+    publishOutput()
+  }
+
+  private func publishOutput() {
+    guard scheduledPublish == nil else { return }
+    let now = ContinuousClock.now
+    guard let last = lastOutputPublish, now - last < Self.publishInterval else {
+      lastOutputPublish = now
+      publishSnapshot()
+      return
+    }
+    let wait = Self.publishInterval - (now - last)
+    scheduledPublish = Task { [weak self] in
+      try? await Task.sleep(for: wait)
+      guard !Task.isCancelled else { return }
+      await self?.flushScheduledPublish()
+    }
+  }
+
+  private func flushScheduledPublish() {
+    scheduledPublish?.cancel()
+    scheduledPublish = nil
+    lastOutputPublish = .now
     publishSnapshot()
   }
 
@@ -352,8 +425,21 @@ actor TerminalPipeline {
     self.rows = rows
   }
 
-  /// Test seam: feed bytes through the normal output path.
-  func feedForTest(_ bytes: Data) { applyOutput(bytes) }
+  /// Test seam: feed bytes through the normal output path, then publish at once rather than
+  /// at the next frame interval.
+  func feedForTest(_ bytes: Data) {
+    applyOutput(bytes)
+    if scheduledPublish != nil { flushScheduledPublish() }
+  }
+
+  /// Test seam: feed through the output path and leave publishing to its own pace.
+  func feedPacedForTest(_ bytes: Data) { applyOutput(bytes) }
+  var publishesForTest: Int { publishCount }
+  var publishedGenerationForTest: UInt64? { lastRenderedGeneration }
+  var rebuildsForTest: Int { rebuildCount }
+  func resizeForTest(cols: UInt16, rows: UInt16, settled: Bool) {
+    applyLocalResize(cols: cols, rows: rows, settled: settled)
+  }
 
   var isWatchingImagesForTest: Bool { imageWatch != nil }
   var imageWatchDelayForTest: Duration { watchDelay }
@@ -378,6 +464,7 @@ actor TerminalPipeline {
     syncMouseModes(from: emulator)
     guard frame.header.generation != lastRenderedGeneration else { return false }
     lastRenderedGeneration = frame.header.generation
+    publishCount += 1
     // Output or an animation frame: watch closely again.
     speedUpImageWatch()
     if frame.header.altScreen != lastAltScreen {

@@ -15,6 +15,7 @@ final class TerminalGlyphCache {
   /// `nil` marks a codepoint no font on the system can draw, so the lookup is
   /// not retried every frame.
   private var glyphs: [UInt64: Resolved?] = [:]
+  private var fallbackFaces: [String: CTFont] = [:]
 
   init(regular: UIFont, bold: UIFont) {
     // UIFont is toll-free bridged to CTFont; this is the documented way to
@@ -45,7 +46,11 @@ final class TerminalGlyphCache {
     }
 
     // Core Text picks the fallback face it would have used inside a CTLine.
-    let fallback = CTFontCreateForString(base, text as CFString, CFRange(location: 0, length: utf16.count))
+    let created = CTFontCreateForString(base, text as CFString, CFRange(location: 0, length: utf16.count))
+    // One object per face, so the renderer can batch glyphs by font identity.
+    let name = CTFontCopyPostScriptName(created) as String
+    let fallback = fallbackFaces[name] ?? created
+    fallbackFaces[name] = fallback
     guard let glyph = glyph(for: &utf16, in: fallback) else { return nil }
     return Resolved(glyph: glyph, font: fallback)
   }

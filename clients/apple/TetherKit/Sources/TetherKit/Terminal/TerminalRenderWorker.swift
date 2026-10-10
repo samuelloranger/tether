@@ -5,13 +5,19 @@ import UIKit
 struct TerminalRenderOutput {
   var header: GridSnapshot.Header
   var cells: [GridSnapshot.Cell]
-  var rowTexts: [String]
-  var linkSpans: [[LinkSpan]]
+  var hyperlinks: [[LinkSpan]]
   var images: TerminalImageLayer
   var image: CGImage?
+  /// Rows the bitmap anchors to the bottom of the view.
+  var drawRows: Int
+
+  /// Plain text per row. Computed on demand: only selection and link taps read it.
+  var rowTexts: [String] {
+    TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows))
+  }
 }
 
-/// Link detection and rasterization for one surface, off the main thread.
+/// Rasterization for one surface, off the main thread.
 /// Touch only from the surface's serial render queue.
 final class TerminalRenderWorker {
   private let renderer = TerminalGridRenderer()
@@ -19,8 +25,7 @@ final class TerminalRenderWorker {
   private var lastMetrics: TerminalRenderMetrics?
   private var lastHeader: GridSnapshot.Header?
   private var lastCells: [GridSnapshot.Cell] = []
-  private var lastRowTexts: [String] = []
-  private var lastLinkSpans: [[LinkSpan]] = []
+  private var lastHyperlinks: [[LinkSpan]] = []
   private var lastImages = TerminalImageLayer.empty
 
   func reset() {
@@ -29,8 +34,7 @@ final class TerminalRenderWorker {
     lastMetrics = nil
     lastHeader = nil
     lastCells = []
-    lastRowTexts = []
-    lastLinkSpans = []
+    lastHyperlinks = []
     lastImages = .empty
   }
 
@@ -50,18 +54,8 @@ final class TerminalRenderWorker {
     lastGeneration = header.generation
     lastHeader = header
     lastCells = frame.cells
+    lastHyperlinks = frame.hyperlinks
     lastImages = frame.images
-    let cols = Int(header.cols)
-    let rows = Int(header.rows)
-    lastRowTexts = TerminalRunBuilder.rowTexts(cells: lastCells, cols: cols, rows: rows)
-    // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in
-    // LinkSpans still runs.
-    lastLinkSpans = LinkSpans.merging(
-      explicit: frame.hyperlinks,
-      detected: LinkSpans.compute(
-        texts: lastRowTexts, wrapped: Array(repeating: false, count: lastRowTexts.count), cols: cols
-      )
-    )
     return rasterize(metrics: metrics)
   }
 
@@ -79,10 +73,10 @@ final class TerminalRenderWorker {
     return TerminalRenderOutput(
       header: header,
       cells: lastCells,
-      rowTexts: lastRowTexts,
-      linkSpans: lastLinkSpans,
+      hyperlinks: lastHyperlinks,
       images: lastImages,
-      image: image
+      image: image,
+      drawRows: renderer.drawRows
     )
   }
 }

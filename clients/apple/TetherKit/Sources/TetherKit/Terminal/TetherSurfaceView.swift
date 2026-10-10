@@ -123,8 +123,36 @@ public final class TetherSurfaceView: UIView {
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
   private var images = TerminalImageLayer.empty
-  private var cachedRowTexts: [String] = []
-  private var linkSpans: [[LinkSpan]] = []
+  private var hyperlinks: [[LinkSpan]] = []
+  /// Rows the current bitmap anchors to the bottom; set with each committed frame.
+  private var drawRows = 0
+  /// Row text and link spans are worked out when a tap or a selection needs them, not for
+  /// every frame: detection runs several regexes over the whole screen.
+  private var lazyRowTexts: [String]?
+  private var lazyLinkSpans: [[LinkSpan]]?
+
+  private var cachedRowTexts: [String] {
+    if let lazyRowTexts { return lazyRowTexts }
+    guard let header else { return [] }
+    let texts = TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows))
+    lazyRowTexts = texts
+    return texts
+  }
+
+  private var linkSpans: [[LinkSpan]] {
+    if let lazyLinkSpans { return lazyLinkSpans }
+    guard let header else { return [] }
+    let texts = cachedRowTexts
+    // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in LinkSpans still runs.
+    let spans = LinkSpans.merging(
+      explicit: hyperlinks,
+      detected: LinkSpans.compute(
+        texts: texts, wrapped: Array(repeating: false, count: texts.count), cols: Int(header.cols)
+      )
+    )
+    lazyLinkSpans = spans
+    return spans
+  }
 
   private var font: UIFont = .monospacedSystemFont(ofSize: 14, weight: .regular)
   private var boldFont: UIFont = .monospacedSystemFont(ofSize: 14, weight: .bold)
@@ -298,9 +326,11 @@ public final class TetherSurfaceView: UIView {
     header = nil
     cells = []
     images = .empty
-    cachedRowTexts = []
+    hyperlinks = []
+    drawRows = 0
+    lazyRowTexts = nil
+    lazyLinkSpans = nil
     shownCursor = nil
-    linkSpans = []
     renderQueue.async { [worker] in
       worker.reset()
     }
@@ -368,11 +398,14 @@ public final class TetherSurfaceView: UIView {
     }
     guard let output else { return }
 
+    let gridChanged = header?.cols != output.header.cols || header?.rows != output.header.rows
     header = output.header
     cells = output.cells
     images = output.images
-    cachedRowTexts = output.rowTexts
-    linkSpans = output.linkSpans
+    hyperlinks = output.hyperlinks
+    drawRows = output.drawRows
+    lazyRowTexts = nil
+    lazyLinkSpans = nil
 
     withoutAnimations {
       if let image = output.image {
@@ -385,7 +418,8 @@ public final class TetherSurfaceView: UIView {
       updateCursorLayer()
       updateSelectionLayers()
     }
-    invalidateIntrinsicContentSize()
+    // Only the grid's size feeds the intrinsic size; invalidating per frame re-ran layout.
+    if gridChanged { invalidateIntrinsicContentSize() }
   }
 
   private func currentMetrics() -> TerminalRenderMetrics? {
@@ -535,24 +569,25 @@ public final class TetherSurfaceView: UIView {
   /// Bottom-anchored so the leftover height sits under the title bar like empty scrollback,
   /// not as a gap between the newest line and the key bar.
   private var gridOriginY: CGFloat {
-    guard let header else { return 0 }
-    let cols = Int(header.cols)
-    let rows = Int(header.rows)
-    let drawRows = TerminalGridLayout.paintedRows(
-      cells: cells, cols: cols, rows: rows, altScreen: header.altScreen, images: images
-    )
-    let drawn = CGFloat(drawRows) * cellHeight
-    return max(0, bounds.height - drawn)
+    guard header != nil else { return 0 }
+    return max(0, bounds.height - CGFloat(drawRows) * cellHeight)
   }
+
+  /// Bounds and scale the bitmap was last laid out for: a layout pass that changes neither
+  /// has nothing to repaint.
+  private var laidOut: (size: CGSize, scale: CGFloat)?
 
   public override func layoutSubviews() {
     super.layoutSubviews()
+    let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
     withoutAnimations {
       contentLayer.frame = bounds
       textLayer.frame = CGRect(x: gridOriginX, y: 0, width: bounds.width, height: bounds.height)
-      textLayer.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
+      textLayer.contentsScale = scale
     }
     reportGridSize()
+    guard laidOut?.size != bounds.size || laidOut?.scale != scale else { return }
+    laidOut = (bounds.size, scale)
     requestRepaint()
   }
 
@@ -661,6 +696,7 @@ public final class TetherSurfaceView: UIView {
     case .began:
       lastPanY = point.y
       scrollRemainder = 0
+      scheduler?.interactive = true
     case .changed:
       let delta = lastPanY - point.y
       lastPanY = point.y
@@ -677,6 +713,7 @@ public final class TetherSurfaceView: UIView {
       applyScrollOffset()
     case .ended, .cancelled, .failed:
       scrollRemainder = 0
+      scheduler?.interactive = false
       applyScrollOffset()
     default:
       break
@@ -721,6 +758,7 @@ public final class TetherSurfaceView: UIView {
       // A mouse wheel tick arrives as a `.began` that already carries its whole movement.
       lastScrollY = 0
       scrollRemainder = 0
+      scheduler?.interactive = true
       fallthrough
     case .changed:
       let delta = lastScrollY - y
@@ -744,6 +782,7 @@ public final class TetherSurfaceView: UIView {
       }
     case .ended, .cancelled, .failed:
       scrollRemainder = 0
+      scheduler?.interactive = false
     default:
       break
     }

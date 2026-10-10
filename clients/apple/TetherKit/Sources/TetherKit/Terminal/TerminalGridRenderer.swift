@@ -34,7 +34,16 @@ final class TerminalGridRenderer {
   private var metrics: TerminalRenderMetrics?
   private var glyphCache: TerminalGlyphCache?
   private var colors: [UInt32: CGColor] = [:]
+  private var dimColors: [UInt32: CGColor] = [:]
   private var glyphOffsetX: CGFloat = 0
+  /// Reused across runs and frames instead of two fresh arrays per glyph run.
+  private var glyphBuffer: [CGGlyph] = []
+  private var positionBuffer: [CGPoint] = []
+  /// What the bitmap shows now, so the next frame repaints only the rows that differ.
+  private var paintedCells: [GridSnapshot.Cell] = []
+  private var paintedOriginY: CGFloat = -1
+  /// Rows anchored to the bottom in the last render.
+  private(set) var drawRows = 0
   /// Decoded once per image content; dropped when no placement shows it any more.
   private var bitmaps: [TerminalImageLayer.Key: CGImage] = [:]
   /// Whether `image` shows any kitty placement: an empty frame may keep a stale bitmap,
@@ -50,6 +59,9 @@ final class TerminalGridRenderer {
     metrics = nil
     glyphCache = nil
     colors.removeAll(keepingCapacity: true)
+    dimColors.removeAll(keepingCapacity: true)
+    paintedCells = []
+    paintedOriginY = -1
   }
 
   func render(
@@ -70,14 +82,27 @@ final class TerminalGridRenderer {
     let drawRows = TerminalGridLayout.paintedRows(
       cells: cells, cols: cols, rows: rows, altScreen: header.altScreen, images: images
     )
+    self.drawRows = drawRows
     // Bottom-anchored, so a row-count change moves every row. Alt-screen trailing
     // empties are left out so they become slack at the top, not a gap under the TUI.
     let originY = max(0, metrics.size.height - CGFloat(drawRows) * metrics.cellHeight)
 
     guard drawRows > 0 || imageShowsPlacements else { return image }
 
-    // Full repaint every frame: row-granular diffing desynced on resize and left torn
-    // text. A whole grid is cheap at phone sizes and cannot drift from the cells.
+    // Same geometry and no images on either frame: only rows whose cells changed are
+    // repainted, each clipped to its own band. Anything else repaints the whole bitmap, which
+    // is also what keeps a resize from leaving torn rows behind.
+    if images.isEmpty, !imageShowsPlacements, originY == paintedOriginY, paintedCells.count == cells.count {
+      for row in 0..<drawRows {
+        let range = (row * cols)..<((row + 1) * cols)
+        guard cells[range] != paintedCells[range] else { continue }
+        paintRow(row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
+      }
+      paintedCells = cells
+      image = context.makeImage()
+      return image
+    }
+
     context.setFillColor(metrics.background)
     context.fill(CGRect(origin: .zero, size: metrics.size))
 
@@ -97,14 +122,42 @@ final class TerminalGridRenderer {
     }
     drawImages(images, depth: .belowText, originY: originY, metrics: metrics, context: context)
     for row in 0..<drawRows {
-      drawGlyphs(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
+      clipped(toRow: row, originY: originY, metrics: metrics, context: context) {
+        drawGlyphs(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
+      }
     }
     drawImages(images, depth: .aboveText, originY: originY, metrics: metrics, context: context)
-    bitmaps = bitmaps.filter { images.bitmaps[$0.key] != nil }
+    if !bitmaps.isEmpty { bitmaps = bitmaps.filter { images.bitmaps[$0.key] != nil } }
     imageShowsPlacements = !images.isEmpty
+    paintedCells = cells
+    paintedOriginY = originY
 
     image = context.makeImage()
     return image
+  }
+
+  private func paintRow(
+    _ row: Int, cols: Int, cells: [GridSnapshot.Cell], originY: CGFloat,
+    metrics: TerminalRenderMetrics, glyphCache: TerminalGlyphCache, context: CGContext
+  ) {
+    let band = CGRect(x: 0, y: CGFloat(row) * metrics.cellHeight + originY, width: metrics.size.width, height: metrics.cellHeight)
+    context.setFillColor(metrics.background)
+    context.fill(band)
+    drawBackgrounds(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, context: context)
+    clipped(toRow: row, originY: originY, metrics: metrics, context: context) {
+      drawGlyphs(row: row, cols: cols, cells: cells, originY: originY, metrics: metrics, glyphCache: glyphCache, context: context)
+    }
+  }
+
+  /// A row's glyphs stay inside its band on every path, so repainting one row alone never
+  /// leaves (or erases) a neighbour's overhang the full repaint would have drawn.
+  private func clipped(
+    toRow row: Int, originY: CGFloat, metrics: TerminalRenderMetrics, context: CGContext, _ draw: () -> Void
+  ) {
+    context.saveGState()
+    context.clip(to: CGRect(x: 0, y: CGFloat(row) * metrics.cellHeight + originY, width: metrics.size.width, height: metrics.cellHeight))
+    draw()
+    context.restoreGState()
   }
 
   // MARK: - Images
@@ -209,42 +262,38 @@ final class TerminalGridRenderer {
     let baseline = y + (metrics.cellHeight - metrics.font.lineHeight) / 2 + metrics.font.ascender
     for run in TerminalRunBuilder.glyphRuns(cells: cells, rowStart: rowStart, cols: cols) {
       let bold = run.style & GridSnapshot.attrBold != 0
-      var textColor = color(run.color)
-      if run.style & GridSnapshot.attrDim != 0 {
-        textColor = textColor.copy(alpha: textColor.alpha * 0.65) ?? textColor
-      }
+      let textColor = run.style & GridSnapshot.attrDim != 0 ? dimColor(run.color) : color(run.color)
       context.setFillColor(textColor)
 
       // A run can mix fonts (Core Text fallback for uncovered codepoints), and glyph
       // ids only mean anything relative to their font, so flush on every font change.
       var batchFont: CTFont?
-      var glyphs: [CGGlyph] = []
-      var positions: [CGPoint] = []
-      glyphs.reserveCapacity(run.codepoints.count)
-      positions.reserveCapacity(run.codepoints.count)
+      glyphBuffer.removeAll(keepingCapacity: true)
+      positionBuffer.removeAll(keepingCapacity: true)
       var drewAnything = false
 
       // CTFontDrawGlyphs positions are in TEXT space: a flipped text matrix draws at
       // -baseline, off the canvas. So flip the CTM around the baseline, glyphs at y = 0.
       func flush() {
-        guard let batchFont, !glyphs.isEmpty else { return }
+        guard let batchFont, !glyphBuffer.isEmpty else { return }
         context.saveGState()
         context.textMatrix = .identity
         context.translateBy(x: 0, y: baseline)
         context.scaleBy(x: 1, y: -1)
-        CTFontDrawGlyphs(batchFont, glyphs, positions, glyphs.count, context)
+        CTFontDrawGlyphs(batchFont, glyphBuffer, positionBuffer, glyphBuffer.count, context)
         context.restoreGState()
-        glyphs.removeAll(keepingCapacity: true)
-        positions.removeAll(keepingCapacity: true)
+        glyphBuffer.removeAll(keepingCapacity: true)
+        positionBuffer.removeAll(keepingCapacity: true)
       }
 
       for (offset, codepoint) in run.codepoints.enumerated() {
         guard let resolved = glyphCache.glyph(for: codepoint, bold: bold) else { continue }
-        if let current = batchFont, !CFEqual(current, resolved.font) { flush() }
+        // The cache hands back the same font object for the same face, so identity will do.
+        if let current = batchFont, current !== resolved.font { flush() }
         batchFont = resolved.font
-        glyphs.append(resolved.glyph)
+        glyphBuffer.append(resolved.glyph)
         // y is 0 because `flush` has already translated to the baseline.
-        positions.append(
+        positionBuffer.append(
           CGPoint(
             x: CGFloat(run.startCol + offset) * metrics.cellWidth + glyphOffsetX,
             y: 0
@@ -316,6 +365,9 @@ final class TerminalGridRenderer {
     self.metrics = metrics
     glyphCache = cache
     colors.removeAll(keepingCapacity: true)
+    dimColors.removeAll(keepingCapacity: true)
+    paintedCells = []
+    paintedOriginY = -1
     glyphOffsetX = Self.horizontalInset(cellWidth: metrics.cellWidth, cache: cache)
     return true
   }
@@ -327,6 +379,14 @@ final class TerminalGridRenderer {
     var advances = [CGSize.zero]
     _ = CTFontGetAdvancesForGlyphs(cache.regular, .horizontal, &glyphs, &advances, 1)
     return max(0, (cellWidth - advances[0].width) / 2)
+  }
+
+  private func dimColor(_ argb: UInt32) -> CGColor {
+    if let cached = dimColors[argb] { return cached }
+    let base = color(argb)
+    let dim = base.copy(alpha: base.alpha * 0.65) ?? base
+    dimColors[argb] = dim
+    return dim
   }
 
   private func color(_ argb: UInt32) -> CGColor {

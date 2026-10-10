@@ -23,6 +23,8 @@ final class TerminalEngine {
   /// Set by anything that can add, move or remove a kitty image, so an unchanged screen
   /// doesn't rebuild the graphics snapshot every refresh.
   private var graphicsDirty = true
+  /// A chunk that ended on ESC may continue an APC in the next one.
+  private var endedOnEscape = false
   private let imageOwner = TerminalEngine.nextImageOwner()
   private static let ownerLock = NSLock()
   nonisolated(unsafe) private static var lastImageOwner: UInt64 = 0
@@ -38,7 +40,9 @@ final class TerminalEngine {
   /// so it is restored before every feed and resize.
   private var liveTop = 0
 
-  init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000, theme: TerminalTheme = .tether) {
+  /// `eagerGrid: false` defers the first grid to the first `frame()`: a tall replay engine
+  /// would otherwise build it twice.
+  init(cols: UInt16, rows: UInt16, scrollback: Int = 10_000, theme: TerminalTheme = .tether, eagerGrid: Bool = true) {
     self.theme = theme
     let delegate = EngineDelegate()
     self.delegate = delegate
@@ -54,9 +58,14 @@ final class TerminalEngine {
     terminal = Terminal(delegate: delegate, options: options)
     TerminalPalette.install(theme, on: terminal)
     palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
-    let grid = buildGrid()
-    cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks, images: .empty)
-    terminal.clearUpdateRange()
+    if eagerGrid {
+      let grid = buildGrid()
+      cached = TerminalFrame(header: currentHeader(), cells: grid.cells, hyperlinks: grid.hyperlinks, images: .empty)
+      terminal.clearUpdateRange()
+    } else {
+      cached = TerminalFrame(header: currentHeader(), cells: [])
+      needsRefresh = true
+    }
   }
 
   func frame() -> TerminalFrame {
@@ -295,7 +304,10 @@ final class TerminalEngine {
   }
 
   private func feedLocked(_ bytes: Data) {
-    graphicsDirty = true
+    // Kitty graphics arrive as APC (`ESC _`); anything else that moves an image also marks
+    // rows, which rebuilds the image layer on its own.
+    if Self.mayCarryGraphics(bytes, afterEscape: endedOnEscape) { graphicsDirty = true }
+    endedOnEscape = bytes.last == 0x1B
     let pinned = scrollOffset
     let oldLiveTop = liveTop
     let trimmedBefore = terminal.buffer.totalLinesTrimmed
@@ -318,6 +330,16 @@ final class TerminalEngine {
     terminal.buffer.yDisp = top
     scrollOffset = liveTop - top
     needsRefresh = true
+  }
+
+  static func mayCarryGraphics(_ bytes: Data, afterEscape: Bool) -> Bool {
+    if afterEscape, bytes.first == 0x5F { return true }
+    var previous: UInt8 = 0
+    for byte in bytes {
+      if previous == 0x1B, byte == 0x5F { return true }
+      previous = byte
+    }
+    return false
   }
 
   private func resizeLocked(cols: UInt16, rows: UInt16) {
@@ -463,6 +485,8 @@ final class TerminalEngine {
   private func returnToLive() {
     guard scrollOffset > 0, !terminal.isCurrentBufferAlternate else { return }
     terminal.buffer.yDisp = liveTop
+    // The view moved without any row being marked: the next grid must be built whole.
+    needsRefresh = true
   }
 
   private func refresh() {
@@ -482,13 +506,25 @@ final class TerminalEngine {
     guard needsRefresh || stateChanged || imagesChanged || delegate.paletteChanged
       || terminal.getUpdateRange() != nil
     else { return }
+    let dirty = terminal.getUpdateRange()
+    // Only rows SwiftTerm marked are re-read; a new size, palette or viewport rebuilds all.
+    let rebuildAll = needsRefresh || delegate.paletteChanged
+      || header.cols != cached.header.cols || header.rows != cached.header.rows
+      || cached.cells.count != Int(header.cols) * Int(header.rows)
     needsRefresh = false
     if delegate.paletteChanged {
       palette = TerminalPalette.table(of: terminal, fallback: theme.foreground)
       delegate.paletteChanged = false
     }
     terminal.clearUpdateRange()
-    let grid = buildGrid()
+    let grid: (cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]])
+    if rebuildAll {
+      grid = buildGrid()
+    } else if let dirty {
+      grid = buildGrid(rows: dirty.startY...dirty.endY, over: cached)
+    } else {
+      grid = (cached.cells, cached.hyperlinks)
+    }
     if stateChanged || imagesChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks {
       generationCounter &+= 1
     }
@@ -523,30 +559,56 @@ final class TerminalEngine {
     var cells = [GridSnapshot.Cell](repeating: TerminalPalette.blankCell(for: theme), count: dims.cols * dims.rows)
     var hyperlinks: [[LinkSpan]] = []
     for row in 0..<dims.rows {
-      guard let line = terminal.getLine(row: row) else { continue }
-      var open: (start: Int, target: LinkTarget)?
-      func close(at end: Int) {
-        guard let run = open else { return }
-        if hyperlinks.isEmpty { hyperlinks = Array(repeating: [], count: dims.rows) }
-        hyperlinks[row].append(LinkSpan(start: run.start, end: end, target: run.target))
-        open = nil
-      }
-      for col in 0..<min(dims.cols, line.count) {
-        let data = line[col]
-        var cell = Self.cell(data, palette: palette, theme: theme)
-        // A wide glyph's tail carries no payload of its own; it belongs to the head's link.
-        let target = data.width == 0 ? open?.target : Self.hyperlinkTarget(data)
-        if target != open?.target { close(at: col) }
-        if let target {
-          if open == nil { open = (col, target) }
-          // Shown underlined: an OSC 8 link's text need not look like a URL.
-          cell.attrs |= GridSnapshot.attrUnderline
-        }
-        cells[row * dims.cols + col] = cell
-      }
-      close(at: min(dims.cols, line.count))
+      readRow(row, cols: dims.cols, rows: dims.rows, into: &cells, hyperlinks: &hyperlinks)
     }
     return (cells, hyperlinks)
+  }
+
+  /// Re-reads `marked` (clamped to the screen) and keeps every other row of `previous`.
+  private func buildGrid(
+    rows marked: ClosedRange<Int>, over previous: TerminalFrame
+  ) -> (cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]]) {
+    let dims = terminal.getDims()
+    var cells = previous.cells
+    var hyperlinks = previous.hyperlinks
+    let blank = TerminalPalette.blankCell(for: theme)
+    let first = max(0, marked.lowerBound)
+    let last = min(dims.rows - 1, marked.upperBound)
+    guard first <= last else { return (cells, hyperlinks) }
+    for row in first...last {
+      let start = row * dims.cols
+      cells.replaceSubrange(start..<(start + dims.cols), with: repeatElement(blank, count: dims.cols))
+      if !hyperlinks.isEmpty { hyperlinks[row] = [] }
+      readRow(row, cols: dims.cols, rows: dims.rows, into: &cells, hyperlinks: &hyperlinks)
+    }
+    return (cells, hyperlinks)
+  }
+
+  private func readRow(
+    _ row: Int, cols: Int, rows: Int, into cells: inout [GridSnapshot.Cell], hyperlinks: inout [[LinkSpan]]
+  ) {
+    guard let line = terminal.getLine(row: row) else { return }
+    var open: (start: Int, target: LinkTarget)?
+    func close(at end: Int) {
+      guard let run = open else { return }
+      if hyperlinks.isEmpty { hyperlinks = Array(repeating: [], count: rows) }
+      hyperlinks[row].append(LinkSpan(start: run.start, end: end, target: run.target))
+      open = nil
+    }
+    for col in 0..<min(cols, line.count) {
+      let data = line[col]
+      var cell = Self.cell(data, palette: palette, theme: theme)
+      // A wide glyph's tail carries no payload of its own; it belongs to the head's link.
+      let target = data.width == 0 ? open?.target : Self.hyperlinkTarget(data)
+      if target != open?.target { close(at: col) }
+      if let target {
+        if open == nil { open = (col, target) }
+        // Shown underlined: an OSC 8 link's text need not look like a URL.
+        cell.attrs |= GridSnapshot.attrUnderline
+      }
+      cells[row * cols + col] = cell
+    }
+    close(at: min(cols, line.count))
   }
 
   private static func hyperlinkTarget(_ data: CharData) -> LinkTarget? {

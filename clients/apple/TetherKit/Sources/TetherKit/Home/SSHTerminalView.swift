@@ -217,7 +217,7 @@ public struct SSHTerminalView: View {
       }
       ZStack {
         TetherSurfaceRepresentable(
-          snapshot: $controller.snapshot,
+          frames: controller.frames,
           sessionKey: controller.sessionKey,
           fontName: preferences.terminalFont.postScriptName,
           fontSize: preferences.terminalFontSize,
