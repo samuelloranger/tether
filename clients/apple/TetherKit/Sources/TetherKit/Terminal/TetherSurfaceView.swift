@@ -123,11 +123,13 @@ public final class TetherSurfaceView: UIView {
   /// Cell size the local grid was last computed with.
   private var localCell: CGSize?
 
-  /// Only the keyboard's height change is held back. A new width (rotation, an iPad window) or
-  /// a new font changes what the grid can hold, and the old one drawn in it would clip.
+  /// Only room gained is held back (the keyboard leaving under a sheet): the grid keeps its rows
+  /// and the extra space is slack. Room lost (a keyboard coming up while covered) is never held,
+  /// or the old rows would run under the key bar. A new width or font is never held either.
   private func holds(_ size: (cols: UInt16, rows: UInt16)) -> Bool {
     guard let localGrid, covered else { return false }
-    return size.cols == localGrid.cols && localCell == CGSize(width: cellWidth, height: cellHeight)
+    return size.cols == localGrid.cols && size.rows >= localGrid.rows
+      && localCell == CGSize(width: cellWidth, height: cellHeight)
   }
 
   private func setLocalGrid(_ size: (cols: UInt16, rows: UInt16)) {
