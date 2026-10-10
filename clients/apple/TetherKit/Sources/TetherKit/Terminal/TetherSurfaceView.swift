@@ -99,10 +99,26 @@ public final class TetherSurfaceView: UIView {
   public var freezesGrid = false {
     didSet { if oldValue, !freezesGrid { reportGridSize() } }
   }
-  private var gridHeld: Bool {
+  private var covered: Bool {
     // A Mac sheet leaves the window and the keyboard alone; a held grid would only lag a resize.
-    guard localGrid != nil, !TetherPlatform.isMac else { return false }
+    guard !TetherPlatform.isMac else { return false }
     return freezesGrid || window?.rootViewController?.presentedViewController != nil
+  }
+  /// Cell size the local grid was last computed with.
+  private var localCell: CGSize?
+
+  /// Only the keyboard's height change is held back. A new width (rotation, an iPad window) or
+  /// a new font changes what the grid can hold, and the old one drawn in it would clip.
+  private func holds(_ size: (cols: UInt16, rows: UInt16)) -> Bool {
+    guard let localGrid, covered else { return false }
+    return size.cols == localGrid.cols && localCell == CGSize(width: cellWidth, height: cellHeight)
+  }
+
+  private func setLocalGrid(_ size: (cols: UInt16, rows: UInt16)) {
+    localCell = CGSize(width: cellWidth, height: cellHeight)
+    guard localGrid?.cols != size.cols || localGrid?.rows != size.rows else { return }
+    localGrid = size
+    onGridSizeChange?(size.cols, size.rows)
   }
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
@@ -558,10 +574,7 @@ public final class TetherSurfaceView: UIView {
 
     // Local emulator follows the view immediately, every frame: the rendered
     // grid must match the bounds or a keyboard shrink leaves blank rows.
-    if !gridHeld, localGrid?.cols != size.cols || localGrid?.rows != size.rows {
-      localGrid = size
-      onGridSizeChange?(size.cols, size.rows)
-    }
+    if !holds(size) { setLocalGrid(size) }
     scheduleGridSettle()
   }
 
@@ -571,16 +584,13 @@ public final class TetherSurfaceView: UIView {
     gridSettleWork?.cancel()
     let work = DispatchWorkItem { [weak self] in
       guard let self, let settled = self.currentGridSize() else { return }
-      if self.gridHeld {
+      if self.holds(settled) {
         // A sheet presented from elsewhere (a notification tap) has no flag that clears;
         // look again until it is gone. `freezesGrid` re-reports when it turns off.
         if !self.freezesGrid { self.scheduleGridSettle() }
         return
       }
-      if self.localGrid?.cols != settled.cols || self.localGrid?.rows != settled.rows {
-        self.localGrid = settled
-        self.onGridSizeChange?(settled.cols, settled.rows)
-      }
+      self.setLocalGrid(settled)
       if self.serverGrid?.cols != settled.cols || self.serverGrid?.rows != settled.rows {
         self.serverGrid = settled
         self.onGridSizeSettled?(settled.cols, settled.rows)

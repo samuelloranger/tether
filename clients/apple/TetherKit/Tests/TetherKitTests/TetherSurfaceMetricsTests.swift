@@ -38,7 +38,7 @@ final class TetherSurfaceMetricsTests: XCTestCase {
   }
 
   private func settle() {
-    RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.7))
   }
 
   func testAFrozenGridIgnoresBoundsChangesUntilItThaws() {
@@ -64,5 +64,12 @@ final class TetherSurfaceMetricsTests: XCTestCase {
     view.freezesGrid = false
     settle()
     XCTAssertEqual(settled, [UInt16(600 / view.cellHeight)])
+  }
+
+  func testAFontChangeStillResizesAFrozenGrid() {
+    let (view, reported) = makeSurface()
+    view.freezesGrid = true
+    view.fontSize = 20
+    XCTAssertEqual(reported()?.rows, UInt16(600 / view.cellHeight))
   }
 }

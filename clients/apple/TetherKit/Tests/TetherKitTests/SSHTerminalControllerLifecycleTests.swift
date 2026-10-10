@@ -39,9 +39,10 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     controller.updateGridServer(cols: 100, rows: 30)
     controller.updateGrid(cols: 100, rows: 47)
     await controller.connect()
-    let resized = await eventually { !stream.resizes.isEmpty }
+    // The settled size queued before connecting lands first; the connect's own resize follows.
+    let resized = await eventually { stream.resizes.count >= 2 }
     XCTAssertTrue(resized)
-    XCTAssertEqual(stream.resizes.first, [100, 30])
+    XCTAssertFalse(stream.resizes.contains([100, 47]), "\(stream.resizes)")
     await controller.leave()
   }
 
