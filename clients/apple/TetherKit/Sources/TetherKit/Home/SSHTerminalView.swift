@@ -17,6 +17,8 @@ public struct SSHTerminalView: View {
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var drawerOpen = false
+  /// The drawer's name field takes the keyboard; closing the drawer hands it back.
+  @State private var focusedBeforeDrawer = false
   /// Live horizontal drag on the drawer, `nil` when no finger is on it.
   @State private var dragTranslation: CGFloat?
   @State private var showSettings = false
@@ -170,6 +172,9 @@ public struct SSHTerminalView: View {
     .onChange(of: windowTitle, initial: true) { _, title in
       if tabs != nil { MacWindowTitle.set(title) }
     }
+    .onChange(of: drawerOpen) { _, open in
+      if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer { focused = true }
+    }
     .onChange(of: modalOpen) { _, open in
       guard tabs != nil else { return }
       if open { focused = false } else { refocusOnMac() }
@@ -210,19 +215,6 @@ public struct SSHTerminalView: View {
       if let tabs {
         MacSessionStrip(tabs: tabs, onKill: { pendingKill = $0 })
       }
-      if let alert = controller.agentAlert {
-        AgentAlertBanner(
-          alert: alert,
-          onOpen: { goToSession(alert.session) },
-          onDismiss: { controller.dismissAgentAlert() }
-        )
-        .transition(.opacity)
-        .task(id: "\(alert.session)-\(alert.since.timeIntervalSince1970)") {
-          guard let lifetime = alert.bannerLifetime else { return }
-          try? await Task.sleep(nanoseconds: UInt64(lifetime * 1_000_000_000))
-          controller.expireAgentAlert(alert)
-        }
-      }
       ZStack {
         TetherSurfaceRepresentable(
           snapshot: $controller.snapshot,
@@ -248,7 +240,8 @@ public struct SSHTerminalView: View {
           onCopyLink: { acknowledgeCopy($0, into: $showCopyConfirmation) },
           onMouseBytes: { controller.sendInput($0) },
           mouseMode: controller.mouseMode,
-          mouseSgr: controller.mouseSgr
+          mouseSgr: controller.mouseSgr,
+          freezesGrid: drawerOpen || modalOpen
         )
         .accessibilityIdentifier("sshTerminalSurface")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -260,6 +253,9 @@ public struct SSHTerminalView: View {
         bellFlashOverlay
       }
       .overlay(alignment: .bottom) { heldQuestionBanner }
+      // Over the terminal, not above it: in the stack it took rows from the grid, and the
+      // host saw a resize when it came and another when it expired.
+      .overlay(alignment: .top) { agentAlertBanner }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .onChange(of: controller.bellRings) { ringBell() }
       .onChange(of: preferences.keyBar, initial: true) { accessory.layout = preferences.keyBar }
@@ -274,7 +270,8 @@ public struct SSHTerminalView: View {
             onHideKeyboard: { focused = false }
           )
         ),
-        showsAccessory: !drawerOpen && !TetherPlatform.isMac,
+        // Kept while the drawer is open: dropping it resized the grid under the drawer.
+        showsAccessory: !TetherPlatform.isMac,
         compactAccessory: preferences.compactKeys,
         onSubmitBytes: submit,
         isFocused: $focused
@@ -353,7 +350,8 @@ public struct SSHTerminalView: View {
     .foregroundStyle(TetherColors.accent)
     .animation(TetherMotion.ui(TetherMotion.arrive, reduceMotion: reduceMotion), value: controller.status)
     .padding(.horizontal, 10).padding(.vertical, 6)
-    .background(TetherColors.surface)
+    // Up under the status bar too, or the strip there shows the terminal's colour.
+    .background(TetherColors.surface.ignoresSafeArea(edges: .top))
     .overlay(alignment: .bottom) {
       if let progress = controller.terminalReport.progress { progressBar(progress) }
     }
@@ -692,6 +690,23 @@ public struct SSHTerminalView: View {
   }
 
   @ViewBuilder
+  private var agentAlertBanner: some View {
+    if let alert = controller.agentAlert {
+      AgentAlertBanner(
+        alert: alert,
+        onOpen: { goToSession(alert.session) },
+        onDismiss: { controller.dismissAgentAlert() }
+      )
+      .transition(.opacity)
+      .task(id: "\(alert.session)-\(alert.since.timeIntervalSince1970)") {
+        guard let lifetime = alert.bannerLifetime else { return }
+        try? await Task.sleep(nanoseconds: UInt64(lifetime * 1_000_000_000))
+        controller.expireAgentAlert(alert)
+      }
+    }
+  }
+
+  @ViewBuilder
   private var heldQuestionBanner: some View {
     if questionRunner != nil, let question = controller.heldQuestion {
       HeldQuestionBanner(
@@ -807,7 +822,7 @@ public struct SSHTerminalView: View {
           .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
         Button("New session") {
           if let tabs { tabs.beginNewSession() } else {
-            withAnimation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion)) { drawerOpen = true }
+            setDrawer(open: true)
           }
         }
         .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)

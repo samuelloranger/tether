@@ -93,6 +93,17 @@ public final class TetherSurfaceView: UIView {
   /// Size the server PTY was last told — updated only when the bounds settle.
   private var serverGrid: (cols: UInt16, rows: UInt16)?
   private var gridSettleWork: DispatchWorkItem?
+  /// Holds the grid at its last size while something covers the terminal (a sheet, the
+  /// drawer). Those take the keyboard with them, so the host would see one resize going in
+  /// and another coming back, and a TUI would redraw twice for nothing.
+  public var freezesGrid = false {
+    didSet { if oldValue, !freezesGrid { reportGridSize() } }
+  }
+  private var gridHeld: Bool {
+    // A Mac sheet leaves the window and the keyboard alone; a held grid would only lag a resize.
+    guard localGrid != nil, !TetherPlatform.isMac else { return false }
+    return freezesGrid || window?.rootViewController?.presentedViewController != nil
+  }
   private var header: GridSnapshot.Header?
   private var cells: [GridSnapshot.Cell] = []
   private var images = TerminalImageLayer.empty
@@ -547,16 +558,25 @@ public final class TetherSurfaceView: UIView {
 
     // Local emulator follows the view immediately, every frame: the rendered
     // grid must match the bounds or a keyboard shrink leaves blank rows.
-    if localGrid?.cols != size.cols || localGrid?.rows != size.rows {
+    if !gridHeld, localGrid?.cols != size.cols || localGrid?.rows != size.rows {
       localGrid = size
       onGridSizeChange?(size.cols, size.rows)
     }
+    scheduleGridSettle()
+  }
 
+  private func scheduleGridSettle() {
     // Re-assert the local grid too: the dedupe guard above can leave it at a transient
     // keyboard-animation height, clipping the newest rows under the key bar.
     gridSettleWork?.cancel()
     let work = DispatchWorkItem { [weak self] in
       guard let self, let settled = self.currentGridSize() else { return }
+      if self.gridHeld {
+        // A sheet presented from elsewhere (a notification tap) has no flag that clears;
+        // look again until it is gone. `freezesGrid` re-reports when it turns off.
+        if !self.freezesGrid { self.scheduleGridSettle() }
+        return
+      }
       if self.localGrid?.cols != settled.cols || self.localGrid?.rows != settled.rows {
         self.localGrid = settled
         self.onGridSizeChange?(settled.cols, settled.rows)

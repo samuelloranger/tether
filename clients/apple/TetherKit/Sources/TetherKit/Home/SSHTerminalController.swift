@@ -172,6 +172,9 @@ public final class SSHTerminalController {
   private var pendingNoSession = false
   private var lastCols: UInt16 = 80
   private var lastRows: UInt16 = 24
+  /// Once a settled size exists, only it reaches a fresh PTY: a local size can be a frame
+  /// of a keyboard animation, and the surface would not resend the size it last settled.
+  private var hasSettledGrid = false
 
   init(
     title: String,
@@ -892,10 +895,11 @@ public final class SSHTerminalController {
   public func sendInput(_ text: String) { pipeline.outbound.yield(.input(text, key: sessionKey)) }
   public func sendPaste(_ text: String) { pipeline.outbound.yield(.paste(text, key: sessionKey)) }
   public func updateGrid(cols: UInt16, rows: UInt16) {
-    lastCols = cols; lastRows = rows
+    if !hasSettledGrid { lastCols = cols; lastRows = rows }
     pipeline.outbound.yield(.localResize(cols: cols, rows: rows))
   }
   public func updateGridServer(cols: UInt16, rows: UInt16) {
+    hasSettledGrid = true
     lastCols = cols; lastRows = rows
     pipeline.outbound.yield(.serverResize(cols: cols, rows: rows))
   }

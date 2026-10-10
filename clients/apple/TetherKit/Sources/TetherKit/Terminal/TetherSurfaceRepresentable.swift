@@ -22,6 +22,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
   public var onMouseBytes: (String) -> Void
   public var mouseMode: MouseMode
   public var mouseSgr: Bool
+  public var freezesGrid: Bool
 
   public init(
     snapshot: Binding<TerminalFrame?>,
@@ -43,7 +44,8 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     onCopyLink: @escaping (String) -> Void = { _ in },
     onMouseBytes: @escaping (String) -> Void = { _ in },
     mouseMode: MouseMode = .off,
-    mouseSgr: Bool = true
+    mouseSgr: Bool = true,
+    freezesGrid: Bool = false
   ) {
     _snapshot = snapshot
     self.sessionKey = sessionKey
@@ -65,6 +67,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     self.onMouseBytes = onMouseBytes
     self.mouseMode = mouseMode
     self.mouseSgr = mouseSgr
+    self.freezesGrid = freezesGrid
   }
 
   public func makeCoordinator() -> Coordinator {
@@ -98,6 +101,7 @@ public struct TetherSurfaceRepresentable: UIViewRepresentable {
     uiView.cursorPreference = cursorStyle
     uiView.mouseMode = mouseMode
     uiView.mouseSgr = mouseSgr
+    if uiView.freezesGrid != freezesGrid { uiView.freezesGrid = freezesGrid }
     bindCallbacks(uiView, context: context)
     if context.coordinator.sessionKey != sessionKey {
       context.coordinator.sessionKey = sessionKey

@@ -33,6 +33,18 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     XCTAssertNotEqual(controller.status, .connected)
   }
 
+  func test_a_fresh_pty_gets_the_settled_size_not_a_keyboard_animation_frame() async {
+    let stream = ScriptedByteStream()
+    let controller = makeController(DialScript([stream]), FakeOps())
+    controller.updateGridServer(cols: 100, rows: 30)
+    controller.updateGrid(cols: 100, rows: 47)
+    await controller.connect()
+    let resized = await eventually { !stream.resizes.isEmpty }
+    XCTAssertTrue(resized)
+    XCTAssertEqual(stream.resizes.first, [100, 30])
+    await controller.leave()
+  }
+
   func test_a_redial_after_a_drop_resets_the_control_connection() async {
     let first = ScriptedByteStream()
     let second = ScriptedByteStream()
