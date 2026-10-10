@@ -11,12 +11,8 @@ public final class TerminalAccessoryModel {
   public var compact = false
   /// The keys the bar shows, in order.
   public var layout = KeyBarLayout.default
-  /// Drives the bar's own slide-out — UIKit's dismissal only travels the bar's
-  /// height (a short hop); this carries it fully off the bottom first.
+  /// Drives the bar's own slide-out.
   public var visible = true
-  /// Window-bottom to the TOP of the docked bar, measured. UIKit docks ~15pt above
-  /// the edge, not above the 34pt indicator, so a fixed constant left dead space.
-  public var dockedHeight: CGFloat = 0
   public init() {}
 }
 
@@ -62,15 +58,6 @@ public struct TerminalAccessoryBar: View {
     // Confine the material to its bounds: the default .all bled into the indicator
     // strip and the bar read half again as tall.
     .background(.ultraThinMaterial, ignoresSafeAreaEdges: [])
-    // The bar lives in the keyboard window, so `.global` is that window's space
-    // (screen geometry). Reporting its top edge lets the terminal reserve the real height.
-    .background(
-      GeometryReader { proxy in
-        Color.clear
-          .onAppear { report(proxy) }
-          .onChange(of: proxy.frame(in: .global)) { _, _ in report(proxy) }
-      }
-    )
     // Slide the whole row clear of the bottom edge, not just UIKit's own-height
     // nudge. Reduce Motion keeps the fade and drops the travel.
     .offset(y: model.visible || reduceMotion ? 0 : metrics.keySize * 2.4)
@@ -81,26 +68,6 @@ public struct TerminalAccessoryBar: View {
     )
   }
 
-
-  /// Publishes the bar's docked height, skipping slide-out frames — mid-animation
-  /// its top edge is off-screen and would report the bar as taller than it is.
-  private func report(_ proxy: GeometryProxy) {
-    guard model.visible else { return }
-    let frame = proxy.frame(in: .global)
-    guard let screen = UIApplication.shared.connectedScenes
-      .compactMap({ ($0 as? UIWindowScene)?.screen })
-      .first
-    else { return }
-    // A tearing-down keyboard window hands out frames starting above the screen
-    // (minY < 0), reading as taller than the display — reject those dismissal artefacts.
-    guard frame.minY >= 0 else { return }
-    let height = max(0, screen.bounds.maxY - frame.minY)
-    guard height <= screen.bounds.height else { return }
-    guard abs(height - model.dockedHeight) > 0.5 else { return }
-    // Deferred one runloop turn: the terminal's padding reads this and changes the
-    // layout this GeometryReader measures, so an inline write is a dependency cycle.
-    DispatchQueue.main.async { model.dockedHeight = height }
-  }
 
   private var pasteButton: some View {
     TerminalPasteKey(onPaste: onPaste)

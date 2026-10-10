@@ -17,6 +17,9 @@ public struct SSHTerminalView: View {
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var drawerOpen = false
+  /// The bar shows while any keyboard is up, the drawer's name field's included, so the
+  /// keyboard and bar together never change height under the drawer.
+  @State private var keyboardUp = false
   /// The drawer's name field takes the keyboard; closing the drawer hands it back.
   @State private var focusedBeforeDrawer = false
   /// Live horizontal drag on the drawer, `nil` when no finger is on it.
@@ -172,6 +175,14 @@ public struct SSHTerminalView: View {
     .onChange(of: windowTitle, initial: true) { _, title in
       if tabs != nil { MacWindowTitle.set(title) }
     }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+      keyboardUp = true
+    }
+    // Did, not will: the bar rides the keyboard down and leaves once it is gone, inside the
+    // same settle window, so the host sees one resize.
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+      keyboardUp = false
+    }
     .onChange(of: drawerOpen) { _, open in
       if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer { focused = true }
     }
@@ -260,18 +271,21 @@ public struct SSHTerminalView: View {
       .onChange(of: controller.bellRings) { ringBell() }
       .onChange(of: preferences.keyBar, initial: true) { accessory.layout = preferences.keyBar }
       .onChange(of: preferences.compactKeys, initial: true) { accessory.compact = preferences.compactKeys }
+      // In the app's own hierarchy, sitting on the keyboard through the keyboard safe area, not
+      // the keyboard's accessory: that lives in the keyboard's window, above every app view, so
+      // the drawer could not cover it.
+      if keyboardUp && !TetherPlatform.isMac {
+        TerminalAccessoryBar(
+          model: accessory,
+          onKey: { controller.sendInput($0) },
+          onPaste: { controller.sendPaste($0) },
+          onArrow: { controller.sendInput($0.escapeSequence) },
+          onHideKeyboard: { focused = false }
+        )
+      }
       TerminalInputBridge(
-        accessory: TetherPlatform.isMac ? AnyView(EmptyView()) : AnyView(
-          TerminalAccessoryBar(
-            model: accessory,
-            onKey: { controller.sendInput($0) },
-            onPaste: { controller.sendPaste($0) },
-            onArrow: { controller.sendInput($0.escapeSequence) },
-            onHideKeyboard: { focused = false }
-          )
-        ),
-        // Kept while the drawer is open: dropping it resized the grid under the drawer.
-        showsAccessory: !TetherPlatform.isMac,
+        accessory: AnyView(EmptyView()),
+        showsAccessory: false,
         compactAccessory: preferences.compactKeys,
         onSubmitBytes: submit,
         isFocused: $focused
