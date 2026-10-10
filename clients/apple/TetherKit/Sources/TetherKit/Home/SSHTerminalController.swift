@@ -420,6 +420,7 @@ public final class SSHTerminalController {
       if wasAttached && departing != name { flushPushInBackground(session: departing) }
       return
     }
+    await pipeline.holdFramesForSwitch()
     for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name).enumerated() {
       // Separate writes: the detach key's own read must not carry the command.
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }

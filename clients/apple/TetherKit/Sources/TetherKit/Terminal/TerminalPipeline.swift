@@ -101,6 +101,23 @@ actor TerminalPipeline {
   private var rebuildCount = 0
   private var ptyResizeCount = 0
   private var scheduledPublish: Task<Void, Never>?
+  /// A typed switch passes through the bare shell under zmx: the detach resets the screen and
+  /// the shell echoes the attach. The departing session's frame stays up until zmx has cleared
+  /// for the next one and its replay has gone quiet.
+  private var switchHold: SwitchHold?
+  private struct SwitchHold {
+    /// A timer that already woke when its hold ended must not end the next one.
+    var id: UInt64
+    var sawClear = false
+    var tail: [UInt8] = []
+    var limit: Task<Void, Never>?
+    var quiet: Task<Void, Never>?
+  }
+  /// What the zmx client writes before it replays a session.
+  private static let attachClear = Array("\u{1B}[2J\u{1B}[H".utf8)
+  static let switchHoldQuiet = Duration.milliseconds(60)
+  private var switchHoldLimit = Duration.seconds(2)
+  private var switchHolds: UInt64 = 0
 
   /// `theme` is the one the first grid is created in, so the first frame is never drawn in
   /// the default colors.
@@ -177,6 +194,7 @@ actor TerminalPipeline {
   /// Drops the transport but KEEPS the emulator, so a foreground reconnect to
   /// the same session reuses its scrollback.
   func disconnect() {
+    endSwitchHold(publish: false)
     imagesWatchable = false
     watchImages(nil)
     sshReadTask?.cancel()
@@ -420,7 +438,53 @@ actor TerminalPipeline {
       for text in emulator.takeClipboard() { eventSink.yield(.clipboard(text)) }
       syncReport(from: emulator)
     }
+    if switchHold != nil { noteSwitchOutput(bytes) }
     publishOutput()
+  }
+
+  // MARK: - Session switch
+
+  func holdFramesForSwitch() {
+    endSwitchHold(publish: false)
+    switchHolds += 1
+    let id = switchHolds
+    var hold = SwitchHold(id: id)
+    let limit = switchHoldLimit
+    // The attach may fail or print nothing zmx-like: never keep a stale frame up for good.
+    hold.limit = Task { [weak self] in
+      do { try await Task.sleep(for: limit) } catch { return }
+      await self?.endSwitchHold(publish: true, id: id)
+    }
+    switchHold = hold
+  }
+
+  private func noteSwitchOutput(_ bytes: Data) {
+    guard var hold = switchHold else { return }
+    if !hold.sawClear {
+      let scanned = hold.tail + bytes
+      if scanned.firstRange(of: Self.attachClear) != nil {
+        hold.sawClear = true
+      } else {
+        hold.tail = Array(scanned.suffix(Self.attachClear.count - 1))
+      }
+    }
+    if hold.sawClear {
+      hold.quiet?.cancel()
+      let id = hold.id
+      hold.quiet = Task { [weak self] in
+        do { try await Task.sleep(for: Self.switchHoldQuiet) } catch { return }
+        await self?.endSwitchHold(publish: true, id: id)
+      }
+    }
+    switchHold = hold
+  }
+
+  private func endSwitchHold(publish: Bool, id: UInt64? = nil) {
+    guard let hold = switchHold, id == nil || id == hold.id else { return }
+    hold.limit?.cancel()
+    hold.quiet?.cancel()
+    switchHold = nil
+    if publish { publishSnapshot() }
   }
 
   private func publishOutput() {
@@ -470,6 +534,8 @@ actor TerminalPipeline {
   var publishedGenerationForTest: UInt64? { lastRenderedGeneration }
   var rebuildsForTest: Int { rebuildCount }
   var ptyResizesForTest: Int { ptyResizeCount }
+  var isHoldingForSwitchForTest: Bool { switchHold != nil }
+  func setSwitchHoldLimitForTest(_ limit: Duration) { switchHoldLimit = limit }
   var trimsBlankRowsForTest: Bool { unpaintedGrow }
   func resizeForTest(cols: UInt16, rows: UInt16, settled: Bool) {
     applyLocalResize(cols: cols, rows: rows, settled: settled)
@@ -490,7 +556,7 @@ actor TerminalPipeline {
   /// True when a new frame went out.
   @discardableResult
   private func publishSnapshot() -> Bool {
-    guard let emulator else { return false }
+    guard switchHold == nil, let emulator else { return false }
     var frame = emulator.frame()
     if !frame.header.altScreen { unpaintedGrow = false }
     frame.header.trimsBlankRows = unpaintedGrow
