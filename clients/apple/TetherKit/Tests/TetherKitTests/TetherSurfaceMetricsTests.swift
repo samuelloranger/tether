@@ -73,4 +73,13 @@ final class TetherSurfaceMetricsTests: XCTestCase {
     view.fontSize = 20
     XCTAssertEqual(reported()?.rows, UInt16(600 / view.cellHeight))
   }
+
+  /// A keyboard coming up while the drawer is open must not leave rows under the key bar.
+  func testAFrozenGridStillShrinksToFit() {
+    let (view, reported) = makeSurface()
+    view.freezesGrid = true
+    relayout(view, height: 300)
+    XCTAssertEqual(reported()?.rows, UInt16(300 / view.cellHeight))
+  }
 }
+
