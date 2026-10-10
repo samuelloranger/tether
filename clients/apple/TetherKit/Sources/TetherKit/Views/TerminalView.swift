@@ -231,6 +231,9 @@ public struct TerminalInputBridge: UIViewRepresentable {
   /// Gate the ACCESSORY, never the bridge's existence: a `.focused()` view that
   /// appears and disappears makes SwiftUI and UIKit focus machinery loop at 100% CPU.
   public var showsAccessory: Bool = true
+  /// False while the bar is faded out but keeps its place: taps on its strip go through to
+  /// whatever the app shows there.
+  public var accessoryInteractive = true
   public var compactAccessory = false
   public var onSubmitBytes: (String) -> Void
   public var isFocused: Binding<Bool>
@@ -238,12 +241,14 @@ public struct TerminalInputBridge: UIViewRepresentable {
   public init(
     accessory: AnyView,
     showsAccessory: Bool = true,
+    accessoryInteractive: Bool = true,
     compactAccessory: Bool = false,
     onSubmitBytes: @escaping (String) -> Void,
     isFocused: Binding<Bool>
   ) {
     self.accessory = accessory
     self.showsAccessory = showsAccessory
+    self.accessoryInteractive = accessoryInteractive
     self.compactAccessory = compactAccessory
     self.onSubmitBytes = onSubmitBytes
     self.isFocused = isFocused
@@ -286,6 +291,7 @@ public struct TerminalInputBridge: UIViewRepresentable {
     // rootView is set once in makeUIView. Reassigning it here is what made
     // reloadInputViews() rebuild SwiftUI inside a SwiftUI update.
     uiView.compactAccessory = compactAccessory
+    uiView.accessoryInteractive = accessoryInteractive
     if uiView.showsAccessory != showsAccessory {
       uiView.showsAccessory = showsAccessory
       uiView.reloadInputViews()
@@ -535,6 +541,10 @@ public final class TerminalInputTextView: UITextView {
     if !unhandled.isEmpty {
       super.pressesBegan(unhandled, with: event)
     }
+  }
+
+  var accessoryInteractive = true {
+    didSet { accessoryContainer.isUserInteractionEnabled = accessoryInteractive }
   }
 
   /// Configured once, not on every getter call — UIKit asks for the accessory often.
