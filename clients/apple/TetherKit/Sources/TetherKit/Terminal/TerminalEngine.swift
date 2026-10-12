@@ -398,7 +398,8 @@ final class TerminalEngine {
   /// that trims the scrollback drops it, and the line with it.
   private struct ImageAnchor {
     var token: UInt64
-    var line: ObjectIdentifier
+    /// Held, so no line made during the resize can take its place at the same address.
+    var line: BufferLine
     var offset: Int
   }
 
@@ -423,7 +424,7 @@ final class TerminalEngine {
       guard row >= 0, let index = starts.lastIndex(where: { $0 <= row }),
         let first = terminal.bufferLine(atRow: starts[index])
       else { return nil }
-      return ImageAnchor(token: placement.token, line: ObjectIdentifier(first), offset: row - starts[index])
+      return ImageAnchor(token: placement.token, line: first, offset: row - starts[index])
     }
   }
 
@@ -440,7 +441,7 @@ final class TerminalEngine {
       storedRow[placement.token] = top + placement.geometry.row
     }
     for anchor in anchors {
-      guard let index = startOf[anchor.line], let stored = storedRow[anchor.token] else {
+      guard let index = startOf[ObjectIdentifier(anchor.line)], let stored = storedRow[anchor.token] else {
         imageRowShift[anchor.token] = nil
         continue
       }

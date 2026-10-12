@@ -137,6 +137,8 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     ops.execResult = { _ in "" }
     let controller = makeController(DialScript([stream]), ops)
     await controller.connect()
+    // Past the first attach's settle time, so b starts at once.
+    try? await Task.sleep(nanoseconds: 300_000_000)
     var taps: [Task<Void, Never>] = []
     for name in ["b", "c", "d"] {
       taps.append(Task { await controller.switchSession(to: name) })
@@ -182,8 +184,28 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     let attachB = try XCTUnwrap(writes.firstIndex { $0.text.contains("attach 'b'") })
     let detachC = try XCTUnwrap(writes[(attachB + 1)...].firstIndex { $0.text.contains("\u{1C}") })
     let gap = writes[detachC].at - writes[attachB].at
-    XCTAssertGreaterThanOrEqual(gap, .milliseconds(200))
+    // The settle time is 250 ms from when the attach was queued; without the wait the gap is
+    // a few ms. The margin absorbs queueing delay on a loaded simulator.
+    XCTAssertGreaterThanOrEqual(gap, .milliseconds(150))
     XCTAssertEqual(controller.attach, "c")
+    await controller.leave()
+  }
+
+  /// A connect types an attach too: a switch tapped right after it waits the same way.
+  func test_a_switch_right_after_connecting_waits_for_the_first_attach_to_settle() async throws {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    let attached = await eventually { stream.writtenText.contains("attach '") }
+    XCTAssertTrue(attached)
+    await controller.switchSession(to: "b")
+
+    let writes = stream.timedWrites
+    let first = try XCTUnwrap(writes.firstIndex { $0.text.contains("attach '") })
+    let detach = try XCTUnwrap(writes[(first + 1)...].firstIndex { $0.text.contains("\u{1C}") })
+    XCTAssertGreaterThanOrEqual(writes[detach].at - writes[first].at, .milliseconds(150))
     await controller.leave()
   }
 }

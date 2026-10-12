@@ -288,6 +288,7 @@ public final class SSHTerminalController {
         } else {
           hasSession = true
           pipeline.outbound.yield(.input(ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach), key: sessionKey))
+          lastAttachWrite = .now
         }
         schedulePushRegister()
         Task { await refreshSessions() }
@@ -406,9 +407,9 @@ public final class SSHTerminalController {
   /// never interleave: the second's attach would land inside the session the first opened.
   @ObservationIgnored private var switchQueue: Task<Void, Never>?
   @ObservationIgnored private var latestSwitch = 0
-  /// When the last switch typed its attach: the next detach key waits until that attach
-  /// has had time to start, however long after it the tap came.
-  @ObservationIgnored private var lastSwitchWrite: ContinuousClock.Instant?
+  /// When an attach was last typed, by a connect or a switch: the next detach key waits until
+  /// that attach has had time to start, however long after it the tap came.
+  @ObservationIgnored private var lastAttachWrite: ContinuousClock.Instant?
 
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
   /// program in the session we leave is never typed into and keeps running. Switches run one
@@ -421,7 +422,7 @@ public final class SSHTerminalController {
       await previous?.value
       guard let self, ticket == self.latestSwitch else { return }
       // This detach key must not reach the shell while the previous attach starts up.
-      if let last = self.lastSwitchWrite {
+      if let last = self.lastAttachWrite {
         let ready = last + .nanoseconds(Int64(ZmxSwitch.settleNanoseconds))
         if ready > .now { try? await Task.sleep(until: ready, clock: .continuous) }
         guard ticket == self.latestSwitch else { return }
@@ -455,7 +456,7 @@ public final class SSHTerminalController {
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
     }
-    lastSwitchWrite = .now
+    lastAttachWrite = .now
     if wasAttached { flushPushInBackground(session: departing) }
   }
 
