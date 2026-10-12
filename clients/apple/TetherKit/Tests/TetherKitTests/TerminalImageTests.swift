@@ -235,6 +235,43 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertEqual(frame.images.placements.first?.row, 1)
   }
 
+  /// The alt screen lists only its own placements; a visit must not drop the primary
+  /// screen's shifts.
+  func test_visiting_the_alt_screen_after_a_reflow_keeps_the_image_on_its_line() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(String(repeating: "x", count: 20) + "\r\nabove\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow")
+    engine.resize(cols: 10, rows: 10)
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 3)
+    engine.feed("\u{1b}[?1049hfull-screen program")
+    _ = engine.frame()
+    engine.feed("\u{1b}[?1049l")
+    let back = engine.frame()
+    XCTAssertEqual(rowText(back, 2), "above")
+    XCTAssertEqual(back.images.placements.first?.row, 3)
+  }
+
+  /// A reflow that overflows a full scrollback drops the oldest lines; the image still
+  /// follows its own line, not the line that now has its old index.
+  func test_a_reflow_that_trims_a_full_scrollback_keeps_the_image_on_its_line() throws {
+    let engine = TerminalEngine(cols: 20, rows: 10, scrollback: 5)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed((1...20).map { "old \($0)\r\n" }.joined() + "above\r\n")
+    engine.feed(kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow\r\n")
+    // Lines under the image grow on the narrower screen, so it moves up the screen.
+    engine.feed(String(repeating: "x", count: 20) + "\r\n" + String(repeating: "y", count: 20) + "\r\n")
+    let before = engine.frame()
+    let aboveBefore = try XCTUnwrap((0..<10).first { rowText(before, $0) == "above" })
+    XCTAssertEqual(before.images.placements.first?.row, aboveBefore + 1)
+
+    engine.resize(cols: 10, rows: 10)
+    let after = engine.frame()
+    XCTAssertEqual(rowText(after, 0), "old 19", "the reflow trimmed the oldest lines")
+    let aboveAfter = try XCTUnwrap((0..<10).first { rowText(after, $0) == "above" })
+    XCTAssertLessThan(aboveAfter, aboveBefore)
+    XCTAssertEqual(after.images.placements.first?.row, aboveAfter + 1)
+  }
+
   func test_deleting_the_last_image_on_an_empty_alt_screen_clears_it() throws {
     let renderer = TerminalGridRenderer()
     let cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)

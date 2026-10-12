@@ -152,15 +152,21 @@ final class ScriptedByteStream: TerminalByteStream, @unchecked Sendable {
     }
   }
 
-  private var writes: [Data] = []
+  private var writes: [(at: ContinuousClock.Instant, bytes: Data)] = []
   /// Everything written to the "host", in order.
   var writtenText: String {
     lock.lock(); defer { lock.unlock() }
-    return writes.map { String(decoding: $0, as: UTF8.self) }.joined()
+    return writes.map { String(decoding: $0.bytes, as: UTF8.self) }.joined()
+  }
+
+  /// Each write with when it arrived.
+  var timedWrites: [(at: ContinuousClock.Instant, text: String)] {
+    lock.lock(); defer { lock.unlock() }
+    return writes.map { ($0.at, String(decoding: $0.bytes, as: UTF8.self)) }
   }
 
   func write(_ bytes: Data) async throws {
-    lock.lock(); writes.append(bytes); lock.unlock()
+    lock.lock(); writes.append((.now, bytes)); lock.unlock()
   }
 
   private var recordedResizes: [[UInt16]] = []

@@ -65,8 +65,9 @@ final class TerminalGlyphCache {
     if Self.isEmojiOrLastResort(created), !scalar.properties.isEmojiPresentation {
       let bold = CTFontGetSymbolicTraits(base).contains(.traitBold)
       for name in bold ? Self.textSymbolFacesBold : Self.textSymbolFaces {
-        let face = shared(CTFontCreateWithName(name as CFString, CTFontGetSize(base), nil), base: base)
-        guard CTFontCopyPostScriptName(face) as String == name else { continue }
+        let named = CTFontCreateWithName(name as CFString, CTFontGetSize(base), nil)
+        guard CTFontCopyPostScriptName(named) as String == name else { continue }
+        let face = shared(named, base: base)
         if let glyph = glyph(for: &utf16, in: face) {
           return Resolved(glyph: glyph, font: face, advance: advance(of: glyph, in: face))
         }

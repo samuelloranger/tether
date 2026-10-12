@@ -383,66 +383,69 @@ final class TerminalEngine {
     scrollOffset = 0
     // A reflow moves text between rows; recorded command marks no longer line up.
     commandMarks.removeAll()
-    // Only the primary screen reflows.
+    // While the alt screen shows, SwiftTerm defers the primary screen's reflow to the switch
+    // back, inside a feed; images there keep their rows (no snapshot of an inactive screen).
     let reflows = Int(cols) != dims.cols && !terminal.isCurrentBufferAlternate
     let anchors = reflows ? imageAnchors() : []
-    let trimmedBefore = terminal.buffer.totalLinesTrimmed
     terminal.resize(cols: Int(cols), rows: Int(rows))
     liveTop = terminal.buffer.yDisp
-    if !anchors.isEmpty { reanchorImages(anchors, trimmed: terminal.buffer.totalLinesTrimmed > trimmedBefore) }
+    if !anchors.isEmpty { reanchorImages(anchors) }
     needsRefresh = true
   }
 
-  /// A placement's line, as the index of the line among the buffer's lines (soft-wrapped
-  /// rows are one line) and the row within it, which a reflow leaves alone.
+  /// A placement's line, by the identity of the line's first row, and the row within it.
+  /// A reflow keeps that row's object while it moves rows in and out of the line; a resize
+  /// that trims the scrollback drops it, and the line with it.
   private struct ImageAnchor {
     var token: UInt64
-    var storedRow: Int
-    var line: Int
+    var line: ObjectIdentifier
     var offset: Int
-    var lineCount: Int
   }
 
-  /// Buffer rows that begin a line, oldest first.
-  private func lineStarts() -> [Int] {
+  /// Buffer rows that begin a line, oldest first, and the row count.
+  private func lineStarts() -> (starts: [Int], end: Int) {
     var starts: [Int] = []
     var row = 0
     while let line = terminal.bufferLine(atRow: row) {
       if !line.isWrapped || row == 0 { starts.append(row) }
       row += 1
     }
-    return starts
+    return (starts, row)
   }
 
   private func imageAnchors() -> [ImageAnchor] {
     let placements = terminal.kittyGraphicsRenderSnapshot().placements.filter { !$0.isVirtual }
     guard !placements.isEmpty else { return [] }
     let top = terminal.buffer.yDisp
-    let starts = lineStarts()
+    let starts = lineStarts().starts
     return placements.compactMap { placement in
-      let storedRow = top + placement.geometry.row
-      let row = storedRow + (imageRowShift[placement.token] ?? 0)
-      guard row >= 0, let line = starts.lastIndex(where: { $0 <= row }) else { return nil }
-      return ImageAnchor(
-        token: placement.token, storedRow: storedRow, line: line, offset: row - starts[line], lineCount: starts.count
-      )
+      let row = top + placement.geometry.row + (imageRowShift[placement.token] ?? 0)
+      guard row >= 0, let index = starts.lastIndex(where: { $0 <= row }),
+        let first = terminal.bufferLine(atRow: starts[index])
+      else { return nil }
+      return ImageAnchor(token: placement.token, line: ObjectIdentifier(first), offset: row - starts[index])
     }
   }
 
-  /// `trimmed`: the resize dropped rows off the top of the scrollback, and the lines on them.
-  private func reanchorImages(_ anchors: [ImageAnchor], trimmed: Bool) {
-    let starts = lineStarts()
-    var end = 0
-    while terminal.bufferLine(atRow: end) != nil { end += 1 }
+  private func reanchorImages(_ anchors: [ImageAnchor]) {
+    let (starts, end) = lineStarts()
+    var startOf: [ObjectIdentifier: Int] = [:]
+    for (index, row) in starts.enumerated() {
+      if let line = terminal.bufferLine(atRow: row) { startOf[ObjectIdentifier(line)] = index }
+    }
+    // Where SwiftTerm now keeps each placement: the resize may have moved the viewport.
+    let top = terminal.buffer.yDisp
+    var storedRow: [UInt64: Int] = [:]
+    for placement in terminal.kittyGraphicsRenderSnapshot().placements where !placement.isVirtual {
+      storedRow[placement.token] = top + placement.geometry.row
+    }
     for anchor in anchors {
-      let line = anchor.line - (trimmed ? max(0, anchor.lineCount - starts.count) : 0)
-      guard starts.indices.contains(line) else {
+      guard let index = startOf[anchor.line], let stored = storedRow[anchor.token] else {
         imageRowShift[anchor.token] = nil
         continue
       }
-      let next = line + 1 < starts.count ? starts[line + 1] : end
-      let row = min(starts[line] + anchor.offset, next - 1)
-      imageRowShift[anchor.token] = row - anchor.storedRow
+      let next = index + 1 < starts.count ? starts[index + 1] : end
+      imageRowShift[anchor.token] = min(starts[index] + anchor.offset, next - 1) - stored
     }
   }
 
@@ -616,11 +619,14 @@ final class TerminalEngine {
     let images: TerminalImageLayer
     if graphicsDirty || terminal.getUpdateRange() != nil {
       let snapshot = terminal.kittyGraphicsRenderSnapshot()
-      if !imageRowShift.isEmpty {
+      // Shifts belong to primary-screen placements; the alt screen numbers its own tokens
+      // and lists only its own placements.
+      let primary = !terminal.isCurrentBufferAlternate
+      if primary, !imageRowShift.isEmpty {
         let live = Set(snapshot.placements.map(\.token))
         imageRowShift = imageRowShift.filter { live.contains($0.key) }
       }
-      images = TerminalImageLayer(snapshot, owner: imageOwner, rowShift: imageRowShift)
+      images = TerminalImageLayer(snapshot, owner: imageOwner, rowShift: primary ? imageRowShift : [:])
     } else {
       images = cached.images
     }

@@ -406,6 +406,9 @@ public final class SSHTerminalController {
   /// never interleave: the second's attach would land inside the session the first opened.
   @ObservationIgnored private var switchQueue: Task<Void, Never>?
   @ObservationIgnored private var latestSwitch = 0
+  /// When the last switch typed its attach: the next detach key waits until that attach
+  /// has had time to start, however long after it the tap came.
+  @ObservationIgnored private var lastSwitchWrite: ContinuousClock.Instant?
 
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
   /// program in the session we leave is never typed into and keeps running. Switches run one
@@ -417,9 +420,13 @@ public final class SSHTerminalController {
     let task = Task { [weak self] in
       await previous?.value
       guard let self, ticket == self.latestSwitch else { return }
+      // This detach key must not reach the shell while the previous attach starts up.
+      if let last = self.lastSwitchWrite {
+        let ready = last + .nanoseconds(Int64(ZmxSwitch.settleNanoseconds))
+        if ready > .now { try? await Task.sleep(until: ready, clock: .continuous) }
+        guard ticket == self.latestSwitch else { return }
+      }
       await self.performSwitch(to: name)
-      // The next switch's detach key must not reach the shell while this attach starts up.
-      if ticket != self.latestSwitch { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
     }
     switchQueue = task
     await task.value
@@ -448,6 +455,7 @@ public final class SSHTerminalController {
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
     }
+    lastSwitchWrite = .now
     if wasAttached { flushPushInBackground(session: departing) }
   }
 

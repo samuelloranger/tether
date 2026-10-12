@@ -158,4 +158,32 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     XCTAssertEqual(controller.attach, "d")
     await controller.leave()
   }
+
+  /// A tap just after the previous switch finished: its detach key still waits until the
+  /// previous attach has had time to start, or it reaches the shell and its attach lands
+  /// inside the session just opened.
+  func test_a_switch_right_after_another_waits_for_its_attach_to_settle() async throws {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    let first = Task { await controller.switchSession(to: "b") }
+    // The next tap lands as soon as b's attach is typed, while the switch still refreshes.
+    let attached = await eventually { stream.writtenText.contains("attach 'b'") }
+    XCTAssertTrue(attached)
+    let second = Task { await controller.switchSession(to: "c") }
+    await first.value
+    await second.value
+
+    let typed = await eventually { stream.writtenText.contains("attach 'c'") }
+    XCTAssertTrue(typed)
+    let writes = stream.timedWrites
+    let attachB = try XCTUnwrap(writes.firstIndex { $0.text.contains("attach 'b'") })
+    let detachC = try XCTUnwrap(writes[(attachB + 1)...].firstIndex { $0.text.contains("\u{1C}") })
+    let gap = writes[detachC].at - writes[attachB].at
+    XCTAssertGreaterThanOrEqual(gap, .milliseconds(200))
+    XCTAssertEqual(controller.attach, "c")
+    await controller.leave()
+  }
 }
