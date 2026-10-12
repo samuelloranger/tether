@@ -9,6 +9,7 @@ struct TerminalRenderOutput {
   var images: TerminalImageLayer
   var clusters: [Int: String] = [:]
   var defaultBackground: UInt32?
+  var wrapped: [Bool] = []
   var image: CGImage?
   /// Rows the bitmap anchors to the bottom of the view.
   var drawRows: Int
@@ -18,6 +19,11 @@ struct TerminalRenderOutput {
   /// Plain text per row. Computed on demand: only selection and link taps read it.
   var rowTexts: [String] {
     TerminalRunBuilder.rowTexts(cells: cells, cols: Int(header.cols), rows: Int(header.rows), clusters: clusters)
+  }
+
+  /// Computed on demand, like `rowTexts`.
+  var linkSpans: [[LinkSpan]] {
+    LinkSpans.screen(rowTexts: rowTexts, explicit: hyperlinks, wrapped: wrapped, cols: Int(header.cols))
   }
 }
 
@@ -33,6 +39,7 @@ final class TerminalRenderWorker {
   private var lastImages = TerminalImageLayer.empty
   private var lastClusters: [Int: String] = [:]
   private var lastDefaultBackground: UInt32?
+  private var lastWrapped: [Bool] = []
 
   func reset() {
     renderer.invalidate()
@@ -44,6 +51,7 @@ final class TerminalRenderWorker {
     lastImages = .empty
     lastClusters = [:]
     lastDefaultBackground = nil
+    lastWrapped = []
   }
 
   /// Keeps the last image but lets a new session's generation 1 through.
@@ -66,6 +74,7 @@ final class TerminalRenderWorker {
     lastImages = frame.images
     lastClusters = frame.clusters
     lastDefaultBackground = frame.defaultBackground
+    lastWrapped = frame.wrapped
     return rasterize(metrics: metrics)
   }
 
@@ -89,6 +98,7 @@ final class TerminalRenderWorker {
       images: lastImages,
       clusters: lastClusters,
       defaultBackground: lastDefaultBackground,
+      wrapped: lastWrapped,
       image: image,
       drawRows: renderer.drawRows,
       cursorImage: header.cursorVisible

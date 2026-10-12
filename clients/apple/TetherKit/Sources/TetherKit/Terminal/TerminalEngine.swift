@@ -650,8 +650,10 @@ final class TerminalEngine {
     } else {
       grid = Grid(cells: cached.cells, hyperlinks: cached.hyperlinks, clusters: cached.clusters)
     }
+    let wrapped = wrapFlags()
     if stateChanged || imagesChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks
-      || grid.clusters != cached.clusters || effectiveTheme.background != cached.defaultBackground {
+      || grid.clusters != cached.clusters || effectiveTheme.background != cached.defaultBackground
+      || wrapped != cached.wrapped {
       generationCounter &+= 1
     }
     var stamped = header
@@ -661,7 +663,14 @@ final class TerminalEngine {
       && grid.cells[cursorIndex].attrs & GridSnapshot.attrWide != 0
     cached = TerminalFrame(
       header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks, images: images,
-      clusters: grid.clusters, defaultBackground: effectiveTheme.background)
+      clusters: grid.clusters, defaultBackground: effectiveTheme.background, wrapped: wrapped)
+  }
+
+  /// SwiftTerm flags the continuing row; a frame flags the row that continues. The row past
+  /// the bottom exists while scrolled back.
+  private func wrapFlags() -> [Bool] {
+    let top = terminal.buffer.yDisp
+    return (0..<terminal.getDims().rows).map { terminal.bufferLine(atRow: top + $0 + 1)?.isWrapped ?? false }
   }
 
   private struct Grid {
