@@ -159,6 +159,16 @@ public enum LinkSpans {
     }
   }
 
+  /// Every link on a screen: OSC 8 links plus detected ones. `wrapped[row]` is true when the
+  /// terminal wrapped that row into the next at the edge, which joins the two outright; the
+  /// hard-wrap heuristic still covers lines a TUI breaks itself.
+  static func screen(rowTexts: [String], explicit: [[LinkSpan]], wrapped: [Bool], cols: Int) -> [[LinkSpan]] {
+    // The wide-glyph placeholder is a column, not text: as a space it ends a URL as before.
+    let texts = rowTexts.map { String($0.map { $0 == TerminalRunBuilder.wideTail ? " " : $0 }) }
+    let wrapped = wrapped.count == texts.count ? wrapped : Array(repeating: false, count: texts.count)
+    return merging(explicit: explicit, detected: compute(texts: texts, wrapped: wrapped, cols: cols))
+  }
+
   public static func target(atColumn col: Int, row: Int, spans: [[LinkSpan]]) -> LinkTarget? {
     guard row >= 0, row < spans.count else { return nil }
     for span in spans[row] where col >= span.start && col < span.end {

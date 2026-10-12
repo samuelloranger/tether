@@ -202,6 +202,76 @@ final class TerminalImageTests: XCTestCase {
     XCTAssertEqual(engine.frame().images.placements.first?.row, 2)
   }
 
+  /// A font change reflows the text; an image must stay on the line it was printed after,
+  /// not keep its old row and cover what moved under it.
+  func test_a_reflow_keeps_an_image_under_the_line_it_followed() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(String(repeating: "x", count: 20) + "\r\nabove\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow")
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 2)
+
+    // Narrower: the full-width line wraps, so everything after it moves down a row.
+    engine.resize(cols: 10, rows: 10)
+    let narrow = engine.frame()
+    XCTAssertEqual(rowText(narrow, 2), "above")
+    XCTAssertEqual(narrow.images.placements.first?.row, 3, "the image covers the line that moved into its old row")
+
+    // And back: the line joins again and the image follows it up.
+    engine.resize(cols: 20, rows: 10)
+    let wide = engine.frame()
+    XCTAssertEqual(rowText(wide, 1), "above")
+    XCTAssertEqual(wide.images.placements.first?.row, 2)
+  }
+
+  func test_after_a_reflow_output_still_scrolls_the_image_with_its_line() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(String(repeating: "x", count: 20) + "\r\nabove\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow")
+    engine.resize(cols: 10, rows: 10)
+    engine.feed((1...7).map { "\r\nline \($0)" }.joined())
+    let frame = engine.frame()
+    let above = (0..<10).first { rowText(frame, $0) == "above" }
+    XCTAssertEqual(above, 0)
+    XCTAssertEqual(frame.images.placements.first?.row, 1)
+  }
+
+  /// The alt screen lists only its own placements; a visit must not drop the primary
+  /// screen's shifts.
+  func test_visiting_the_alt_screen_after_a_reflow_keeps_the_image_on_its_line() {
+    let engine = TerminalEngine(cols: 20, rows: 10)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed(String(repeating: "x", count: 20) + "\r\nabove\r\n" + kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow")
+    engine.resize(cols: 10, rows: 10)
+    XCTAssertEqual(engine.frame().images.placements.first?.row, 3)
+    engine.feed("\u{1b}[?1049hfull-screen program")
+    _ = engine.frame()
+    engine.feed("\u{1b}[?1049l")
+    let back = engine.frame()
+    XCTAssertEqual(rowText(back, 2), "above")
+    XCTAssertEqual(back.images.placements.first?.row, 3)
+  }
+
+  /// A reflow that overflows a full scrollback drops the oldest lines; the image still
+  /// follows its own line, not the line that now has its old index.
+  func test_a_reflow_that_trims_a_full_scrollback_keeps_the_image_on_its_line() throws {
+    let engine = TerminalEngine(cols: 20, rows: 10, scrollback: 5)
+    engine.setCellPixelSize(width: 10, height: 20)
+    engine.feed((1...20).map { "old \($0)\r\n" }.joined() + "above\r\n")
+    engine.feed(kitty("a=T,f=32,s=2,v=2,q=2", redOverBlue) + "\r\nbelow\r\n")
+    // Lines under the image grow on the narrower screen, so it moves up the screen.
+    engine.feed(String(repeating: "x", count: 20) + "\r\n" + String(repeating: "y", count: 20) + "\r\n")
+    let before = engine.frame()
+    let aboveBefore = try XCTUnwrap((0..<10).first { rowText(before, $0) == "above" })
+    XCTAssertEqual(before.images.placements.first?.row, aboveBefore + 1)
+
+    engine.resize(cols: 10, rows: 10)
+    let after = engine.frame()
+    XCTAssertEqual(rowText(after, 0), "old 19", "the reflow trimmed the oldest lines")
+    let aboveAfter = try XCTUnwrap((0..<10).first { rowText(after, $0) == "above" })
+    XCTAssertLessThan(aboveAfter, aboveBefore)
+    XCTAssertEqual(after.images.placements.first?.row, aboveAfter + 1)
+  }
+
   func test_deleting_the_last_image_on_an_empty_alt_screen_clears_it() throws {
     let renderer = TerminalGridRenderer()
     let cells = [GridSnapshot.Cell](repeating: black, count: 4 * 2)

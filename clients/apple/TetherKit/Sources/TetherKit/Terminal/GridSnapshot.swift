@@ -73,10 +73,14 @@ public struct TerminalFrame: Sendable, Equatable {
   public var clusters: [Int: String]
   /// The default background in effect: the theme's, or what a program set with OSC 11.
   public var defaultBackground: UInt32?
+  /// Per visible row: true when the terminal wrapped it into the next row at the edge, as
+  /// opposed to the program ending the line. Empty when unknown.
+  public var wrapped: [Bool]
 
   public init(
     header: GridSnapshot.Header, cells: [GridSnapshot.Cell], hyperlinks: [[LinkSpan]] = [],
-    images: TerminalImageLayer = .empty, clusters: [Int: String] = [:], defaultBackground: UInt32? = nil
+    images: TerminalImageLayer = .empty, clusters: [Int: String] = [:], defaultBackground: UInt32? = nil,
+    wrapped: [Bool] = []
   ) {
     self.header = header
     self.cells = cells
@@ -84,5 +88,6 @@ public struct TerminalFrame: Sendable, Equatable {
     self.images = images
     self.clusters = clusters
     self.defaultBackground = defaultBackground
+    self.wrapped = wrapped
   }
 }

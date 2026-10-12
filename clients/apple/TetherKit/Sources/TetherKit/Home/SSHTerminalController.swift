@@ -288,6 +288,7 @@ public final class SSHTerminalController {
         } else {
           hasSession = true
           pipeline.outbound.yield(.input(ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach), key: sessionKey))
+          lastAttachWrite = .now
         }
         schedulePushRegister()
         Task { await refreshSessions() }
@@ -402,9 +403,38 @@ public final class SSHTerminalController {
     return agentAlert?.session == link.sessionId
   }
 
+  /// The switch being typed. Each tap is its own task, and two switches' keystrokes must
+  /// never interleave: the second's attach would land inside the session the first opened.
+  @ObservationIgnored private var switchQueue: Task<Void, Never>?
+  @ObservationIgnored private var latestSwitch = 0
+  /// When an attach was last typed, by a connect or a switch: the next detach key waits until
+  /// that attach has had time to start, however long after it the tap came.
+  @ObservationIgnored private var lastAttachWrite: ContinuousClock.Instant?
+
   /// Detaches the zmx client holding the PTY and attaches from the shell underneath, so the
-  /// program in the session we leave is never typed into and keeps running.
+  /// program in the session we leave is never typed into and keeps running. Switches run one
+  /// at a time; one a newer tap replaced while it waited is dropped.
   public func switchSession(to name: String) async {
+    latestSwitch += 1
+    let ticket = latestSwitch
+    let previous = switchQueue
+    let task = Task { [weak self] in
+      await previous?.value
+      guard let self, ticket == self.latestSwitch else { return }
+      // This detach key must not reach the shell while the previous attach starts up.
+      if let last = self.lastAttachWrite {
+        let ready = last + .nanoseconds(Int64(ZmxSwitch.settleNanoseconds))
+        if ready > .now { try? await Task.sleep(until: ready, clock: .continuous) }
+        guard ticket == self.latestSwitch else { return }
+      }
+      await self.performSwitch(to: name)
+    }
+    switchQueue = task
+    await task.value
+    if ticket == latestSwitch { await refreshSessions() }
+  }
+
+  private func performSwitch(to name: String) async {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
     guard name != attach || !hasSession else { return }
@@ -426,8 +456,8 @@ public final class SSHTerminalController {
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
     }
+    lastAttachWrite = .now
     if wasAttached { flushPushInBackground(session: departing) }
-    await refreshSessions()
   }
 
   /// Switch away first when killing the current session — killing the one we're
@@ -999,6 +1029,7 @@ public final class SSHTerminalController {
   }
   public func jumpToPrompt(_ direction: PromptJump) async -> Bool { await pipeline.jumpToPrompt(direction) }
   public func lastCommandOutput() async -> String? { await pipeline.lastCommandOutput() }
+  public func shellMarksPrompts() async -> Bool { await pipeline.hasPromptMarks() }
   /// Numbered here, synchronously, so the pipeline can drop a request that reaches it
   /// after a newer one, however the tasks carrying them are scheduled.
   public func requestTheme(_ theme: TerminalTheme) {

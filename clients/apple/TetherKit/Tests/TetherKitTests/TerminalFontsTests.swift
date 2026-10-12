@@ -65,6 +65,34 @@ final class TerminalFontsTests: XCTestCase {
     }
   }
 
+  /// Faces without these symbols (Comic Mono, Fira Code, JetBrains Mono for ✔) must still
+  /// draw their text form. Core Text falls back to Apple Color Emoji, which only has the
+  /// emoji form: a colour picture two cells wide, or its missing-glyph box.
+  func test_check_and_cross_marks_draw_from_a_real_face_in_every_terminal_font() {
+    for name in TerminalFont.builtIn.map(\.postScriptName) {
+      let cache = TerminalGlyphCache(
+        regular: TerminalFonts.font(postScriptName: name, size: 14, bold: false),
+        bold: TerminalFonts.font(postScriptName: name, size: 14, bold: true)
+      )
+      // ✓ ✔ ✗ ✘ ✖ ➜ ⏺ (Claude Code's bullet)
+      for codepoint: UInt32 in [0x2713, 0x2714, 0x2717, 0x2718, 0x2716, 0x279C, 0x23FA] {
+        for bold in [false, true] {
+          let label = "\(name)\(bold ? " bold" : "") U+\(String(codepoint, radix: 16, uppercase: true))"
+          guard let resolved = cache.glyph(for: codepoint, bold: bold) else {
+            XCTFail("\(label): no glyph at all"); continue
+          }
+          let face = postScriptName(resolved.font)
+          let glyphName = CTFontCopyNameForGlyph(resolved.font, resolved.glyph).map { $0 as String } ?? "?"
+          XCTAssertFalse(face.hasPrefix("LastResort") || face.contains("AppleColorEmoji"), "\(label) falls back to \(face)")
+          XCTAssertFalse(
+            glyphName == ".notdef" || glyphName.lowercased().hasPrefix("lastresort"),
+            "\(label) draws the missing-glyph box \(glyphName) from \(face)"
+          )
+        }
+      }
+    }
+  }
+
   func test_saved_ids_from_the_old_enum_still_resolve_and_unknown_ones_fall_back() {
     XCTAssertEqual(TerminalFont.named("SF Mono").postScriptName, "SFMono-Regular")
     XCTAssertEqual(TerminalFont.named("Courier New").postScriptName, "CourierNewPSMT")

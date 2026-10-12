@@ -129,4 +129,83 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     XCTAssertTrue(back)
     await controller.leave()
   }
+  /// Taps faster than a switch takes: each switch types in full before the next starts, and
+  /// one a later tap replaced while it waited is never typed.
+  func test_overlapping_switches_type_one_at_a_time_and_skip_replaced_ones() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    // Past the first attach's settle time, so b starts at once.
+    try? await Task.sleep(nanoseconds: 300_000_000)
+    var taps: [Task<Void, Never>] = []
+    for name in ["b", "c", "d"] {
+      taps.append(Task { await controller.switchSession(to: name) })
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    for tap in taps { await tap.value }
+
+    let typed = await eventually { stream.writtenText.contains("attach 'd'") }
+    XCTAssertTrue(typed)
+    let events = stream.writtenText.compactMap { character -> String? in
+      character == "\u{1C}" ? "detach" : nil
+    }
+    XCTAssertEqual(events.count, 2)
+    let attaches = stream.writtenText.components(separatedBy: "attach '").dropFirst().map { $0.prefix(1) }
+    XCTAssertEqual(attaches, ["w", "b", "d"])
+    // Every attach after the first follows its own detach.
+    let order = stream.writtenText.filter { $0 == "\u{1C}" || $0 == "\n" }
+    XCTAssertEqual(String(order), "\n\u{1C}\n\u{1C}\n")
+    XCTAssertEqual(controller.attach, "d")
+    await controller.leave()
+  }
+
+  /// A tap just after the previous switch finished: its detach key still waits until the
+  /// previous attach has had time to start, or it reaches the shell and its attach lands
+  /// inside the session just opened.
+  func test_a_switch_right_after_another_waits_for_its_attach_to_settle() async throws {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    let first = Task { await controller.switchSession(to: "b") }
+    // The next tap lands as soon as b's attach is typed, while the switch still refreshes.
+    let attached = await eventually { stream.writtenText.contains("attach 'b'") }
+    XCTAssertTrue(attached)
+    let second = Task { await controller.switchSession(to: "c") }
+    await first.value
+    await second.value
+
+    let typed = await eventually { stream.writtenText.contains("attach 'c'") }
+    XCTAssertTrue(typed)
+    let writes = stream.timedWrites
+    let attachB = try XCTUnwrap(writes.firstIndex { $0.text.contains("attach 'b'") })
+    let detachC = try XCTUnwrap(writes[(attachB + 1)...].firstIndex { $0.text.contains("\u{1C}") })
+    let gap = writes[detachC].at - writes[attachB].at
+    // The settle time is 250 ms from when the attach was queued; without the wait the gap is
+    // a few ms. The margin absorbs queueing delay on a loaded simulator.
+    XCTAssertGreaterThanOrEqual(gap, .milliseconds(150))
+    XCTAssertEqual(controller.attach, "c")
+    await controller.leave()
+  }
+
+  /// A connect types an attach too: a switch tapped right after it waits the same way.
+  func test_a_switch_right_after_connecting_waits_for_the_first_attach_to_settle() async throws {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    let attached = await eventually { stream.writtenText.contains("attach '") }
+    XCTAssertTrue(attached)
+    await controller.switchSession(to: "b")
+
+    let writes = stream.timedWrites
+    let first = try XCTUnwrap(writes.firstIndex { $0.text.contains("attach '") })
+    let detach = try XCTUnwrap(writes[(first + 1)...].firstIndex { $0.text.contains("\u{1C}") })
+    XCTAssertGreaterThanOrEqual(writes[detach].at - writes[first].at, .milliseconds(150))
+    await controller.leave()
+  }
 }

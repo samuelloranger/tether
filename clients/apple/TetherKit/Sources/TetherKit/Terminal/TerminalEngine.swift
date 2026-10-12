@@ -27,6 +27,9 @@ final class TerminalEngine {
   private var graphicsDirty = true
   /// A chunk that ended on ESC may continue an APC in the next one.
   private var endedOnEscape = false
+  /// Rows each kitty placement has to move, by token: SwiftTerm keeps a placement at its
+  /// buffer row through a reflow while the text it was printed with moves.
+  private var imageRowShift: [UInt64: Int] = [:]
   private let imageOwner = TerminalEngine.nextImageOwner()
   private static let ownerLock = NSLock()
   nonisolated(unsafe) private static var lastImageOwner: UInt64 = 0
@@ -248,6 +251,11 @@ final class TerminalEngine {
     locked { jumpToPromptLocked(direction) }
   }
 
+  /// Whether the shell has marked any prompt still in the buffer.
+  var hasPromptMarks: Bool {
+    locked { !promptRows().isEmpty }
+  }
+
   /// Text of the newest finished command's output, from the OSC 133 marks. Nil when the
   /// shell marks no prompts or the last command printed nothing.
   func lastCommandOutput() -> String? {
@@ -375,9 +383,71 @@ final class TerminalEngine {
     scrollOffset = 0
     // A reflow moves text between rows; recorded command marks no longer line up.
     commandMarks.removeAll()
+    // While the alt screen shows, SwiftTerm defers the primary screen's reflow to the switch
+    // back, inside a feed; images there keep their rows (no snapshot of an inactive screen).
+    let reflows = Int(cols) != dims.cols && !terminal.isCurrentBufferAlternate
+    let anchors = reflows ? imageAnchors() : []
     terminal.resize(cols: Int(cols), rows: Int(rows))
     liveTop = terminal.buffer.yDisp
+    if !anchors.isEmpty { reanchorImages(anchors) }
     needsRefresh = true
+  }
+
+  /// A placement's line, by the identity of the line's first row, and the row within it.
+  /// A reflow keeps that row's object while it moves rows in and out of the line; a resize
+  /// that trims the scrollback drops it, and the line with it.
+  private struct ImageAnchor {
+    var token: UInt64
+    /// Held, so no line made during the resize can take its place at the same address.
+    var line: BufferLine
+    var offset: Int
+  }
+
+  /// Buffer rows that begin a line, oldest first, and the row count.
+  private func lineStarts() -> (starts: [Int], end: Int) {
+    var starts: [Int] = []
+    var row = 0
+    while let line = terminal.bufferLine(atRow: row) {
+      if !line.isWrapped || row == 0 { starts.append(row) }
+      row += 1
+    }
+    return (starts, row)
+  }
+
+  private func imageAnchors() -> [ImageAnchor] {
+    let placements = terminal.kittyGraphicsRenderSnapshot().placements.filter { !$0.isVirtual }
+    guard !placements.isEmpty else { return [] }
+    let top = terminal.buffer.yDisp
+    let starts = lineStarts().starts
+    return placements.compactMap { placement in
+      let row = top + placement.geometry.row + (imageRowShift[placement.token] ?? 0)
+      guard row >= 0, let index = starts.lastIndex(where: { $0 <= row }),
+        let first = terminal.bufferLine(atRow: starts[index])
+      else { return nil }
+      return ImageAnchor(token: placement.token, line: first, offset: row - starts[index])
+    }
+  }
+
+  private func reanchorImages(_ anchors: [ImageAnchor]) {
+    let (starts, end) = lineStarts()
+    var startOf: [ObjectIdentifier: Int] = [:]
+    for (index, row) in starts.enumerated() {
+      if let line = terminal.bufferLine(atRow: row) { startOf[ObjectIdentifier(line)] = index }
+    }
+    // Where SwiftTerm now keeps each placement: the resize may have moved the viewport.
+    let top = terminal.buffer.yDisp
+    var storedRow: [UInt64: Int] = [:]
+    for placement in terminal.kittyGraphicsRenderSnapshot().placements where !placement.isVirtual {
+      storedRow[placement.token] = top + placement.geometry.row
+    }
+    for anchor in anchors {
+      guard let index = startOf[ObjectIdentifier(anchor.line)], let stored = storedRow[anchor.token] else {
+        imageRowShift[anchor.token] = nil
+        continue
+      }
+      let next = index + 1 < starts.count ? starts[index + 1] : end
+      imageRowShift[anchor.token] = min(starts[index] + anchor.offset, next - 1) - stored
+    }
   }
 
   private func scrollLocked(lines: Int32) {
@@ -547,9 +617,20 @@ final class TerminalEngine {
     let header = currentHeader()
     let stateChanged = !Self.sameState(header, cached.header)
     // An animation tick marks the screen for update without any output.
-    let images = graphicsDirty || terminal.getUpdateRange() != nil
-      ? TerminalImageLayer(terminal.kittyGraphicsRenderSnapshot(), owner: imageOwner)
-      : cached.images
+    let images: TerminalImageLayer
+    if graphicsDirty || terminal.getUpdateRange() != nil {
+      let snapshot = terminal.kittyGraphicsRenderSnapshot()
+      // Shifts belong to primary-screen placements; the alt screen numbers its own tokens
+      // and lists only its own placements.
+      let primary = !terminal.isCurrentBufferAlternate
+      if primary, !imageRowShift.isEmpty {
+        let live = Set(snapshot.placements.map(\.token))
+        imageRowShift = imageRowShift.filter { live.contains($0.key) }
+      }
+      images = TerminalImageLayer(snapshot, owner: imageOwner, rowShift: primary ? imageRowShift : [:])
+    } else {
+      images = cached.images
+    }
     graphicsDirty = false
     let imagesChanged = images != cached.images
     // OSC 4/104 repaint colors without touching the update range; a kitty placement or
@@ -576,8 +657,10 @@ final class TerminalEngine {
     } else {
       grid = Grid(cells: cached.cells, hyperlinks: cached.hyperlinks, clusters: cached.clusters)
     }
+    let wrapped = wrapFlags()
     if stateChanged || imagesChanged || grid.cells != cached.cells || grid.hyperlinks != cached.hyperlinks
-      || grid.clusters != cached.clusters || effectiveTheme.background != cached.defaultBackground {
+      || grid.clusters != cached.clusters || effectiveTheme.background != cached.defaultBackground
+      || wrapped != cached.wrapped {
       generationCounter &+= 1
     }
     var stamped = header
@@ -587,7 +670,14 @@ final class TerminalEngine {
       && grid.cells[cursorIndex].attrs & GridSnapshot.attrWide != 0
     cached = TerminalFrame(
       header: stamped, cells: grid.cells, hyperlinks: grid.hyperlinks, images: images,
-      clusters: grid.clusters, defaultBackground: effectiveTheme.background)
+      clusters: grid.clusters, defaultBackground: effectiveTheme.background, wrapped: wrapped)
+  }
+
+  /// SwiftTerm flags the continuing row; a frame flags the row that continues. The row past
+  /// the bottom exists while scrolled back.
+  private func wrapFlags() -> [Bool] {
+    let top = terminal.buffer.yDisp
+    return (0..<terminal.getDims().rows).map { terminal.bufferLine(atRow: top + $0 + 1)?.isWrapped ?? false }
   }
 
   private struct Grid {

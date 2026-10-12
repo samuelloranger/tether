@@ -142,6 +142,7 @@ public final class TetherSurfaceView: UIView {
   private var cells: [GridSnapshot.Cell] = []
   private var images = TerminalImageLayer.empty
   private var hyperlinks: [[LinkSpan]] = []
+  private var wrapped: [Bool] = []
   private var clusters: [Int: String] = [:]
   private var cursorImage: CGImage?
   /// The default background the last frame was drawn on (the theme's, or OSC 11's).
@@ -164,15 +165,7 @@ public final class TetherSurfaceView: UIView {
   private var linkSpans: [[LinkSpan]] {
     if let lazyLinkSpans { return lazyLinkSpans }
     guard let header else { return [] }
-    // The wide-glyph placeholder is a column, not text: as a space it ends a URL as before.
-    let texts = cachedRowTexts.map { String($0.map { $0 == TerminalRunBuilder.wideTail ? " " : $0 }) }
-    // Frames carry no soft-wrap flags yet — the hard-wrap heuristic in LinkSpans still runs.
-    let spans = LinkSpans.merging(
-      explicit: hyperlinks,
-      detected: LinkSpans.compute(
-        texts: texts, wrapped: Array(repeating: false, count: texts.count), cols: Int(header.cols)
-      )
-    )
+    let spans = LinkSpans.screen(rowTexts: cachedRowTexts, explicit: hyperlinks, wrapped: wrapped, cols: Int(header.cols))
     lazyLinkSpans = spans
     return spans
   }
@@ -354,6 +347,7 @@ public final class TetherSurfaceView: UIView {
     cells = []
     images = .empty
     hyperlinks = []
+    wrapped = []
     clusters = [:]
     cursorImage = nil
     shownBackground = nil
@@ -434,6 +428,7 @@ public final class TetherSurfaceView: UIView {
     cells = output.cells
     images = output.images
     hyperlinks = output.hyperlinks
+    wrapped = output.wrapped
     clusters = output.clusters
     drawRows = output.drawRows
     cursorImage = output.cursorImage

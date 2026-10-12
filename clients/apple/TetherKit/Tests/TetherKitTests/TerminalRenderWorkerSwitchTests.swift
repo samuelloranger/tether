@@ -79,6 +79,30 @@ final class TerminalRenderWorkerSwitchTests: XCTestCase {
     )
   }
 
+  // MARK: - Links across a soft wrap
+
+  /// A URL the terminal wrapped at the edge is one link on both rows, even when the second
+  /// row carries nothing that looks like a URL on its own.
+  func testASoftWrappedURLIsOneLinkOnBothRows() throws {
+    let engine = TerminalEngine(cols: 20, rows: 4)
+    let url = "https://example.com/abcdefghijklmno"
+    engine.feed(Data(url.utf8))
+    let output = try XCTUnwrap(TerminalRenderWorker().render(frame: engine.frame(), metrics: metrics(cols: 20, rows: 4)))
+    XCTAssertEqual(output.wrapped, [true, false, false, false])
+    XCTAssertEqual(output.rowTexts[1], "abcdefghijklmno")
+    XCTAssertEqual(LinkSpans.target(atColumn: 0, row: 0, spans: output.linkSpans), .external(url: url))
+    XCTAssertEqual(LinkSpans.target(atColumn: 3, row: 1, spans: output.linkSpans), .external(url: url))
+  }
+
+  func testASoftWrappedPathIsOneLinkOnBothRows() throws {
+    let engine = TerminalEngine(cols: 20, rows: 4)
+    engine.feed(Data("see Sources/App/Terminal/Engine.swift:42 now".utf8))
+    let output = try XCTUnwrap(TerminalRenderWorker().render(frame: engine.frame(), metrics: metrics(cols: 20, rows: 4)))
+    let target = LinkTarget.file(path: "Sources/App/Terminal/Engine.swift", line: 42, column: nil)
+    XCTAssertEqual(LinkSpans.target(atColumn: 5, row: 0, spans: output.linkSpans), target)
+    XCTAssertEqual(LinkSpans.target(atColumn: 2, row: 1, spans: output.linkSpans), target)
+  }
+
   // MARK: - Helpers
 
   private func metrics(cols: Int, rows: Int, fontSize: CGFloat = 14) -> TerminalRenderMetrics {
