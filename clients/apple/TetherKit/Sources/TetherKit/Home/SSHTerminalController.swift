@@ -471,7 +471,6 @@ public final class SSHTerminalController {
         // Killed the only session — drop to the empty state, don't recreate one.
         hasSession = false
         pendingNoSession = true
-        terminalReport = .empty
       }
     }
     _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
@@ -1069,7 +1068,8 @@ public final class SSHTerminalController {
       guard appIsActive(), bellThrottle.shouldRing(at: ProcessInfo.processInfo.systemUptime) else { return }
       bellRings += 1
     case let .report(report):
-      guard hasSession else { return }
+      // Kept with no session too: the pipeline only reports changes, so a dropped one is lost
+      // for the next session. The header masks the title instead.
       terminalReport = report
     case let .clipboard(text):
       guard appIsActive() else { return }

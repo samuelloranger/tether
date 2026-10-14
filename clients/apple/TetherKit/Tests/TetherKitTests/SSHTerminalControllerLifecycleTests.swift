@@ -129,26 +129,26 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     XCTAssertTrue(back)
     await controller.leave()
   }
+
   /// Killing the last session leaves the bare login shell under the empty state: typing must
-  /// not reach it, and the dead session's title must not linger in the header.
-  func test_killing_the_only_session_gates_input_and_clears_its_title() async {
+  /// not reach it. Its reports are still kept — the pipeline only sends changes, so one
+  /// dropped here would be missing once the next session attaches.
+  func test_killing_the_only_session_gates_input_but_keeps_reports() async {
     let stream = ScriptedByteStream()
     let ops = FakeOps()
     ops.execResult = { _ in "" }
     let controller = makeController(DialScript([stream]), ops)
     await controller.connect()
-    stream.push(Data("\u{1B}]2;agent at work\u{07}".utf8))
-    let titled = await eventually { controller.terminalReport.title == "agent at work" }
-    XCTAssertTrue(titled)
 
     await controller.killSession("work")
     stream.push(Data("\u{1B}]2;login shell\u{07}".utf8))
+    let reported = await eventually { controller.terminalReport.title == "login shell" }
     controller.sendInput("typed")
     controller.sendPaste("pasted")
     try? await Task.sleep(nanoseconds: 300_000_000)
 
     XCTAssertFalse(controller.hasSession)
-    XCTAssertNil(controller.terminalReport.title)
+    XCTAssertTrue(reported)
     XCTAssertFalse(stream.writtenText.contains("typed"), stream.writtenText)
     XCTAssertFalse(stream.writtenText.contains("pasted"), stream.writtenText)
     await controller.leave()
