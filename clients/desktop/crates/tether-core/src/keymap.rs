@@ -14,6 +14,14 @@ impl Mods {
     pub fn param(self) -> u8 {
         1 + self.shift as u8 + 2 * self.alt as u8 + 4 * self.ctrl as u8
     }
+
+    pub fn union(self, other: Mods) -> Mods {
+        Mods {
+            shift: self.shift || other.shift,
+            alt: self.alt || other.alt,
+            ctrl: self.ctrl || other.ctrl,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,6 +374,20 @@ mod named_tests {
             }
             .param(),
             8
+        );
+    }
+
+    #[test]
+    fn a_modifier_held_in_either_set_is_held() {
+        assert_eq!(NONE.union(CTRL), CTRL);
+        assert_eq!(SHIFT.union(NONE), SHIFT);
+        assert_eq!(
+            ALT.union(CTRL),
+            Mods {
+                shift: false,
+                alt: true,
+                ctrl: true
+            }
         );
     }
 

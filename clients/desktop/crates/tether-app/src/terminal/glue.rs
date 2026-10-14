@@ -266,7 +266,7 @@ fn wire_callbacks(ui: &AppWindow) {
             vm.set_menu_x(x);
             vm.set_menu_y(y + 52.0 + 34.0);
         }
-        let mods = tether_core::keymap::Mods { shift, alt, ctrl };
+        let mods = held_mods(shift, alt, ctrl);
         send(Msg::Mouse(MouseMsg {
             kind,
             button,
@@ -284,7 +284,7 @@ fn wire_callbacks(ui: &AppWindow) {
         let scale = w.window().scale_factor();
         send(Msg::Wheel {
             delta_px: delta * scale,
-            mods: tether_core::keymap::Mods { shift, alt, ctrl },
+            mods: held_mods(shift, alt, ctrl),
             x_px: x * scale,
             y_px: y * scale,
         });
@@ -328,6 +328,12 @@ fn keys_to_pty(app: &App) -> bool {
         && !app.ui.global::<crate::GitVm>().get_modal()
 }
 
+/// Slint learns modifiers from key events, and the terminal consumes those before Slint sees
+/// them, so its pointer events report Ctrl and Shift as up. winit's own state fills them in.
+fn held_mods(shift: bool, alt: bool, ctrl: bool) -> tether_core::keymap::Mods {
+    tether_core::keymap::Mods { shift, alt, ctrl }.union(MODS.get())
+}
+
 pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
     match event {
         WindowEvent::ModifiersChanged(m) => {
@@ -368,6 +374,11 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             EventResult::PreventDefault
         }
         WindowEvent::Focused(focused) => {
+            // A modifier released while unfocused would otherwise stay held for every click.
+            if !*focused {
+                MODS.set(tether_core::keymap::Mods::default());
+                send(Msg::Modifiers(tether_core::keymap::Mods::default()));
+            }
             send(Msg::Focus(*focused));
             #[cfg(windows)]
             if *focused {
