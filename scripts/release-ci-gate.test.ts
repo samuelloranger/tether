@@ -121,6 +121,17 @@ test('says so quickly when the branch produces no run at all', async () => {
   expect(stderr).toContain('pull requests');
 });
 
+// `gh` failing once (network, rate limit) also reads as "no run": once a run has been seen, that
+// must not be mistaken for a branch that never gets CI.
+test('an empty poll after the run was seen keeps waiting instead of failing', async () => {
+  const { code, stdout, stderr } = await waitForCi([inProgress, null, inProgress, green], {
+    CI_APPEAR_SECONDS: '0',
+  });
+  expect(stderr).not.toContain('no CI run exists');
+  expect(code).toBe(0);
+  expect(stdout).toContain('CI is green');
+});
+
 // The wait must sit between pushing the bump and pushing the tag: after the tag, release.yml is
 // already building.
 test('release.sh waits for the release commit between the branch push and the tag', () => {

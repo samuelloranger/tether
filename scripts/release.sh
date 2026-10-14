@@ -90,10 +90,11 @@ wait_for_ci() {
   local sha=$1
   local deadline=$(( $(date +%s) + CI_WAIT_SECONDS ))
   local appear_by=$(( $(date +%s) + CI_APPEAR_SECONDS ))
-  local run status conclusion url reported=""
+  local run status conclusion url reported="" seen=""
   while :; do
     run=$(ci_run_for "$sha")
-    if [ -z "$run" ] && [ "$(date +%s)" -ge "$appear_by" ]; then
+    # A failed `gh` call also comes back empty, so only fail fast before any run was seen.
+    if [ -z "$run" ] && [ -z "$seen" ] && [ "$(date +%s)" -ge "$appear_by" ]; then
       echo "Error: no CI run exists for $sha after ${CI_APPEAR_SECONDS}s." >&2
       echo "       CI runs on pushes to main and on pull requests. Releasing from" >&2
       echo "       '${BRANCH:-this branch}' may never produce one — open a PR, dispatch the CI" >&2
@@ -101,6 +102,7 @@ wait_for_ci() {
       return 1
     fi
     if [ -n "$run" ]; then
+      seen=1
       IFS='|' read -r status conclusion url <<< "$run"
       if [ "$status" = "completed" ]; then
         if [ "$conclusion" = "success" ]; then
