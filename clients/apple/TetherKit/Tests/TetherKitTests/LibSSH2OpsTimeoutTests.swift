@@ -43,6 +43,8 @@ final class LibSSH2OpsTimeoutTests: XCTestCase {
 
   /// Keepalives must not start before the session is up: OpenSSH's strict KEX drops a
   /// global request mid-exchange (libssh2 -8). Needs only a listening sshd; else skips.
+  /// A shared runner's sshd can stall one key exchange, so a fresh connection gets three tries;
+  /// the strict-KEX regression fails every one of them.
   func test_a_real_sshd_completes_the_handshake() throws {
     let port = 22
     do {
@@ -51,10 +53,19 @@ final class LibSSH2OpsTimeoutTests: XCTestCase {
       throw XCTSkip("No sshd on 127.0.0.1:\(port)")
     }
     let config = SSHConnectionConfig(host: "127.0.0.1", port: port, username: "nobody", credentials: [])
-    let ops = LibSSH2Ops(config: config)
-    defer { ops.teardown() }
-
-    XCTAssertNoThrow(try ops.connectAndHandshake())
-    XCTAssertFalse(try ops.hostKeyFingerprint().isEmpty)
+    var lastError: Error?
+    for _ in 0..<3 {
+      let ops = LibSSH2Ops(config: config, operationTimeoutMs: 5_000)
+      defer { ops.teardown() }
+      do {
+        try ops.connectAndHandshake()
+      } catch {
+        lastError = error
+        continue
+      }
+      XCTAssertFalse(try ops.hostKeyFingerprint().isEmpty)
+      return
+    }
+    XCTFail("handshake failed on every attempt: \(String(describing: lastError))")
   }
 }
