@@ -129,6 +129,31 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     XCTAssertTrue(back)
     await controller.leave()
   }
+  /// Killing the last session leaves the bare login shell under the empty state: typing must
+  /// not reach it, and the dead session's title must not linger in the header.
+  func test_killing_the_only_session_gates_input_and_clears_its_title() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { _ in "" }
+    let controller = makeController(DialScript([stream]), ops)
+    await controller.connect()
+    stream.push(Data("\u{1B}]2;agent at work\u{07}".utf8))
+    let titled = await eventually { controller.terminalReport.title == "agent at work" }
+    XCTAssertTrue(titled)
+
+    await controller.killSession("work")
+    stream.push(Data("\u{1B}]2;login shell\u{07}".utf8))
+    controller.sendInput("typed")
+    controller.sendPaste("pasted")
+    try? await Task.sleep(nanoseconds: 300_000_000)
+
+    XCTAssertFalse(controller.hasSession)
+    XCTAssertNil(controller.terminalReport.title)
+    XCTAssertFalse(stream.writtenText.contains("typed"), stream.writtenText)
+    XCTAssertFalse(stream.writtenText.contains("pasted"), stream.writtenText)
+    await controller.leave()
+  }
+
   /// Taps faster than a switch takes: each switch types in full before the next starts, and
   /// one a later tap replaced while it waited is never typed.
   func test_overlapping_switches_type_one_at_a_time_and_skip_replaced_ones() async {

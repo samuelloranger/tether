@@ -172,6 +172,9 @@ public struct SSHTerminalView: View {
     .onChange(of: windowTitle, initial: true) { _, title in
       if tabs != nil { MacWindowTitle.set(title) }
     }
+    .onChange(of: controller.hasSession) { _, has in
+      if !has && !TetherPlatform.isMac { focused = false }
+    }
     .onChange(of: drawerOpen) { _, open in
       if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer { focused = true }
     }
@@ -310,7 +313,7 @@ public struct SSHTerminalView: View {
         Text(controller.title).font(.subheadline.weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         HStack(spacing: 4) {
-          Text(controller.terminalReport.title ?? controller.attach)
+          Text(sessionLabel)
           Text("·")
           // State is spelled out as well as coloured — the lamp alone would be
           // invisible to Differentiate Without Color and to VoiceOver.
@@ -616,6 +619,11 @@ public struct SSHTerminalView: View {
     }
   }
 
+  private var sessionLabel: String {
+    if case .connected = controller.status, !controller.hasSession { return "no session" }
+    return controller.terminalReport.title ?? controller.attach
+  }
+
   private var statusLabel: String {
     SSHTerminalController.connectionCopy(
       status: controller.status, reachability: controller.reachability
@@ -812,31 +820,39 @@ public struct SSHTerminalView: View {
   }
 
   /// Shown when the host has no zmx session: nothing is auto-created, so the terminal
-  /// stays gated until the user starts one from the drawer.
+  /// stays gated until the user starts one from the drawer. It covers the whole grid —
+  /// underneath is the bare login shell, or whatever the last session left behind.
   @ViewBuilder
   private var emptyStateOverlay: some View {
     if case .connected = controller.status, !controller.hasSession {
-      VStack(spacing: 14) {
-        Image(systemName: "terminal").font(.largeTitle).foregroundStyle(TetherColors.textSecondary)
-        Text("No session on \(controller.title)")
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-          .multilineTextAlignment(.center)
-        Text("Nothing runs until you start one.")
-          .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
-        Button("New session") {
-          if let tabs { tabs.beginNewSession() } else {
-            setDrawer(open: true)
-          }
-        }
-        .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
-        .padding(.horizontal, 20).padding(.vertical, 10)
-        .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
-        .buttonStyle(TetherPressStyle())
-        .accessibilityIdentifier("sshEmptyStateNew")
+      ZStack {
+        preferences.terminalTheme.backgroundColor
+        emptyStateCard
       }
-      .padding(24).frame(maxWidth: 300)
-      .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
-      .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+      .transition(.opacity)
     }
+  }
+
+  private var emptyStateCard: some View {
+    VStack(spacing: 14) {
+      Image(systemName: "terminal").font(.largeTitle).foregroundStyle(TetherColors.textSecondary)
+      Text("No session on \(controller.title)")
+        .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        .multilineTextAlignment(.center)
+      Text("Nothing runs until you start one.")
+        .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+      Button("New session") {
+        if let tabs { tabs.beginNewSession() } else {
+          setDrawer(open: true)
+        }
+      }
+      .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+      .padding(.horizontal, 20).padding(.vertical, 10)
+      .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+      .buttonStyle(TetherPressStyle())
+      .accessibilityIdentifier("sshEmptyStateNew")
+    }
+    .padding(24).frame(maxWidth: 300)
+    .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
   }
 }

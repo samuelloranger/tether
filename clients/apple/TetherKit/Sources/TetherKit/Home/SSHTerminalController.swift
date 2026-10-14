@@ -471,6 +471,7 @@ public final class SSHTerminalController {
         // Killed the only session — drop to the empty state, don't recreate one.
         hasSession = false
         pendingNoSession = true
+        terminalReport = .empty
       }
     }
     _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
@@ -1012,8 +1013,17 @@ public final class SSHTerminalController {
     return await pipeline.historyText()
   }
 
-  public func sendInput(_ text: String) { pipeline.outbound.yield(.input(text, key: sessionKey)) }
-  public func sendPaste(_ text: String) { pipeline.outbound.yield(.paste(text, key: sessionKey)) }
+  /// Without a session the PTY is the bare login shell, which only a switch types into.
+  public func sendInput(_ text: String) {
+    guard hasSession else { return }
+    pipeline.outbound.yield(.input(text, key: sessionKey))
+  }
+
+  public func sendPaste(_ text: String) {
+    guard hasSession else { return }
+    pipeline.outbound.yield(.paste(text, key: sessionKey))
+  }
+
   public func updateGrid(cols: UInt16, rows: UInt16) {
     if !hasSettledGrid { lastCols = cols; lastRows = rows }
     pipeline.outbound.yield(.localResize(cols: cols, rows: rows))
@@ -1059,6 +1069,7 @@ public final class SSHTerminalController {
       guard appIsActive(), bellThrottle.shouldRing(at: ProcessInfo.processInfo.systemUptime) else { return }
       bellRings += 1
     case let .report(report):
+      guard hasSession else { return }
       terminalReport = report
     case let .clipboard(text):
       guard appIsActive() else { return }
