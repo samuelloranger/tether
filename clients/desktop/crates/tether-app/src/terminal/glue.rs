@@ -374,6 +374,11 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             EventResult::PreventDefault
         }
         WindowEvent::Focused(focused) => {
+            // A modifier released while unfocused would otherwise stay held for every click.
+            if !*focused {
+                MODS.set(tether_core::keymap::Mods::default());
+                send(Msg::Modifiers(tether_core::keymap::Mods::default()));
+            }
             send(Msg::Focus(*focused));
             #[cfg(windows)]
             if *focused {
