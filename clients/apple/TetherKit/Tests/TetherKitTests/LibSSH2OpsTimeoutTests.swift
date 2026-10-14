@@ -59,11 +59,12 @@ final class LibSSH2OpsTimeoutTests: XCTestCase {
       defer { ops.teardown() }
       do {
         try ops.connectAndHandshake()
-        XCTAssertFalse(try ops.hostKeyFingerprint().isEmpty)
-        return
       } catch {
         lastError = error
+        continue
       }
+      XCTAssertFalse(try ops.hostKeyFingerprint().isEmpty)
+      return
     }
     XCTFail("handshake failed on every attempt: \(String(describing: lastError))")
   }
