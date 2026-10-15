@@ -6150,9 +6150,11 @@ dependencies = [
  "base64 0.22.1",
  "image",
  "miniz_oxide 0.8.9",
+ "skrifa",
  "swash",
  "tempfile",
  "tether-core",
+ "tiny-skia 0.12.0",
 ]
 
 [[package]]

@@ -6,7 +6,7 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
 use tether_core::fonts::FontFace;
 
-use crate::fonts::{SYMBOLS, face_bytes, system_fallbacks};
+use crate::fonts::{SYMBOLS, face_bytes, find_fallback, system_fallback, system_fallbacks};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum FaceSlot {
@@ -20,7 +20,7 @@ pub(crate) fn face_data(font: &FontFace, slot: FaceSlot) -> &'static [u8] {
         FaceSlot::Primary { bold: false } => face_bytes(font.id).0,
         FaceSlot::Primary { bold: true } => face_bytes(font.id).1,
         FaceSlot::Symbols => SYMBOLS,
-        FaceSlot::System(i) => system_fallbacks()[i],
+        FaceSlot::System(i) => system_fallback(i),
     }
 }
 
@@ -29,6 +29,15 @@ fn glyph_in(data: &[u8], ch: char) -> u16 {
 }
 
 pub(crate) fn resolve(font: &FontFace, bold: bool, ch: char) -> (FaceSlot, u16) {
+    resolve_with(font, bold, ch, &find_fallback)
+}
+
+fn resolve_with(
+    font: &FontFace,
+    bold: bool,
+    ch: char,
+    find: &dyn Fn(char) -> Option<usize>,
+) -> (FaceSlot, u16) {
     let primary = FaceSlot::Primary { bold };
     let slots = [primary, FaceSlot::Symbols]
         .into_iter()
@@ -37,6 +46,12 @@ pub(crate) fn resolve(font: &FontFace, bold: bool, ch: char) -> (FaceSlot, u16) 
         let glyph = glyph_in(face_data(font, slot), ch);
         if glyph != 0 {
             return (slot, glyph);
+        }
+    }
+    if let Some(i) = find(ch) {
+        let glyph = glyph_in(system_fallback(i), ch);
+        if glyph != 0 {
+            return (FaceSlot::System(i), glyph);
         }
     }
     (primary, 0)
@@ -99,7 +114,11 @@ impl GlyphAtlas {
 
 fn rasterize(ctx: &mut ScaleContext, key: GlyphKey, size_px: f32) -> Option<RasterGlyph> {
     let font = tether_core::fonts::font_named(key.font);
-    let face = FontRef::from_index(face_data(font, key.slot), 0)?;
+    let data = face_data(font, key.slot);
+    if crate::colr::has_colr_v1(data, key.glyph) {
+        return crate::colr::rasterize(data, key.glyph, size_px);
+    }
+    let face = FontRef::from_index(data, 0)?;
     let mut scaler = ctx.builder(face).size(size_px).hint(true).build();
     let image = Render::new(&[
         Source::ColorOutline(0),
@@ -145,7 +164,7 @@ mod tests {
     fn a_glyph_no_font_has_is_notdef_in_the_primary_face() {
         let font = font_named("cascadia-mono");
         assert_eq!(
-            resolve(font, false, '\u{10FFFD}'),
+            resolve_with(font, false, '\u{10FFFD}', &|_| None),
             (FaceSlot::Primary { bold: false }, 0)
         );
     }
