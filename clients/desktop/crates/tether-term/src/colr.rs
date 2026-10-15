@@ -16,14 +16,6 @@ use tiny_skia::{
 
 use crate::glyphs::RasterGlyph;
 
-pub(crate) fn has_colr_v1(data: &[u8], glyph: u16) -> bool {
-    FontRef::from_index(data, 0).is_ok_and(|font| {
-        font.color_glyphs()
-            .get_with_format(GlyphId::new(glyph.into()), ColorGlyphFormat::ColrV1)
-            .is_some()
-    })
-}
-
 /// None when the glyph has no COLRv1 paint, so the caller can fall back to swash.
 pub(crate) fn rasterize(data: &[u8], glyph: u16, size_px: f32) -> Option<RasterGlyph> {
     let font = FontRef::from_index(data, 0).ok()?;
@@ -461,7 +453,6 @@ pub(crate) mod tests {
     #[test]
     fn a_colr_v1_emoji_paints_in_colour_around_the_baseline() {
         let g = glyph('\u{1f600}');
-        assert!(has_colr_v1(COLR_V1_EMOJI, g));
         let r = rasterize(COLR_V1_EMOJI, g, 32.0).expect("paints");
         assert!(r.color);
         assert!((28..=48).contains(&r.width), "width {}", r.width);
@@ -487,9 +478,146 @@ pub(crate) mod tests {
 
     #[test]
     fn plain_glyphs_and_other_fonts_are_left_to_swash() {
-        assert!(!has_colr_v1(crate::fonts::SYMBOLS, 1));
         assert!(rasterize(crate::fonts::SYMBOLS, 1, 32.0).is_none());
         assert!(rasterize(b"not a font", 1, 32.0).is_none());
+    }
+
+    fn canvas_painter(font: &FontRef<'static>) -> Painter<'static> {
+        let red = skrifa::color::Color {
+            red: 255,
+            green: 0,
+            blue: 0,
+            alpha: 255,
+        };
+        let blue = skrifa::color::Color {
+            red: 0,
+            green: 0,
+            blue: 255,
+            alpha: 255,
+        };
+        Painter {
+            font: Box::leak(Box::new(font.clone())),
+            palette: vec![red, blue],
+            transforms: vec![Transform::identity()],
+            clips: Vec::new(),
+            layers: vec![Pixmap::new(8, 8).unwrap()],
+        }
+    }
+
+    fn canvas_pixel(p: &Painter, x: u32, y: u32) -> [u8; 4] {
+        let c = p.layers[0].pixel(x, y).unwrap().demultiply();
+        [c.red(), c.green(), c.blue(), c.alpha()]
+    }
+
+    fn solid(index: u16) -> Brush<'static> {
+        Brush::Solid {
+            palette_index: index,
+            alpha: 1.0,
+        }
+    }
+
+    #[test]
+    fn nested_transforms_apply_the_inner_one_first() {
+        let font = FontRef::from_index(COLR_V1_EMOJI, 0).unwrap();
+        let mut p = canvas_painter(&font);
+        let scale = Affine {
+            xx: 2.0,
+            yy: 2.0,
+            ..Affine::default()
+        };
+        let shift = Affine {
+            dx: 1.0,
+            ..Affine::default()
+        };
+        p.push_transform(scale);
+        p.push_transform(shift);
+        // Scale after shift: x = 1 lands on 4, not 3.
+        p.push_clip_box(BoundingBox {
+            x_min: 1.0,
+            y_min: 0.0,
+            x_max: 2.0,
+            y_max: 1.0,
+        });
+        p.fill(solid(0));
+        assert_eq!(canvas_pixel(&p, 5, 1), [255, 0, 0, 255]);
+        assert_eq!(canvas_pixel(&p, 2, 1)[3], 0);
+        p.pop_clip();
+        p.pop_transform();
+        p.pop_transform();
+        assert_eq!(p.transform(), Transform::identity());
+    }
+
+    #[test]
+    fn clips_intersect_and_pop_back() {
+        let font = FontRef::from_index(COLR_V1_EMOJI, 0).unwrap();
+        let mut p = canvas_painter(&font);
+        let half = |x_min, x_max| BoundingBox {
+            x_min,
+            y_min: 0.0,
+            x_max,
+            y_max: 8.0,
+        };
+        p.push_clip_box(half(0.0, 6.0));
+        p.push_clip_box(half(2.0, 8.0));
+        p.fill(solid(0));
+        assert_eq!(canvas_pixel(&p, 1, 4)[3], 0);
+        assert_eq!(canvas_pixel(&p, 4, 4), [255, 0, 0, 255]);
+        assert_eq!(canvas_pixel(&p, 7, 4)[3], 0);
+        p.pop_clip();
+        p.fill(solid(1));
+        assert_eq!(canvas_pixel(&p, 1, 4), [0, 0, 255, 255]);
+        assert_eq!(canvas_pixel(&p, 7, 4)[3], 0);
+    }
+
+    #[test]
+    fn a_composite_layer_merges_with_its_mode() {
+        let font = FontRef::from_index(COLR_V1_EMOJI, 0).unwrap();
+        let mut p = canvas_painter(&font);
+        // Backdrop red on the left half, source blue everywhere, kept only where the backdrop is.
+        p.push_layer(CompositeMode::SrcOver);
+        p.push_clip_box(BoundingBox {
+            x_min: 0.0,
+            y_min: 0.0,
+            x_max: 4.0,
+            y_max: 8.0,
+        });
+        p.fill(solid(0));
+        p.pop_clip();
+        p.push_layer(CompositeMode::SrcIn);
+        p.fill(solid(1));
+        p.pop_layer_with_mode(CompositeMode::SrcIn);
+        p.pop_layer_with_mode(CompositeMode::SrcOver);
+        assert_eq!(p.layers.len(), 1);
+        assert_eq!(canvas_pixel(&p, 1, 4), [0, 0, 255, 255]);
+        assert_eq!(canvas_pixel(&p, 6, 4)[3], 0);
+    }
+
+    #[test]
+    fn a_linear_gradient_runs_between_its_points() {
+        let font = FontRef::from_index(COLR_V1_EMOJI, 0).unwrap();
+        let mut p = canvas_painter(&font);
+        let stops = [
+            ColorStop {
+                offset: 0.0,
+                palette_index: 0,
+                alpha: 1.0,
+            },
+            ColorStop {
+                offset: 1.0,
+                palette_index: 1,
+                alpha: 1.0,
+            },
+        ];
+        p.fill(Brush::LinearGradient {
+            p0: Point::new(0.0, 0.0),
+            p1: Point::new(8.0, 0.0),
+            color_stops: &stops,
+            extend: Extend::Pad,
+        });
+        let [r0, _, b0, _] = canvas_pixel(&p, 0, 4);
+        let [r7, _, b7, _] = canvas_pixel(&p, 7, 4);
+        assert!(r0 > 200 && b0 < 50, "{r0} {b0}");
+        assert!(r7 < 50 && b7 > 200, "{r7} {b7}");
     }
 
     #[test]

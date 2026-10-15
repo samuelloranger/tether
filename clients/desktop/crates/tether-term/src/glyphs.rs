@@ -115,8 +115,8 @@ impl GlyphAtlas {
 fn rasterize(ctx: &mut ScaleContext, key: GlyphKey, size_px: f32) -> Option<RasterGlyph> {
     let font = tether_core::fonts::font_named(key.font);
     let data = face_data(font, key.slot);
-    if crate::colr::has_colr_v1(data, key.glyph) {
-        return crate::colr::rasterize(data, key.glyph, size_px);
+    if let Some(glyph) = crate::colr::rasterize(data, key.glyph, size_px) {
+        return Some(glyph);
     }
     let face = FontRef::from_index(data, 0)?;
     let mut scaler = ctx.builder(face).size(size_px).hint(true).build();
