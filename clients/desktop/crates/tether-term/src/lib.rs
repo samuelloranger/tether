@@ -1,3 +1,4 @@
+mod colr;
 mod compose;
 pub mod fonts;
 mod glyphs;
