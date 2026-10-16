@@ -147,9 +147,12 @@ pub struct Rasterizer {
     shape: ShapeContext,
     atlas: GlyphAtlas,
     resolved: HashMap<(&'static str, bool, char), (FaceSlot, u16)>,
-    emoji_glyphs: HashMap<(FaceSlot, String), Option<u16>>,
+    emoji_glyphs: HashMap<(&'static str, bool), HashMap<String, ShapedEmoji>>,
     images: ImageCache,
 }
+
+/// An emoji grapheme's colour face and its one shaped glyph, or None when it has neither.
+type ShapedEmoji = Option<(FaceSlot, u16)>;
 
 struct EmojiCluster {
     start: usize,
@@ -296,7 +299,7 @@ impl Rasterizer {
                 self.draw_shaped_row(&mut img, snap, style, &m, row, cell_x(0), y, &emoji_cells);
             }
             for cluster in &clusters {
-                let cell = snap.cell(row, cluster.start);
+                let fg = self.cell_fg(snap, style, row, cluster.start);
                 let key = GlyphKey {
                     font: style.font.id,
                     slot: cluster.slot,
@@ -304,7 +307,7 @@ impl Rasterizer {
                 };
                 if let Some(g) = self.atlas.get(&mut self.scale, key) {
                     let x = cell_x(cluster.start) + g.left;
-                    img.draw_glyph(g, x, y + m.baseline as i32 - g.top, cell.fg);
+                    img.draw_glyph(g, x, y + m.baseline as i32 - g.top, fg);
                 }
             }
         }
@@ -375,19 +378,26 @@ impl Rasterizer {
                 continue;
             };
             let end = last + if snap.cell(row, last).wide { 2 } else { 1 };
-            let first = grapheme.chars().next().unwrap();
-            let (slot, _) = resolve_emoji(style.font, snap.cell(row, start).bold, first);
-            if !matches!(slot, FaceSlot::System(_)) {
-                continue;
+            let bold = snap.cell(row, start).bold;
+            let known = self.emoji_glyphs.entry((style.font.id, bold)).or_default();
+            if known.len() >= 4096 {
+                known.clear();
             }
-            if self.emoji_glyphs.len() >= 4096 {
-                self.emoji_glyphs.clear();
-            }
-            let glyph = *self
-                .emoji_glyphs
-                .entry((slot, grapheme.to_owned()))
-                .or_insert_with(|| shape_emoji(face_data(style.font, slot), grapheme));
-            if let Some(glyph) = glyph {
+            let shaped = match known.get(grapheme) {
+                Some(shaped) => *shaped,
+                None => {
+                    let first = grapheme.chars().next().unwrap();
+                    let shaped = match resolve_emoji(style.font, bold, first) {
+                        (slot @ FaceSlot::System(_), _) => {
+                            shape_emoji(face_data(style.font, slot), grapheme).map(|g| (slot, g))
+                        }
+                        _ => None,
+                    };
+                    known.insert(grapheme.to_owned(), shaped);
+                    shaped
+                }
+            };
+            if let Some((slot, glyph)) = shaped {
                 clusters.push(EmojiCluster {
                     start,
                     end,
@@ -743,13 +753,16 @@ mod tests {
             padding_px: 0,
             ..style(theme, 1.0)
         };
-        let (cw, ch) = cell_metrics(st.font, st.size_px, 1.0);
-        let size = ((20.0 * cw) as u32, (4.0 * ch) as u32);
-        let base = Rasterizer::new().render(&snap("👩💻".as_bytes()), &st, size.0, size.1);
-        let joined = Rasterizer::new().render(&snap("👩‍💻".as_bytes()), &st, size.0, size.1);
-        assert_ne!(
-            joined.pixels, base.pixels,
-            "joined emoji should differ from two separate emoji"
+        let mut r = Rasterizer::new();
+        let joined = r.emoji_clusters(&snap("👩‍💻".as_bytes()), 0, &st);
+        // Both parts are wide: the sequence starts at the first and covers the second.
+        assert_eq!(
+            joined.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
+            [(0, 4)]
+        );
+        assert!(
+            r.emoji_clusters(&snap("👩💻".as_bytes()), 0, &st)
+                .is_empty()
         );
     }
 
