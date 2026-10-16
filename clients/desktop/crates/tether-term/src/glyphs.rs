@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
-use swash::FontRef;
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
 use tether_core::fonts::FontFace;
+use unicode_properties::{EmojiStatus, UnicodeEmoji};
 
-use crate::fonts::{SYMBOLS, face_bytes, find_fallback, system_fallback, system_fallbacks};
+use crate::fonts::{
+    Face, SYMBOLS, face_bytes, find_fallback, system_fallback, system_fallback_count,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum FaceSlot {
@@ -15,21 +17,31 @@ pub(crate) enum FaceSlot {
     System(usize),
 }
 
-pub(crate) fn face_data(font: &FontFace, slot: FaceSlot) -> &'static [u8] {
+pub(crate) fn face_data(font: &FontFace, slot: FaceSlot) -> Face {
     match slot {
-        FaceSlot::Primary { bold: false } => face_bytes(font.id).0,
-        FaceSlot::Primary { bold: true } => face_bytes(font.id).1,
-        FaceSlot::Symbols => SYMBOLS,
+        FaceSlot::Primary { bold: false } => Face::first(face_bytes(font.id).0),
+        FaceSlot::Primary { bold: true } => Face::first(face_bytes(font.id).1),
+        FaceSlot::Symbols => Face::first(SYMBOLS),
         FaceSlot::System(i) => system_fallback(i),
     }
 }
 
-fn glyph_in(data: &[u8], ch: char) -> u16 {
-    FontRef::from_index(data, 0).map_or(0, |f| f.charmap().map(ch))
-}
-
 pub(crate) fn resolve(font: &FontFace, bold: bool, ch: char) -> (FaceSlot, u16) {
     resolve_with(font, bold, ch, &find_fallback)
+}
+
+pub(crate) fn resolve_emoji(font: &FontFace, bold: bool, ch: char) -> (FaceSlot, u16) {
+    resolve_with_preference(font, bold, ch, &find_fallback, true)
+}
+
+pub(crate) fn emoji_presentation(ch: char) -> bool {
+    matches!(
+        ch.emoji_status(),
+        EmojiStatus::EmojiPresentation
+            | EmojiStatus::EmojiPresentationAndEmojiComponent
+            | EmojiStatus::EmojiPresentationAndModifierBase
+            | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent
+    )
 }
 
 fn resolve_with(
@@ -38,23 +50,57 @@ fn resolve_with(
     ch: char,
     find: &dyn Fn(char) -> Option<usize>,
 ) -> (FaceSlot, u16) {
+    resolve_with_preference(font, bold, ch, find, emoji_presentation(ch))
+}
+
+fn resolve_with_preference(
+    font: &FontFace,
+    bold: bool,
+    ch: char,
+    find: &dyn Fn(char) -> Option<usize>,
+    prefer_emoji: bool,
+) -> (FaceSlot, u16) {
     let primary = FaceSlot::Primary { bold };
+    if prefer_emoji {
+        for i in 0..system_fallback_count() {
+            let face = system_fallback(i);
+            let glyph = face.glyph(ch);
+            if glyph != 0 && has_color(face) {
+                return (FaceSlot::System(i), glyph);
+            }
+        }
+        if let Some(i) = find(ch) {
+            let face = system_fallback(i);
+            let glyph = face.glyph(ch);
+            if glyph != 0 && has_color(face) {
+                return (FaceSlot::System(i), glyph);
+            }
+        }
+    }
     let slots = [primary, FaceSlot::Symbols]
         .into_iter()
-        .chain((0..system_fallbacks().len()).map(FaceSlot::System));
+        .chain((0..system_fallback_count()).map(FaceSlot::System));
     for slot in slots {
-        let glyph = glyph_in(face_data(font, slot), ch);
+        let glyph = face_data(font, slot).glyph(ch);
         if glyph != 0 {
             return (slot, glyph);
         }
     }
     if let Some(i) = find(ch) {
-        let glyph = glyph_in(system_fallback(i), ch);
+        let glyph = system_fallback(i).glyph(ch);
         if glyph != 0 {
             return (FaceSlot::System(i), glyph);
         }
     }
     (primary, 0)
+}
+
+fn has_color(face: Face) -> bool {
+    face.font().is_some_and(|face| {
+        [b"CBDT", b"COLR", b"sbix"]
+            .iter()
+            .any(|tag| face.table(swash::tag_from_bytes(tag)).is_some())
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,11 +160,11 @@ impl GlyphAtlas {
 
 fn rasterize(ctx: &mut ScaleContext, key: GlyphKey, size_px: f32) -> Option<RasterGlyph> {
     let font = tether_core::fonts::font_named(key.font);
-    let data = face_data(font, key.slot);
-    if let Some(glyph) = crate::colr::rasterize(data, key.glyph, size_px) {
+    let face = face_data(font, key.slot);
+    if let Some(glyph) = crate::colr::rasterize(face.data, face.index, key.glyph, size_px) {
         return Some(glyph);
     }
-    let face = FontRef::from_index(data, 0)?;
+    let face = face.font()?;
     let mut scaler = ctx.builder(face).size(size_px).hint(true).build();
     let image = Render::new(&[
         Source::ColorOutline(0),
@@ -217,7 +263,7 @@ mod tests {
             return;
         };
         // A host with no colour emoji font falls back to a plain face, which draws in one colour.
-        let face = FontRef::from_index(system_fallbacks()[i], 0).unwrap();
+        let face = system_fallback(i).font().unwrap();
         let colour = [b"CBDT", b"COLR", b"sbix"]
             .iter()
             .any(|t| face.table(swash::tag_from_bytes(t)).is_some());
@@ -235,5 +281,23 @@ mod tests {
         let raster = atlas.get(&mut ctx, key).expect("emoji draws");
         assert!(raster.width > 0 && raster.height > 0);
         assert!(raster.color);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn emoji_presentation_uses_colour_font_before_symbols() {
+        if !std::path::Path::new("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf").exists() {
+            return;
+        }
+        let font = font_named("cascadia-mono");
+        let (slot, _) = resolve(font, false, '⚡');
+        let FaceSlot::System(i) = slot else {
+            panic!("emoji presentation should use the system emoji font: {slot:?}");
+        };
+        let face = system_fallback(i).font().unwrap();
+        assert!(
+            face.table(swash::tag_from_bytes(b"CBDT")).is_some()
+                || face.table(swash::tag_from_bytes(b"COLR")).is_some()
+        );
     }
 }

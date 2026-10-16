@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
-use swash::FontRef;
 use swash::scale::ScaleContext;
 use swash::shape::ShapeContext;
 use tether_core::fonts::FontFace;
 use tether_core::prefs::CursorShape;
 use tether_core::theme::TerminalTheme;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::compose::ImageCache;
-use crate::glyphs::{FaceSlot, GlyphAtlas, GlyphKey, RasterGlyph, face_data, resolve};
+use crate::fonts::Face;
+use crate::glyphs::{
+    FaceSlot, GlyphAtlas, GlyphKey, RasterGlyph, face_data, resolve, resolve_emoji,
+};
 use crate::metrics::{FaceMetrics, face_metrics};
 use crate::snapshot::{RenderCell, Snapshot};
 use crate::terminal::Cell;
@@ -74,6 +77,58 @@ impl RgbaImage {
             }
         }
     }
+
+    /// Draw block elements against the actual cell bounds. Font glyphs leave seams
+    /// because their ink bounds and the terminal cell advance do not coincide.
+    fn draw_block(&mut self, ch: char, x: i32, y: i32, w: i32, h: i32, rgb: u32) -> bool {
+        let cp = ch as u32;
+        if !is_cell_block(ch) {
+            return false;
+        }
+        let mut rect = |left: i32, top: i32, right: i32, bottom: i32| {
+            self.fill_rect(x + left, y + top, right - left, bottom - top, rgb);
+        };
+        match cp {
+            0x2580 => rect(0, 0, w, h / 2),
+            0x2581..=0x2588 => rect(0, h * (0x2588 - cp) as i32 / 8, w, h),
+            0x2589..=0x258f => rect(0, 0, w * (0x2590 - cp) as i32 / 8, h),
+            0x2590 => rect(w / 2, 0, w, h),
+            0x2594 => rect(0, 0, w, (h / 8).max(1)),
+            0x2595 => rect(w * 7 / 8, 0, w, h),
+            _ => {
+                let bits = match cp {
+                    0x2596 => 0b0010,
+                    0x2597 => 0b0001,
+                    0x2598 => 0b1000,
+                    0x2599 => 0b1011,
+                    0x259a => 0b1001,
+                    0x259b => 0b1110,
+                    0x259c => 0b1101,
+                    0x259d => 0b0100,
+                    0x259e => 0b0110,
+                    0x259f => 0b0111,
+                    _ => unreachable!(),
+                };
+                if bits & 0b1000 != 0 {
+                    rect(0, 0, w / 2, h / 2);
+                }
+                if bits & 0b0100 != 0 {
+                    rect(w / 2, 0, w, h / 2);
+                }
+                if bits & 0b0010 != 0 {
+                    rect(0, h / 2, w / 2, h);
+                }
+                if bits & 0b0001 != 0 {
+                    rect(w / 2, h / 2, w, h);
+                }
+            }
+        }
+        true
+    }
+}
+
+fn is_cell_block(ch: char) -> bool {
+    (0x2580..=0x259f).contains(&(ch as u32)) && !(0x2591..=0x2593).contains(&(ch as u32))
 }
 
 pub struct RenderStyle<'a> {
@@ -92,7 +147,33 @@ pub struct Rasterizer {
     shape: ShapeContext,
     atlas: GlyphAtlas,
     resolved: HashMap<(&'static str, bool, char), (FaceSlot, u16)>,
+    emoji_glyphs: HashMap<(&'static str, bool), HashMap<String, ShapedEmoji>>,
     images: ImageCache,
+}
+
+/// An emoji grapheme's colour face and its one shaped glyph, or None when it has neither.
+type ShapedEmoji = Option<(FaceSlot, u16)>;
+
+struct EmojiCluster {
+    start: usize,
+    end: usize,
+    slot: FaceSlot,
+    glyph: u16,
+}
+
+fn shape_emoji(face: Face, grapheme: &str) -> Option<u16> {
+    let face = harfrust::Font::new(face.data, face.index)?;
+    let shaper_font = harfrust::ShaperFont::new(&face);
+    let mut buffer = harfrust::Buffer::new();
+    buffer.push_str(grapheme);
+    buffer.guess_segment_properties();
+    harfrust::shape(&shaper_font, &mut buffer, harfrust::ShapeOptions::default()).ok()?;
+    let [glyph] = buffer.glyph_infos() else {
+        return None;
+    };
+    u16::try_from(glyph.glyph_id)
+        .ok()
+        .filter(|glyph| *glyph != 0)
 }
 
 impl Default for Rasterizer {
@@ -108,6 +189,7 @@ impl Rasterizer {
             shape: ShapeContext::new(),
             atlas: GlyphAtlas::new(),
             resolved: HashMap::new(),
+            emoji_glyphs: HashMap::new(),
             images: ImageCache::default(),
         }
     }
@@ -151,6 +233,15 @@ impl Rasterizer {
             if y + chh <= 0 {
                 continue;
             }
+            let clusters = self.emoji_clusters(snap, row, style);
+            let mut emoji_cells = if clusters.is_empty() {
+                Vec::new()
+            } else {
+                vec![false; snap.cols]
+            };
+            for cluster in &clusters {
+                emoji_cells[cluster.start..cluster.end.min(snap.cols)].fill(true);
+            }
             for col in 0..snap.cols {
                 let cell = snap.cell(row, col);
                 let (mut fg, mut bg) = (cell.fg, cell.bg);
@@ -161,7 +252,11 @@ impl Rasterizer {
                 if bg != style.theme.background {
                     img.fill_rect(cell_x(col), y, cw * span, chh, bg);
                 }
-                if !ligatures && !cell.spacer && cell.ch != ' ' {
+                if emoji_cells.get(col).copied().unwrap_or(false) {
+                    // The grapheme is drawn once at its first cell below.
+                } else if !cell.spacer && img.draw_block(cell.ch, cell_x(col), y, cw, chh, fg) {
+                    // Blocks bypass font shaping in both rendering modes.
+                } else if !ligatures && !cell.spacer && cell.ch != ' ' {
                     self.draw_char(
                         &mut img,
                         style.font,
@@ -201,7 +296,19 @@ impl Rasterizer {
                 }
             }
             if ligatures {
-                self.draw_shaped_row(&mut img, snap, style, &m, row, cell_x(0), y);
+                self.draw_shaped_row(&mut img, snap, style, &m, row, cell_x(0), y, &emoji_cells);
+            }
+            for cluster in &clusters {
+                let fg = self.cell_fg(snap, style, row, cluster.start);
+                let key = GlyphKey {
+                    font: style.font.id,
+                    slot: cluster.slot,
+                    glyph: cluster.glyph,
+                };
+                if let Some(g) = self.atlas.get(&mut self.scale, key) {
+                    let x = cell_x(cluster.start) + g.left;
+                    img.draw_glyph(g, x, y + m.baseline as i32 - g.top, fg);
+                }
             }
         }
         for view in &snap.images {
@@ -215,6 +322,93 @@ impl Rasterizer {
         img
     }
 
+    fn emoji_clusters(
+        &mut self,
+        snap: &Snapshot,
+        row: usize,
+        style: &RenderStyle,
+    ) -> Vec<EmojiCluster> {
+        if !(0..snap.cols).any(|col| {
+            let cell = snap.cell(row, col);
+            !cell.zerowidth.is_empty()
+                || (0x1f1e6..=0x1f1ff).contains(&(cell.ch as u32))
+                || (0x1f3fb..=0x1f3ff).contains(&(cell.ch as u32))
+        }) {
+            return Vec::new();
+        }
+        let mut text = String::new();
+        let mut positions = Vec::new();
+        for col in 0..snap.cols {
+            let cell = snap.cell(row, col);
+            if cell.spacer {
+                continue;
+            }
+            positions.push((text.len(), col));
+            text.push(cell.ch);
+            for &ch in &cell.zerowidth {
+                positions.push((text.len(), col));
+                text.push(ch);
+            }
+        }
+        let mut clusters = Vec::new();
+        for (byte, grapheme) in text.grapheme_indices(true) {
+            if grapheme.chars().count() < 2
+                || !grapheme.chars().any(|ch| {
+                    matches!(ch, '\u{fe0f}' | '\u{200d}' | '\u{20e3}')
+                        || (0x1f3fb..=0x1f3ff).contains(&(ch as u32))
+                        || (0x1f1e6..=0x1f1ff).contains(&(ch as u32))
+                })
+            {
+                continue;
+            }
+            if grapheme.contains('\u{fe0e}') {
+                continue;
+            }
+            let Some(&(start_byte, start)) = positions.iter().find(|(b, _)| *b >= byte) else {
+                continue;
+            };
+            if start_byte != byte {
+                continue;
+            }
+            let Some(&(_, last)) = positions
+                .iter()
+                .take_while(|(b, _)| *b < byte + grapheme.len())
+                .last()
+            else {
+                continue;
+            };
+            let end = last + if snap.cell(row, last).wide { 2 } else { 1 };
+            let bold = snap.cell(row, start).bold;
+            let known = self.emoji_glyphs.entry((style.font.id, bold)).or_default();
+            if known.len() >= 4096 {
+                known.clear();
+            }
+            let shaped = match known.get(grapheme) {
+                Some(shaped) => *shaped,
+                None => {
+                    let first = grapheme.chars().next().unwrap();
+                    let shaped = match resolve_emoji(style.font, bold, first) {
+                        (slot @ FaceSlot::System(_), _) => {
+                            shape_emoji(face_data(style.font, slot), grapheme).map(|g| (slot, g))
+                        }
+                        _ => None,
+                    };
+                    known.insert(grapheme.to_owned(), shaped);
+                    shaped
+                }
+            };
+            if let Some((slot, glyph)) = shaped {
+                clusters.push(EmojiCluster {
+                    start,
+                    end,
+                    slot,
+                    glyph,
+                });
+            }
+        }
+        clusters
+    }
+
     pub(crate) fn shape_run(
         &mut self,
         font: &'static FontFace,
@@ -223,7 +417,7 @@ impl Rasterizer {
         size_px: f32,
         cell_w: f32,
     ) -> Vec<(usize, u16, f32)> {
-        let Some(face) = FontRef::from_index(face_data(font, FaceSlot::Primary { bold }), 0) else {
+        let Some(face) = face_data(font, FaceSlot::Primary { bold }).font() else {
             return Vec::new();
         };
         let byte_of_char: Vec<usize> = text.char_indices().map(|(byte, _)| byte).collect();
@@ -308,13 +502,16 @@ impl Rasterizer {
         row: usize,
         x0: i32,
         y: i32,
+        emoji_cells: &[bool],
     ) {
         let baseline = y + m.baseline as i32;
         let primary: Vec<bool> = (0..snap.cols)
             .map(|col| {
                 let c: &RenderCell = snap.cell(row, col);
-                !c.spacer
+                !emoji_cells.get(col).copied().unwrap_or(false)
+                    && !c.spacer
                     && !c.wide
+                    && !is_cell_block(c.ch)
                     && matches!(
                         self.lookup(style.font, c.bold, c.ch).0,
                         FaceSlot::Primary { .. }
@@ -325,7 +522,11 @@ impl Rasterizer {
         while col < snap.cols {
             let cell = snap.cell(row, col);
             if !primary[col] {
-                if !cell.spacer && cell.ch != ' ' {
+                if !emoji_cells.get(col).copied().unwrap_or(false)
+                    && !cell.spacer
+                    && cell.ch != ' '
+                    && !is_cell_block(cell.ch)
+                {
                     let fg = self.cell_fg(snap, style, row, col);
                     self.draw_char(
                         img,
@@ -499,6 +700,104 @@ mod tests {
             cell_has_ink(&img, cw as u32, 0, cw as u32, ch as u32, theme.background),
             "nerd icon from symbols font"
         );
+    }
+
+    #[test]
+    fn adjacent_full_blocks_have_no_cell_seams() {
+        let theme = theme_named("tether");
+        let st = RenderStyle {
+            padding_px: 0,
+            ..style(theme, 1.0)
+        };
+        let (cw, ch) = cell_metrics(st.font, st.size_px, 1.0);
+        let img = Rasterizer::new().render(
+            &snap("████".as_bytes()),
+            &st,
+            (20.0 * cw) as u32,
+            (4.0 * ch) as u32,
+        );
+        let y = (ch / 2.0) as u32;
+        for x in 0..(4.0 * cw) as u32 {
+            assert_eq!(img.pixel(x, y), rgba(theme.foreground), "seam at x={x}");
+        }
+    }
+
+    #[test]
+    fn adjacent_quadrants_join_at_the_cell_edge_with_ligatures() {
+        let theme = theme_named("tether");
+        let st = RenderStyle {
+            font: font_named("cascadia-code"),
+            padding_px: 0,
+            ..style(theme, 1.0)
+        };
+        let (cw, ch) = cell_metrics(st.font, st.size_px, 1.0);
+        let img = Rasterizer::new().render(
+            &snap("▐▌".as_bytes()),
+            &st,
+            (20.0 * cw) as u32,
+            (4.0 * ch) as u32,
+        );
+        let y = (ch / 2.0) as u32;
+        for x in (cw / 2.0) as u32..(cw + cw / 2.0) as u32 {
+            assert_eq!(img.pixel(x, y), rgba(theme.foreground), "seam at x={x}");
+        }
+    }
+
+    #[test]
+    fn emoji_sequences_are_shaped_as_one_visible_glyph() {
+        if !std::path::Path::new("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf").exists() {
+            return;
+        }
+        let theme = theme_named("tether");
+        let st = RenderStyle {
+            padding_px: 0,
+            ..style(theme, 1.0)
+        };
+        let mut r = Rasterizer::new();
+        let joined = r.emoji_clusters(&snap("👩‍💻".as_bytes()), 0, &st);
+        // Both parts are wide: the sequence starts at the first and covers the second.
+        assert_eq!(
+            joined.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
+            [(0, 4)]
+        );
+        assert!(
+            r.emoji_clusters(&snap("👩💻".as_bytes()), 0, &st)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn emoji_variation_selector_uses_colour_presentation() {
+        if !std::path::Path::new("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf").exists() {
+            return;
+        }
+        let theme = theme_named("tether");
+        let st = RenderStyle {
+            padding_px: 0,
+            ..style(theme, 1.0)
+        };
+        let img = Rasterizer::new().render(&snap("♥️".as_bytes()), &st, 220, 88);
+        assert!(
+            img.pixels.as_chunks::<4>().0.iter().any(
+                |px| (px[0] as u16) > (px[1] as u16) * 2 && (px[0] as u16) > (px[2] as u16) * 2
+            ),
+            "expected red emoji pixels"
+        );
+    }
+
+    #[test]
+    fn composed_emoji_have_one_shaped_glyph() {
+        if !std::path::Path::new("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf").exists() {
+            return;
+        }
+        let theme = theme_named("tether");
+        let st = style(theme, 1.0);
+        for text in ["👩‍💻", "🇨🇦", "1️⃣", "👍🏽"] {
+            let snapshot = snap(text.as_bytes());
+            let clusters = Rasterizer::new().emoji_clusters(&snapshot, 0, &st);
+            assert_eq!(clusters.len(), 1, "{text}");
+            assert_ne!(clusters[0].glyph, 0, "{text}");
+        }
     }
 
     #[test]

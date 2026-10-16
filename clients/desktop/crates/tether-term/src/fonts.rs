@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
@@ -172,20 +173,60 @@ pub fn face_bytes(id: &str) -> (&'static [u8], &'static [u8]) {
     }
 }
 
+/// One face of a font file. A collection (`.ttc`) holds several, and the index picks one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Face {
+    pub data: &'static [u8],
+    pub index: u32,
+}
+
+impl Face {
+    pub(crate) const fn first(data: &'static [u8]) -> Self {
+        Self { data, index: 0 }
+    }
+
+    pub(crate) fn font(self) -> Option<swash::FontRef<'static>> {
+        swash::FontRef::from_index(self.data, self.index as usize)
+    }
+
+    pub(crate) fn glyph(self, ch: char) -> u16 {
+        self.font().map_or(0, |f| f.charmap().map(ch))
+    }
+}
+
+/// Fontconfig and DirectWrite both name a face by its file and its index in that file.
+type FaceKey = (PathBuf, u32);
+
 /// System faces tried after the chosen one and the symbols. The list only grows, so a
 /// `FaceSlot::System` index stays valid for the life of the process.
 #[derive(Default)]
 struct Fallbacks {
-    faces: Vec<&'static [u8]>,
-    paths: Vec<PathBuf>,
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    faces: Vec<Face>,
+    keys: Vec<FaceKey>,
+    files: HashMap<PathBuf, &'static [u8]>,
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     uncovered: HashSet<char>,
 }
 
 impl Fallbacks {
-    fn push(&mut self, path: PathBuf, bytes: Vec<u8>) -> usize {
-        self.paths.push(path);
-        self.faces.push(Box::leak(bytes.into_boxed_slice()));
+    fn position(&self, key: &FaceKey) -> Option<usize> {
+        self.keys.iter().position(|k| k == key)
+    }
+
+    /// Adds the face unless it is known. A file another face already holds is shared, so
+    /// bytes read twice by a race are dropped rather than kept.
+    fn keep(&mut self, key: FaceKey, bytes: Cow<'static, [u8]>) -> usize {
+        if let Some(i) = self.position(&key) {
+            return i;
+        }
+        let data = match (self.files.get(&key.0), bytes) {
+            (Some(data), _) => *data,
+            (None, Cow::Borrowed(data)) => data,
+            (None, Cow::Owned(bytes)) => Box::leak(bytes.into_boxed_slice()),
+        };
+        self.files.insert(key.0.clone(), data);
+        self.faces.push(Face { data, index: key.1 });
+        self.keys.push(key);
         self.faces.len() - 1
     }
 }
@@ -195,56 +236,69 @@ fn fallbacks() -> &'static RwLock<Fallbacks> {
     LOADED.get_or_init(|| RwLock::new(load_system_fallbacks()))
 }
 
-pub fn system_fallbacks() -> Vec<&'static [u8]> {
+pub(crate) fn system_fallback_count() -> usize {
     fallbacks()
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .faces
-        .clone()
+        .len()
 }
 
-pub(crate) fn system_fallback(index: usize) -> &'static [u8] {
+pub(crate) fn system_fallback(index: usize) -> Face {
     fallbacks()
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .faces
         .get(index)
         .copied()
-        .unwrap_or(&[])
+        .unwrap_or(Face::first(&[]))
 }
 
-/// Loads a system face that draws `ch` when none of the loaded ones does, and returns its
-/// index. Each character is looked up at most once.
+/// Asks the system for a face that draws `ch` when none of the loaded ones does, and
+/// returns its index. Each character is looked up at most once.
 pub(crate) fn find_fallback(ch: char) -> Option<usize> {
     #[cfg(target_os = "linux")]
     {
         extend_for(fallbacks(), &fontconfig_cover, ch)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        extend_for(
+            fallbacks(),
+            &|ch| Box::new(crate::dwrite::cover(ch).into_iter()),
+            ch,
+        )
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = ch;
         None
     }
 }
 
+/// The bytes holding `key` when that face can draw `probe`. `known` is the file when
+/// another of its faces is already loaded.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+fn usable(known: Option<&'static [u8]>, key: &FaceKey, probe: char) -> Option<Cow<'static, [u8]>> {
+    if let Some(data) = known {
+        return draws(data, key.1, probe).then_some(Cow::Borrowed(data));
+    }
+    let bytes = std::fs::read(&key.0).ok()?;
+    draws(&bytes, key.1, probe).then_some(Cow::Owned(bytes))
+}
+
+/// Colour emoji are loaded up front and tried first, because common symbol fonts draw
+/// monochrome emoji. Everything else is looked up per character, emoji too when no colour
+/// face is found here.
 #[cfg(windows)]
 fn load_system_fallbacks() -> Fallbacks {
-    let dir = PathBuf::from(std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into()))
-        .join("Fonts");
-    let mut found = Fallbacks::default();
-    for file in [
-        "seguiemj.ttf",
-        "seguisym.ttf",
-        "msyh.ttc",
-        "YuGothM.ttc",
-        "malgun.ttf",
-    ] {
-        let path = dir.join(file);
-        if let Ok(bytes) = std::fs::read(&path) {
-            found.push(path, bytes);
-        }
+    let mut loaded = Fallbacks::default();
+    if let Some(key) = crate::dwrite::cover('\u{1f600}')
+        && let Some(bytes) = usable(None, &key, '\u{1f600}')
+    {
+        loaded.keep(key, bytes);
     }
-    found
+    loaded
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -259,9 +313,10 @@ fn load_system_fallbacks() -> Fallbacks {
 
 #[cfg(target_os = "linux")]
 /// What each fallback has to cover, in the order they are tried: colour emoji first, as on
-/// Windows, because common symbol fonts draw monochrome emoji. Chinese comes before
-/// Japanese as on Windows, since only the first face of a collection is drawn. A match that
-/// cannot draw its probe is dropped, since fontconfig always answers with its best guess even when nothing fits.
+/// Windows, because common symbol fonts draw monochrome emoji. Han without a language comes
+/// before the explicit Chinese, Japanese and Korean faces, so fontconfig picks the regional
+/// forms the user's locale asks for. A match that cannot draw its probe is dropped, since
+/// fontconfig always answers with its best guess even when nothing fits.
 const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
     (
         "emoji",
@@ -273,6 +328,7 @@ const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
         '\u{2603}',
         &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
     ),
+    ("sans-serif:charset=6c49", '\u{6c49}', &[]),
     (
         "sans-serif:lang=zh-cn",
         '\u{6c49}',
@@ -290,34 +346,50 @@ const FALLBACK_WANTS: &[(&str, char, &[&str])] = &[
     ),
 ];
 
+/// `%{index}` carries a variable font's named instance in its high 16 bits; the face is
+/// the low 16.
 #[cfg(target_os = "linux")]
-fn fontconfig_match(pattern: &str) -> Option<PathBuf> {
-    let out = tether_core::hostcmd::host_command("fc-match")
-        .args(["-f", "%{file}", pattern])
-        .output()
-        .ok()?;
-    let path = String::from_utf8(out.stdout).ok()?;
-    (out.status.success() && !path.is_empty()).then(|| path.into())
+fn parse_face_line(line: &str) -> Option<FaceKey> {
+    let (index, file) = line.split_once(' ')?;
+    let index = index.parse::<u32>().ok()? & 0xffff;
+    (!file.is_empty()).then(|| (PathBuf::from(file), index))
 }
 
 #[cfg(target_os = "linux")]
-fn fontconfig_list(pattern: &str) -> Vec<PathBuf> {
+fn fontconfig_match(pattern: &str) -> Option<FaceKey> {
+    let out = tether_core::hostcmd::host_command("fc-match")
+        .args(["-f", "%{index} %{file}", pattern])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_face_line(std::str::from_utf8(&out.stdout).ok()?)
+}
+
+#[cfg(target_os = "linux")]
+fn fontconfig_list(pattern: &str) -> Vec<FaceKey> {
     let Ok(out) = tether_core::hostcmd::host_command("fc-list")
-        .args(["-f", "%{file}\n", pattern])
+        .args(["-f", "%{index} %{file}\n", pattern])
         .output()
     else {
         return Vec::new();
     };
-    String::from_utf8_lossy(&out.stdout)
+    let mut keys: Vec<FaceKey> = Vec::new();
+    for key in String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter(|line| !line.is_empty())
-        .map(PathBuf::from)
-        .collect()
+        .filter_map(parse_face_line)
+    {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
 }
 
 /// Fontconfig's best guess first; every face that claims the character only when that fails.
 #[cfg(target_os = "linux")]
-fn fontconfig_cover(ch: char) -> Box<dyn Iterator<Item = PathBuf>> {
+fn fontconfig_cover(ch: char) -> Box<dyn Iterator<Item = FaceKey>> {
     let charset = format!(":charset={:x}", ch as u32);
     let best = fontconfig_match(&format!("sans-serif{charset}"));
     let rest = std::iter::once_with(move || fontconfig_list(&charset)).flatten();
@@ -325,46 +397,37 @@ fn fontconfig_cover(ch: char) -> Box<dyn Iterator<Item = PathBuf>> {
 }
 
 /// Faces read while looking for one character, so a character no font has stays cheap.
-#[cfg(target_os = "linux")]
+#[cfg(any(windows, target_os = "linux"))]
 const MAX_TRIED_PER_CHAR: usize = 8;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(windows, target_os = "linux"))]
 fn extend_for(
     store: &RwLock<Fallbacks>,
-    find: &dyn Fn(char) -> Box<dyn Iterator<Item = PathBuf>>,
+    find: &dyn Fn(char) -> Box<dyn Iterator<Item = FaceKey>>,
     ch: char,
 ) -> Option<usize> {
-    let known = |path: &PathBuf| {
-        let s = store.read().unwrap_or_else(|e| e.into_inner());
-        s.paths.iter().position(|p| p == path)
-    };
-    if store
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .uncovered
-        .contains(&ch)
-    {
+    let read = || store.read().unwrap_or_else(|e| e.into_inner());
+    if read().uncovered.contains(&ch) {
         return None;
     }
     let mut tried = Vec::new();
-    for path in find(ch) {
+    for key in find(ch) {
         // A loaded face was already asked, and does not have it.
-        if known(&path).is_some() || tried.contains(&path) {
+        if read().position(&key).is_some() || tried.contains(&key) {
             continue;
         }
         if tried.len() == MAX_TRIED_PER_CHAR {
             break;
         }
-        tried.push(path.clone());
-        let Ok(bytes) = std::fs::read(&path) else {
-            continue;
-        };
-        if draws(&bytes, ch) {
-            let mut s = store.write().unwrap_or_else(|e| e.into_inner());
-            if let Some(i) = s.paths.iter().position(|p| *p == path) {
-                return Some(i);
-            }
-            return Some(s.push(path, bytes));
+        tried.push(key.clone());
+        let known = read().files.get(&key.0).copied();
+        if let Some(bytes) = usable(known, &key, ch) {
+            return Some(
+                store
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keep(key, bytes),
+            );
         }
     }
     store
@@ -377,9 +440,9 @@ fn extend_for(
 
 /// Mapped is not drawn: swash paints colour tables of version 0 only, so COLRv1 emoji go
 /// through `colr`, and a face neither can paint is skipped.
-#[cfg(target_os = "linux")]
-fn draws(data: &[u8], probe: char) -> bool {
-    let Some(font) = swash::FontRef::from_index(data, 0) else {
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+fn draws(data: &[u8], index: u32, probe: char) -> bool {
+    let Some(font) = swash::FontRef::from_index(data, index as usize) else {
         return false;
     };
     let glyph = font.charmap().map(probe);
@@ -395,30 +458,26 @@ fn draws(data: &[u8], probe: char) -> bool {
     ])
     .render(&mut scaler, glyph)
     .is_some_and(|image| image.data.iter().any(|b| *b != 0))
-        || crate::colr::rasterize(data, glyph, 16.0)
+        || crate::colr::rasterize(data, index, glyph, 16.0)
             .is_some_and(|image| image.data.iter().any(|b| *b != 0))
 }
 
 #[cfg(target_os = "linux")]
-/// Only the first face of a collection is ever drawn, so that is the one that is checked.
 fn linux_fallbacks(
-    find: &dyn Fn(&str) -> Option<PathBuf>,
+    find: &dyn Fn(&str) -> Option<FaceKey>,
     wants: &[(&str, char, &[&str])],
 ) -> Fallbacks {
     let mut loaded = Fallbacks::default();
     for (pattern, probe, well_known) in wants {
         let candidates = find(pattern)
             .into_iter()
-            .chain(well_known.iter().map(PathBuf::from));
-        for path in candidates {
-            if loaded.paths.contains(&path) {
+            .chain(well_known.iter().map(|p| (PathBuf::from(p), 0)));
+        for key in candidates {
+            if loaded.position(&key).is_some() {
                 break;
             }
-            let Ok(bytes) = std::fs::read(&path) else {
-                continue;
-            };
-            if draws(&bytes, *probe) {
-                loaded.push(path, bytes);
+            if let Some(bytes) = usable(loaded.files.get(&key.0).copied(), &key, *probe) {
+                loaded.keep(key, bytes);
                 break;
             }
         }
@@ -548,11 +607,6 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    fn covers(data: &[u8], ch: char) -> bool {
-        maps(data, ch)
-    }
-
-    #[cfg(target_os = "linux")]
     #[test]
     fn a_fallback_that_lacks_its_probe_is_dropped() {
         let dir = tempfile::tempdir().unwrap();
@@ -560,17 +614,17 @@ mod tests {
         std::fs::write(&nerd, SYMBOLS).unwrap();
         let wants: &[(&str, char, &[&str])] =
             &[("any", '\u{1f600}', &[]), ("any", '\u{f121}', &[])];
-        let found = linux_fallbacks(&|_| Some(nerd.clone()), wants);
+        let found = linux_fallbacks(&|_| Some((nerd.clone(), 0)), wants);
         assert_eq!(found.faces.len(), 1);
-        assert!(covers(found.faces[0], '\u{f121}'));
+        assert_ne!(found.faces[0].glyph('\u{f121}'), 0);
         assert!(
             linux_fallbacks(&|_| None, &[("any", 'A', &[])])
                 .faces
                 .is_empty()
         );
-        assert!(!draws(SYMBOLS, '\u{1f600}'));
-        assert!(draws(SYMBOLS, '\u{f121}'));
-        assert!(!draws(b"not a font", 'A'));
+        assert!(!draws(SYMBOLS, 0, '\u{1f600}'));
+        assert!(draws(SYMBOLS, 0, '\u{f121}'));
+        assert!(!draws(b"not a font", 0, 'A'));
     }
 
     #[cfg(target_os = "linux")]
@@ -583,14 +637,18 @@ mod tests {
         std::fs::write(&emoji, crate::colr::tests::COLR_V1_EMOJI).unwrap();
         let store = RwLock::new(Fallbacks::default());
         let asked = std::cell::Cell::new(0);
-        let candidates = vec![dir.path().join("missing.ttf"), nerd, emoji.clone()];
-        let find = |_| -> Box<dyn Iterator<Item = PathBuf>> {
+        let candidates = vec![
+            (dir.path().join("missing.ttf"), 0),
+            (nerd, 0),
+            (emoji.clone(), 0),
+        ];
+        let find = |_| -> Box<dyn Iterator<Item = FaceKey>> {
             asked.set(asked.get() + 1);
             Box::new(candidates.clone().into_iter())
         };
 
         assert_eq!(extend_for(&store, &find, '\u{1f600}'), Some(0));
-        assert_eq!(store.read().unwrap().paths, vec![emoji]);
+        assert_eq!(store.read().unwrap().keys, vec![(emoji, 0)]);
 
         // Every candidate is loaded or cannot draw it: remembered, not asked again.
         assert_eq!(extend_for(&store, &find, '\u{10fffd}'), None);
@@ -599,20 +657,120 @@ mod tests {
         assert_eq!(store.read().unwrap().faces.len(), 1);
     }
 
+    /// Two faces of one collection: the file is read once, and each face draws from its
+    /// own index.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn faces_of_one_collection_share_the_file_and_keep_their_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let ttc = dir.path().join("pair.ttc");
+        std::fs::write(&ttc, collection(&[SYMBOLS, face_bytes("cascadia-mono").0])).unwrap();
+        let store = RwLock::new(Fallbacks::default());
+        let nerd = extend_for(
+            &store,
+            &|_| Box::new([(ttc.clone(), 0)].into_iter()),
+            '\u{f121}',
+        );
+        let latin = extend_for(&store, &|_| Box::new([(ttc.clone(), 1)].into_iter()), 'A');
+        let s = store.read().unwrap();
+        let (nerd, latin) = (s.faces[nerd.unwrap()], s.faces[latin.unwrap()]);
+        assert_eq!((nerd.index, latin.index), (0, 1));
+        assert_eq!(nerd.data.as_ptr(), latin.data.as_ptr());
+        assert_ne!(nerd.glyph('\u{f121}'), 0);
+        assert_eq!(latin.glyph('\u{f121}'), 0);
+    }
+
+    #[test]
+    fn a_file_read_twice_by_a_race_is_kept_once() {
+        let mut store = Fallbacks::default();
+        let path = PathBuf::from("/fonts/pair.ttc");
+        let first = store.keep((path.clone(), 0), Cow::Owned(SYMBOLS.to_vec()));
+        let second = store.keep((path.clone(), 1), Cow::Owned(SYMBOLS.to_vec()));
+        assert_eq!(store.keep((path, 0), Cow::Owned(SYMBOLS.to_vec())), first);
+        assert_eq!(store.faces.len(), 2);
+        assert_eq!(
+            store.faces[first].data.as_ptr(),
+            store.faces[second].data.as_ptr()
+        );
+    }
+
+    /// A minimal `ttcf` wrapper: the header points at each font's table directory, whose
+    /// table offsets are rebased onto the font's place in the file.
+    #[cfg(target_os = "linux")]
+    fn collection(fonts: &[&[u8]]) -> Vec<u8> {
+        let header = 12 + 4 * fonts.len();
+        let mut out = b"ttcf\x00\x01\x00\x00".to_vec();
+        out.extend((fonts.len() as u32).to_be_bytes());
+        let mut at = header;
+        let mut starts = Vec::new();
+        for font in fonts {
+            starts.push(at);
+            at += font.len().next_multiple_of(4);
+        }
+        for start in &starts {
+            out.extend((*start as u32).to_be_bytes());
+        }
+        for (font, start) in fonts.iter().zip(starts) {
+            let mut font = font.to_vec();
+            let tables = u16::from_be_bytes([font[4], font[5]]) as usize;
+            for t in 0..tables {
+                let at = 12 + t * 16 + 8;
+                let offset = u32::from_be_bytes(font[at..at + 4].try_into().unwrap());
+                font[at..at + 4].copy_from_slice(&(offset + start as u32).to_be_bytes());
+            }
+            font.resize(font.len().next_multiple_of(4), 0);
+            out.extend(font);
+        }
+        out
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fontconfig_lines_name_the_face_not_the_named_instance() {
+        assert_eq!(
+            parse_face_line("65538 /fonts/My Font.ttc"),
+            Some((PathBuf::from("/fonts/My Font.ttc"), 2))
+        );
+        assert_eq!(parse_face_line("0 "), None);
+        assert_eq!(parse_face_line("x /a.ttf"), None);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn this_hosts_fallbacks_cover_emoji_and_cjk_when_installed() {
-        let found = system_fallbacks();
+        let s = fallbacks().read().unwrap();
         let installed = |p: &str| std::path::Path::new(p).exists();
+        let covers = |ch| s.faces.iter().any(|f| f.glyph(ch) != 0);
         if installed("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf") {
-            assert!(found.iter().any(|f| covers(f, '\u{1f600}')));
+            assert!(covers('\u{1f600}'));
         }
         if installed("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc") {
-            assert!(found.iter().any(|f| covers(f, '\u{65e5}')));
-            assert!(found.iter().any(|f| covers(f, '\u{d55c}')));
+            assert!(covers('\u{65e5}'));
+            assert!(covers('\u{d55c}'));
         }
-        for f in found {
-            assert!(swash::FontRef::from_index(f, 0).is_some());
+        for f in &s.faces {
+            assert!(f.font().is_some());
+        }
+    }
+
+    /// Scripts the old fixed list missed; any Windows install has fonts for them.
+    #[cfg(windows)]
+    #[test]
+    fn directwrite_finds_a_face_for_any_script() {
+        for ch in [
+            '\u{1f600}',
+            '\u{0627}',
+            '\u{05d0}',
+            '\u{0e01}',
+            '\u{0915}',
+            '\u{65e5}',
+        ] {
+            let i = find_fallback(ch)
+                .or_else(|| {
+                    (0..system_fallback_count()).find(|&i| system_fallback(i).glyph(ch) != 0)
+                })
+                .unwrap_or_else(|| panic!("no face for U+{:04X}", ch as u32));
+            assert_ne!(system_fallback(i).glyph(ch), 0);
         }
     }
 }
