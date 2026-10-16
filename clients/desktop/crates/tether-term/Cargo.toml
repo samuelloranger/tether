@@ -18,5 +18,11 @@ unicode-properties = { version = "0.1.4", default-features = false, features = [
 unicode-segmentation = "1.13.3"
 harfrust = "0.14.0"
 
+[target.'cfg(windows)'.dependencies]
+# The version and DirectWrite bindings Slint's font stack already builds.
+windows = { version = "0.62.2", features = ["Win32_Graphics_DirectWrite", "Win32_Globalization"] }
+# `#[implement]` expands to paths in this crate.
+windows-core = "0.62.2"
+
 [dev-dependencies]
 tempfile.workspace = true

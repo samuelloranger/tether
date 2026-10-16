@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use swash::FontRef;
 use swash::scale::ScaleContext;
 use swash::shape::ShapeContext;
 use tether_core::fonts::FontFace;
@@ -9,6 +8,7 @@ use tether_core::theme::TerminalTheme;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::compose::ImageCache;
+use crate::fonts::Face;
 use crate::glyphs::{
     FaceSlot, GlyphAtlas, GlyphKey, RasterGlyph, face_data, resolve, resolve_emoji,
 };
@@ -161,8 +161,8 @@ struct EmojiCluster {
     glyph: u16,
 }
 
-fn shape_emoji(data: &'static [u8], grapheme: &str) -> Option<u16> {
-    let face = harfrust::Font::new(data, 0)?;
+fn shape_emoji(face: Face, grapheme: &str) -> Option<u16> {
+    let face = harfrust::Font::new(face.data, face.index)?;
     let shaper_font = harfrust::ShaperFont::new(&face);
     let mut buffer = harfrust::Buffer::new();
     buffer.push_str(grapheme);
@@ -417,7 +417,7 @@ impl Rasterizer {
         size_px: f32,
         cell_w: f32,
     ) -> Vec<(usize, u16, f32)> {
-        let Some(face) = FontRef::from_index(face_data(font, FaceSlot::Primary { bold }), 0) else {
+        let Some(face) = face_data(font, FaceSlot::Primary { bold }).font() else {
             return Vec::new();
         };
         let byte_of_char: Vec<usize> = text.char_indices().map(|(byte, _)| byte).collect();

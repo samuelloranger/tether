@@ -17,8 +17,8 @@ use tiny_skia::{
 use crate::glyphs::RasterGlyph;
 
 /// None when the glyph has no COLRv1 paint, so the caller can fall back to swash.
-pub(crate) fn rasterize(data: &[u8], glyph: u16, size_px: f32) -> Option<RasterGlyph> {
-    let font = FontRef::from_index(data, 0).ok()?;
+pub(crate) fn rasterize(data: &[u8], index: u32, glyph: u16, size_px: f32) -> Option<RasterGlyph> {
+    let font = FontRef::from_index(data, index).ok()?;
     let color = font
         .color_glyphs()
         .get_with_format(GlyphId::new(glyph.into()), ColorGlyphFormat::ColrV1)?;
@@ -453,7 +453,7 @@ pub(crate) mod tests {
     #[test]
     fn a_colr_v1_emoji_paints_in_colour_around_the_baseline() {
         let g = glyph('\u{1f600}');
-        let r = rasterize(COLR_V1_EMOJI, g, 32.0).expect("paints");
+        let r = rasterize(COLR_V1_EMOJI, 0, g, 32.0).expect("paints");
         assert!(r.color);
         assert!((28..=48).contains(&r.width), "width {}", r.width);
         assert!((28..=48).contains(&r.height), "height {}", r.height);
@@ -470,7 +470,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_heart_is_red() {
-        let r = rasterize(COLR_V1_EMOJI, glyph('\u{2764}'), 32.0).expect("paints");
+        let r = rasterize(COLR_V1_EMOJI, 0, glyph('\u{2764}'), 32.0).expect("paints");
         let [red, green, blue, alpha] = pixel(&r, r.width / 2, r.height / 2);
         assert_eq!(alpha, 255);
         assert!(red > 180 && green < 80 && blue < 80, "{red} {green} {blue}");
@@ -478,8 +478,8 @@ pub(crate) mod tests {
 
     #[test]
     fn plain_glyphs_and_other_fonts_are_left_to_swash() {
-        assert!(rasterize(crate::fonts::SYMBOLS, 1, 32.0).is_none());
-        assert!(rasterize(b"not a font", 1, 32.0).is_none());
+        assert!(rasterize(crate::fonts::SYMBOLS, 0, 1, 32.0).is_none());
+        assert!(rasterize(b"not a font", 0, 1, 32.0).is_none());
     }
 
     fn canvas_painter(font: &FontRef<'static>) -> Painter<'static> {

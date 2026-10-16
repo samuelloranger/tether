@@ -1,5 +1,7 @@
 mod colr;
 mod compose;
+#[cfg(windows)]
+mod dwrite;
 pub mod fonts;
 mod glyphs;
 pub mod images;
