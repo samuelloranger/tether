@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
@@ -212,10 +213,20 @@ impl Fallbacks {
         self.keys.iter().position(|k| k == key)
     }
 
-    fn push(&mut self, (path, index): FaceKey, data: &'static [u8]) -> usize {
-        self.files.entry(path.clone()).or_insert(data);
-        self.keys.push((path, index));
-        self.faces.push(Face { data, index });
+    /// Adds the face unless it is known. A file another face already holds is shared, so
+    /// bytes read twice by a race are dropped rather than kept.
+    fn keep(&mut self, key: FaceKey, bytes: Cow<'static, [u8]>) -> usize {
+        if let Some(i) = self.position(&key) {
+            return i;
+        }
+        let data = match (self.files.get(&key.0), bytes) {
+            (Some(data), _) => *data,
+            (None, Cow::Borrowed(data)) => data,
+            (None, Cow::Owned(bytes)) => Box::leak(bytes.into_boxed_slice()),
+        };
+        self.files.insert(key.0.clone(), data);
+        self.faces.push(Face { data, index: key.1 });
+        self.keys.push(key);
         self.faces.len() - 1
     }
 }
@@ -266,25 +277,26 @@ pub(crate) fn find_fallback(ch: char) -> Option<usize> {
 }
 
 /// The bytes holding `key` when that face can draw `probe`. `known` is the file when
-/// another of its faces is already loaded; a file read only to be rejected is dropped.
+/// another of its faces is already loaded.
 #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
-fn usable(known: Option<&'static [u8]>, key: &FaceKey, probe: char) -> Option<&'static [u8]> {
+fn usable(known: Option<&'static [u8]>, key: &FaceKey, probe: char) -> Option<Cow<'static, [u8]>> {
     if let Some(data) = known {
-        return draws(data, key.1, probe).then_some(data);
+        return draws(data, key.1, probe).then_some(Cow::Borrowed(data));
     }
     let bytes = std::fs::read(&key.0).ok()?;
-    draws(&bytes, key.1, probe).then(|| &*Box::leak(bytes.into_boxed_slice()))
+    draws(&bytes, key.1, probe).then_some(Cow::Owned(bytes))
 }
 
 /// Colour emoji are loaded up front and tried first, because common symbol fonts draw
-/// monochrome emoji. Everything else is looked up per character.
+/// monochrome emoji. Everything else is looked up per character, emoji too when no colour
+/// face is found here.
 #[cfg(windows)]
 fn load_system_fallbacks() -> Fallbacks {
     let mut loaded = Fallbacks::default();
     if let Some(key) = crate::dwrite::cover('\u{1f600}')
-        && let Some(data) = usable(None, &key, '\u{1f600}')
+        && let Some(bytes) = usable(None, &key, '\u{1f600}')
     {
-        loaded.push(key, data);
+        loaded.keep(key, bytes);
     }
     loaded
 }
@@ -409,12 +421,13 @@ fn extend_for(
         }
         tried.push(key.clone());
         let known = read().files.get(&key.0).copied();
-        if let Some(data) = usable(known, &key, ch) {
-            let mut s = store.write().unwrap_or_else(|e| e.into_inner());
-            return Some(match s.position(&key) {
-                Some(i) => i,
-                None => s.push(key, data),
-            });
+        if let Some(bytes) = usable(known, &key, ch) {
+            return Some(
+                store
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keep(key, bytes),
+            );
         }
     }
     store
@@ -463,8 +476,8 @@ fn linux_fallbacks(
             if loaded.position(&key).is_some() {
                 break;
             }
-            if let Some(data) = usable(loaded.files.get(&key.0).copied(), &key, *probe) {
-                loaded.push(key, data);
+            if let Some(bytes) = usable(loaded.files.get(&key.0).copied(), &key, *probe) {
+                loaded.keep(key, bytes);
                 break;
             }
         }
@@ -665,6 +678,20 @@ mod tests {
         assert_eq!(nerd.data.as_ptr(), latin.data.as_ptr());
         assert_ne!(nerd.glyph('\u{f121}'), 0);
         assert_eq!(latin.glyph('\u{f121}'), 0);
+    }
+
+    #[test]
+    fn a_file_read_twice_by_a_race_is_kept_once() {
+        let mut store = Fallbacks::default();
+        let path = PathBuf::from("/fonts/pair.ttc");
+        let first = store.keep((path.clone(), 0), Cow::Owned(SYMBOLS.to_vec()));
+        let second = store.keep((path.clone(), 1), Cow::Owned(SYMBOLS.to_vec()));
+        assert_eq!(store.keep((path, 0), Cow::Owned(SYMBOLS.to_vec())), first);
+        assert_eq!(store.faces.len(), 2);
+        assert_eq!(
+            store.faces[first].data.as_ptr(),
+            store.faces[second].data.as_ptr()
+        );
     }
 
     /// A minimal `ttcf` wrapper: the header points at each font's table directory, whose
