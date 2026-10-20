@@ -144,7 +144,7 @@ export component AgentSheet inherits Rectangle {
         drop-shadow-color: #00000059;
         col := VerticalLayout {
             padding: 20px;
-            padding-bottom: 16px;
+            padding-bottom: 24px;
             spacing: 10px;
             Text { text: AgentVm.title; wrap: word-wrap; font-size: 18px; font-weight: 650; color: Tokens.text; }
             if AgentVm.phase == 0: Text { text: "Loading the question…"; color: Tokens.text-secondary; font-size: 13px; }
@@ -158,14 +158,19 @@ export component AgentSheet inherits Rectangle {
                     for q[i] in AgentVm.questions: QuestionBlock { data: q; index: i; }
                 }
             }
-            if AgentVm.phase == 3: VerticalLayout {
-                spacing: 10px;
-                Text { text: AgentVm.body != "" ? AgentVm.body : "The agent is asking for permission."; wrap: word-wrap; color: Tokens.text; font-size: 14px; }
-                reply := Field { placeholder: "Reply instead"; }
-                SecondaryButton {
-                    text: "Send reply";
-                    enabled: reply.text != "" && !AgentVm.sending;
-                    clicked => { AgentVm.reply(reply.text); }
+            if AgentVm.phase == 3: Flickable {
+                preferred-height: min(permission.preferred-height, 380px);
+                content-height: permission.preferred-height;
+                permission := VerticalLayout {
+                    width: parent.width;
+                    spacing: 10px;
+                    Text { text: AgentVm.body != "" ? AgentVm.body : "The agent is asking for permission."; wrap: word-wrap; color: Tokens.text; font-size: 14px; }
+                    reply := Field { placeholder: "Reply instead"; }
+                    SecondaryButton {
+                        text: "Send reply";
+                        enabled: reply.text != "" && !AgentVm.sending;
+                        clicked => { AgentVm.reply(reply.text); }
+                    }
                 }
             }
             if AgentVm.phase == 2 && AgentVm.error != "": Text { text: AgentVm.error; wrap: word-wrap; color: Tokens.danger; font-size: 13px; }
