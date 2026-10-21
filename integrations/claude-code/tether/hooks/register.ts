@@ -2,10 +2,10 @@ import type { EngineInterface, Register } from 'claude-code'
 import { answersFrom, decide, holdsInMode, questionBody, summarize } from './hold'
 
 let interactive = false
-// tool.check doesn't carry the permission mode. The classic events do, so the latest
-// one stands in for it; where an organization's guard keeps classic events from user
-// mods, the settings' default mode is all there is (a mode picked by flag or shift+tab
-// then goes unseen, and its asks are held like any other).
+// tool.check doesn't carry the permission mode, and the classic events that do are kept
+// from user mods wherever an organization's guard loads (every Team or Enterprise
+// sign-in), each skip reported in the transcript. So the settings' default mode is all
+// there is: a mode picked by flag or shift+tab goes unseen, and its asks are held.
 let mode: string | undefined
 
 export const register: Register = on => {
@@ -17,19 +17,6 @@ export const register: Register = on => {
     } catch {
       mode = undefined
     }
-    return next(e)
-  })
-
-  on('classic.SessionStart', async ($, e, next) => {
-    mode = e.permission_mode
-    return next(e)
-  })
-  on('classic.UserPromptSubmit', async ($, e, next) => {
-    mode = e.permission_mode
-    return next(e)
-  })
-  on('classic.PostToolUse', async ($, e, next) => {
-    mode = e.permission_mode
     return next(e)
   })
 
