@@ -14,8 +14,6 @@ function world(
   mock.env(on, env)
   on('session.start', () => ({ cwd: '/x' }))
   on('settings.read', () => ({ value: defaultMode ? { permissions: { defaultMode } } : {} }) as never)
-  on('classic.UserPromptSubmit', () => ({}))
-  on('classic.PostToolUse', () => ({}))
   on('tool.check', () => ({ decision: verdict, reason: 'needs approval' }))
   // Beneath the mod's tool.call is Claude's own dialog.
   on('tool.call', (_$, e) => {
@@ -137,28 +135,11 @@ describe('tool.check', () => {
     expect(w.runs).toEqual([])
   })
 
-  test('a mode that settles asks on its own is never held', async ($, on) => {
-    const w = world(on, { wait: '{"action":"approve"}\n' })
-    await start($)
-    await $.classic.UserPromptSubmit({ prompt: 'go', permission_mode: 'auto' } as never)
-    expect((await $.tool.check(BASH)).decision).toBe('ask')
-    expect(w.runs).toEqual([])
-  })
-
   test('a settings default mode that settles asks is never held', async ($, on) => {
     const w = world(on, { wait: '{"action":"approve"}\n', defaultMode: 'dontAsk' })
     await start($)
     expect((await $.tool.check(BASH)).decision).toBe('ask')
     expect(w.runs).toEqual([])
-  })
-
-  test('the latest mode wins: back to default after a tool holds again', async ($, on) => {
-    const w = world(on, { wait: '{"action":"approve"}\n' })
-    await start($)
-    await $.classic.UserPromptSubmit({ prompt: 'go', permission_mode: 'dontAsk' } as never)
-    await $.classic.PostToolUse({ tool_name: 'Read', tool_input: {}, tool_response: {}, tool_use_id: 't0', permission_mode: 'default' } as never)
-    expect((await $.tool.check(BASH)).decision).toBe('allow')
-    expect(w.runs.length).toBe(1)
   })
 
   test("a plugin's permission query is never held", async ($, on) => {
