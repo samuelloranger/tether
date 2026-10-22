@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
       # tsc comes from the root workspace, like the CI relay job.
       - name: Install root tools
         working-directory: .
