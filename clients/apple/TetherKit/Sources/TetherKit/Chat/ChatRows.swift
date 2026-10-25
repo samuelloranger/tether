@@ -72,6 +72,8 @@ struct ChatItemRow: View, Equatable {
       ThoughtRow(text: text, expanded: expanded, toggle: toggle)
     case .tool, .permission:
       ToolGroupView(items: [item], cwd: cwd, expandedIDs: expanded ? [item.id] : []) { _ in toggle() }
+    case let .question(question):
+      if !question.isPending { ResolvedQuestionRow(question: question) }
     case let .plan(entries):
       PlanRow(entries: entries)
     case let .notice(text):

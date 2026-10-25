@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -47,6 +47,103 @@ enum ChatFixture {
     if !claude.isEmpty { frame["_meta"] = ["claudeCode": claude] }
     if let input { frame["rawInput"] = input }
     return frame
+  }
+
+  static let questionRequestId = 8
+  /// Set by the debug root so the question card opens its Other field with text typed in.
+  nonisolated(unsafe) static var openQuestionOther = false
+
+  private static func choice(_ value: String, _ description: String) -> [String: Any] {
+    ["const": value, "title": value, "description": description]
+  }
+
+  /// The recorded single-select question, as the adapter sent it.
+  private static let colourProperties: [String: Any] = [
+    "question_0": [
+      "type": "string", "title": "Colour",
+      "oneOf": [choice("red", "Red"), choice("green", "Green"), choice("blue", "Blue")],
+    ],
+    "question_0_custom": [
+      "type": "string", "title": "Other",
+      "description": "Type your own answer, or add a note to the option you chose above (optional).",
+    ],
+  ]
+
+  private static let runnerProperties: [String: Any] = [
+    "question_0": [
+      "type": "string", "title": "Test runner",
+      "oneOf": [
+        choice("vitest", "Fast, Vite-native, watch mode"),
+        choice("jest", "The long-standing default"),
+        choice("bun", "Built in, no extra dependency"),
+      ],
+    ],
+    "question_1": [
+      "type": "array", "title": "Checks to run in CI",
+      "items": [
+        "anyOf": [
+          choice("lint", "Biome lint and format check"),
+          choice("types", "tsc --noEmit"),
+          choice("unit", "The whole unit suite"),
+          choice("e2e", "Simulator UI tests, slower"),
+        ],
+      ],
+    ],
+    "question_1_custom": [
+      "type": "string", "title": "Other",
+      "description": "Type your own answer, or add a note to the option you chose above (optional).",
+    ],
+  ]
+
+  private static func elicitation(message: String, properties: [String: Any]) -> String {
+    json([
+      "jsonrpc": "2.0", "id": questionRequestId, "method": "elicitation/create",
+      "params": [
+        "mode": "form", "sessionId": "sess-1", "toolCallId": "toolu_question", "message": message,
+        "requestedSchema": ["type": "object", "properties": properties],
+      ],
+    ])
+  }
+
+  private static func askTool() -> [String] {
+    [
+      update(tool("toolu_question", "Asking for your input", kind: "other", status: "pending", toolName: "AskUserQuestion", input: [:])),
+    ]
+  }
+
+  /// An agent question left open (`answered: false`) or answered with red.
+  @MainActor
+  static func questionModel(multi: Bool = false, answered: Bool = false) -> ChatSessionModel {
+    var lines: [String] = [
+      update(["sessionUpdate": "session_info_update", "title": multi ? "CI setup" : "Colour preference"]),
+      message(multi
+        ? "I can set up CI for the app, but two choices change what I build."
+        : "Before I pick a theme I need one preference."),
+    ]
+    lines += askTool()
+    let request = multi
+      ? elicitation(message: "Two quick questions before I set up CI", properties: runnerProperties)
+      : elicitation(message: "Which colour do you prefer?", properties: colourProperties)
+    lines.append(request)
+    let offset = lines.reduce(0) { $0 + $1.utf8.count + 1 }
+    if answered {
+      lines.append(message("Red it is. I'll use it for the accent colour."))
+      lines.append(json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]))
+    }
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: multi ? "Set up CI for this app." : "Pick a theme for the app.")]
+    if answered {
+      journal.entries.append(
+        .init(kind: .questionAnswer, offset: offset, requestId: .int(questionRequestId), optionId: "accept",
+          content: ["question_0": .text("red")]))
+    }
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(journal)
+    ) { _, _ in FixtureByteStream(log: log) }
   }
 
   /// Set by the debug root so the subagent rows open already expanded.
@@ -517,9 +614,13 @@ public struct ChatFixtureRoot: View {
 
   public init(mode: String) {
     self.mode = mode
+    ChatFixture.openQuestionOther = mode == "question-other"
     listMode = mode == "list"
     let initial: ChatSessionModel
     switch mode {
+    case "question", "question-other": initial = ChatFixture.questionModel(multi: mode == "question-other")
+    case "question-multi": initial = ChatFixture.questionModel(multi: true)
+    case "question-answered": initial = ChatFixture.questionModel(answered: true)
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
     case "send": initial = ChatFixture.sendModel()

@@ -96,6 +96,7 @@ struct ChatItem: Codable, Equatable, Identifiable, Sendable {
     case thought(text: String)
     case tool(ChatToolCall)
     case permission(ChatPermission)
+    case question(ChatQuestion)
     case plan([ACPPlanEntry])
     case notice(String)
     case error(String)
@@ -128,6 +129,8 @@ struct ChatState: Codable, Equatable, Sendable {
   fileprivate var silentRequestIds: Set<ACPID> = []
   /// Answers the host took while no client was attached, so a replayed request shows resolved.
   fileprivate var hostAnswers: [ACPID: String] = [:]
+  /// The question tool's own calls: the question row stands for them.
+  fileprivate var questionToolIds: Set<String> = []
 
   func option(id: String) -> ACPConfigOption? { configOptions.first { $0.id == id } }
 
@@ -157,6 +160,15 @@ struct ChatState: Codable, Equatable, Sendable {
   }
 }
 
+extension ChatState {
+  var pendingQuestions: [ChatQuestion] {
+    items.compactMap {
+      if case let .question(question) = $0.kind, question.isPending { return question }
+      return nil
+    }
+  }
+}
+
 enum ChatEvent: Equatable, Sendable {
   case message(ACPInbound)
   case userPrompt(text: String, imageCount: Int = 0, atOffset: Int)
@@ -167,6 +179,10 @@ enum ChatEvent: Equatable, Sendable {
   case permissionAnswerUndelivered(requestId: ACPID, optionId: String)
   /// The host answered this request itself; the card resolves now or when the request arrives.
   case hostAnswered(requestId: ACPID, optionId: String)
+  /// The user answered, declined or cancelled a question; `content` is only meaningful for an accept.
+  case questionAnswered(requestId: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue])
+  /// The answer never reached the agent: the question asks again, unless something else resolved it since.
+  case questionAnswerUndelivered(requestId: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue])
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
   case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int)
   case connectionLost
@@ -188,9 +204,14 @@ enum ChatReducer {
       resolve(requestId, optionId, in: &next)
     case let .permissionAnswerUndelivered(requestId, optionId):
       reopen(requestId, optionId, in: &next)
+    case let .questionAnswered(requestId, action, content):
+      resolveQuestion(requestId, .init(action: action, content: content), in: &next)
+    case let .questionAnswerUndelivered(requestId, action, content):
+      reopenQuestion(requestId, .init(action: action, content: content), in: &next)
     case let .hostAnswered(requestId, optionId):
       next.hostAnswers[requestId] = optionId
       resolve(requestId, optionId, in: &next)
+      resolveQuestion(requestId, hostValue: optionId, in: &next)
     case let .promptUndelivered(text, imageCount, offset):
       if let index = next.items.lastIndex(where: { $0.kind == .user(text: text, imageCount: imageCount, offset: offset) }) {
         next.items.remove(at: index)
@@ -219,11 +240,13 @@ enum ChatReducer {
       if let reason = result.stopReason {
         state.turn = .idle
         state.lastStopReason = reason
+        endPendingQuestions(in: &state)
       }
     case let .errorResponse(id, code, text):
       if let id, state.silentRequestIds.contains(id) { return }
       append(.error(text.isEmpty ? "Agent error \(code)" : text), to: &state)
       state.turn = .idle
+      endPendingQuestions(in: &state)
     case let .permissionRequest(id, request):
       mergeTool(request.tool, creating: false, into: &state)
       append(
@@ -238,6 +261,13 @@ enum ChatReducer {
           resolvedOptionId: nil)),
         to: &state)
       if let optionId = state.hostAnswers[id] { resolve(id, optionId, in: &state) }
+    case let .elicitation(id, request):
+      if let toolId = request.toolCallId { state.questionToolIds.insert(toolId) }
+      append(
+        .question(ChatQuestion(
+          requestId: id, toolCallId: request.toolCallId, message: request.message, fields: request.fields)),
+        to: &state)
+      if let value = state.hostAnswers[id] { resolveQuestion(id, hostValue: value, in: &state) }
     case let .update(update):
       apply(update, to: &state)
     case .unknown:
@@ -268,6 +298,8 @@ enum ChatReducer {
         append(.user(text: text, offset: 0), to: &state)
       }
     case let .toolCall(fields), let .toolCallUpdate(fields):
+      if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }
+      if state.questionToolIds.contains(fields.id) { return }
       mergeTool(fields, creating: true, into: &state)
     case let .plan(entries):
       var replaced = false
@@ -336,6 +368,50 @@ enum ChatReducer {
     state.items.indices.reversed().first { index in
       guard case let .tool(call) = state.items[index].kind else { return false }
       return call.id == parentId || call.children.contains { $0.id == parentId }
+    }
+  }
+
+  private static func setQuestion(_ requestId: ACPID, in state: inout ChatState, _ change: (inout ChatQuestion) -> Bool) {
+    for index in state.items.indices.reversed() {
+      if case var .question(question) = state.items[index].kind, question.requestId == requestId {
+        guard change(&question) else { return }
+        state.items[index].kind = .question(question)
+        return
+      }
+    }
+  }
+
+  private static func resolveQuestion(_ requestId: ACPID, _ resolution: ChatQuestion.State, in state: inout ChatState) {
+    setQuestion(requestId, in: &state) { question in
+      guard question.isPending else { return false }
+      question.state = resolution
+      return true
+    }
+  }
+
+  private static func resolveQuestion(_ requestId: ACPID, hostValue: String, in state: inout ChatState) {
+    setQuestion(requestId, in: &state) { question in
+      guard question.isPending else { return false }
+      question.state = question.hostState(hostValue)
+      return true
+    }
+  }
+
+  private static func reopenQuestion(_ requestId: ACPID, _ resolution: ChatQuestion.State, in state: inout ChatState) {
+    setQuestion(requestId, in: &state) { question in
+      guard question.state == resolution else { return false }
+      question.state = .pending
+      return true
+    }
+  }
+
+  /// A finished turn leaves nothing to answer: the agent has stopped waiting, as the holder sees it.
+  private static func endPendingQuestions(in state: inout ChatState) {
+    for index in state.items.indices {
+      if case var .question(question) = state.items[index].kind, question.isPending {
+        question.state = .cancelled
+        state.items[index].kind = .question(question)
+      }
     }
   }
 

@@ -90,7 +90,11 @@ actor ACPClient {
       "initialize",
       [
         "protocolVersion": 1,
-        "clientCapabilities": ["fs": ["readTextFile": false, "writeTextFile": false], "terminal": false],
+        "clientCapabilities": [
+          "fs": ["readTextFile": false, "writeTextFile": false], "terminal": false,
+          // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
+          "elicitation": ["form": [String: Any]()],
+        ],
       ])
   }
 
@@ -142,6 +146,39 @@ actor ACPClient {
     try await write(["jsonrpc": "2.0", "method": "session/cancel", "params": ["sessionId": sessionId]])
     for permission in builder.state.pendingPermissions {
       try await respond(to: permission.requestId, outcome: ["outcome": "cancelled"], optionId: "cancelled")
+    }
+    for question in builder.state.pendingQuestions {
+      try await answerQuestion(requestId: question.requestId, action: .cancel)
+    }
+  }
+
+  /// Journaled and shown before the write, and taken back if it fails, like a permission answer.
+  /// `content` is only sent with an accept.
+  func answerQuestion(
+    requestId: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue] = [:]
+  ) async throws {
+    guard builder.state.pendingQuestions.contains(where: { $0.requestId == requestId }) else { return }
+    let sent = action == .accept ? content : [:]
+    journal.entries.append(
+      .init(kind: .questionAnswer, offset: builder.consumedOffset, requestId: requestId, optionId: action.rawValue,
+        content: action == .accept ? sent : nil))
+    builder.apply(.questionAnswered(requestId: requestId, action: action, content: sent))
+    publish()
+    store.save(journal)
+    var result: [String: Any] = ["action": action.rawValue]
+    if action == .accept { result["content"] = sent.mapValues(\.json) }
+    do {
+      try await write(["jsonrpc": "2.0", "id": requestId.json, "result": result])
+    } catch {
+      if let index = journal.entries.lastIndex(where: {
+        $0.kind == .questionAnswer && $0.requestId == requestId && $0.optionId == action.rawValue
+      }) {
+        journal.entries.remove(at: index)
+      }
+      store.save(journal)
+      builder.apply(.questionAnswerUndelivered(requestId: requestId, action: action, content: sent))
+      publish()
+      throw error
     }
   }
 

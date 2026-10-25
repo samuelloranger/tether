@@ -64,6 +64,10 @@ final class ChatSnapshotTests: XCTestCase {
       Case(name: "turn-write", lines: ACPFixture.agentLines, journal: ACPFixture.journal),
       Case(name: "controls", lines: ACPFixture.Controls.agentLines, journal: controls),
       Case(name: "nesting", lines: nesting, journal: nested),
+      Case(
+        name: "question-answered", lines: ACPFixture.Elicitation.agentLines,
+        journal: ACPFixture.Elicitation.journal(answer: ["question_0": .text("red"), "question_0_custom": .text("a note")])),
+      Case(name: "question-turn-end", lines: ACPFixture.Elicitation.agentLines, journal: ACPFixture.Elicitation.journal()),
     ]
   }
 

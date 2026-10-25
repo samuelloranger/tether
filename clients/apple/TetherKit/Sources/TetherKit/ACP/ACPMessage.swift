@@ -139,6 +139,7 @@ enum ACPInbound: Equatable, Sendable {
   case errorResponse(id: ACPID?, code: Int, message: String)
   case update(ACPUpdate)
   case permissionRequest(id: ACPID, request: ACPPermissionRequest)
+  case elicitation(id: ACPID, request: ACPElicitationRequest)
   case unknown(method: String?)
 }
 
@@ -157,6 +158,7 @@ enum ACPDecoder {
         if method == "session/request_permission", let id, let request = permission(params) {
           return .permissionRequest(id: id, request: request)
         }
+        if method == "elicitation/create", let id { return .elicitation(id: id, request: elicitation(params)) }
         return .unknown(method: method)
       }
       if method == "session/update", let update = params["update"] as? JSON {
@@ -311,6 +313,15 @@ enum ACPDecoder {
       break
     }
     return fields
+  }
+
+  /// A malformed form still becomes a question the user can decline: the agent waits for a reply either way.
+  private static func elicitation(_ params: JSON) -> ACPElicitationRequest {
+    let message = params["message"] as? String ?? ""
+    return ACPElicitationRequest(
+      toolCallId: params["toolCallId"] as? String,
+      message: message.isEmpty ? "The agent has a question." : message,
+      fields: ChatQuestionSchema.fields(from: params["requestedSchema"] as? JSON ?? [:]))
   }
 
   private static func permission(_ params: JSON) -> ACPPermissionRequest? {

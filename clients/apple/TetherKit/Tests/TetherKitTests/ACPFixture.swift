@@ -26,6 +26,41 @@ enum ACPFixture {
     }
   }
 
+  /// The recorded AskUserQuestion turn: the client advertised `elicitation`, the adapter asked one single-select question.
+  enum Elicitation {
+    static let agentLines: [String] = ACPFixture.lines(prefix: "< ", file: "acp-elicitation.log")
+    static let clientLines: [String] = ACPFixture.lines(prefix: "> ", file: "acp-elicitation.log")
+
+    static func index(containing needle: String) -> Int {
+      agentLines.firstIndex { $0.contains(needle) } ?? -1
+    }
+
+    static func offset(after count: Int) -> Int {
+      agentLines.prefix(count).reduce(0) { $0 + $1.utf8.count + 1 }
+    }
+
+    static func log(_ count: Int? = nil) -> Data {
+      Data((agentLines.prefix(count ?? agentLines.count).joined(separator: "\n") + "\n").utf8)
+    }
+
+    static var requestLine: Int { index(containing: "elicitation/create") }
+    /// The prompt goes out after `session/new` answers.
+    static var promptOffset: Int { offset(after: index(containing: "\"sessionId\":\"sess-3\",\"modes\"") + 1) }
+    /// An answer goes out once the request has arrived.
+    static var answerOffset: Int { offset(after: requestLine + 1) }
+
+    static func journal(answer: [String: ChatQuestionValue]? = nil) -> ChatJournal {
+      var journal = ChatJournal()
+      journal.sessionId = "sess-3"
+      journal.entries = [.init(kind: .prompt, offset: promptOffset, text: "Ask me a colour")]
+      if let answer {
+        journal.entries.append(
+          .init(kind: .questionAnswer, offset: answerOffset, requestId: .int(0), optionId: "accept", content: answer))
+      }
+      return journal
+    }
+  }
+
   static func index(containing needle: String) -> Int {
     agentLines.firstIndex { $0.contains(needle) } ?? -1
   }

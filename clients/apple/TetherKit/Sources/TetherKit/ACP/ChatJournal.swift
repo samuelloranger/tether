@@ -6,6 +6,8 @@ struct ChatJournal: Codable, Equatable, Sendable {
   struct Entry: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
       case prompt, answer, silentRequest
+      /// A question answered here: `optionId` holds the action and `content` the form values.
+      case questionAnswer
       /// An answer the host recorded while no client was attached; offset 0, applied before the replay.
       case hostAnswer
     }
@@ -14,18 +16,20 @@ struct ChatJournal: Codable, Equatable, Sendable {
     var text: String?
     var requestId: ACPID?
     var optionId: String?
+    var content: [String: ChatQuestionValue]?
     /// Image bytes are never stored; only how many went with the prompt.
     var imageCount = 0
 
     init(
       kind: Kind, offset: Int, text: String? = nil, requestId: ACPID? = nil, optionId: String? = nil,
-      imageCount: Int = 0
+      content: [String: ChatQuestionValue]? = nil, imageCount: Int = 0
     ) {
       self.kind = kind
       self.offset = offset
       self.text = text
       self.requestId = requestId
       self.optionId = optionId
+      self.content = content
       self.imageCount = imageCount
     }
 
@@ -36,6 +40,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
       text = try container.decodeIfPresent(String.self, forKey: .text)
       requestId = try container.decodeIfPresent(ACPID.self, forKey: .requestId)
       optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
+      content = try container.decodeIfPresent([String: ChatQuestionValue].self, forKey: .content)
       imageCount = try container.decodeIfPresent(Int.self, forKey: .imageCount) ?? 0
     }
 
@@ -48,6 +53,9 @@ struct ChatJournal: Codable, Equatable, Sendable {
       case .answer:
         guard let requestId, let optionId else { return nil }
         return .permissionAnswered(requestId: requestId, optionId: optionId)
+      case .questionAnswer:
+        guard let requestId, let action = optionId.flatMap(ChatQuestionAction.init(rawValue:)) else { return nil }
+        return .questionAnswered(requestId: requestId, action: action, content: content ?? [:])
       case .hostAnswer:
         guard let requestId, let optionId else { return nil }
         return .hostAnswered(requestId: requestId, optionId: optionId)
@@ -61,7 +69,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
   var entries: [Entry] = []
 
   var answeredRequestIds: Set<ACPID> {
-    Set(entries.compactMap { $0.kind == .answer || $0.kind == .hostAnswer ? $0.requestId : nil })
+    Set(entries.compactMap { [.answer, .hostAnswer, .questionAnswer].contains($0.kind) ? $0.requestId : nil })
   }
 
   /// The entries a reducer standing at `offset` has applied, in the order they were journaled.
@@ -72,7 +80,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
 /// `offset` instead of replaying everything. The journal stays authoritative: the snapshot only
 /// counts which of its entries it already reflects.
 struct ChatSnapshot: Codable, Equatable, Sendable {
-  static let currentVersion = 1
+  static let currentVersion = 2
 
   var version = ChatSnapshot.currentVersion
   /// The host session's created time (unix seconds): a session recreated under the same name has another.
@@ -100,14 +108,22 @@ struct ChatSnapshot: Codable, Equatable, Sendable {
       && Self.digest(applied.prefix(journalApplied)) == journalDigest
   }
 
+  private static func canonical(_ content: [String: ChatQuestionValue]) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    return (try? encoder.encode(content)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+  }
+
   /// FNV-1a over the entries' fields; `Hasher` is seeded per process, so it cannot be stored.
   static func digest(_ entries: some Sequence<ChatJournal.Entry>) -> String {
     var hash: UInt64 = 0xcbf2_9ce4_8422_2325
     for entry in entries {
-      let line = [
+      var fields = [
         entry.kind.rawValue, "\(entry.offset)", entry.text ?? "", entry.requestId.map { "\($0)" } ?? "",
         entry.optionId ?? "", "\(entry.imageCount)",
-      ].joined(separator: "\u{1F}") + "\n"
+      ]
+      if let content = entry.content { fields.append(canonical(content)) }
+      let line = fields.joined(separator: "\u{1F}") + "\n"
       for byte in line.utf8 {
         hash ^= UInt64(byte)
         hash = hash &* 0x0000_0100_0000_01B3
