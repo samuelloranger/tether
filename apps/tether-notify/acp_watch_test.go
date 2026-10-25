@@ -1,0 +1,423 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+type fakeRelay struct {
+	mu     sync.Mutex
+	status int
+	got    []PushContent
+	reqs   []relayRequest
+	key    string
+}
+
+func newFakeRelay(t *testing.T, status int) *fakeRelay {
+	t.Helper()
+	fr := &fakeRelay{status: status, key: generateSecretKeyBase64()}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req relayRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		fr.mu.Lock()
+		defer fr.mu.Unlock()
+		if fr.status == http.StatusOK {
+			c, err := decryptPushContent(fr.key, req.Ciphertext)
+			if err != nil {
+				t.Errorf("decrypt: %v", err)
+			}
+			fr.got = append(fr.got, c)
+			fr.reqs = append(fr.reqs, req)
+		}
+		w.WriteHeader(fr.status)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("TETHER_PUSH_RELAY_URL", srv.URL)
+	if err := saveDevices([]Device{{Token: "tok", SecretKey: fr.key}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostLabelPath(), []byte("box"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return fr
+}
+
+func (fr *fakeRelay) pushes() []PushContent {
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	return append([]PushContent(nil), fr.got...)
+}
+
+func (fr *fakeRelay) waitPushes(t *testing.T, n int) []PushContent {
+	t.Helper()
+	waitFor(t, fmt.Sprintf("%d pushes", n), func() bool { return len(fr.pushes()) >= n })
+	return fr.pushes()
+}
+
+// scriptedAgent runs a shell agent that logs whole stdin to in.log and prints each emit.N
+// file (in order) to stdout once it appears.
+type scriptedAgent struct {
+	dir string
+	n   int
+}
+
+func newScriptedAgent(t *testing.T) (*scriptedAgent, string) {
+	dir := t.TempDir()
+	script := fmt.Sprintf(`n=0; while :; do f=%[1]s/emit.$n; if [ -f $f ]; then cat $f; n=$((n+1)); else sleep 0.03; fi; done & cat >> %[1]s/in.log`, dir)
+	return &scriptedAgent{dir: dir}, script
+}
+
+func (a *scriptedAgent) emit(t *testing.T, line string) {
+	t.Helper()
+	tmp := filepath.Join(a.dir, "tmp")
+	if err := os.WriteFile(tmp, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, filepath.Join(a.dir, fmt.Sprintf("emit.%d", a.n))); err != nil {
+		t.Fatal(err)
+	}
+	a.n++
+}
+
+func (a *scriptedAgent) stdin() string {
+	b, _ := os.ReadFile(filepath.Join(a.dir, "in.log"))
+	return string(b)
+}
+
+const permReq = `{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t","title":"Write out.txt","kind":"edit"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"always","name":"Always allow","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}`
+
+// startDetached spawns the holder and drops the client, leaving nobody attached.
+func startDetached(t *testing.T, name, script string) {
+	t.Helper()
+	cleanupSession(t, name)
+	p := startAttach(t, name, "--spawn", script, "--cwd", t.TempDir())
+	_ = p.stdin.Close()
+	if code := p.exitCode(t); code != 0 {
+		t.Fatalf("attach exit %d", code)
+	}
+	time.Sleep(250 * time.Millisecond)
+}
+
+func runAcp(t *testing.T, args ...string) (string, string, int) {
+	t.Helper()
+	exe, _ := os.Executable()
+	cmd := exec.Command(exe, append([]string{"acp"}, args...)...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return out.String(), errb.String(), code
+}
+
+func pendingCount(name string) int {
+	return len(loadACPTracker(name).st.Requests)
+}
+
+func TestACPPermissionPushedOnceWithNoClient(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "p", script)
+	a.emit(t, `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"session_info_update","title":"Fix the bug"}}}`)
+	a.emit(t, permReq)
+	got := fr.waitPushes(t, 1)
+	time.Sleep(300 * time.Millisecond)
+	if got = fr.pushes(); len(got) != 1 {
+		t.Fatalf("want one push, got %d", len(got))
+	}
+	c := got[0]
+	if c.Category != acpPermissionCategory || c.Level != levelUrgent || c.Body != "Allow: Write out.txt?" ||
+		c.Session != "Fix the bug" || c.ACPSession != "p" || c.RequestID != "7" || c.Title != "Fix the bug · needs you" {
+		t.Fatalf("payload %+v", c)
+	}
+	if strings.Join(c.Options, ",") != "Allow,Always allow,Reject" || strings.Join(c.OptionIDs, ",") != "allow,always,reject" ||
+		strings.Join(c.OptionKinds, ",") != "allow_once,allow_always,reject_once" {
+		t.Fatalf("options %+v", c)
+	}
+	if want := threadKey("box", "Fix the bug"); fr.reqs[0].ThreadKey != want || fr.reqs[0].Level != levelUrgent {
+		t.Fatalf("relay request %+v", fr.reqs[0])
+	}
+	if pendingCount("p") != 1 {
+		t.Fatal("request should be pending")
+	}
+}
+
+func TestACPNoPushWhenClientAttached(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "c")
+	p := startAttach(t, "c", "--spawn", script, "--cwd", t.TempDir())
+	a.emit(t, permReq)
+	if l := p.readLine(t); !strings.Contains(l, "request_permission") {
+		t.Fatalf("got %q", l)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if n := len(fr.pushes()); n != 0 {
+		t.Fatalf("pushed %d with a client attached", n)
+	}
+	if pendingCount("c") != 1 {
+		t.Fatal("request should still be tracked")
+	}
+}
+
+func TestACPNoDuplicatePushOnReplayOrRestart(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	var pushed []PushContent
+	mk := func() *acpDaemonState {
+		return &acpDaemonState{tr: loadACPTracker("d"), push: func(c PushContent, _ string) error { pushed = append(pushed, c); return nil }}
+	}
+	_ = os.MkdirAll(acpDir("d"), 0o700)
+	s := mk()
+	s.scanAgent([]byte(permReq + "\n"))
+	s.pushes.Wait()
+	s = mk()
+	s.scanAgent([]byte(permReq + "\n"))
+	s.scanAgent([]byte(permReq + "\n"))
+	s.pushes.Wait()
+	if len(pushed) != 1 {
+		t.Fatalf("pushed %d times", len(pushed))
+	}
+	if n := len(fr.pushes()); n != 0 {
+		t.Fatal("relay should be untouched")
+	}
+	// Answered ids are never re-announced either.
+	tr := loadACPTracker("d")
+	if err := tr.answer("7", "allow", func(*acpRequest) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	s = mk()
+	s.scanAgent([]byte(permReq + "\n"))
+	s.pushes.Wait()
+	if len(pushed) != 1 || len(s.tr.st.Requests) != 0 {
+		t.Fatalf("answered id re-announced: %d %v", len(pushed), s.tr.st.Requests)
+	}
+}
+
+func TestACPScanToleratesGarbageAndSplitChunks(t *testing.T) {
+	acpEnv(t)
+	_ = os.MkdirAll(acpDir("g"), 0o700)
+	var pushed []PushContent
+	s := &acpDaemonState{tr: loadACPTracker("g"), push: func(c PushContent, _ string) error { pushed = append(pushed, c); return nil }}
+	s.scanAgent([]byte("not json\n{\"id\":\n\n"))
+	half := len(permReq) / 2
+	s.scanAgent([]byte(permReq[:half]))
+	s.scanAgent([]byte(permReq[half:] + "\n"))
+	s.pushes.Wait()
+	if len(pushed) != 1 {
+		t.Fatalf("pushed %d", len(pushed))
+	}
+}
+
+func TestACPAnswerWritesOneWholeLineAndSecondExits3(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "a", script)
+	a.emit(t, permReq)
+	waitFor(t, "pending", func() bool { return pendingCount("a") == 1 })
+
+	out, errs, code := runAcp(t, "answer", "a", "--request", "7", "--option", "allow")
+	if code != 0 {
+		t.Fatalf("exit %d %q %q", code, out, errs)
+	}
+	want := `{"id":7,"jsonrpc":"2.0","result":{"outcome":{"optionId":"allow","outcome":"selected"}}}` + "\n"
+	waitFor(t, "agent stdin", func() bool { return a.stdin() != "" })
+	if got := a.stdin(); got != want {
+		t.Fatalf("agent saw %q", got)
+	}
+	if pendingCount("a") != 0 {
+		t.Fatal("pending not cleared")
+	}
+	_, errs, code = runAcp(t, "answer", "a", "--request", "7", "--option", "allow")
+	if code != 3 || !strings.Contains(errs, "not outstanding") {
+		t.Fatalf("second answer exit %d %q", code, errs)
+	}
+	if a.stdin() != want {
+		t.Fatal("second answer reached the agent")
+	}
+	out, _, code = runAcp(t, "answers", "a")
+	if code != 0 {
+		t.Fatalf("answers exit %d", code)
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(out), &m); err != nil || len(m) != 1 || m["7"] != "allow" {
+		t.Fatalf("answers %q", out)
+	}
+}
+
+func TestACPAnswerCancelAndStringID(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "x", script)
+	a.emit(t, strings.Replace(permReq, `"id":7`, `"id":"abc 1"`, 1))
+	waitFor(t, "pending", func() bool { return pendingCount("x") == 1 })
+	if _, errs, code := runAcp(t, "answer", "x", "--request", `"abc 1"`, "--cancel"); code != 0 {
+		t.Fatalf("exit %d %q", code, errs)
+	}
+	waitFor(t, "agent stdin", func() bool { return a.stdin() != "" })
+	want := `{"id":"abc 1","jsonrpc":"2.0","result":{"outcome":{"outcome":"cancelled"}}}` + "\n"
+	if got := a.stdin(); got != want {
+		t.Fatalf("agent saw %q", got)
+	}
+	out, _, _ := runAcp(t, "answers", "x")
+	if !strings.Contains(out, `"\"abc 1\"":"cancelled"`) {
+		t.Fatalf("answers %q", out)
+	}
+}
+
+func TestACPAnswersEmpty(t *testing.T) {
+	acpEnv(t)
+	_, script := newScriptedAgent(t)
+	startDetached(t, "e2", script)
+	out, _, code := runAcp(t, "answers", "e2")
+	if code != 0 || strings.TrimSpace(out) != "{}" {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	if _, _, code := runAcp(t, "answers", "nope"); code != 3 {
+		t.Fatalf("missing session exit %d", code)
+	}
+}
+
+func TestACPAnswerNeverInterleavesWithClientStream(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "i")
+	p := startAttach(t, "i", "--spawn", script, "--cwd", t.TempDir())
+	a.emit(t, permReq)
+	p.readLine(t)
+	waitFor(t, "pending", func() bool { return pendingCount("i") == 1 })
+	// The attached client is mid-line when the answer arrives.
+	long := `{"jsonrpc":"2.0","id":1,"method":"x","params":"` + strings.Repeat("z", 400<<10) + `"}`
+	half := len(long) / 2
+	fmt.Fprint(p.stdin, long[:half])
+	time.Sleep(200 * time.Millisecond)
+	if _, errs, code := runAcp(t, "answer", "i", "--request", "7", "--option", "reject"); code != 0 {
+		t.Fatalf("answer exit %d %q", code, errs)
+	}
+	fmt.Fprint(p.stdin, long[half:]+"\n")
+	fmt.Fprint(p.stdin, `{"jsonrpc":"2.0","id":2,"method":"y"}`+"\n")
+	waitFor(t, "all lines", func() bool { return strings.Count(a.stdin(), "\n") == 3 })
+	lines := strings.Split(strings.TrimSuffix(a.stdin(), "\n"), "\n")
+	for _, l := range lines {
+		var v map[string]any
+		if err := json.Unmarshal([]byte(l), &v); err != nil {
+			t.Fatalf("partial or interleaved line (%d bytes): %v", len(l), err)
+		}
+	}
+	if !strings.Contains(lines[0], `"selected"`) || lines[1] != long {
+		t.Fatalf("order/content wrong: %.80q", lines[0])
+	}
+}
+
+func TestACPPhoneResponseThroughAttachClearsPending(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "r2")
+	p := startAttach(t, "r2", "--spawn", script, "--cwd", t.TempDir())
+	a.emit(t, permReq)
+	p.readLine(t)
+	waitFor(t, "pending", func() bool { return pendingCount("r2") == 1 })
+	fmt.Fprint(p.stdin, `{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}`+"\n")
+	waitFor(t, "cleared", func() bool { return pendingCount("r2") == 0 })
+	_, _, code := runAcp(t, "answer", "r2", "--request", "7", "--option", "allow")
+	if code != 3 {
+		t.Fatalf("exit %d", code)
+	}
+	if n := strings.Count(a.stdin(), "\n"); n != 1 {
+		t.Fatalf("agent saw %d lines", n)
+	}
+}
+
+func TestACPDonePushOnTurnEndWithNoClient(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "t")
+	p := startAttach(t, "t", "--spawn", script, "--cwd", t.TempDir())
+	fmt.Fprint(p.stdin, `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[]}}`+"\n")
+	waitFor(t, "prompt seen", func() bool { return strings.Contains(a.stdin(), "session/prompt") })
+	_ = p.stdin.Close()
+	p.exitCode(t)
+	a.emit(t, permReq)
+	fr.waitPushes(t, 1)
+	a.emit(t, `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`)
+	got := fr.waitPushes(t, 2)
+	d := got[1]
+	if d.Category != acpDoneCategory || d.Level != levelQuiet || d.StopReason != "end_turn" || !strings.Contains(d.Body, "end_turn") || d.Title != "t" {
+		t.Fatalf("done push %+v", d)
+	}
+	if pendingCount("t") != 0 {
+		t.Fatal("turn end should clear outstanding requests")
+	}
+	if _, _, code := runAcp(t, "answer", "t", "--request", "7", "--option", "allow"); code != 3 {
+		t.Fatalf("answer after turn end exit %d", code)
+	}
+}
+
+func TestACPNoDonePushWhenClientAttached(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "n")
+	p := startAttach(t, "n", "--spawn", script, "--cwd", t.TempDir())
+	fmt.Fprint(p.stdin, `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{}}`+"\n")
+	waitFor(t, "prompt seen", func() bool { return strings.Contains(a.stdin(), "session/prompt") })
+	a.emit(t, `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`)
+	p.readLine(t)
+	time.Sleep(300 * time.Millisecond)
+	if n := len(fr.pushes()); n != 0 {
+		t.Fatalf("pushed %d", n)
+	}
+}
+
+func TestACPPushFailureDoesNotBreakAgentOrAttach(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 500)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "f", script)
+	a.emit(t, permReq)
+	waitFor(t, "pending", func() bool { return pendingCount("f") == 1 })
+	waitFor(t, "notified", func() bool { return loadACPTracker("f").st.Requests["7"].Notified })
+	p := startAttach(t, "f")
+	if l := p.readLine(t); !strings.Contains(l, "request_permission") {
+		t.Fatalf("replay %q", l)
+	}
+	if _, errs, code := runAcp(t, "answer", "f", "--request", "7", "--option", "allow"); code != 0 {
+		t.Fatalf("answer exit %d %q", code, errs)
+	}
+}
+
+func TestACPPushRelayDownDoesNotBreakAgent(t *testing.T) {
+	acpEnv(t)
+	t.Setenv("TETHER_PUSH_RELAY_URL", "http://127.0.0.1:1")
+	if err := saveDevices([]Device{{Token: "tok", SecretKey: generateSecretKeyBase64()}}); err != nil {
+		t.Fatal(err)
+	}
+	a, script := newScriptedAgent(t)
+	startDetached(t, "dn", script)
+	a.emit(t, permReq)
+	waitFor(t, "pending", func() bool { return pendingCount("dn") == 1 })
+	if _, errs, code := runAcp(t, "answer", "dn", "--request", "7", "--option", "allow"); code != 0 {
+		t.Fatalf("answer exit %d %q", code, errs)
+	}
+}

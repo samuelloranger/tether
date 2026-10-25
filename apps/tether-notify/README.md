@@ -95,6 +95,34 @@ exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `at
 sends what is already logged and exits; `--linger 30s` keeps following until output has
 been idle that long.
 
+### Permission requests while nobody is attached
+
+The daemon reads the agent's stream (it still forwards every byte untouched) and tracks
+`session/request_permission` requests, `session_info_update` chat titles and the end of
+each `session/prompt` turn. Outstanding requests live in `acp/<name>/pending.json`.
+
+- When a permission request arrives and no client is attached, one encrypted push goes
+  out for that request (category `tether.acp.permission`, urgent, body `Allow: <tool>?`).
+  A request is never pushed twice, even across a daemon restart or a log replay. The push
+  carries `acp` (session name), `requestId` (the JSON-RPC id as JSON text), `options`
+  (button labels, at most 4, only when there are 2 or more), and parallel `optionIds` and
+  `optionKinds`. Nothing is pushed when a client is attached.
+- When a `session/prompt` turn ends and no client is attached, a quiet push
+  (`tether.acp.done`, with `stopReason`) goes out.
+- A response the attached client sends for a request clears it. Whole lines only are
+  written to the agent's stdin, so a daemon-originated line never lands inside a client's
+  half-written line (a partial line left by a dropped client is discarded).
+
+    tether-notify acp answer chat1 --request 7 --option allow   # or: --request 7 --cancel
+    tether-notify acp answers chat1                             # {"7":"allow"}
+
+`answer` goes through the daemon, which writes the JSON-RPC response (`outcome` `selected`
+with the `optionId`, or `cancelled`) to the agent and records it in `answers.json`.
+`--request` is the id as JSON text (`7`, `"abc"`; a value that is not valid JSON is taken
+as a string id). Exit 3 means the request is not outstanding (answered from elsewhere, or
+the agent moved on); `answers` prints the recorded answers (`{}` when none) so a
+reconnecting client can merge them into its transcript.
+
 Devices live in `~/.tether-notify/devices.json`, session state in
 `~/.tether-notify/sessions/` (override the directory with `TETHER_NOTIFY_HOME`).
 zmx is found at `TETHER_ZMX`, else `~/.local/bin/zmx`, else on `PATH`. Relay URL defaults to the official one; override with

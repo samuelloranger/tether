@@ -35,6 +35,13 @@ type PushContent struct {
 	Session string `json:"session,omitempty"`
 	// Level is the push's urgency (urgent|normal|quiet); see pushLevel.
 	Level string `json:"level,omitempty"`
+	// ACP pushes: the holder session, the JSON-RPC id of the request (raw JSON text), and
+	// the permission options' ids and kinds, parallel to Options (their names).
+	ACPSession  string   `json:"acp,omitempty"`
+	RequestID   string   `json:"requestId,omitempty"`
+	OptionIDs   []string `json:"optionIds,omitempty"`
+	OptionKinds []string `json:"optionKinds,omitempty"`
+	StopReason  string   `json:"stopReason,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

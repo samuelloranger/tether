@@ -45,7 +45,9 @@ func pushLevel(category string) string {
 	switch category {
 	case "tether.agent.waiting", questionCategory:
 		return levelUrgent
-	case "tether.agent.done":
+	case acpPermissionCategory:
+		return levelUrgent
+	case "tether.agent.done", acpDoneCategory:
 		return levelQuiet
 	}
 	return levelNormal
@@ -117,6 +119,9 @@ func main() {
 		case errors.Is(err, errNoSession):
 			fmt.Fprintln(os.Stderr, "tether-notify: no such acp session")
 			os.Exit(3)
+		case errors.Is(err, errNotOutstanding):
+			fmt.Fprintln(os.Stderr, "tether-notify: that request is not outstanding (already answered, or the agent moved on)")
+			os.Exit(3)
 		case errors.Is(err, errReplaced):
 			fmt.Fprintln(os.Stderr, "tether-notify: replaced by another client")
 			os.Exit(5)
@@ -161,6 +166,10 @@ func usage() {
                                              hold an ACP agent that outlives ssh: raw JSON-RPC on
                                              stdin/stdout, replayed from byte N of its log (exit 3
                                              if no session and no --spawn; 5 if replaced)
+  acp answer NAME --request ID (--option OPTION_ID | --cancel)
+                                             answer a held session/request_permission request through the
+                                             daemon (exit 3 if it is not outstanding)
+  acp answers NAME                           print the answers made this way as JSON {"<id>":"<optionId>|cancelled"}
   acp ls | acp kill NAME                     list or stop held agents
   list                                       list registered phones
   remove <token>                             forget a phone

@@ -94,7 +94,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|ls|kill")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|kill")
 	}
 	switch args[0] {
 	case "attach":
@@ -104,6 +104,13 @@ func runACP(args []string) error {
 			return fmt.Errorf("usage: acp daemon <name>")
 		}
 		return acpDaemon(args[1])
+	case "answer":
+		return acpAnswer(args[1:])
+	case "answers":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: acp answers <name>")
+		}
+		return acpAnswers(args[1], os.Stdout)
 	case "ls":
 		return acpLs(os.Stdout)
 	case "kill":
@@ -254,6 +261,12 @@ type acpDaemonState struct {
 	clients int
 	stdin   io.WriteCloser
 	log     *os.File
+	tr      *acpTracker
+	errf    io.Writer
+	push    func(PushContent, string) error
+	pushes  sync.WaitGroup
+	partial []byte
+	skip    bool
 }
 
 func (s *acpDaemonState) broadcast() {
@@ -311,7 +324,11 @@ func acpDaemon(name string) error {
 	}
 	cmd.Stdout = pw
 
-	s := &acpDaemonState{notify: make(chan struct{}), stdin: stdin, log: logf}
+	s := &acpDaemonState{
+		notify: make(chan struct{}), stdin: stdin, log: logf, errf: errf,
+		tr:   loadACPTracker(name),
+		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
+	}
 	startErr := cmd.Start()
 	pw.Close()
 	m.Pid = os.Getpid()
@@ -336,6 +353,7 @@ func acpDaemon(name string) error {
 					s.broadcast()
 					s.mu.Unlock()
 				}
+				s.scanAgent(buf[:n])
 			}
 			if err != nil {
 				return
@@ -370,6 +388,7 @@ func acpDaemon(name string) error {
 	s.broadcast()
 	s.mu.Unlock()
 	ln.Close()
+	waitTimeout(&s.pushes, 15*time.Second)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -390,6 +409,10 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 	line, err := r.ReadString('\n')
 	if err != nil {
 		conn.Close()
+		return
+	}
+	if rest, ok := strings.CutPrefix(line, "answer "); ok {
+		s.control(conn, rest)
 		return
 	}
 	var from, lingerMs int64
@@ -424,16 +447,25 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 	go func() {
 		defer close(done)
 		buf := make([]byte, 32*1024)
+		var pend []byte
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
-				s.mu.Lock()
-				if s.cur != me {
+				var lines [][]byte
+				lines, pend = splitLines(pend, buf[:n])
+				for _, l := range lines {
+					s.mu.Lock()
+					if s.cur != me {
+						s.mu.Unlock()
+						return
+					}
+					s.tr.clientLine(l)
+					_, _ = s.stdin.Write(l)
 					s.mu.Unlock()
+				}
+				if len(pend) > maxACPLine {
 					return
 				}
-				_, _ = s.stdin.Write(buf[:n])
-				s.mu.Unlock()
 			}
 			if err != nil {
 				s.mu.Lock()
