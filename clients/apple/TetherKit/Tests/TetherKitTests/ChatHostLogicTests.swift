@@ -154,4 +154,34 @@ final class ChatHostLogicTests: XCTestCase {
     XCTAssertEqual(state.items.map(\.kind), [.user(text: "again", offset: 0)])
     XCTAssertEqual(state.turn, .idle)
   }
+
+  func test_parent_path_and_agent_label_for_a_chat_row() {
+    XCTAssertEqual(ChatFormat.parentPath("/home/dev/projects/api"), "/home/dev/projects")
+    XCTAssertEqual(ChatFormat.parentPath("/srv"), "/")
+    XCTAssertEqual(ChatFormat.parentPath("~/work/api"), "~/work")
+    XCTAssertNil(ChatFormat.parentPath("~"))
+    XCTAssertNil(ChatFormat.parentPath("/"))
+    XCTAssertEqual(ChatFormat.agentLabel(spawn: "npx -y @agentclientprotocol/claude-agent-acp"), "Claude")
+    XCTAssertEqual(ChatFormat.agentLabel(spawn: "codex-acp"), "Codex")
+    XCTAssertNil(ChatFormat.agentLabel(spawn: "npx -y something"))
+  }
+
+  func test_context_fraction_is_clamped_and_needs_a_size() {
+    XCTAssertEqual(ChatFormat.contextFraction(used: 250, size: 1000), 0.25)
+    XCTAssertEqual(ChatFormat.contextFraction(used: 2000, size: 1000), 1)
+    XCTAssertNil(ChatFormat.contextFraction(used: 5, size: 0))
+    XCTAssertNil(ChatFormat.contextFraction(used: nil, size: 10))
+  }
+
+  func test_permission_slots_split_allow_deny_and_broader_allows() {
+    let options = [
+      ACPPermissionOption(optionId: "always", name: "Yes, allow all edits", kind: "allow_always"),
+      ACPPermissionOption(optionId: "no", name: "No", kind: "reject_once"),
+      ACPPermissionOption(optionId: "once", name: "Yes", kind: "allow_once"),
+    ]
+    let slots = ChatPermissionOptions.slots(options)
+    XCTAssertEqual(slots.allow?.optionId, "once")
+    XCTAssertEqual(slots.deny?.optionId, "no")
+    XCTAssertEqual(slots.extras.map(\.optionId), ["always"])
+  }
 }

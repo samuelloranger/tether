@@ -193,11 +193,47 @@ enum ChatPermissionOptions {
   }
 }
 
+extension ChatPermissionOptions {
+  /// The three slots of the permission card: the one-off allow, the deny, and any broader allows.
+  static func slots(_ options: [ACPPermissionOption]) -> (
+    allow: ACPPermissionOption?, deny: ACPPermissionOption?, extras: [ACPPermissionOption]
+  ) {
+    let ordered = Self.ordered(options)
+    let allow = ordered.first { $0.role == .primary }?.option
+    let deny = ordered.first { $0.role == .destructive }?.option
+    let extras = ordered.filter { $0.option.optionId != allow?.optionId && $0.option.optionId != deny?.optionId }
+    return (allow, deny, extras.map(\.option))
+  }
+}
+
 enum ChatFormat {
   static func folderName(_ cwd: String) -> String {
     let trimmed = cwd.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     guard let last = trimmed.split(separator: "/").last else { return cwd == "/" ? "/" : "Home" }
     return String(last)
+  }
+
+  /// The folder a chat sits in, for the row's subtitle; nil at the root or for a bare `~`.
+  static func parentPath(_ cwd: String) -> String? {
+    var parts = cwd.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    guard !parts.isEmpty, cwd != "~" else { return nil }
+    parts.removeLast()
+    if parts.isEmpty { return cwd.hasPrefix("/") ? "/" : nil }
+    return (cwd.hasPrefix("/") ? "/" : "") + parts.joined(separator: "/")
+  }
+
+  /// A short agent name from the command the host spawned, nil when it is not a known one.
+  static func agentLabel(spawn: String) -> String? {
+    let lower = spawn.lowercased()
+    for (needle, label) in [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini"), ("cursor", "Cursor")]
+    where lower.contains(needle) { return label }
+    return nil
+  }
+
+  /// Used share of the context window in 0...1; nil when the agent reported no size.
+  static func contextFraction(used: Int?, size: Int?) -> Double? {
+    guard let used, let size, size > 0 else { return nil }
+    return max(0, min(1, Double(used) / Double(size)))
   }
 
   /// 31043 -> "31k", 1_000_000 -> "1M".
