@@ -57,6 +57,12 @@ struct ACPToolFields: Equatable, Sendable {
   var diff: ACPDiff?
   var text: String?
   var rawOutput: String?
+  /// `_meta.claudeCode.toolName`, which tells a subagent launch ("Agent", older "Task") from any other call.
+  var toolName: String?
+  /// `_meta.claudeCode.parentToolUseId`: set on a subagent's own tool calls.
+  var parentId: String?
+  /// Scalar fields of `rawInput`, stringified; a subagent launch fills them in progressively.
+  var input: [String: String]?
 }
 
 struct ACPPlanEntry: Equatable, Sendable {
@@ -261,6 +267,20 @@ enum ACPDecoder {
     guard let id = object["toolCallId"] as? String else { return nil }
     var fields = ACPToolFields(id: id)
     fields.title = object["title"] as? String
+    let meta = (object["_meta"] as? JSON)?["claudeCode"] as? JSON
+    fields.toolName = meta?["toolName"] as? String
+    fields.parentId = meta?["parentToolUseId"] as? String
+    if let input = object["rawInput"] as? JSON {
+      var scalars: [String: String] = [:]
+      for (key, value) in input {
+        if let text = value as? String {
+          scalars[key] = text
+        } else if let number = value as? NSNumber {
+          scalars[key] = CFGetTypeID(number) == CFBooleanGetTypeID() ? (number.boolValue ? "true" : "false") : number.stringValue
+        }
+      }
+      if !scalars.isEmpty { fields.input = scalars }
+    }
     fields.kind = (object["kind"] as? String).flatMap(ACPToolKind.init(rawValue:)) ?? (object["kind"] == nil ? nil : .other)
     fields.status = (object["status"] as? String).flatMap(ACPToolStatus.init(rawValue:))
     var texts: [String] = []

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=list` shows the chat list, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
+/// the question, `=stream` drips a long reply over several seconds, `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -30,15 +30,74 @@ enum ChatFixture {
 
   private static func tool(
     _ id: String, _ title: String, kind: String, status: String, text: String? = nil, diff: [String: Any]? = nil,
-    update isUpdate: Bool = false
+    update isUpdate: Bool = false, parent: String? = nil, toolName: String? = nil, input: [String: Any]? = nil
   ) -> [String: Any] {
     var content: [[String: Any]] = []
     if let text { content.append(["type": "content", "content": ["type": "text", "text": text]]) }
     if let diff { content.append(diff) }
-    return [
+    var frame: [String: Any] = [
       "sessionUpdate": isUpdate ? "tool_call_update" : "tool_call", "toolCallId": id, "title": title,
       "kind": kind, "status": status, "content": content,
     ]
+    var claude: [String: Any] = [:]
+    if let parent { claude["parentToolUseId"] = parent }
+    if let toolName { claude["toolName"] = toolName }
+    if !claude.isEmpty { frame["_meta"] = ["claudeCode": claude] }
+    if let input { frame["rawInput"] = input }
+    return frame
+  }
+
+  /// Set by the debug root so the subagent rows open already expanded.
+  nonisolated(unsafe) static var openSubagents = false
+
+  private static let subagentBrief = """
+  Check that the migration is safe to run twice.
+
+  - read `db/migrate.ts` and list every statement that is not idempotent
+  - run the migration test suite and report failures
+  - do not edit any file outside `db/`
+
+  Reply with a short report: what you checked, what failed, what you changed.
+  """
+
+  /// A foreground and a background subagent between ordinary tool rows. The background one is still
+  /// running when the log ends.
+  @MainActor
+  static func subagentsModel() -> ChatSessionModel {
+    var lines: [String] = [
+      update(["sessionUpdate": "session_info_update", "title": "Migration check"]),
+      update(tool("m1", "Read db/migrate.ts", kind: "read", status: "completed", text: "export async function migrate() {}")),
+      update(tool("a1", "Task", kind: "think", status: "pending", toolName: "Agent", input: [:])),
+      update(tool("a1", "run the migration check", kind: "think", status: "in_progress", update: true, toolName: "Agent", input: ["description": "run the migration check"])),
+      update(tool("a1", "run the migration check", kind: "think", status: "in_progress", update: true, toolName: "Agent", input: ["description": "run the migration check", "model": "sonnet"])),
+      update(tool("a1", "run the migration check", kind: "think", status: "in_progress", update: true, toolName: "Agent", input: ["description": "run the migration check", "model": "sonnet", "prompt": subagentBrief])),
+      update(tool("c1", "Read db/migrate.ts", kind: "read", status: "completed", text: "export async function migrate() {}", parent: "a1")),
+      update(tool("c2", "bun test db/migrate.test.ts", kind: "execute", status: "completed",
+        text: "```console\n✓ creates the tables\n✗ runs twice without error\n\n 1 pass, 1 fail\n```", parent: "a1")),
+      update(tool("c3", "Edit src/fetch.ts", kind: "edit", status: "completed", diff: editDiff, parent: "a1")),
+      update(tool("c4", "WebSearch: sql create table if not exists", kind: "fetch", status: "completed", text: "3 results", parent: "a1")),
+      update(tool("a1", "run the migration check", kind: "think", status: "completed",
+        text: "The migration was **not** safe to run twice: one `CREATE TABLE` lacked `IF NOT EXISTS`.\n\n- fixed in `db/migrate.ts`\n- the suite now passes (2 of 2)", update: true, toolName: "Agent")),
+      message("The check found one non-idempotent statement and fixed it. I'll also have a background agent audit the seed scripts."),
+      update(tool("m2", "bun test", kind: "execute", status: "completed", text: "```console\n 2 pass, 0 fail\n```")),
+      update(tool("b1", "Task", kind: "think", status: "pending", toolName: "Agent", input: [:])),
+      update(tool("b1", "audit the seed scripts", kind: "think", status: "completed",
+        text: "Async agent launched successfully. (This tool result is internal metadata for the host.)\nagentId: agent-b1", update: true, toolName: "Agent",
+        input: ["description": "audit the seed scripts", "model": "haiku", "run_in_background": true, "prompt": "List the seed scripts that insert without a conflict clause."])),
+      update(tool("d1", "Read db/seed.ts", kind: "read", status: "completed", text: "export const seed = []", parent: "b1")),
+      update(tool("d2", "grep -n insert db/seed.ts", kind: "execute", status: "completed", text: "12: insert into users", parent: "b1")),
+      update(tool("d3", "Read db/seed-users.ts", kind: "read", status: "in_progress", parent: "b1")),
+    ]
+    lines.append(update(["sessionUpdate": "usage_update", "used": 30_000, "size": 1_000_000]))
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: "Check that the migration is safe to run twice.")]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(journal)
+    ) { _ in FixtureByteStream(log: log) }
   }
 
   private static let editDiff: [String: Any] = [
@@ -397,6 +456,9 @@ public struct ChatFixtureRoot: View {
     switch mode {
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
+    case "subagents", "subagents-open", "subagents-open-top":
+      ChatFixture.openSubagents = mode != "subagents"
+      initial = ChatFixture.subagentsModel()
     case "controls", "controls-sheet", "slash", "attach": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
     }
@@ -410,7 +472,7 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash", startAtTop: mode == "scrolledup",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash", startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "attach" ? "Compare these two screenshots" : "",
           openControls: mode == "controls-sheet", seedAttachments: mode == "attach")
       }

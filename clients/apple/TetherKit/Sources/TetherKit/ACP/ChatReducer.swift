@@ -1,5 +1,26 @@
 import Foundation
 
+/// A subagent launch, as the adapter's `Agent` tool (older `Task`) describes it.
+struct ChatSubagent: Equatable, Sendable {
+  var description: String?
+  var model: String?
+  var subagentType: String?
+  var prompt: String?
+  /// Set by `run_in_background` or by the launch result; a background run reports back as assistant text.
+  var background = false
+
+  static let launchToolNames: Set<String> = ["Agent", "Task"]
+  static let asyncLaunchPrefix = "Async agent launched successfully"
+
+  mutating func merge(_ input: [String: String]) {
+    if let value = input["description"] { description = value }
+    if let value = input["model"] { model = value }
+    if let value = input["subagent_type"] { subagentType = value }
+    if let value = input["prompt"] { prompt = value }
+    if input["run_in_background"] == "true" { background = true }
+  }
+}
+
 struct ChatToolCall: Equatable, Sendable {
   var id: String
   var title: String
@@ -8,6 +29,10 @@ struct ChatToolCall: Equatable, Sendable {
   var diff: ACPDiff?
   var text: String?
   var rawOutput: String?
+  var parentId: String?
+  var subagent: ChatSubagent?
+  /// A launch row's own tool calls, in arrival order.
+  var children: [ChatToolCall] = []
 
   init(_ fields: ACPToolFields) {
     id = fields.id
@@ -15,8 +40,9 @@ struct ChatToolCall: Equatable, Sendable {
     kind = fields.kind ?? .other
     status = fields.status ?? .pending
     diff = fields.diff
-    text = fields.text
-    rawOutput = fields.rawOutput
+    parentId = fields.parentId
+    if let name = fields.toolName, ChatSubagent.launchToolNames.contains(name) { subagent = ChatSubagent() }
+    merge(fields)
   }
 
   mutating func merge(_ fields: ACPToolFields) {
@@ -24,8 +50,30 @@ struct ChatToolCall: Equatable, Sendable {
     if let value = fields.kind { kind = value }
     if let value = fields.status { status = value }
     if let value = fields.diff { diff = value }
-    if let value = fields.text { text = value }
+    if let value = fields.parentId { parentId = value }
     if let value = fields.rawOutput { rawOutput = value }
+    if subagent != nil {
+      if let input = fields.input { subagent?.merge(input) }
+      if let value = fields.text, value.hasPrefix(ChatSubagent.asyncLaunchPrefix) {
+        subagent?.background = true
+      } else if let value = fields.text {
+        text = value
+      }
+    } else if let value = fields.text {
+      text = value
+    }
+  }
+
+  var isRunning: Bool { status == .pending || status == .inProgress }
+
+  /// Whether the row should show a spinner: its own call, or a background run still making calls.
+  var isActive: Bool {
+    isRunning || (subagent?.background == true && children.contains { $0.isRunning })
+  }
+
+  var subagentTitle: String {
+    if let description = subagent?.description, !description.isEmpty { return description }
+    return title == "Task" || title == "Agent" ? "Subagent" : title
   }
 }
 
@@ -87,6 +135,18 @@ struct ChatState: Equatable, Sendable {
   func currentChoice(of id: String) -> String? {
     guard let option = option(id: id) else { return nil }
     return option.choices.first { $0.value == option.currentValue }?.name ?? option.currentValue
+  }
+
+  /// What a running subagent is doing now, for the working indicator.
+  var subagentActivity: String? {
+    for item in items.reversed() {
+      guard case let .tool(call) = item.kind, call.subagent != nil, call.isActive else { continue }
+      guard let latest = call.children.last(where: { $0.isRunning }) ?? call.children.last else {
+        return call.subagentTitle
+      }
+      return "\(call.subagentTitle) \u{00B7} \(latest.title)"
+    }
+    return nil
   }
 
   var pendingPermissions: [ChatPermission] {
@@ -244,13 +304,35 @@ enum ChatReducer {
 
   private static func mergeTool(_ fields: ACPToolFields, creating: Bool, into state: inout ChatState) {
     for index in state.items.indices.reversed() {
-      if case var .tool(call) = state.items[index].kind, call.id == fields.id {
+      guard case var .tool(call) = state.items[index].kind else { continue }
+      if call.id == fields.id {
         call.merge(fields)
         state.items[index].kind = .tool(call)
         return
       }
+      if let child = call.children.firstIndex(where: { $0.id == fields.id }) {
+        call.children[child].merge(fields)
+        state.items[index].kind = .tool(call)
+        return
+      }
     }
-    if creating { append(.tool(ChatToolCall(fields)), to: &state) }
+    guard creating else { return }
+    if let parentId = fields.parentId, let index = launchIndex(for: parentId, in: state),
+      case var .tool(call) = state.items[index].kind
+    {
+      call.children.append(ChatToolCall(fields))
+      state.items[index].kind = .tool(call)
+      return
+    }
+    append(.tool(ChatToolCall(fields)), to: &state)
+  }
+
+  /// The top-level row a child belongs under; a subagent launched by a subagent shares its parent's list.
+  private static func launchIndex(for parentId: String, in state: ChatState) -> Int? {
+    state.items.indices.reversed().first { index in
+      guard case let .tool(call) = state.items[index].kind else { return false }
+      return call.id == parentId || call.children.contains { $0.id == parentId }
+    }
   }
 
   private static func resolve(_ requestId: ACPID, _ optionId: String, in state: inout ChatState) {

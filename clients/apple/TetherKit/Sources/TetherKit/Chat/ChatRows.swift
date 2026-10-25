@@ -181,7 +181,11 @@ struct ToolGroupView: View, Equatable {
   @ViewBuilder private func row(_ item: ChatItem) -> some View {
     switch item.kind {
     case let .tool(call):
-      ToolCallRow(call: call, cwd: cwd, expanded: expandedIDs.contains(item.id)) { toggle(item.id) }
+      if call.subagent != nil {
+        SubagentRow(call: call, cwd: cwd, expanded: expandedIDs.contains(item.id)) { toggle(item.id) }
+      } else {
+        ToolCallRow(call: call, cwd: cwd, expanded: expandedIDs.contains(item.id)) { toggle(item.id) }
+      }
     case let .permission(permission):
       if let resolved = permission.resolvedOptionId {
         ResolvedPermissionRow(permission: permission, optionId: resolved)
@@ -212,6 +216,21 @@ struct ToolRowLayout<Trailing: View>: View {
     }
     .padding(.horizontal, 12)
     .frame(minHeight: 36)
+  }
+}
+
+struct ToolStatusGlyph: View {
+  let status: ACPToolStatus
+  let active: Bool
+
+  var body: some View {
+    if active {
+      ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
+    } else if status == .failed {
+      Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.danger)
+    } else {
+      Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
+    }
   }
 }
 
@@ -263,16 +282,7 @@ struct ToolCallRow: View {
     .accessibilityHint(expandable ? (expanded ? "Hides the details" : "Shows the details") : "")
   }
 
-  @ViewBuilder private var statusGlyph: some View {
-    switch call.status {
-    case .pending, .inProgress:
-      ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
-    case .completed:
-      Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
-    case .failed:
-      Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.danger)
-    }
-  }
+  private var statusGlyph: some View { ToolStatusGlyph(status: call.status, active: call.isRunning) }
 
   private var statusWord: String {
     switch call.status {
@@ -430,6 +440,7 @@ struct FailedMessageRow: View {
 
 /// "Working…" with a light sweep; plain under Reduce Motion.
 struct WorkingIndicator: View {
+  var activity: String?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
@@ -444,15 +455,16 @@ struct WorkingIndicator: View {
       }
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("The agent is working")
+    .accessibilityLabel(activity.map { "The agent is working: \($0)" } ?? "The agent is working")
   }
 
   private func label(sweep: Double) -> some View {
     let mid = min(1, max(0, sweep))
     let lead = max(0, min(mid, sweep - 0.25))
     let trail = max(mid, min(1, sweep + 0.25))
-    return Text("Working…")
+    return Text(activity ?? "Working…")
       .font(.footnote.weight(.medium))
+      .lineLimit(1).truncationMode(.middle)
       .foregroundStyle(
         LinearGradient(
           stops: [

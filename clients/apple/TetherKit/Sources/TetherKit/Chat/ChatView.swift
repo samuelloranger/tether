@@ -105,11 +105,11 @@ struct ChatView: View {
       ForEach(ChatGrouping.blocks(visibleItems)) { block in
         switch block {
         case let .item(item):
-          ChatItemRow(item: item, cwd: model.cwd, expanded: isExpanded(item.id)) { toggleExpanded(item.id) }
+          ChatItemRow(item: item, cwd: model.cwd, expanded: isExpanded(item)) { toggleExpanded(item.id) }
             .equatable()
         case let .tools(items):
           ToolGroupView(
-            items: items, cwd: model.cwd, expandedIDs: Set(items.map(\.id).filter(isExpanded)),
+            items: items, cwd: model.cwd, expandedIDs: Set(items.filter(isExpanded).map(\.id)),
             toggle: toggleExpanded
           )
           .equatable()
@@ -120,7 +120,7 @@ struct ChatView: View {
           message: message, canRetry: model.canSend,
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
-      if model.state.turn == .working && model.state.pendingPermissions.isEmpty { WorkingIndicator() }
+      if model.state.turn == .working && model.state.pendingPermissions.isEmpty { WorkingIndicator(activity: model.state.subagentActivity) }
     }
     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
   }
@@ -173,11 +173,12 @@ struct ChatView: View {
     }
   }
 
-  private func isExpanded(_ id: Int) -> Bool {
+  private func isExpanded(_ item: ChatItem) -> Bool {
     #if DEBUG
     if ProcessInfo.processInfo.environment["TETHER_DEBUG_TOOLS_OPEN"] != nil { return true }
+    if ChatFixture.openSubagents, case let .tool(call) = item.kind, call.subagent != nil { return true }
     #endif
-    return expanded.contains(id)
+    return expanded.contains(item.id)
   }
 
   private func toggleExpanded(_ id: Int) {
