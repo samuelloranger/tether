@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question.
+/// the question, `=stream` drips a long reply over several seconds, `=list` shows the chat list.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -126,6 +126,38 @@ enum ChatFixture {
     Data((lines(pendingPermission: pendingPermission).joined(separator: "\n") + "\n").utf8)
   }
 
+  /// A long reply that overflows the screen, delivered a chunk at a time.
+  static let dripChunks: [String] = {
+    var chunks = [update([
+      "sessionUpdate": "agent_message_chunk", "messageId": "msg_stream",
+      "content": ["type": "text", "text": "Here is the full walkthrough, one step at a time.\n\n"],
+    ])]
+    for step in 1...36 {
+      chunks.append(update([
+        "sessionUpdate": "agent_message_chunk", "messageId": "msg_stream",
+        "content": ["type": "text", "text": "Step \(step): the helper keeps its state small, retries only on server errors and waits a little longer each time.\n\n"],
+      ]))
+    }
+    chunks.append(update([
+      "sessionUpdate": "agent_message_chunk", "messageId": "msg_stream",
+      "content": ["type": "text", "text": "END OF REPLY"],
+    ]))
+    chunks.append(json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]))
+    return chunks
+  }()
+
+  @MainActor
+  static func streamModel() -> ChatSessionModel {
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: promptText)]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(journal)
+    ) { _ in DripByteStream(chunks: dripChunks) }
+  }
+
   static func journal(pendingPermission: Bool) -> ChatJournal {
     var journal = ChatJournal()
     journal.sessionId = "sess-1"
@@ -187,6 +219,41 @@ final class FixtureByteStream: TerminalByteStream, @unchecked Sendable {
   }
 }
 
+/// Hands over one line per tick, like a streaming agent, then stays open and silent.
+final class DripByteStream: TerminalByteStream, @unchecked Sendable {
+  private let lock = NSLock()
+  private var chunks: [String]
+  private var closed = false
+  private let interval: UInt64
+
+  init(chunks: [String], intervalMs: UInt64 = 250) {
+    self.chunks = chunks
+    interval = intervalMs * 1_000_000
+  }
+
+  func read() async throws -> Data? {
+    while true {
+      try await Task.sleep(nanoseconds: interval)
+      lock.lock()
+      if closed { lock.unlock(); return nil }
+      if !chunks.isEmpty {
+        let next = chunks.removeFirst()
+        lock.unlock()
+        return Data((next + "\n").utf8)
+      }
+      lock.unlock()
+    }
+  }
+
+  func write(_ bytes: Data) async throws {}
+
+  func close() async {
+    lock.lock()
+    closed = true
+    lock.unlock()
+  }
+}
+
 /// DEBUG root for screenshots: the chat screen alone, over the fixture.
 public struct ChatFixtureRoot: View {
   @State private var model: ChatSessionModel
@@ -201,9 +268,11 @@ public struct ChatFixtureRoot: View {
     ].joined(separator: "\n")
   })
 
-  public init(pendingPermission: Bool, list: Bool = false) {
+  public init(pendingPermission: Bool, list: Bool = false, stream: Bool = false) {
     listMode = list
-    _model = State(initialValue: ChatFixture.model(pendingPermission: pendingPermission))
+    _model = State(
+      initialValue: stream
+        ? ChatFixture.streamModel() : ChatFixture.model(pendingPermission: pendingPermission))
   }
 
   public var body: some View {

@@ -11,67 +11,15 @@ struct ChatView: View {
   @State private var userScrolledUp = false
   @State private var bottomEdge: CGFloat = 0
   @State private var viewportHeight: CGFloat = 0
+  @State private var atBottom = true
+  @State private var sendTick = 0
   @State private var reviewing: ChatPermission?
 
   private let bottomID = "chat-bottom"
   private static let space = "chat-scroll"
 
   var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 14) {
-          if model.state.items.isEmpty { emptyState }
-          ForEach(visibleItems) { item in
-            ChatItemRow(item: item, cwd: model.cwd, expanded: expanded.contains(item.id)) {
-              withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
-                if expanded.contains(item.id) { expanded.remove(item.id) } else { expanded.insert(item.id) }
-              }
-            }
-            .equatable()
-          }
-          ForEach(model.outbox.failed) { message in
-            FailedMessageRow(
-              message: message, canRetry: model.canSend,
-              retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
-          }
-          if model.state.turn == .working && model.state.pendingPermissions.isEmpty { WorkingIndicator() }
-          Color.clear.frame(height: 1).id(bottomID)
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { bottomEdge = $0 }
-            .onDisappear { bottomEdge = .infinity }
-        }
-        .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
-      }
-      .coordinateSpace(name: Self.space)
-      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
-      .defaultScrollAnchor(.bottom)
-      .scrollDismissesKeyboard(.interactively)
-      .simultaneousGesture(
-        DragGesture(minimumDistance: 14).onChanged { drag in
-          if drag.translation.height > 24, !nearBottom { userScrolledUp = true }
-        })
-      .onChange(of: bottomEdge) { _, _ in if nearBottom { userScrolledUp = false } }
-      .onChange(of: model.state.tailSignature) { _, _ in
-        if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
-      }
-      .overlay(alignment: .bottomTrailing) {
-        if userScrolledUp {
-          Button {
-            userScrolledUp = false
-            withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
-              proxy.scrollTo(bottomID, anchor: .bottom)
-            }
-          } label: {
-            Label("Jump to latest", systemImage: "arrow.down")
-              .font(.caption.weight(.semibold))
-              .tetherPill()
-          }
-          .buttonStyle(TetherPressStyle())
-          .padding(.trailing, 14).padding(.bottom, 10)
-          .transition(.opacity)
-        }
-      }
-      .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: userScrolledUp)
-    }
+    scroller
     .background(TetherColors.background.ignoresSafeArea())
     .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     .navigationBarTitleDisplayMode(.inline)
@@ -93,6 +41,72 @@ struct ChatView: View {
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingPermissions.first?.requestId)
     .sheet(item: Binding(get: { reviewing }, set: { reviewing = $0 })) { permission in
       PermissionReviewSheet(permission: permission, cwd: model.cwd)
+    }
+  }
+
+  @ViewBuilder private var scroller: some View {
+    if #available(iOS 18.0, *) {
+      FollowingTranscript(atBottom: $atBottom, sendTick: sendTick, reduceMotion: reduceMotion) { transcript }
+    } else {
+      legacyScroller
+    }
+  }
+
+  private var transcript: some View {
+    LazyVStack(alignment: .leading, spacing: 14) {
+      if model.state.items.isEmpty { emptyState }
+      ForEach(visibleItems) { item in
+        ChatItemRow(item: item, cwd: model.cwd, expanded: expanded.contains(item.id)) {
+          withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
+            if expanded.contains(item.id) { expanded.remove(item.id) } else { expanded.insert(item.id) }
+          }
+        }
+        .equatable()
+      }
+      ForEach(model.outbox.failed) { message in
+        FailedMessageRow(
+          message: message, canRetry: model.canSend,
+          retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
+      }
+      if model.state.turn == .working && model.state.pendingPermissions.isEmpty { WorkingIndicator() }
+    }
+    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
+  }
+
+  /// iOS 17: the transcript follows by scrolling to a sentinel when the tail changes.
+  private var legacyScroller: some View {
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(spacing: 0) {
+          transcript
+          Color.clear.frame(height: 1).id(bottomID)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { bottomEdge = $0 }
+            .onDisappear { bottomEdge = .infinity }
+        }
+      }
+      .coordinateSpace(name: Self.space)
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+      .defaultScrollAnchor(.bottom)
+      .scrollDismissesKeyboard(.interactively)
+      .simultaneousGesture(
+        DragGesture(minimumDistance: 14).onChanged { drag in
+          if drag.translation.height > 24, !nearBottom { userScrolledUp = true }
+        })
+      .onChange(of: bottomEdge) { _, _ in if nearBottom { userScrolledUp = false } }
+      .onChange(of: model.state.tailSignature) { _, _ in
+        if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
+      }
+      .overlay(alignment: .bottomTrailing) {
+        if userScrolledUp {
+          JumpToLatestButton {
+            userScrolledUp = false
+            withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
+              proxy.scrollTo(bottomID, anchor: .bottom)
+            }
+          }
+        }
+      }
+      .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: userScrolledUp)
     }
   }
 
@@ -232,6 +246,7 @@ struct ChatView: View {
       } else if model.send(draft) {
         draft = ""
         userScrolledUp = false
+        sendTick += 1
       }
     } label: {
       Image(systemName: working ? "stop.fill" : "arrow.up")
@@ -407,5 +422,63 @@ private struct PermissionReviewSheet: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
     }
+  }
+}
+
+struct JumpToLatestButton: View {
+  let action: () -> Void
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    Button(action: action) {
+      Label("Jump to latest", systemImage: "arrow.down")
+        .font(.caption.weight(.semibold))
+        .tetherPill()
+    }
+    .buttonStyle(TetherPressStyle())
+    .padding(.trailing, 14).padding(.bottom, 10)
+    .transition(.opacity)
+  }
+}
+
+/// iOS 18: the scroll view stays pinned to the end while content grows (`.sizeChanges`) and lets go
+/// once the user scrolls up; "at the bottom" comes from the real offset and sizes.
+@available(iOS 18.0, *)
+private struct FollowingTranscript<Content: View>: View {
+  @Binding var atBottom: Bool
+  let sendTick: Int
+  let reduceMotion: Bool
+  @ViewBuilder var content: () -> Content
+
+  @State private var position = ScrollPosition(edge: .bottom)
+
+  var body: some View {
+    ScrollView {
+      content()
+    }
+    .scrollPosition($position)
+    .defaultScrollAnchor(.bottom, for: .initialOffset)
+    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+    .scrollDismissesKeyboard(.interactively)
+    .onScrollGeometryChange(for: Bool.self) { geometry in
+      ChatScrollFollow.isNearBottom(
+        offset: geometry.contentOffset.y,
+        content: geometry.contentSize.height,
+        container: geometry.containerSize.height,
+        bottomInset: geometry.contentInsets.bottom)
+    } action: { _, near in
+      atBottom = near
+    }
+    .overlay(alignment: .bottomTrailing) {
+      if !atBottom {
+        JumpToLatestButton {
+          withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
+            position.scrollTo(edge: .bottom)
+          }
+        }
+      }
+    }
+    .onChange(of: sendTick) { _, _ in position.scrollTo(edge: .bottom) }
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: atBottom)
   }
 }
