@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class ChatResumeModelTests: XCTestCase {
-  private static let identity = 1_700_000_000
+  nonisolated private static let identity = 1_700_000_000
 
   private final class Dialer: @unchecked Sendable {
     var streams: [ScriptedByteStream]
