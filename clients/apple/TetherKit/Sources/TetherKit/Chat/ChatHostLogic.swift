@@ -2,7 +2,11 @@ import Foundation
 
 /// The `tether-notify acp` commands a chat runs over ssh exec.
 enum ACPHostCommand {
-  static let spawnCommand = "npx -y @agentclientprotocol/claude-agent-acp"
+  /// Pinned: the transcript reducer is written against this adapter's output, so a host never
+  /// picks up a newer one on its own.
+  static let adapterPackage = "@agentclientprotocol/claude-agent-acp"
+  static let adapterVersion = "0.95.0"
+  static let spawnCommand = "npx -y \(adapterPackage)@\(adapterVersion)"
   private static let prefix = "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp"
 
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so

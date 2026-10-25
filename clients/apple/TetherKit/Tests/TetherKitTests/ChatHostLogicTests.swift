@@ -6,10 +6,18 @@ final class ChatHostLogicTests: XCTestCase {
     XCTAssertEqual(
       ACPHostCommand.attach(name: "chat-ab12", cwd: "/home/sam/my app", spawn: true),
       "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp attach 'chat-ab12' --from 0 "
-        + "--spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd '/home/sam/my app'")
+        + "--spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0' --cwd '/home/sam/my app'")
     XCTAssertEqual(
       ACPHostCommand.attach(name: "chat-ab12", cwd: "/x", spawn: false),
       "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp attach 'chat-ab12' --from 0")
+  }
+
+  func test_the_spawn_command_is_pinned_to_an_explicit_adapter_version() {
+    XCTAssertEqual(ACPHostCommand.spawnCommand, "npx -y @agentclientprotocol/claude-agent-acp@0.95.0")
+    let command = ACPHostCommand.attach(name: "c", cwd: "/x", spawn: true)
+    XCTAssertTrue(command.contains("--spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0'"))
+    XCTAssertEqual(shellQuote(ACPHostCommand.spawnCommand), "'npx -y @agentclientprotocol/claude-agent-acp@0.95.0'")
+    XCTAssertFalse(ACPHostCommand.attach(name: "c", cwd: "/x", spawn: false).contains("npx"))
   }
 
   func test_shell_metacharacters_in_a_name_or_folder_are_quoted() {
