@@ -146,6 +146,34 @@ enum ChatFixture {
     return chunks
   }()
 
+  /// A long finished turn, rendered whole: grouped tool rows and plenty of prose.
+  @MainActor
+  static func longModel() -> ChatSessionModel {
+    var lines: [String] = [
+      update(["sessionUpdate": "session_info_update", "title": "Chat feature"]),
+      update(tool("t1", "Edit apps/tether-notify/README.md", kind: "edit", status: "completed")),
+      update(tool("t2", "ls -la /work/project/.codegraph", kind: "execute", status: "completed", text: "total 8")),
+      update(tool("t3", "Read src/fetch.ts", kind: "read", status: "completed", text: "export async function fetchJSON")),
+      update(["sessionUpdate": "usage_update", "used": 41_250, "size": 1_000_000]),
+      message("Edited `apps/tether-notify/README.md` line 3: \"the v5 SSH host\" is now \"the SSH host\". It's uncommitted. Revert with `git checkout apps/tether-notify/README.md`.\n\nThe `ship:scout` subagent is exploring the repo in the background. I'll relay its report when it finishes."),
+      message("\n\n## Entry points\n\n- iOS and Mac Catalyst: `clients/apple/TetherIOS` is the app target, with `TetherKit` holding the SSH transport and every screen\n- Windows and Linux: `clients/desktop/` is one Rust workspace with a Slint UI\n- Host side: `apps/tether-notify/` is a small Go tool for encrypted push\n\n"),
+    ]
+    for step in 1...6 {
+      lines.append(message("Step \(step): the helper keeps its state small, retries only on `5xx` server errors and waits a little longer each time, so a flaky upstream does not hammer the host.\n\n"))
+    }
+    lines.append(message("```ts\nfor (let attempt = 1; ; attempt++) { await sleep(2 ** attempt * 100) }\n```\n\nDone."))
+    lines.append(json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]))
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: "What does this repo do?")]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/tether", readOnly: false,
+      store: InMemoryChatJournalStore(journal)
+    ) { _ in FixtureByteStream(log: log) }
+  }
+
   @MainActor
   static func streamModel() -> ChatSessionModel {
     var journal = ChatJournal()
@@ -268,11 +296,18 @@ public struct ChatFixtureRoot: View {
     ].joined(separator: "\n")
   })
 
-  public init(pendingPermission: Bool, list: Bool = false, stream: Bool = false) {
-    listMode = list
-    _model = State(
-      initialValue: stream
-        ? ChatFixture.streamModel() : ChatFixture.model(pendingPermission: pendingPermission))
+  private let mode: String
+
+  public init(mode: String) {
+    self.mode = mode
+    listMode = mode == "list"
+    let initial: ChatSessionModel
+    switch mode {
+    case "stream": initial = ChatFixture.streamModel()
+    case "keyboard", "scrolledup": initial = ChatFixture.longModel()
+    default: initial = ChatFixture.model(pendingPermission: mode == "permission")
+    }
+    _model = State(initialValue: initial)
   }
 
   public var body: some View {
@@ -281,7 +316,7 @@ public struct ChatFixtureRoot: View {
         ChatListView(model: listModel, onOpen: { _ in }, onClose: {})
           .task { await listModel.refresh() }
       } else {
-        ChatView(model: model)
+        ChatView(model: model, focusComposer: mode == "keyboard", startAtTop: mode == "scrolledup")
       }
     }
       .tint(TetherColors.accent)

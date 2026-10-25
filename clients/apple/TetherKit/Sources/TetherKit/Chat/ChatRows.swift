@@ -87,7 +87,7 @@ struct UserMessageRow: View {
 
   var body: some View {
     Text(text)
-      .font(.callout)
+      .font(.subheadline)
       .foregroundStyle(TetherColors.textPrimary)
       .textSelection(.enabled)
       .padding(.horizontal, 14).padding(.vertical, 10)

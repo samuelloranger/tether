@@ -7,6 +7,9 @@ struct ChatView: View {
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  var focusComposer = false
+  var startAtTop = false
+  @FocusState private var composerFocused: Bool
   @State private var draft = ""
   @State private var expanded: Set<Int> = []
   @State private var userScrolledUp = false
@@ -25,16 +28,21 @@ struct ChatView: View {
     .background(TetherColors.background.ignoresSafeArea())
     .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     .navigationBarTitleDisplayMode(.inline)
-    .toolbarBackground(.regularMaterial, for: .navigationBar)
-    .toolbarBackground(scrolledUnder ? .visible : .hidden, for: .navigationBar)
+    .toolbarBackground(TetherColors.background, for: .navigationBar)
+    .toolbarBackground(.visible, for: .navigationBar)
     .navigationBarBackButtonHidden(true)
-    .overlay(alignment: .top) { contextHairline }
+    .overlay(alignment: .top) { headerRule }
     .toolbar {
-      ToolbarItem(placement: .topBarLeading) { backButton }
-      ToolbarItem(placement: .principal) { titleBlock }
-      ToolbarItem(placement: .topBarTrailing) { connectionBadge }
+      ToolbarItem(placement: .topBarLeading) { backButton }.withoutGlass()
+      ToolbarItem(placement: .principal) { titleBlock }.withoutGlass()
+      ToolbarItem(placement: .topBarTrailing) { connectionBadge }.withoutGlass()
     }
     .task { await model.connect() }
+    .task {
+      guard focusComposer else { return }
+      try? await Task.sleep(nanoseconds: 700_000_000)
+      composerFocused = true
+    }
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .active: model.sceneBecameActive()
@@ -51,14 +59,14 @@ struct ChatView: View {
 
   @ViewBuilder private var scroller: some View {
     if #available(iOS 18.0, *) {
-      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, sendTick: sendTick, reduceMotion: reduceMotion) { transcript }
+      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
     } else {
       legacyScroller
     }
   }
 
   private var transcript: some View {
-    LazyVStack(alignment: .leading, spacing: 14) {
+    LazyVStack(alignment: .leading, spacing: 12) {
       if model.state.items.isEmpty { emptyState }
       ForEach(ChatGrouping.blocks(visibleItems)) { block in
         switch block {
@@ -80,7 +88,7 @@ struct ChatView: View {
       }
       if model.state.turn == .working && model.state.pendingPermissions.isEmpty { WorkingIndicator() }
     }
-    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
+    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
   }
 
   /// iOS 17: the transcript follows by scrolling to a sentinel when the tail changes.
@@ -99,7 +107,6 @@ struct ChatView: View {
       }
       .coordinateSpace(name: Self.space)
       .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
-      .chatEdgeFade(top: scrolledUnder, bottom: userScrolledUp)
       .defaultScrollAnchor(.bottom)
       .scrollDismissesKeyboard(.interactively)
       .simultaneousGesture(
@@ -110,7 +117,7 @@ struct ChatView: View {
       .onChange(of: model.state.tailSignature) { _, _ in
         if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
       }
-      .overlay(alignment: .bottomTrailing) {
+      .overlay(alignment: .bottom) {
         if userScrolledUp {
           JumpToLatestButton {
             userScrolledUp = false
@@ -158,7 +165,7 @@ struct ChatView: View {
   private var backButton: some View {
     Button { dismiss() } label: {
       Image(systemName: "chevron.backward")
-        .font(.system(size: 28, weight: .regular))
+        .font(.system(size: 18, weight: .semibold))
         .foregroundStyle(TetherColors.accent)
         .frame(width: 44, height: 44, alignment: .leading)
         .contentShape(Rectangle())
@@ -169,15 +176,21 @@ struct ChatView: View {
 
   private var titleBlock: some View {
     VStack(spacing: 1) {
-      Text(model.title).font(.headline).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
-      Text(ChatFormat.folderName(model.cwd)).font(.caption).foregroundStyle(TetherColors.textFaint)
+      Text(model.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+      Text(ChatFormat.folderName(model.cwd)).font(.caption).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(1)
     }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(model.title), \(model.cwd)")
   }
 
-  /// Context usage as a 3pt line under the header instead of a third fact in the subtitle.
+  /// Context usage as a 3pt line under the header; otherwise a hairline once content scrolls under it.
+  @ViewBuilder private var headerRule: some View {
+    if scrolledUnder, ChatFormat.contextFraction(used: model.state.contextUsed, size: model.state.contextSize) == nil {
+      Rectangle().fill(TetherColors.border).frame(height: 0.5)
+    } else { contextHairline }
+  }
+
   @ViewBuilder private var contextHairline: some View {
     if let fraction = ChatFormat.contextFraction(used: model.state.contextUsed, size: model.state.contextSize) {
       Rectangle().fill(TetherColors.border).frame(height: 3)
@@ -211,11 +224,8 @@ struct ChatView: View {
   private func badge(color: Color, text: String) -> some View {
     HStack(spacing: 5) {
       Circle().fill(color).frame(width: 6, height: 6)
-      Text(text).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+      Text(text).font(.caption).foregroundStyle(TetherColors.textSecondary)
     }
-    .padding(.horizontal, 9)
-    .frame(height: 24)
-    .background(color.opacity(0.14), in: Capsule())
     .accessibilityElement(children: .combine)
     .accessibilityLabel("Connection: \(text)")
   }
@@ -253,8 +263,8 @@ struct ChatView: View {
         composer
       }
     }
-    .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
-    .background(TetherColors.background.opacity(0.96))
+    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+    .background(TetherColors.background.ignoresSafeArea(.all, edges: .bottom))
     .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: model.state.pendingPermissions.first?.requestId)
   }
@@ -276,8 +286,9 @@ struct ChatView: View {
           axis: .vertical
         )
           .lineLimit(1...6)
-          .font(.body)
-          .padding(.horizontal, 14).padding(.vertical, 9)
+          .font(.subheadline)
+          .focused($composerFocused)
+          .padding(.horizontal, 14).padding(.vertical, 8)
           .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
           .opacity(permissionPending ? 0.55 : 1)
           .accessibilityLabel("Message the agent")
@@ -544,12 +555,18 @@ struct JumpToLatestButton: View {
 
   var body: some View {
     Button(action: action) {
-      Label("Jump to latest", systemImage: "arrow.down")
-        .font(.caption.weight(.semibold))
-        .tetherPill()
+      HStack(spacing: 5) {
+        Image(systemName: "arrow.down").font(.caption2.weight(.bold))
+        Text("Jump to latest").font(.caption.weight(.medium))
+      }
+      .foregroundStyle(TetherColors.textPrimary)
+      .padding(.horizontal, 12).frame(height: 28)
+      .background(TetherColors.surfaceRaised, in: Capsule())
+      .overlay(Capsule().strokeBorder(TetherColors.border, lineWidth: 0.5))
+      .hitSlop(vertical: 8, horizontal: 8)
     }
     .buttonStyle(TetherPressStyle())
-    .padding(.trailing, 14).padding(.bottom, 10)
+    .padding(.bottom, 8)
     .transition(.opacity)
   }
 }
@@ -562,6 +579,7 @@ private struct FollowingTranscript<Content: View>: View {
   @Binding var scrolledUnder: Bool
   let sendTick: Int
   let reduceMotion: Bool
+  var startAtTop = false
   @ViewBuilder var content: () -> Content
 
   @State private var position = ScrollPosition(edge: .bottom)
@@ -587,8 +605,8 @@ private struct FollowingTranscript<Content: View>: View {
     } action: { _, under in
       scrolledUnder = under
     }
-    .chatEdgeFade(top: scrolledUnder, bottom: !atBottom)
-    .overlay(alignment: .bottomTrailing) {
+    .scrollEdgeEffectHiddenIfAvailable()
+    .overlay(alignment: .bottom) {
       if !atBottom {
         JumpToLatestButton {
           withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
@@ -597,38 +615,25 @@ private struct FollowingTranscript<Content: View>: View {
         }
       }
     }
+    .task {
+      guard startAtTop else { return }
+      try? await Task.sleep(nanoseconds: 900_000_000)
+      position.scrollTo(edge: .top)
+    }
     .onChange(of: sendTick) { _, _ in position.scrollTo(edge: .bottom) }
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: atBottom)
   }
 }
 
 extension View {
-  /// Fades the last 12pt of scrolling content under the bars instead of slicing a line in half.
-  func chatEdgeFade(top: Bool, bottom: Bool) -> some View { modifier(ChatEdgeFade(top: top, bottom: bottom)) }
+  @ViewBuilder fileprivate func scrollEdgeEffectHiddenIfAvailable() -> some View {
+    if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .all) } else { self }
+  }
 }
 
-private struct ChatEdgeFade: ViewModifier {
-  let top: Bool
-  let bottom: Bool
-  @State private var insets = EdgeInsets()
-  private let fade: CGFloat = 12
-
-  func body(content: Content) -> some View {
-    content
-      .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets = $0 }
-      .mask {
-        VStack(spacing: 0) {
-          Color.black.frame(height: insets.top)
-          LinearGradient(colors: [top ? .clear : .black, .black], startPoint: .top, endPoint: .bottom)
-            .frame(height: fade)
-          Color.black
-          LinearGradient(colors: [.black, bottom ? .clear : .black], startPoint: .top, endPoint: .bottom)
-            .frame(height: fade)
-          Color.black.frame(height: insets.bottom)
-        }
-        .ignoresSafeArea()
-        .animation(.easeOut(duration: 0.15), value: top)
-        .animation(.easeOut(duration: 0.15), value: bottom)
-      }
+extension ToolbarContent {
+  /// iOS 26 wraps every toolbar item in a glass bubble; the chat header stays flat.
+  @ToolbarContentBuilder fileprivate func withoutGlass() -> some ToolbarContent {
+    if #available(iOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
   }
 }

@@ -249,22 +249,33 @@ struct MarkdownBodyView: View {
   /// Chat prose: body-sized, full contrast, a little more air between blocks.
   var reading = false
 
-  private var proseFont: Font { reading ? .body : .footnote }
+  private var proseFont: Font { reading ? .subheadline : .footnote }
   private var proseColor: Color { reading ? TetherColors.textPrimary : TetherColors.textSecondary }
 
+  /// Chat prose sets inline code a notch under the text with a faint tint.
+  private func styled(_ text: AttributedString) -> AttributedString {
+    guard reading else { return text }
+    var out = text
+    for run in out.runs where run.inlinePresentationIntent?.contains(.code) == true {
+      out[run.range].font = .system(.footnote, design: .monospaced)
+      out[run.range].backgroundColor = TetherColors.surfaceRaised
+    }
+    return out
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: reading ? 12 : 10) {
+    VStack(alignment: .leading, spacing: reading ? 9 : 10) {
       ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
         switch block {
         case let .heading(level, text):
           Text(text)
             .font(reading
-              ? (level == 1 ? .title3.weight(.semibold) : .headline)
+              ? (level == 1 ? .headline : .subheadline.weight(.semibold))
               : (level == 1 ? .headline : level == 2 ? .subheadline.weight(.semibold) : .footnote.weight(.semibold)))
             .foregroundStyle(TetherColors.textPrimary)
             .padding(.top, 2)
         case let .paragraph(text):
-          Text(text).font(proseFont).foregroundStyle(proseColor).lineSpacing(reading ? 3 : 0)
+          Text(styled(text)).font(proseFont).foregroundStyle(proseColor).lineSpacing(reading ? 2 : 0)
         case let .list(items):
           listRows(items)
         case let .code(lines):
@@ -291,11 +302,11 @@ struct MarkdownBodyView: View {
   }
 
   private func listRows(_ items: [MarkdownListItem]) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: reading ? 4 : 5) {
       ForEach(Array(items.enumerated()), id: \.offset) { _, item in
         let row = HStack(alignment: .firstTextBaseline, spacing: 7) {
           marker(item.marker).frame(minWidth: 12, alignment: .leading)
-          Text(item.text).font(item.quoted ? proseFont.italic() : proseFont)
+          Text(styled(item.text)).font(item.quoted ? proseFont.italic() : proseFont)
             .foregroundStyle(item.quoted ? TetherColors.textFaint : proseColor)
         }
         .padding(.leading, CGFloat(item.depth) * 16)
