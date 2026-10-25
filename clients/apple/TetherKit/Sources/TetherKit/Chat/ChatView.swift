@@ -1,4 +1,6 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 /// A document-style transcript: the agent's prose at full width, everything else quiet.
 struct ChatView: View {
@@ -9,6 +11,9 @@ struct ChatView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var focusComposer = false
   var startAtTop = false
+  var initialDraft = ""
+  var openControls = false
+  var seedAttachments = false
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
   @State private var expanded: Set<Int> = []
@@ -19,6 +24,11 @@ struct ChatView: View {
   @State private var sendTick = 0
   @State private var scrolledUnder = false
   @State private var reviewing: ChatPermission?
+  @State private var showingControls = false
+  @State private var attachments = ChatAttachments()
+  @State private var pickingPhotos = false
+  @State private var pickedPhotos: [PhotosPickerItem] = []
+  @State private var copiedFolder = false
 
   private let bottomID = "chat-bottom"
   private static let space = "chat-scroll"
@@ -39,6 +49,16 @@ struct ChatView: View {
     }
     .task { await model.connect() }
     .task {
+      if !initialDraft.isEmpty, draft.isEmpty { draft = initialDraft }
+      #if DEBUG
+      if seedAttachments { attachments.seedPlaceholders() }
+      #endif
+      if openControls {
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        showingControls = true
+      }
+    }
+    .task {
       guard focusComposer else { return }
       try? await Task.sleep(nanoseconds: 700_000_000)
       composerFocused = true
@@ -52,6 +72,18 @@ struct ChatView: View {
     }
     .onDisappear { model.leave() }
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingPermissions.first?.requestId)
+    .sheet(isPresented: $showingControls) { ChatControlsSheet(model: model) }
+    .photosPicker(
+      isPresented: $pickingPhotos, selection: $pickedPhotos, maxSelectionCount: max(1, attachments.room),
+      matching: .images
+    )
+    .onChange(of: pickedPhotos) { _, picked in
+      guard !picked.isEmpty else { return }
+      for item in picked.prefix(attachments.room) {
+        attachments.add { try? await item.loadTransferable(type: Data.self) }
+      }
+      pickedPhotos = []
+    }
     .sheet(item: Binding(get: { reviewing }, set: { reviewing = $0 })) { permission in
       PermissionReviewSheet(permission: permission, cwd: model.cwd)
     }
@@ -175,13 +207,62 @@ struct ChatView: View {
   }
 
   private var titleBlock: some View {
-    VStack(spacing: 1) {
-      Text(model.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
-      Text(ChatFormat.folderName(model.cwd)).font(.caption).foregroundStyle(TetherColors.textSecondary)
-        .lineLimit(1)
+    let line = ChatStatusLine(state: model.state)
+    return VStack(spacing: 2) {
+      Text(copiedFolder ? "Folder copied" : model.title)
+        .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+        .onLongPressGesture(minimumDuration: 0.4) { copyFolder() }
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityHint("Long press copies the folder")
+      if line.isAvailable {
+        Button { showingControls = true } label: { statusLine(line) }
+          .buttonStyle(.plain)
+          .accessibilityLabel(line.spoken)
+          .accessibilityHint("Opens the session controls")
+          .accessibilityIdentifier("chatControls")
+      } else {
+        Text(ChatFormat.folderName(model.cwd)).font(.caption).foregroundStyle(TetherColors.textSecondary)
+          .lineLimit(1)
+          .accessibilityLabel(model.cwd)
+      }
     }
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(model.title), \(model.cwd)")
+  }
+
+  private func statusLine(_ line: ChatStatusLine) -> some View {
+    HStack(spacing: 8) {
+      HStack(spacing: 0) {
+        if let name = line.model { Text(name).foregroundStyle(TetherColors.textSecondary) }
+        if line.model != nil, line.mode != nil { Text(" · ").foregroundStyle(TetherColors.textFaint) }
+        if let mode = line.mode { Text(mode).foregroundStyle(tint(line.tint)) }
+      }
+      .lineLimit(1)
+      if let stats = line.stats {
+        Text(stats).foregroundStyle(TetherColors.textFaint).monospacedDigit().lineLimit(1).fixedSize()
+      }
+      Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(TetherColors.textFaint)
+    }
+    .font(.system(size: 12))
+    .frame(minHeight: 16)
+    .hitSlop(vertical: 8, horizontal: 8)
+  }
+
+  private func tint(_ tint: ChatModeTint) -> Color {
+    switch tint {
+    case .accent: TetherColors.accent
+    case .success: TetherColors.success
+    case .secondary: TetherColors.textSecondary
+    case .danger: TetherColors.danger
+    }
+  }
+
+  private func copyFolder() {
+    UIPasteboard.general.string = model.cwd
+    UINotificationFeedbackGenerator().notificationOccurred(.success)
+    copiedFolder = true
+    Task {
+      try? await Task.sleep(nanoseconds: 1_300_000_000)
+      copiedFolder = false
+    }
   }
 
   /// Context usage as a 3pt line under the header; otherwise a hairline once content scrolls under it.
@@ -271,6 +352,12 @@ struct ChatView: View {
 
   private var composer: some View {
     VStack(alignment: .leading, spacing: 6) {
+      if let query = slashQuery {
+        SlashPalette(query: query, commands: model.state.commands) { command in
+          draft = ChatSlash.insertion(for: command).text
+          composerFocused = true
+        }
+      }
       if model.link.phase == .catchingUp || model.link.phase == .connecting {
         HStack(spacing: 6) {
           ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
@@ -278,7 +365,12 @@ struct ChatView: View {
         }
         .padding(.leading, 6)
       }
-      HStack(alignment: .bottom, spacing: 8) {
+      if let error = attachments.error {
+        AttachmentErrorRow(message: error) { attachments.error = nil }
+      }
+      if !attachments.items.isEmpty { AttachmentStrip(attachments: attachments) }
+      HStack(alignment: .bottom, spacing: 4) {
+        attachButton
         TextField(
           "", text: $draft,
           prompt: Text(permissionPending ? "Answer the permission above" : "Message the agent")
@@ -294,16 +386,53 @@ struct ChatView: View {
           .accessibilityLabel("Message the agent")
           .accessibilityHint(permissionPending ? "A permission is waiting above" : "")
           .accessibilityIdentifier("chatComposer")
-        actionButton
+        actionButton.padding(.leading, 4)
       }
     }
   }
 
+  private var slashQuery: String? {
+    guard !permissionPending, !model.state.commands.isEmpty else { return nil }
+    return ChatSlash.query(in: draft)
+  }
+
+  private var attachButton: some View {
+    Menu {
+      Button { pickingPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+      if UIPasteboard.general.hasImages {
+        Button { pasteImage() } label: { Label("Paste image", systemImage: "doc.on.clipboard") }
+      }
+    } label: {
+      Image(systemName: "plus")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(TetherColors.textSecondary)
+        .frame(width: 28, height: 28)
+        .background(TetherColors.surfaceRaised, in: Circle())
+        .hitSlop(vertical: 8, horizontal: 8)
+    }
+    .disabled(permissionPending || attachments.room == 0)
+    .opacity(permissionPending ? 0.55 : 1)
+    .padding(.bottom, 4)
+    .accessibilityLabel("Attach image")
+    .accessibilityIdentifier("chatAttach")
+  }
+
+  private func pasteImage() {
+    let board = UIPasteboard.general
+    let data =
+      board.data(forPasteboardType: "public.jpeg") ?? board.data(forPasteboardType: "public.png")
+      ?? board.image?.pngData()
+    guard let data else { return }
+    attachments.add(data: data)
+  }
+
   private var permissionPending: Bool { !model.state.pendingPermissions.isEmpty }
-  private var canSendNow: Bool { !draftIsEmpty && model.canSend }
+  private var canSendNow: Bool {
+    ChatComposerRule.canSend(
+      text: draft, readyImages: attachments.ready.count, encoding: attachments.encoding, sessionCanSend: model.canSend)
+  }
 
   private var working: Bool { model.state.turn == .working }
-  private var draftIsEmpty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
   private var discColor: Color {
     if working { return TetherColors.danger.opacity(0.2) }
@@ -319,8 +448,9 @@ struct ChatView: View {
     Button {
       if working {
         model.cancel()
-      } else if model.send(draft) {
+      } else if canSendNow, model.send(text: draft, images: attachments.ready) {
         draft = ""
+        attachments.clear()
         userScrolledUp = false
         sendTick += 1
       }
@@ -333,7 +463,7 @@ struct ChatView: View {
         .hitSlop(vertical: 6, horizontal: 6)
     }
     .buttonStyle(TetherPressStyle())
-    .disabled(working ? !model.canInteract : (draftIsEmpty || !model.canSend))
+    .disabled(working ? !model.canInteract : !canSendNow)
     .accessibilityLabel(working ? "Stop" : "Send")
     .accessibilityIdentifier("chatAction")
   }

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=list` shows the chat list.
+/// the question, `=stream` drips a long reply over several seconds, `=list` shows the chat list, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -174,6 +174,98 @@ enum ChatFixture {
     ) { _ in FixtureByteStream(log: log) }
   }
 
+  private static func option(
+    _ id: String, _ name: String, _ description: String, current: String, _ choices: [(String, String, String)]
+  ) -> [String: Any] {
+    [
+      "id": id, "name": name, "description": description, "category": id, "type": "select",
+      "currentValue": current,
+      "options": choices.map { ["value": $0.0, "name": $0.1, "description": $0.2] },
+    ]
+  }
+
+  private static let controlOptions: [[String: Any]] = [
+    option("mode", "Mode", "Session permission mode", current: "plan", [
+      ("default", "Manual", "Always ask before making changes"),
+      ("acceptEdits", "Accept edits", "Automatically accept all file edits"),
+      ("plan", "Plan", "Create a plan before making changes"),
+      ("auto", "Auto", "The agent handles permission decisions"),
+      ("bypassPermissions", "Bypass permissions", "Accepts all permissions"),
+    ]),
+    option("model", "Model", "The model for this session", current: "sonnet", [
+      ("opus", "Opus 5", "Most capable, slower"),
+      ("sonnet", "Sonnet 5.5", "Everyday coding"),
+      ("haiku", "Haiku 5.5", "Fastest, lightest"),
+    ]),
+    option("effort", "Effort", "How hard the agent thinks", current: "medium", [
+      ("low", "Low", "Quick answers"),
+      ("medium", "Medium", "Balanced"),
+      ("high", "High", "Thorough reasoning"),
+    ]),
+    option("agent", "Agent", "Which agent profile runs", current: "main", [
+      ("main", "Main", "The default agent"),
+      ("reviewer", "Reviewer", "Read-only code review"),
+    ]),
+  ]
+
+  private static let controlCommands: [[String: Any]] = [
+    ("compact", "Summarise the conversation to free context", "<instructions>"),
+    ("context", "Show what is using the context window", nil),
+    ("review", "Review the pending changes", nil),
+    ("effort", "Set how hard the agent thinks", "<level>"),
+    ("model", "Switch the model for this session", "<name>"),
+    ("plan", "Draft a plan before editing anything", nil),
+    ("init", "Create a project guide file", nil),
+    ("cost", "Show what this session has cost", nil),
+    ("clear", "Start over with an empty conversation", nil),
+    ("config", "Open the agent settings", nil),
+    ("doctor", "Check the agent installation", nil),
+    ("memory", "Edit the saved project notes", nil),
+    ("status", "Show version, model and account", nil),
+    ("resume", "Pick an earlier conversation", "<id>"),
+    ("security-review", "Look for security problems in the diff", nil),
+  ].map { name, description, hint in
+    var command: [String: Any] = ["name": name, "description": description]
+    command["input"] = hint.map { ["hint": $0] } ?? NSNull()
+    return command
+  }
+
+  /// A finished turn with the agent's options, commands, usage with a cost, and an image prompt.
+  @MainActor
+  static func controlsModel() -> ChatSessionModel {
+    let head: [String] = [
+      update(["sessionUpdate": "session_info_update", "title": "Retry for fetchJSON"]),
+      update(["sessionUpdate": "config_option_update", "configOptions": controlOptions]),
+      update(["sessionUpdate": "available_commands_update", "availableCommands": controlCommands]),
+      update(tool("t1", "Read src/fetch.ts", kind: "read", status: "completed", text: "export async function fetchJSON")),
+      message("`fetchJSON` has no retry. I'll keep `4xx` errors fatal and back off only on `5xx`."),
+      json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]),
+    ]
+    let tail: [String] = [
+      update(tool("t2", "Edit src/fetch.ts", kind: "edit", status: "completed")),
+      message("Done. The helper now retries up to three times."),
+      update([
+        "sessionUpdate": "usage_update", "used": 20_000, "size": 1_000_000,
+        "cost": ["amount": 0.157, "currency": "USD"], "_meta": ["_claude/model": "claude-sonnet-5-5"],
+      ]),
+      json(["jsonrpc": "2.0", "id": 4, "result": ["stopReason": "end_turn"]]),
+    ]
+    let log = Data(((head + tail).joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 5
+    journal.entries = [
+      .init(kind: .prompt, offset: 0, text: promptText),
+      .init(
+        kind: .prompt, offset: head.reduce(0) { $0 + $1.utf8.count + 1 },
+        text: "Here are the two failing screens.", imageCount: 2),
+    ]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(journal)
+    ) { _ in FixtureByteStream(log: log) }
+  }
+
   @MainActor
   static func streamModel() -> ChatSessionModel {
     var journal = ChatJournal()
@@ -305,6 +397,7 @@ public struct ChatFixtureRoot: View {
     switch mode {
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
+    case "controls", "controls-sheet", "slash", "attach": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
     }
     _model = State(initialValue: initial)
@@ -316,7 +409,10 @@ public struct ChatFixtureRoot: View {
         ChatListView(model: listModel, onOpen: { _ in }, onClose: {})
           .task { await listModel.refresh() }
       } else {
-        ChatView(model: model, focusComposer: mode == "keyboard", startAtTop: mode == "scrolledup")
+        ChatView(
+          model: model, focusComposer: mode == "keyboard" || mode == "slash", startAtTop: mode == "scrolledup",
+          initialDraft: mode == "slash" ? "/co" : mode == "attach" ? "Compare these two screenshots" : "",
+          openControls: mode == "controls-sheet", seedAttachments: mode == "attach")
       }
     }
       .tint(TetherColors.accent)

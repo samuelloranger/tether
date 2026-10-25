@@ -64,8 +64,8 @@ struct ChatItemRow: View, Equatable {
 
   var body: some View {
     switch item.kind {
-    case let .user(text, _, _):
-      UserMessageRow(text: text)
+    case let .user(text, images, _):
+      UserMessageRow(text: text, imageCount: images)
     case let .assistant(text, _):
       AssistantTextView(text: text)
     case let .thought(text):
@@ -84,17 +84,26 @@ struct ChatItemRow: View, Equatable {
 
 struct UserMessageRow: View {
   let text: String
+  var imageCount = 0
 
   var body: some View {
-    Text(text)
-      .font(.subheadline)
-      .foregroundStyle(TetherColors.textPrimary)
-      .textSelection(.enabled)
+    VStack(alignment: .leading, spacing: 4) {
+      if imageCount > 0 {
+        Label(ChatComposerRule.imageLabel(imageCount), systemImage: "photo")
+          .font(.caption).foregroundStyle(TetherColors.textSecondary)
+      }
+      if !text.isEmpty {
+        Text(text)
+          .font(.subheadline)
+          .foregroundStyle(TetherColors.textPrimary)
+          .textSelection(.enabled)
+      }
+    }
       .padding(.horizontal, 14).padding(.vertical, 10)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
       .padding(.leading, 28)
-      .accessibilityLabel("You: \(text)")
+      .accessibilityLabel("You: \(imageCount > 0 ? ChatComposerRule.imageLabel(imageCount) + ". " : "")\(text)")
   }
 }
 
