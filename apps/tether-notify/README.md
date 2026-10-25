@@ -95,10 +95,32 @@ exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `at
 sends what is already logged and exits; `--linger 30s` keeps following until output has
 been idle that long.
 
+### Lifecycle and retention
+
+A held agent is a long-lived process and `out.log` is the whole conversation in plaintext, so
+the daemon ends idle agents and old sessions are pruned.
+
+- **Idle shutdown.** When all of these hold for the idle window, the daemon ends the agent
+  (SIGTERM to its process group, SIGKILL after 3 s) and keeps the log: no client attached, no
+  outstanding permission or elicitation request, no `session/prompt` turn in flight, and no
+  agent output. Default 12 h; `TETHER_ACP_IDLE` takes a Go duration (`30m`), `0` disables.
+- **Log cap.** If `out.log` passes `TETHER_ACP_LOG_MAX` bytes (default 268435456, 256 MiB; `0`
+  disables) the daemon ends the agent. The log is never truncated, so offsets stay valid.
+- **Ended sessions** stay replayable (`attach` drains the log, `ls` shows `ended`). `meta.json`
+  records `ended` (unix time) and `endedReason`: `idle`, `log-limit`, `exited` (the agent quit
+  on its own) or `killed` (the agent died from a signal that was not the daemon's).
+- **Retention.** `acp ls` and `acp attach` remove ended sessions older than
+  `TETHER_ACP_KEEP_ENDED` (default `14d`; a Go duration or whole days like `7d`; `0`
+  disables), never one whose daemon is still alive. `ls` columns are unchanged.
+- **Spawn failures.** An agent that exits with status 127, or whose `err.log` says `not found`,
+  before printing anything is reported on stderr as `agent command not found on this host`,
+  naming the missing program when it can be parsed (`node/npx not found: install Node.js on
+  this host`). `attach` still exits 0.
+
 ### Permission requests while nobody is attached
 
 The daemon reads the agent's stream (it still forwards every byte untouched) and tracks
-`session/request_permission` requests, `session_info_update` chat titles and the end of
+`session/request_permission` and `elicitation/create` requests, `session_info_update` chat titles and the end of
 each `session/prompt` turn. Outstanding requests live in `acp/<name>/pending.json`.
 
 - When a permission request arrives and no client is attached, one encrypted push goes
@@ -114,6 +136,7 @@ each `session/prompt` turn. Outstanding requests live in `acp/<name>/pending.jso
   half-written line (a partial line left by a dropped client is discarded).
 
     tether-notify acp answer chat1 --request 7 --option allow   # or: --request 7 --cancel
+    tether-notify acp answer chat1 --request 0 --option green   # elicitation; also --cancel, --decline
     tether-notify acp answers chat1                             # {"7":"allow"}
 
 `answer` goes through the daemon, which writes the JSON-RPC response (`outcome` `selected`
@@ -122,6 +145,29 @@ with the `optionId`, or `cancelled`) to the agent and records it in `answers.jso
 as a string id). Exit 3 means the request is not outstanding (answered from elsewhere, or
 the agent moved on); `answers` prints the recorded answers (`{}` when none) so a
 reconnecting client can merge them into its transcript.
+
+### Elicitation (the agent's multiple-choice questions)
+
+When the client advertises `elicitation: {form: {}}` the agent asks questions with an
+agent-to-client request `elicitation/create` (a form: `message` and `requestedSchema`). It is
+tracked like a permission request: kept in `pending.json` with the message and, when the form's
+first property is a single-select string with `oneOf`, its choices (`const` values); cleared by
+the client's response or the end of the turn. With nobody attached, one push goes out per
+request with the same category (`tether.acp.permission`), urgent level, thread key and collapse
+scheme as a permission push, plus `elicitation: true`, `body` the form's message, `requestId`
+the raw id, and, only when the form is that one question (an optional `<name>_custom` free-text
+companion is ignored) with 2 to 4 choices, `options` (the choice titles), `optionIds` (the
+`const` values) and `optionKinds` (`choice` each). Any other form (several questions,
+multi-select, more than 4 choices, free text only) is a plain "needs your input" push without
+`options` that opens the chat.
+
+`answer` on an outstanding elicitation: `--option VALUE` replies
+`{"action":"accept","content":{"<firstProperty>":"VALUE"}}`, `--cancel` replies
+`{"action":"cancel"}`, `--decline` replies `{"action":"decline"}`; `answers` records `VALUE`,
+`cancelled` or `declined`. An `--option` that is not one of the offered `const`s (including any
+`--option` on a form with no choices) is refused: nothing is written, the request stays
+outstanding, stderr says so and the exit status is 3. `--decline` is refused for permission
+requests.
 
 Devices live in `~/.tether-notify/devices.json`, session state in
 `~/.tether-notify/sessions/` (override the directory with `TETHER_NOTIFY_HOME`).

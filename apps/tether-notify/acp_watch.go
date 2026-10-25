@@ -27,6 +27,9 @@ const (
 	maxPushOptions        = 4
 )
 
+// errBadOption maps to exit 3: --option is not one of the choices the elicitation offered.
+var errBadOption = errors.New("option is not one of the offered choices")
+
 // errNotOutstanding maps to exit 3: the request was answered already or the agent moved on.
 var errNotOutstanding = errors.New("request is not outstanding")
 
@@ -42,6 +45,12 @@ type acpRequest struct {
 	Kind     string          `json:"kind,omitempty"`
 	Options  []acpOption     `json:"options"`
 	Notified bool            `json:"notified"`
+	// Elicitation requests (elicitation/create): the form's message, the first property's name, its
+	// choices (in Options, kind "choice") and whether the form is just that one question.
+	Elicitation bool   `json:"elicitation,omitempty"`
+	Message     string `json:"message,omitempty"`
+	Prop        string `json:"prop,omitempty"`
+	Simple      bool   `json:"simple,omitempty"`
 }
 
 type acpTrackerState struct {
@@ -140,12 +149,18 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	switch {
-	case m.Method == "session/request_permission" && key != "":
+	case (m.Method == "session/request_permission" || m.Method == "elicitation/create") && key != "":
 		if _, dup := t.st.Requests[key]; dup {
 			return acpEvent{}
 		}
 		if _, done := t.answers[key]; done {
 			return acpEvent{}
+		}
+		if m.Method == "elicitation/create" {
+			req := parseElicitation(key, m.Params)
+			t.st.Requests[key] = req
+			t.saveLocked()
+			return acpEvent{permission: req, key: key}
 		}
 		var p struct {
 			ToolCall struct {
@@ -191,6 +206,68 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 	return acpEvent{}
 }
 
+// parseElicitation keeps the message and, when the form's first property is a single-select string
+// with oneOf, its choices. Simple means that question is the whole form (bar its "_custom" note).
+func parseElicitation(key string, params json.RawMessage) *acpRequest {
+	req := &acpRequest{ID: json.RawMessage(key), Elicitation: true}
+	var p struct {
+		Message         string `json:"message"`
+		RequestedSchema struct {
+			Properties json.RawMessage `json:"properties"`
+		} `json:"requestedSchema"`
+	}
+	_ = json.Unmarshal(params, &p)
+	req.Message = p.Message
+	names, props := orderedProps(p.RequestedSchema.Properties)
+	if len(names) == 0 {
+		return req
+	}
+	var first struct {
+		Type  string `json:"type"`
+		OneOf []struct {
+			Const string `json:"const"`
+			Title string `json:"title"`
+		} `json:"oneOf"`
+	}
+	if json.Unmarshal(props[names[0]], &first) != nil || first.Type != "string" || len(first.OneOf) == 0 {
+		return req
+	}
+	req.Prop = names[0]
+	for _, c := range first.OneOf {
+		name := c.Title
+		if name == "" {
+			name = c.Const
+		}
+		req.Options = append(req.Options, acpOption{OptionID: c.Const, Name: name, Kind: "choice"})
+	}
+	req.Simple = len(names) == 1 || (len(names) == 2 && names[1] == names[0]+"_custom")
+	return req
+}
+
+// orderedProps returns a JSON object's keys in document order.
+func orderedProps(raw json.RawMessage) ([]string, map[string]json.RawMessage) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, nil
+	}
+	var names []string
+	props := map[string]json.RawMessage{}
+	for dec.More() {
+		tok, err := dec.Token()
+		key, ok := tok.(string)
+		if err != nil || !ok {
+			return nil, nil
+		}
+		var v json.RawMessage
+		if dec.Decode(&v) != nil {
+			return nil, nil
+		}
+		names = append(names, key)
+		props[key] = v
+	}
+	return names, props
+}
+
 func (t *acpTracker) clientLine(line []byte) {
 	m, key, ok := parseRPC(line)
 	if !ok || key == "" {
@@ -233,14 +310,15 @@ func (t *acpTracker) chatName() string {
 }
 
 // answer runs write for an outstanding request and, if it succeeds, records the answer and clears it.
-func (t *acpTracker) answer(key, value string, write func(req *acpRequest) error) error {
+func (t *acpTracker) answer(key string, write func(req *acpRequest) (string, error)) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	r := t.st.Requests[key]
 	if r == nil {
 		return errNotOutstanding
 	}
-	if err := write(r); err != nil {
+	value, err := write(r)
+	if err != nil {
 		return err
 	}
 	delete(t.st.Requests, key)
@@ -356,7 +434,31 @@ func clip(v string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+func (s *acpDaemonState) elicitationPush(req *acpRequest) PushContent {
+	chat := s.tr.chatName()
+	body := clip(req.Message, 200)
+	if body == "" {
+		body = "Needs your input"
+	}
+	c := PushContent{
+		Title: clip(chat, 60) + " · needs you", Body: body, Link: s.link(),
+		Category: acpPermissionCategory, State: "waiting", Version: s.collapseSuffix(string(req.ID)),
+		Session: chat, Level: levelUrgent, ACPSession: s.tr.name, RequestID: string(req.ID), Elicitation: true,
+	}
+	if req.Simple && len(req.Options) >= 2 && len(req.Options) <= maxPushOptions {
+		for _, o := range req.Options {
+			c.Options = append(c.Options, o.Name)
+			c.OptionIDs = append(c.OptionIDs, o.OptionID)
+			c.OptionKinds = append(c.OptionKinds, o.Kind)
+		}
+	}
+	return c
+}
+
 func (s *acpDaemonState) permissionPush(req *acpRequest) PushContent {
+	if req.Elicitation {
+		return s.elicitationPush(req)
+	}
 	chat := s.tr.chatName()
 	what := req.Title
 	if what == "" {
@@ -399,6 +501,8 @@ type acpAnswerMsg struct {
 	ID     json.RawMessage `json:"id"`
 	Option string          `json:"option,omitempty"`
 	Cancel bool            `json:"cancel,omitempty"`
+	// Decline answers an elicitation with action decline.
+	Decline bool `json:"decline,omitempty"`
 }
 
 // control serves one answer message: a verb line, one reply line. The connection is
@@ -408,34 +512,70 @@ func (s *acpDaemonState) control(conn net.Conn, rest string) {
 	reply := func(v string) { _, _ = io.WriteString(conn, v+"\n") }
 	var msg acpAnswerMsg
 	var key bytes.Buffer
-	if json.Unmarshal([]byte(rest), &msg) != nil || json.Compact(&key, msg.ID) != nil || (!msg.Cancel && msg.Option == "") {
+	if json.Unmarshal([]byte(rest), &msg) != nil || json.Compact(&key, msg.ID) != nil || !exactlyOne(msg.Option != "", msg.Cancel, msg.Decline) {
 		reply("err bad answer")
 		return
 	}
-	value, outcome := msg.Option, map[string]any{"outcome": "selected", "optionId": msg.Option}
-	if msg.Cancel {
-		value, outcome = "cancelled", map[string]any{"outcome": "cancelled"}
-	}
-	line, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(key.Bytes()), "result": map[string]any{"outcome": outcome}})
-	line = append(line, '\n')
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.tr.answer(key.String(), value, func(*acpRequest) error {
-		if s.ended {
-			return errors.New("agent has exited")
+	err := s.tr.answer(key.String(), func(req *acpRequest) (string, error) {
+		result, v, err := answerResult(req, msg)
+		if err != nil {
+			return "", err
 		}
-		_, err := s.stdin.Write(line)
-		return err
+		if s.ended {
+			return "", errors.New("agent has exited")
+		}
+		line, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(key.Bytes()), "result": result})
+		_, err = s.stdin.Write(append(line, '\n'))
+		return v, err
 	})
 	switch {
 	case err == nil:
 		reply("ok")
 	case errors.Is(err, errNotOutstanding):
 		reply("stale")
+	case errors.Is(err, errBadOption):
+		reply("badoption")
 	default:
 		reply("err " + err.Error())
 	}
+}
+
+func exactlyOne(bs ...bool) bool {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
+	}
+	return n == 1
+}
+
+// answerResult builds the JSON-RPC result for a request and the value recorded in answers.json.
+func answerResult(req *acpRequest, msg acpAnswerMsg) (any, string, error) {
+	if !req.Elicitation {
+		if msg.Decline {
+			return nil, "", errors.New("decline applies to elicitation requests only")
+		}
+		if msg.Cancel {
+			return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, "cancelled", nil
+		}
+		return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": msg.Option}}, msg.Option, nil
+	}
+	switch {
+	case msg.Cancel:
+		return map[string]any{"action": "cancel"}, "cancelled", nil
+	case msg.Decline:
+		return map[string]any{"action": "decline"}, "declined", nil
+	}
+	for _, o := range req.Options {
+		if req.Prop != "" && o.OptionID == msg.Option {
+			return map[string]any{"action": "accept", "content": map[string]any{req.Prop: msg.Option}}, msg.Option, nil
+		}
+	}
+	return nil, "", errBadOption
 }
 
 func waitTimeout(wg *sync.WaitGroup, d time.Duration) {
@@ -449,21 +589,22 @@ func waitTimeout(wg *sync.WaitGroup, d time.Duration) {
 
 func acpAnswer(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: acp answer <name> --request ID (--option OPTION_ID | --cancel)")
+		return fmt.Errorf("usage: acp answer <name> --request ID (--option OPTION_ID | --cancel | --decline)")
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("acp answer", flag.ContinueOnError)
 	request := fs.String("request", "", "JSON-RPC id of the permission request, as JSON text")
 	option := fs.String("option", "", "optionId to select")
 	cancel := fs.Bool("cancel", false, "answer with outcome cancelled")
+	decline := fs.Bool("decline", false, "decline an elicitation request")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if !validSessionName(name) {
 		return fmt.Errorf("invalid session name")
 	}
-	if *request == "" || (*option == "") == !*cancel {
-		return fmt.Errorf("acp answer needs --request and exactly one of --option or --cancel")
+	if *request == "" || !exactlyOne(*option != "", *cancel, *decline) {
+		return fmt.Errorf("acp answer needs --request and exactly one of --option, --cancel or --decline")
 	}
 	id := json.RawMessage(*request)
 	if !json.Valid(id) {
@@ -482,7 +623,7 @@ func acpAnswer(args []string) error {
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
-	body, _ := json.Marshal(acpAnswerMsg{ID: id, Option: *option, Cancel: *cancel})
+	body, _ := json.Marshal(acpAnswerMsg{ID: id, Option: *option, Cancel: *cancel, Decline: *decline})
 	if _, err := fmt.Fprintf(conn, "answer %s\n", body); err != nil {
 		return err
 	}
@@ -495,6 +636,8 @@ func acpAnswer(args []string) error {
 		return nil
 	case resp == "stale":
 		return errNotOutstanding
+	case resp == "badoption":
+		return errBadOption
 	}
 	return errors.New(strings.TrimPrefix(resp, "err "))
 }

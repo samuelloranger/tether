@@ -202,7 +202,7 @@ func TestACPNoDuplicatePushOnReplayOrRestart(t *testing.T) {
 	}
 	// Answered ids are never re-announced either.
 	tr := loadACPTracker("d")
-	if err := tr.answer("7", "allow", func(*acpRequest) error { return nil }); err != nil {
+	if err := tr.answer("7", func(*acpRequest) (string, error) { return "allow", nil }); err != nil {
 		t.Fatal(err)
 	}
 	s = mk()
@@ -466,4 +466,185 @@ func TestACPPushesWhenHandshakingClientNeverArrives(t *testing.T) {
 	waitFor(t, "request tracked", func() bool { return pendingCount("h") == 1 })
 	c.Close()
 	fr.waitPushes(t, 1)
+}
+
+const elicitReq = `{"jsonrpc":"2.0","id":0,"method":"elicitation/create","params":{"mode":"form","sessionId":"sess-3","toolCallId":"toolu_x","message":"Which colour do you prefer?","requestedSchema":{"type":"object","properties":{"question_0":{"type":"string","title":"Colour","oneOf":[{"const":"red","title":"red","description":"Red"},{"const":"green","title":"green","description":"Green"},{"const":"blue","title":"blue","description":"Blue"}]},"question_0_custom":{"type":"string","title":"Other","description":"Type your own answer, or add a note to the option you chose above (optional)."}}}}}`
+
+const elicitTwoQuestions = `{"jsonrpc":"2.0","id":4,"method":"elicitation/create","params":{"mode":"form","message":"Two things","requestedSchema":{"type":"object","properties":{"question_0":{"type":"string","oneOf":[{"const":"a","title":"A"},{"const":"b","title":"B"}]},"question_1":{"type":"string","oneOf":[{"const":"c","title":"C"},{"const":"d","title":"D"}]}}}}}`
+
+func TestACPElicitationPushedOnceWithNoClient(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "e1", script)
+	a.emit(t, elicitReq)
+	fr.waitPushes(t, 1)
+	time.Sleep(300 * time.Millisecond)
+	got := fr.pushes()
+	if len(got) != 1 {
+		t.Fatalf("want one push, got %d", len(got))
+	}
+	c := got[0]
+	if c.Category != acpPermissionCategory || c.Level != levelUrgent || c.Body != "Which colour do you prefer?" ||
+		c.ACPSession != "e1" || c.RequestID != "0" || !c.Elicitation || c.Title != "e1 · needs you" || c.State != "waiting" {
+		t.Fatalf("payload %+v", c)
+	}
+	if strings.Join(c.Options, ",") != "red,green,blue" || strings.Join(c.OptionIDs, ",") != "red,green,blue" ||
+		strings.Join(c.OptionKinds, ",") != "choice,choice,choice" {
+		t.Fatalf("options %+v", c)
+	}
+	if want := threadKey("box", "e1"); fr.reqs[0].ThreadKey != want || fr.reqs[0].Level != levelUrgent {
+		t.Fatalf("relay request %+v", fr.reqs[0])
+	}
+	if pendingCount("e1") != 1 {
+		t.Fatal("request should be pending")
+	}
+}
+
+func TestACPElicitationNoPushWhenClientAttached(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "e2")
+	p := startAttach(t, "e2", "--spawn", script, "--cwd", t.TempDir())
+	waitFor(t, "client attached", func() bool { m, err := readACPMeta("e2"); return err == nil && m.Attached })
+	a.emit(t, elicitReq)
+	if l := p.readLine(t); !strings.Contains(l, "elicitation/create") {
+		t.Fatalf("got %q", l)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if n := len(fr.pushes()); n != 0 {
+		t.Fatalf("pushed %d with a client attached", n)
+	}
+	fmt.Fprint(p.stdin, `{"jsonrpc":"2.0","id":0,"result":{"action":"accept","content":{}}}`+"\n")
+	waitFor(t, "cleared", func() bool { return pendingCount("e2") == 0 })
+}
+
+func TestACPElicitationAnswerWritesOneWholeLine(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "e3", script)
+	a.emit(t, elicitReq)
+	waitFor(t, "pending", func() bool { return pendingCount("e3") == 1 })
+	if _, errs, code := runAcp(t, "answer", "e3", "--request", "0", "--option", "green"); code != 0 {
+		t.Fatalf("exit %d %q", code, errs)
+	}
+	want := `{"id":0,"jsonrpc":"2.0","result":{"action":"accept","content":{"question_0":"green"}}}` + "\n"
+	waitFor(t, "agent stdin", func() bool { return a.stdin() != "" })
+	if got := a.stdin(); got != want {
+		t.Fatalf("agent saw %q", got)
+	}
+	if pendingCount("e3") != 0 {
+		t.Fatal("pending not cleared")
+	}
+	if _, errs, code := runAcp(t, "answer", "e3", "--request", "0", "--option", "green"); code != 3 || !strings.Contains(errs, "not outstanding") {
+		t.Fatalf("second answer exit %d %q", code, errs)
+	}
+	out, _, _ := runAcp(t, "answers", "e3")
+	if strings.TrimSpace(out) != `{"0":"green"}` {
+		t.Fatalf("answers %q", out)
+	}
+}
+
+func TestACPElicitationRefusesUnofferedOption(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "e4", script)
+	a.emit(t, elicitReq)
+	waitFor(t, "pending", func() bool { return pendingCount("e4") == 1 })
+	_, errs, code := runAcp(t, "answer", "e4", "--request", "0", "--option", "purple")
+	if code != 3 || !strings.Contains(errs, "not one of the choices") {
+		t.Fatalf("exit %d %q", code, errs)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if a.stdin() != "" || pendingCount("e4") != 1 {
+		t.Fatalf("refused option reached the agent or cleared the request: %q", a.stdin())
+	}
+}
+
+func TestACPElicitationCancelAndDecline(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "e5", script)
+	a.emit(t, elicitReq)
+	a.emit(t, strings.Replace(elicitReq, `"id":0`, `"id":1`, 1))
+	waitFor(t, "pending", func() bool { return pendingCount("e5") == 2 })
+	if _, errs, code := runAcp(t, "answer", "e5", "--request", "0", "--cancel"); code != 0 {
+		t.Fatalf("cancel exit %d %q", code, errs)
+	}
+	if _, errs, code := runAcp(t, "answer", "e5", "--request", "1", "--decline"); code != 0 {
+		t.Fatalf("decline exit %d %q", code, errs)
+	}
+	want := `{"id":0,"jsonrpc":"2.0","result":{"action":"cancel"}}` + "\n" + `{"id":1,"jsonrpc":"2.0","result":{"action":"decline"}}` + "\n"
+	waitFor(t, "agent stdin", func() bool { return strings.Count(a.stdin(), "\n") == 2 })
+	if got := a.stdin(); got != want {
+		t.Fatalf("agent saw %q", got)
+	}
+	out, _, _ := runAcp(t, "answers", "e5")
+	if strings.TrimSpace(out) != `{"0":"cancelled","1":"declined"}` {
+		t.Fatalf("answers %q", out)
+	}
+}
+
+func TestACPDeclineIsRefusedForPermissions(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "e6", script)
+	a.emit(t, permReq)
+	waitFor(t, "pending", func() bool { return pendingCount("e6") == 1 })
+	if _, _, code := runAcp(t, "answer", "e6", "--request", "7", "--decline"); code == 0 {
+		t.Fatal("decline accepted for a permission request")
+	}
+	if pendingCount("e6") != 1 {
+		t.Fatal("request should still be outstanding")
+	}
+}
+
+func TestACPElicitationMultiQuestionPushesWithoutOptions(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "e7", script)
+	a.emit(t, elicitTwoQuestions)
+	c := fr.waitPushes(t, 1)[0]
+	if c.Options != nil || c.OptionIDs != nil || c.OptionKinds != nil || !c.Elicitation || c.Body != "Two things" || c.RequestID != "4" {
+		t.Fatalf("payload %+v", c)
+	}
+	if _, _, code := runAcp(t, "answer", "e7", "--request", "4", "--option", "c"); code != 3 {
+		t.Fatalf("option on a multi-question form: exit %d", code)
+	}
+	if _, errs, code := runAcp(t, "answer", "e7", "--request", "4", "--cancel"); code != 0 {
+		t.Fatalf("cancel exit %d %q", code, errs)
+	}
+}
+
+func TestACPElicitationShapesWithoutPushOptions(t *testing.T) {
+	acpEnv(t)
+	_ = os.MkdirAll(acpDir("sh"), 0o700)
+	mk := func(props string) PushContent {
+		line := `{"jsonrpc":"2.0","id":9,"method":"elicitation/create","params":{"message":"m","requestedSchema":{"properties":` + props + `}}}`
+		s := &acpDaemonState{tr: loadACPTracker("sh")}
+		ev := s.tr.agentLine([]byte(line))
+		_ = os.Remove(filepath.Join(acpDir("sh"), "pending.json"))
+		return s.permissionPush(ev.permission)
+	}
+	one := `{"const":"a","title":"A"}`
+	cases := map[string]string{
+		"free text only": `{"q":{"type":"string","title":"Name"}}`,
+		"multi select":   `{"q":{"type":"array","items":{"anyOf":[` + one + `,{"const":"b","title":"B"}]}}}`,
+		"five choices":   `{"q":{"type":"string","oneOf":[` + strings.Repeat(one+",", 4) + one + `]}}`,
+		"one choice":     `{"q":{"type":"string","oneOf":[` + one + `]}}`,
+	}
+	for name, props := range cases {
+		if c := mk(props); c.Options != nil || !c.Elicitation || c.Category != acpPermissionCategory {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	if c := mk(`{"q":{"type":"string","oneOf":[` + one + `,{"const":"b"}]}}`); strings.Join(c.Options, ",") != "A,b" {
+		t.Errorf("fallback title: %+v", c)
+	}
 }

@@ -42,6 +42,8 @@ type PushContent struct {
 	OptionIDs   []string `json:"optionIds,omitempty"`
 	OptionKinds []string `json:"optionKinds,omitempty"`
 	StopReason  string   `json:"stopReason,omitempty"`
+	// Elicitation marks an ACP elicitation/create request (a form), not a permission request.
+	Elicitation bool `json:"elicitation,omitempty"`
 }
 
 func encryptPushContent(keyBase64 string, content PushContent) (string, error) {

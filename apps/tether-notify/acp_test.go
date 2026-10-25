@@ -340,12 +340,12 @@ func TestACPAgentFailingWithOnlyStderrIsReported(t *testing.T) {
 	if code := p.exitCode(t); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if got := p.errb.String(); got != "agent exited with status 127: npx: not found\n" {
+	if got := p.errb.String(); got != "agent command not found on this host: node/npx not found: install Node.js on this host\n" {
 		t.Fatalf("stderr %q", got)
 	}
 	again := startAttach(t, "f")
 	again.readAll(t)
-	if again.exitCode(t) != 0 || !strings.Contains(again.errb.String(), "status 127") {
+	if again.exitCode(t) != 0 || !strings.Contains(again.errb.String(), "not found on this host") {
 		t.Fatalf("replay stderr %q", again.errb.String())
 	}
 }

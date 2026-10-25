@@ -42,6 +42,9 @@ type acpMeta struct {
 	AgentPid int    `json:"agentPid,omitempty"`
 	// Attached is true while a client has completed the first-line handshake and is the current client.
 	Attached bool `json:"attached,omitempty"`
+	// Ended is the unix time the agent ended; EndedReason is idle, log-limit, exited or killed.
+	Ended       int64  `json:"ended,omitempty"`
+	EndedReason string `json:"endedReason,omitempty"`
 }
 
 func acpDir(name string) string { return filepath.Join(home(), "acp", name) }
@@ -144,6 +147,7 @@ func acpAttach(args []string) error {
 		return fmt.Errorf("--from must not be negative")
 	}
 
+	pruneEnded(name)
 	m, err := readACPMeta(name)
 	if err != nil && !errors.Is(err, errNoSession) {
 		return err
@@ -181,11 +185,15 @@ func reportSilentFailure(name string, errw io.Writer) {
 		return
 	}
 	msg := fmt.Sprintf("agent exited with status %d", *m.ExitCode)
-	if data, err := os.ReadFile(filepath.Join(acpDir(name), "err.log")); err == nil {
+	data, err := os.ReadFile(filepath.Join(acpDir(name), "err.log"))
+	if err == nil {
 		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 		if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
 			msg += ": " + clip(last, 300)
 		}
+	}
+	if nf := notFoundMessage(*m.ExitCode, string(data)); nf != "" {
+		msg = nf
 	}
 	fmt.Fprintln(errw, msg)
 }
@@ -313,6 +321,10 @@ type acpDaemonState struct {
 	partial []byte
 	skip    bool
 
+	agentPid  int       // guarded by mu
+	endReason string    // why the daemon ended the agent itself, guarded by mu
+	activity  time.Time // last agent output or busy moment, guarded by mu
+
 	handshaking int // connections accepted whose first line is not read yet, guarded by mu
 	metaMu      sync.Mutex
 	meta        *acpMeta
@@ -391,7 +403,7 @@ func acpDaemon(name string) error {
 
 	s := &acpDaemonState{
 		notify: make(chan struct{}), stdin: stdin, log: logf, errf: errf,
-		tr: loadACPTracker(name), meta: m,
+		tr: loadACPTracker(name), meta: m, activity: time.Now(),
 		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
 	}
 	startErr := cmd.Start()
@@ -399,12 +411,18 @@ func acpDaemon(name string) error {
 	m.Pid = os.Getpid()
 	if startErr == nil {
 		m.AgentPid = cmd.Process.Pid
+		s.agentPid = m.AgentPid
 	}
 	if err := writeACPMeta(m); err != nil {
 		return err
 	}
 	_ = os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(m.Pid)), 0o600)
 
+	logMax := acpLogMax()
+	idleStop := make(chan struct{})
+	if idle := acpDuration("TETHER_ACP_IDLE", defaultACPIdle); idle > 0 && startErr == nil {
+		go s.idleLoop(idle, idleStop)
+	}
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
@@ -415,8 +433,13 @@ func acpDaemon(name string) error {
 				if _, werr := logf.Write(buf[:n]); werr == nil {
 					s.mu.Lock()
 					s.size += int64(n)
+					s.activity = time.Now()
+					over := logMax > 0 && s.size > logMax
 					s.broadcast()
 					s.mu.Unlock()
+					if over {
+						go s.endAgent("log-limit")
+					}
 				}
 				s.scanAgent(buf[:n])
 			}
@@ -436,16 +459,32 @@ func acpDaemon(name string) error {
 		}
 	}()
 
-	code := 127
+	code, signaled := 127, false
 	if startErr == nil {
 		_ = cmd.Wait()
 		code = cmd.ProcessState.ExitCode()
+		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+			signaled = ws.Signaled()
+		}
 	}
+	close(idleStop)
 	// A grandchild can keep the pipe open past the agent's exit; give the reader a moment, then cut it.
 	_ = pr.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 	<-readDone
 
-	s.setMeta(func(m *acpMeta) { m.State, m.ExitCode, m.Attached = "ended", &code, false })
+	s.mu.Lock()
+	reason := s.endReason
+	s.mu.Unlock()
+	if reason == "" {
+		reason = "exited"
+		if signaled {
+			reason = "killed"
+		}
+	}
+	s.setMeta(func(m *acpMeta) {
+		m.State, m.ExitCode, m.Attached = "ended", &code, false
+		m.Ended, m.EndedReason = time.Now().Unix(), reason
+	})
 	s.mu.Lock()
 	s.ended = true
 	s.broadcast()
@@ -608,6 +647,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 }
 
 func acpLs(w io.Writer) error {
+	pruneEnded("")
 	entries, err := os.ReadDir(filepath.Join(home(), "acp"))
 	if err != nil {
 		if os.IsNotExist(err) {
