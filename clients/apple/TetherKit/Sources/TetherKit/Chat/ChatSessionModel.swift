@@ -94,6 +94,8 @@ final class ChatSessionModel {
   /// and a pending permission may already have been answered.
   var canInteract: Bool { link.allowsInteraction && !readOnly }
   var canSend: Bool { canInteract && state.turn == .idle }
+  /// The agent is gone for good: the transcript stays readable, nothing can be sent and nothing redials.
+  var hasEnded: Bool { link.phase == .ended }
 
   func connect() async {
     guard !dialInFlight, !left, client == nil || link.phase == .lost else { return }
@@ -347,7 +349,9 @@ final class ChatSessionModel {
       snapshots?.clear()
       skipSnapshot = true
       await connect()
-    case .ended, .lost:
+    case .ended:
+      link.ended()
+    case .lost:
       break
     }
   }

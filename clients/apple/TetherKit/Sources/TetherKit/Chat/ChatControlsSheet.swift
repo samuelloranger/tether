@@ -165,6 +165,7 @@ struct ChatControlsSheet: View {
     case .connecting: "Connecting"
     case .catchingUp: "Catching up"
     case .lost: "Disconnected"
+    case .ended: "Ended"
     }
   }
 
@@ -173,6 +174,7 @@ struct ChatControlsSheet: View {
     case .live: TetherColors.success
     case .connecting, .catchingUp: TetherColors.warning
     case .lost: TetherColors.danger
+    case .ended: TetherColors.textFaint
     }
   }
 

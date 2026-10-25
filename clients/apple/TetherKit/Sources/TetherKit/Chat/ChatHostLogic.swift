@@ -107,7 +107,8 @@ struct ChatRoute: Hashable, Identifiable {
 /// Tracks the replay window after a (re)connect. The holder replays its whole log, so the
 /// transcript is only trustworthy once no new state has arrived for `settleWindow`.
 struct ChatLinkTracker: Equatable, Sendable {
-  enum Phase: Equatable, Sendable { case connecting, catchingUp, live, lost }
+  /// `ended` is the host's own word that the agent is gone for good; `lost` is only a dropped connection.
+  enum Phase: Equatable, Sendable { case connecting, catchingUp, live, lost, ended }
 
   static let settleWindow: TimeInterval = 0.4
 
@@ -118,7 +119,8 @@ struct ChatLinkTracker: Equatable, Sendable {
 
   mutating func dialStarted() { phase = .connecting }
   mutating func dialFailed() { phase = .lost }
-  mutating func connectionLost() { phase = .lost }
+  mutating func connectionLost() { if phase != .ended { phase = .lost } }
+  mutating func ended() { phase = .ended }
 
   mutating func dialSucceeded(at now: Date) {
     phase = .catchingUp

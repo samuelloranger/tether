@@ -319,6 +319,8 @@ struct ChatView: View {
       badge(color: TetherColors.warning, text: model.link.phase == .connecting ? "Connecting" : "Catching up")
     case .live:
       badge(color: TetherColors.success, text: "Live")
+    case .ended:
+      badge(color: TetherColors.textFaint, text: "Ended")
     }
   }
 
@@ -347,7 +349,7 @@ struct ChatView: View {
         .padding(10)
         .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
       }
-      if let permission = model.state.pendingPermissions.first, !model.readOnly {
+      if let permission = model.state.pendingPermissions.first, !model.readOnly, !model.hasEnded {
         PermissionCard(
           permission: permission, cwd: model.cwd,
           position: model.state.pendingPermissions.count > 1 ? "1 of \(model.state.pendingPermissions.count)" : nil,
@@ -367,6 +369,11 @@ struct ChatView: View {
         Label("Started on another device. Read only.", systemImage: "eye")
           .font(.footnote).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
+      } else if model.hasEnded {
+        Label("This chat has ended. You can still read it.", systemImage: "moon.zzz")
+          .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          .frame(maxWidth: .infinity).padding(.vertical, 6)
+          .accessibilityIdentifier("chatEnded")
       } else {
         composer
       }
