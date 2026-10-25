@@ -167,4 +167,21 @@ final class ChatTranscriptTests: XCTestCase {
     state = ChatReducer.reduce(state, .connectionLost)
     XCTAssertEqual(state.connection, .lost)
   }
+
+  func test_consecutive_tool_and_resolved_permission_rows_share_one_block() {
+    func tool(_ id: Int) -> ChatItem { .init(id: id, kind: .tool(ChatToolCall(ACPToolFields(id: "t\(id)")))) }
+    let resolved = ChatPermission(
+      requestId: .int(1), toolCallId: "t2", title: "Edit", kind: .edit, diff: nil, text: nil, options: [],
+      resolvedOptionId: "once")
+    let items: [ChatItem] = [
+      .init(id: 0, kind: .notice("hi")), tool(1), .init(id: 2, kind: .permission(resolved)), tool(3),
+      .init(id: 4, kind: .assistant(text: "done", messageId: nil)), tool(5),
+    ]
+    let blocks = ChatGrouping.blocks(items)
+    XCTAssertEqual(blocks.count, 4)
+    guard case let .tools(group) = blocks[1] else { return XCTFail("expected a tool group") }
+    XCTAssertEqual(group.map(\.id), [1, 2, 3])
+    guard case let .tools(last) = blocks[3] else { return XCTFail("expected a tool group") }
+    XCTAssertEqual(last.map(\.id), [5])
+  }
 }

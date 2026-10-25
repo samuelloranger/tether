@@ -56,57 +56,73 @@ struct MachineCardView: View {
     // sizes, so they stack there instead.
     let detailLayout = DynamicTypeLayout.detailLayout(
       for: dynamicTypeSize, stackedSpacing: 2, inlineSpacing: 6)
-    return Button(action: onOpen) {
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 10) {
-          Circle().fill(TetherColors.heatCool).frame(width: 11, height: 11).opacity(0.6)
-          Text(profile.name).font(.headline)
-            .foregroundStyle(TetherColors.textPrimary)
-          Spacer()
-          Text("saved").font(.caption2.weight(.semibold).monospaced())
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .foregroundStyle(TetherColors.textFaint)
-            .background(TetherColors.textPrimary.opacity(0.04), in: Capsule())
-            .overlay(Capsule().strokeBorder(TetherColors.border))
+    return VStack(alignment: .leading, spacing: 0) {
+      Button(action: onOpen) {
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 10) {
+            Circle().fill(TetherColors.heatCool).frame(width: 11, height: 11).opacity(0.6)
+            Text(profile.name).font(.headline)
+              .foregroundStyle(TetherColors.textPrimary)
+            Spacer()
+            Text("saved").font(.caption2.weight(.semibold).monospaced())
+              .padding(.horizontal, 8).padding(.vertical, 3)
+              .foregroundStyle(TetherColors.textFaint)
+              .background(TetherColors.textPrimary.opacity(0.04), in: Capsule())
+              .overlay(Capsule().strokeBorder(TetherColors.border))
+          }
+          detailLayout {
+            Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
+            Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
+          }
+          .font(.caption.monospaced())
+          .foregroundStyle(TetherColors.textSecondary)
         }
-        detailLayout {
-          Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
-          Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
-        }
-        .font(.caption.monospaced())
-        .foregroundStyle(TetherColors.textSecondary)
-        HStack(spacing: 4) {
-          Spacer()
-          Text("Open").font(.caption.weight(.semibold))
-          Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
-        }
-        .foregroundStyle(TetherColors.accent)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
       }
-      .padding(.horizontal, 14).padding(.vertical, 13)
-      .tetherCard()
-    }
-    .buttonStyle(TetherPressStyle())
-    .overlay(alignment: .bottomLeading) {
-      if let onChat {
-        Button(action: onChat) {
-          Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 11).padding(.vertical, 6)
-            .background(TetherColors.accent.opacity(0.12), in: Capsule())
-            .foregroundStyle(TetherColors.accent)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("homeMachine_\(profile.name)")
+      .accessibilityLabel("\(profile.name), \(profile.username) at \(profile.host) port \(profile.port), \(authLabel)")
+      .accessibilityHint("Opens a terminal on this machine")
+
+      Rectangle().fill(TetherColors.border).frame(height: 0.5)
+        .padding(.top, 12).padding(.bottom, 8)
+        .accessibilityHidden(true)
+
+      HStack(alignment: .center, spacing: 8) {
+        if let onChat {
+          Button(action: onChat) {
+            Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
+              .font(.caption.weight(.semibold))
+              .padding(.horizontal, 12)
+              .frame(height: 28)
+              .background(TetherColors.accent.opacity(0.12), in: Capsule())
+              .foregroundStyle(TetherColors.accent)
+              .hitSlop(vertical: 8, horizontal: 4)
+          }
+          .buttonStyle(TetherPressStyle())
+          .accessibilityIdentifier("homeChat_\(profile.name)")
+          .accessibilityLabel("Chat with an agent on \(profile.name)")
+        }
+        Spacer(minLength: 0)
+        Button(action: onOpen) {
+          HStack(spacing: 4) {
+            Text("Open").font(.subheadline.weight(.semibold))
+            Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+          }
+          .foregroundStyle(TetherColors.accent)
+          .frame(height: 28)
+          .hitSlop(vertical: 8, horizontal: 8)
         }
         .buttonStyle(TetherPressStyle())
-        .padding(.leading, 8).padding(.bottom, 0)
-        .accessibilityIdentifier("homeChat_\(profile.name)")
-        .accessibilityLabel("Chat with an agent on \(profile.name)")
+        .accessibilityIdentifier("homeOpen_\(profile.name)")
+        .accessibilityLabel("Open \(profile.name)")
+        .accessibilityHint("Opens a terminal on this machine")
       }
     }
+    .padding(.horizontal, 14).padding(.top, 13).padding(.bottom, 8)
+    .tetherCard()
     .macHoverHighlight()
-    .accessibilityIdentifier("homeMachine_\(profile.name)")
-    .accessibilityLabel("\(profile.name), \(profile.username) at \(profile.host) port \(profile.port), \(authLabel)")
-    .accessibilityHint("Opens a terminal on this machine")
   }
 }
 
@@ -203,6 +219,13 @@ extension View {
     } else {
       self
     }
+  }
+
+  /// Grows the tap area without growing the layout, so a compact control keeps a 44pt target.
+  func hitSlop(vertical: CGFloat, horizontal: CGFloat = 0) -> some View {
+    padding(.vertical, vertical).padding(.horizontal, horizontal)
+      .contentShape(Rectangle())
+      .padding(.vertical, -vertical).padding(.horizontal, -horizontal)
   }
 
   func tetherCard(cornerRadius: CGFloat = 16) -> some View {

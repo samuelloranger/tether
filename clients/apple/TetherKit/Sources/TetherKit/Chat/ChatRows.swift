@@ -17,6 +17,40 @@ extension ACPToolKind {
   }
 }
 
+/// A run of tool calls reads as one list, so consecutive tool entries share a surface.
+enum ChatBlock: Identifiable {
+  case item(ChatItem)
+  case tools([ChatItem])
+
+  var id: Int {
+    switch self {
+    case let .item(item): item.id
+    case let .tools(items): items[0].id
+    }
+  }
+}
+
+enum ChatGrouping {
+  static func blocks(_ items: [ChatItem]) -> [ChatBlock] {
+    var blocks: [ChatBlock] = []
+    var run: [ChatItem] = []
+    func flush() {
+      if !run.isEmpty { blocks.append(.tools(run)) }
+      run = []
+    }
+    for item in items {
+      switch item.kind {
+      case .tool, .permission: run.append(item)
+      default:
+        flush()
+        blocks.append(.item(item))
+      }
+    }
+    flush()
+    return blocks
+  }
+}
+
 /// One transcript entry. Equatable so a streaming chunk redraws its own row, not the list.
 struct ChatItemRow: View, Equatable {
   let item: ChatItem
@@ -36,12 +70,8 @@ struct ChatItemRow: View, Equatable {
       AssistantTextView(text: text)
     case let .thought(text):
       ThoughtRow(text: text, expanded: expanded, toggle: toggle)
-    case let .tool(call):
-      ToolCallRow(call: call, cwd: cwd, expanded: expanded, toggle: toggle)
-    case let .permission(permission):
-      if let resolved = permission.resolvedOptionId {
-        ResolvedPermissionRow(permission: permission, optionId: resolved)
-      }
+    case .tool, .permission:
+      ToolGroupView(items: [item], cwd: cwd, expandedIDs: expanded ? [item.id] : []) { _ in toggle() }
     case let .plan(entries):
       PlanRow(entries: entries)
     case let .notice(text):
@@ -115,6 +145,67 @@ struct ThoughtRow: View {
   }
 }
 
+/// Tool rows in one rounded surface: a 24pt icon column, one text column, trailing facts.
+struct ToolGroupView: View, Equatable {
+  let items: [ChatItem]
+  let cwd: String
+  let expandedIDs: Set<Int>
+  let toggle: (Int) -> Void
+
+  static func == (lhs: ToolGroupView, rhs: ToolGroupView) -> Bool {
+    lhs.items == rhs.items && lhs.cwd == rhs.cwd && lhs.expandedIDs == rhs.expandedIDs
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+        if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5).padding(.leading, 46) }
+        row(item)
+      }
+    }
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(TetherColors.border))
+    .clipShape(RoundedRectangle(cornerRadius: 12))
+    .accessibilityElement(children: .contain)
+  }
+
+  @ViewBuilder private func row(_ item: ChatItem) -> some View {
+    switch item.kind {
+    case let .tool(call):
+      ToolCallRow(call: call, cwd: cwd, expanded: expandedIDs.contains(item.id)) { toggle(item.id) }
+    case let .permission(permission):
+      if let resolved = permission.resolvedOptionId {
+        ResolvedPermissionRow(permission: permission, optionId: resolved)
+      }
+    default:
+      EmptyView()
+    }
+  }
+}
+
+/// The shared row frame: icon in a 24pt column, text, then whatever trails.
+struct ToolRowLayout<Trailing: View>: View {
+  let symbol: String
+  let tint: Color
+  let title: String
+  let titleTint: Color
+  @ViewBuilder var trailing: Trailing
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: symbol).font(.footnote).foregroundStyle(tint)
+        .frame(width: 24)
+        .accessibilityHidden(true)
+      Text(title).font(.footnote).foregroundStyle(titleTint)
+        .lineLimit(1).truncationMode(.middle)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      trailing
+    }
+    .padding(.horizontal, 12)
+    .frame(minHeight: 36)
+  }
+}
+
 struct ToolCallRow: View {
   let call: ChatToolCall
   let cwd: String
@@ -129,7 +220,7 @@ struct ToolCallRow: View {
   private var expandable: Bool { call.diff != nil || detail != nil }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: 0) {
       Button(action: toggle) { header }
         .buttonStyle(.plain)
         .disabled(!expandable)
@@ -140,32 +231,28 @@ struct ToolCallRow: View {
   }
 
   private var header: some View {
-    HStack(spacing: 9) {
-      Image(systemName: call.kind.symbolName)
-        .font(.caption)
-        .foregroundStyle(call.status == .failed ? TetherColors.danger : TetherColors.textFaint)
-        .frame(width: 18)
-        .accessibilityHidden(true)
-      Text(call.title)
-        .font(.footnote)
-        .foregroundStyle(call.status == .failed ? TetherColors.danger : TetherColors.textSecondary)
-        .lineLimit(1).truncationMode(.middle)
-      if let diff = call.diff {
-        let file = ACPDiffAdapter.file(for: diff, relativeTo: cwd)
-        HStack(spacing: 4) {
-          if file.added > 0 { Text("+\(file.added)").foregroundStyle(TetherColors.success) }
-          if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(TetherColors.danger) }
+    ToolRowLayout(
+      symbol: call.kind.symbolName,
+      tint: call.status == .failed ? TetherColors.danger : TetherColors.textFaint,
+      title: call.title,
+      titleTint: call.status == .failed ? TetherColors.danger : TetherColors.textSecondary
+    ) {
+      HStack(spacing: 8) {
+        if let diff = call.diff {
+          let file = ACPDiffAdapter.file(for: diff, relativeTo: cwd)
+          HStack(spacing: 5) {
+            if file.added > 0 { Text("+\(file.added)").foregroundStyle(TetherColors.success) }
+            if file.removed > 0 { Text("\u{2212}\(file.removed)").foregroundStyle(TetherColors.danger) }
+          }
+          .font(.caption2.monospacedDigit())
         }
-        .font(.caption2.monospaced())
-      }
-      Spacer(minLength: 6)
-      statusGlyph
-      if expandable {
-        Image(systemName: expanded ? "chevron.down" : "chevron.right")
-          .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        statusGlyph.frame(width: 14)
+        if expandable {
+          Image(systemName: expanded ? "chevron.down" : "chevron.right")
+            .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        }
       }
     }
-    .padding(.vertical, 5)
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(call.title), \(statusWord)")
@@ -198,7 +285,7 @@ struct ToolCallRow: View {
       if let diff = call.diff {
         DiffReviewView(files: [ACPDiffAdapter.file(for: diff, relativeTo: cwd)])
       } else if let detail {
-        Text(String(detail.prefix(4000)) + (detail.count > 4000 ? "\n…" : ""))
+        Text(String(detail.prefix(4000)) + (detail.count > 4000 ? "\n\u{2026}" : ""))
           .font(.caption.monospaced())
           .foregroundStyle(TetherColors.textSecondary)
           .textSelection(.enabled)
@@ -206,10 +293,9 @@ struct ToolCallRow: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .padding(.leading, 27)
+    .background(TetherColors.background.opacity(0.5))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .padding(.horizontal, 8).padding(.bottom, 8)
   }
 }
 
@@ -304,10 +390,13 @@ struct ResolvedPermissionRow: View {
   private var allowed: Bool { option.map { ChatPermissionRole(kind: $0.kind) != .destructive } ?? false }
 
   var body: some View {
-    QuietRow(
+    ToolRowLayout(
       symbol: allowed ? "checkmark.shield" : "xmark.shield",
-      text: "\(option?.name ?? "Cancelled") · \(permission.title)",
-      tint: allowed ? TetherColors.textFaint : TetherColors.warning)
+      tint: allowed ? TetherColors.textFaint : TetherColors.warning,
+      title: "\(option?.name ?? "Cancelled") \u{00B7} \(permission.title)",
+      titleTint: TetherColors.textFaint
+    ) { EmptyView() }
+    .accessibilityElement(children: .combine)
   }
 }
 

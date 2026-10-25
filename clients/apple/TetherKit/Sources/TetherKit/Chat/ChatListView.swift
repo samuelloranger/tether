@@ -142,22 +142,30 @@ struct ChatListView: View {
 private struct ChatListRow: View {
   let chat: ACPChatSummary
 
+  private var status: String { chat.isRunning ? "Running" : "Ended" }
+  private var agent: String? { ChatFormat.agentLabel(spawn: chat.spawn) }
+
   var body: some View {
     HStack(spacing: 12) {
-      Circle()
-        .fill(chat.isRunning ? TetherColors.success : TetherColors.textFaint)
-        .frame(width: 9, height: 9)
-        .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 3) {
-        Text(chat.title).font(.body.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
-          .lineLimit(1)
-        Text(chat.cwd).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
-          .lineLimit(1).truncationMode(.head)
+        HStack(spacing: 6) {
+          Text(chat.title).font(.body.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
+            .lineLimit(1)
+          if let agent {
+            Text(agent).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+              .padding(.horizontal, 6).padding(.vertical, 1)
+              .background(TetherColors.textPrimary.opacity(0.06), in: Capsule())
+              .fixedSize()
+          }
+        }
+        if let parent = ChatFormat.parentPath(chat.cwd) {
+          Text(parent).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+            .lineLimit(1).truncationMode(.middle)
+        }
       }
       Spacer(minLength: 8)
-      VStack(alignment: .trailing, spacing: 3) {
-        Text(chat.isRunning ? "running" : "ended").font(.caption2.weight(.semibold).monospaced())
-          .foregroundStyle(chat.isRunning ? TetherColors.success : TetherColors.textFaint)
+      VStack(alignment: .trailing, spacing: 4) {
+        statusPill
         Text(chat.created, format: .relative(presentation: .named))
           .font(.caption2).foregroundStyle(TetherColors.textFaint)
       }
@@ -167,9 +175,21 @@ private struct ChatListRow: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(chat.title), \(chat.isRunning ? "running" : "ended"), started \(chat.created.formatted(.relative(presentation: .named)))"
+      "\(chat.title), \(status.lowercased()), started \(chat.created.formatted(.relative(presentation: .named)))"
     )
     .accessibilityHint("Opens this chat")
+  }
+
+  private var statusPill: some View {
+    let tint = chat.isRunning ? TetherColors.success : TetherColors.textFaint
+    return HStack(spacing: 5) {
+      Circle().fill(tint).frame(width: 6, height: 6)
+      Text(status).font(.caption2.weight(.semibold)).foregroundStyle(chat.isRunning ? tint : TetherColors.textSecondary)
+    }
+    .padding(.horizontal, 9)
+    .frame(height: 24)
+    .background(tint.opacity(chat.isRunning ? 0.14 : 0.10), in: Capsule())
+    .accessibilityHidden(true)
   }
 }
 
