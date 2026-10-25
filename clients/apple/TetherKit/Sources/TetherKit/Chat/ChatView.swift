@@ -462,10 +462,9 @@ private struct FollowingTranscript<Content: View>: View {
     .scrollDismissesKeyboard(.interactively)
     .onScrollGeometryChange(for: Bool.self) { geometry in
       ChatScrollFollow.isNearBottom(
-        offset: geometry.contentOffset.y,
+        offset: geometry.visibleRect.minY,
         content: geometry.contentSize.height,
-        container: geometry.containerSize.height,
-        bottomInset: geometry.contentInsets.bottom)
+        container: geometry.visibleRect.height)
     } action: { _, near in
       atBottom = near
     }
