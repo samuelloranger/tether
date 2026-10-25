@@ -38,6 +38,8 @@ struct TetherIOSApp: App {
       #if DEBUG
       if let fixture = ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] {
         ChatFixtureRoot(mode: fixture)
+      } else if ProcessInfo.processInfo.environment["TETHER_DEBUG_DRAWER"] != nil {
+        DrawerFixtureRoot()
       } else if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
         AppRootView(demoModel: .liveDemoFromEnv())
       } else if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {

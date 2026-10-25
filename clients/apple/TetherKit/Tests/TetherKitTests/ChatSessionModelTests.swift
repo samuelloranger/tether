@@ -50,6 +50,22 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  func test_the_latest_title_is_stored_for_the_chat_list() async throws {
+    let defaults = UserDefaults(suiteName: "chat-title-\(UUID().uuidString)")!
+    let titles = ChatTitleStore(scope: "h:22", defaults: defaults)
+    let stream = ScriptedByteStream()
+    let model = ChatSessionModel(
+      chatName: "chat-t", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(ACPFixture.journal), titleStore: titles
+    ) { _ in stream }
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertEqual(titles.title(for: "chat-t"), "Hello.txt to out.txt")
+    model.leave()
+  }
+
   func test_a_new_chat_spawns_the_agent_and_runs_the_handshake() async throws {
     let stream = ScriptedByteStream()
     let dialer = Dialer([stream])

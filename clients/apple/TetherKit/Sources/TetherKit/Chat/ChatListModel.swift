@@ -19,17 +19,19 @@ final class ChatListModel {
   var errorMessage: String?
 
   private let exec: Exec
+  private let titles: ChatTitleStore?
   private let closeConnection: () async -> Void
 
-  init(hostName: String, exec: @escaping Exec, close: @escaping () async -> Void = {}) {
+  init(hostName: String, titles: ChatTitleStore? = nil, exec: @escaping Exec, close: @escaping () async -> Void = {}) {
     self.hostName = hostName
+    self.titles = titles
     self.exec = exec
     self.closeConnection = close
   }
 
   static func live(hostName: String, config: SSHConnectionConfig, hostKeyStore: HostKeyStore) -> ChatListModel {
     let control = ControlConnection(config: config, store: hostKeyStore)
-    return ChatListModel(hostName: hostName, exec: { try await control.exec($0) }, close: { await control.close() })
+    return ChatListModel(hostName: hostName, titles: ChatTitleStore(config: config), exec: { try await control.exec($0) }, close: { await control.close() })
   }
 
   func refresh() async {
@@ -51,6 +53,7 @@ final class ChatListModel {
     do {
       _ = try await exec(ACPHostCommand.kill(name: chat.name))
       UserDefaultsChatJournalStore(name: chat.name).save(ChatJournal())
+      titles?.clear(chat.name)
       chats.removeAll { $0.name == chat.name }
     } catch {
       errorMessage = "Couldn't delete the chat: \(error.localizedDescription)"
@@ -58,17 +61,11 @@ final class ChatListModel {
   }
 
   func newRoute(cwdText: String) async -> ChatRoute? {
-    var home = ""
-    if ACPCwd.needsHome(cwdText) {
-      guard let found = try? await exec(ACPHostCommand.home),
-        found.hasPrefix("/")
-      else {
-        errorMessage = "Couldn't read the host's home folder."
-        return nil
-      }
-      home = found.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let route = await ChatRoute.fresh(cwdText: cwdText, exec: exec) else {
+      errorMessage = "Couldn't read the host's home folder."
+      return nil
     }
-    return ChatRoute(name: ChatRoute.newName(), cwd: ACPCwd.expand(cwdText, home: home), readOnly: false)
+    return route
   }
 
   func route(for chat: ACPChatSummary) -> ChatRoute {

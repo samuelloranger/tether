@@ -27,6 +27,7 @@ final class ChatSessionModel {
   static let frameInterval: Duration = .milliseconds(33)
 
   private let store: any ChatJournalStore
+  private let titleStore: ChatTitleStore?
   private let dial: Dial
   private var client: ACPClient?
   private var forwardTask: Task<Void, Never>?
@@ -38,7 +39,8 @@ final class ChatSessionModel {
   private var held: ChatState?
   private var holdingForReplay = false
 
-  init(chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, dial: @escaping Dial) {
+  init(chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil, dial: @escaping Dial) {
+    self.titleStore = titleStore
     self.chatName = chatName
     self.cwd = cwd
     self.readOnly = readOnly
@@ -49,7 +51,9 @@ final class ChatSessionModel {
   static func live(route: ChatRoute, config: SSHConnectionConfig, hostKeyStore: HostKeyStore) -> ChatSessionModel {
     let store: any ChatJournalStore =
       route.readOnly ? InMemoryChatJournalStore() : UserDefaultsChatJournalStore(name: route.name)
-    return ChatSessionModel(chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, store: store) { spawn in
+    return ChatSessionModel(chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, store: store,
+      titleStore: ChatTitleStore(config: config)
+    ) { spawn in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
         command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn))
@@ -218,12 +222,14 @@ final class ChatSessionModel {
       link.connectionLost()
       held = nil
       state = next
+      persistTitle()
       return
     }
     if holdingForReplay && link.phase == .catchingUp {
       held = next
     } else {
       state = next
+      persistTitle()
     }
     scheduleSettle()
   }
@@ -247,6 +253,11 @@ final class ChatSessionModel {
     holdingForReplay = false
     if let held { state = held }
     held = nil
+    persistTitle()
+  }
+
+  private func persistTitle() {
+    if let title = state.title { titleStore?.set(title, for: chatName) }
   }
 
   private func fail(_ error: Error) {

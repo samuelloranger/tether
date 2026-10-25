@@ -117,6 +117,11 @@ public final class SSHTerminalController {
   public let title: String
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
+  /// The host's chats from `tether-notify acp ls`; empty when the host has none or lacks the command.
+  var chats: [ACPChatSummary] = []
+  #if DEBUG
+  @ObservationIgnored var debugChatModel: ((ChatRoute) -> ChatSessionModel)?
+  #endif
   public private(set) var attach: String
   /// False on a host with no zmx sessions: the PTY is a bare login shell until one is created.
   public private(set) var hasSession = true
@@ -170,7 +175,7 @@ public final class SSHTerminalController {
 
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
-  private let control: ControlConnection
+  let control: ControlConnection
   /// `gh` talks to GitHub and can take seconds; on its own connection it never holds
   /// the session list or the diff behind it.
   private let ghControl: ControlConnection
@@ -181,8 +186,8 @@ public final class SSHTerminalController {
   private static let agentStatusStaleAfter: TimeInterval = 30
   private let pipeline: TerminalPipeline
   private var themeSequence: UInt64 = 0
-  private let config: SSHConnectionConfig
-  private let hostKeyStore: HostKeyStore
+  let config: SSHConnectionConfig
+  let hostKeyStore: HostKeyStore
   private let pushIdentity: PushRegistrar.PushIdentity?
   private var didRegisterPush = false
   private var connectInFlight = false
@@ -338,6 +343,7 @@ public final class SSHTerminalController {
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
+    await refreshChats()
     await refreshAgentStatus()
   }
 

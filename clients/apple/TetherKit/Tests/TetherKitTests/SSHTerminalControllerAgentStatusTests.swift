@@ -36,7 +36,7 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
   }
 
   private func statusExecs(_ ops: FakeOps) -> Int {
-    ops.commands.filter { $0.contains("tether-notify") }.count
+    ops.commands.filter { $0.contains("tether-notify") && !$0.contains(" acp ") }.count
   }
 
   func test_first_read_fills_statuses_without_an_alert() async {

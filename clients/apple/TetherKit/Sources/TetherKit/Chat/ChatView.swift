@@ -13,6 +13,8 @@ struct ChatView: View {
   var startAtTop = false
   var initialDraft = ""
   var openControls = false
+  /// Set when the chat sits inside the terminal screen: the header button then opens its drawer.
+  var onSessions: (() -> Void)?
   var seedAttachments = false
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
@@ -195,15 +197,15 @@ struct ChatView: View {
   // MARK: Header
 
   private var backButton: some View {
-    Button { dismiss() } label: {
-      Image(systemName: "chevron.backward")
-        .font(.system(size: 18, weight: .semibold))
+    Button { if let onSessions { onSessions() } else { dismiss() } } label: {
+      Image(systemName: onSessions == nil ? "chevron.backward" : "line.3.horizontal")
+        .font(.system(size: onSessions == nil ? 18 : 17, weight: .semibold))
         .foregroundStyle(TetherColors.accent)
         .frame(width: 44, height: 44, alignment: .leading)
         .contentShape(Rectangle())
     }
-    .accessibilityLabel("Chats")
-    .accessibilityIdentifier("chatBack")
+    .accessibilityLabel(onSessions == nil ? "Chats" : "Open session list")
+    .accessibilityIdentifier(onSessions == nil ? "chatBack" : "chatSessions")
   }
 
   private var titleBlock: some View {
