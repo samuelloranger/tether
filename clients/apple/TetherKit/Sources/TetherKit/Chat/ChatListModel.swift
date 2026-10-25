@@ -20,18 +20,23 @@ final class ChatListModel {
 
   private let exec: Exec
   private let titles: ChatTitleStore?
+  private let files: ChatLocalFiles?
   private let closeConnection: () async -> Void
 
-  init(hostName: String, titles: ChatTitleStore? = nil, exec: @escaping Exec, close: @escaping () async -> Void = {}) {
+  init(
+    hostName: String, titles: ChatTitleStore? = nil, files: ChatLocalFiles? = nil, exec: @escaping Exec,
+    close: @escaping () async -> Void = {}
+  ) {
     self.hostName = hostName
     self.titles = titles
+    self.files = files
     self.exec = exec
     self.closeConnection = close
   }
 
   static func live(hostName: String, config: SSHConnectionConfig, hostKeyStore: HostKeyStore) -> ChatListModel {
     let control = ControlConnection(config: config, store: hostKeyStore)
-    return ChatListModel(hostName: hostName, titles: ChatTitleStore(config: config), exec: { try await control.exec($0) }, close: { await control.close() })
+    return ChatListModel(hostName: hostName, titles: ChatTitleStore(config: config), files: ChatLocalFiles(scope: ChatTitleStore.scope(for: config)), exec: { try await control.exec($0) }, close: { await control.close() })
   }
 
   func refresh() async {
@@ -54,6 +59,7 @@ final class ChatListModel {
       _ = try await exec(ACPHostCommand.kill(name: chat.name))
       UserDefaultsChatJournalStore(name: chat.name).save(ChatJournal())
       titles?.clear(chat.name)
+      files?.clear(chat.name)
       chats.removeAll { $0.name == chat.name }
     } catch {
       errorMessage = "Couldn't delete the chat: \(error.localizedDescription)"

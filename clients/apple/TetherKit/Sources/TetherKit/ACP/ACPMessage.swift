@@ -29,19 +29,19 @@ enum ACPID: Hashable, Codable, Sendable {
   }
 }
 
-enum ACPToolKind: String, Equatable, Sendable {
+enum ACPToolKind: String, Codable, Equatable, Sendable {
   case read, edit, delete, move, search, execute, think, fetch
   case switchMode = "switch_mode"
   case other
 }
 
-enum ACPToolStatus: String, Equatable, Sendable {
+enum ACPToolStatus: String, Codable, Equatable, Sendable {
   case pending
   case inProgress = "in_progress"
   case completed, failed
 }
 
-struct ACPDiff: Equatable, Sendable {
+struct ACPDiff: Codable, Equatable, Sendable {
   var path: String
   var oldText: String?
   var newText: String
@@ -65,13 +65,13 @@ struct ACPToolFields: Equatable, Sendable {
   var input: [String: String]?
 }
 
-struct ACPPlanEntry: Equatable, Sendable {
+struct ACPPlanEntry: Codable, Equatable, Sendable {
   var content: String
   var status: String
   var priority: String
 }
 
-struct ACPPermissionOption: Equatable, Sendable {
+struct ACPPermissionOption: Codable, Equatable, Sendable {
   var optionId: String
   var name: String
   var kind: String
@@ -82,14 +82,14 @@ struct ACPPermissionRequest: Equatable, Sendable {
   var options: [ACPPermissionOption]
 }
 
-struct ACPConfigChoice: Equatable, Sendable {
+struct ACPConfigChoice: Codable, Equatable, Sendable {
   var value: String
   var name: String
   var description: String
 }
 
 /// A select-type session setting such as mode, model or effort; `currentValue` is one of the choices' values.
-struct ACPConfigOption: Equatable, Sendable, Identifiable {
+struct ACPConfigOption: Codable, Equatable, Sendable, Identifiable {
   var id: String
   var name: String
   var description: String
@@ -98,7 +98,7 @@ struct ACPConfigOption: Equatable, Sendable, Identifiable {
   var choices: [ACPConfigChoice]
 }
 
-struct ACPCommand: Equatable, Sendable, Identifiable {
+struct ACPCommand: Codable, Equatable, Sendable, Identifiable {
   var name: String
   var description: String
   /// Present when the command takes arguments.
@@ -106,7 +106,7 @@ struct ACPCommand: Equatable, Sendable, Identifiable {
   var id: String { name }
 }
 
-struct ChatCost: Equatable, Sendable {
+struct ChatCost: Codable, Equatable, Sendable {
   var amount: Double
   var currency: String
 }

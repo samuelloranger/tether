@@ -15,6 +15,7 @@ extension SSHTerminalController {
     _ = try? await control.exec(ACPHostCommand.kill(name: name))
     UserDefaultsChatJournalStore(name: name).save(ChatJournal())
     chatTitles.clear(name)
+    ChatLocalFiles(scope: ChatTitleStore.scope(for: config)).clear(name)
     chats.removeAll { $0.name == name }
     await refreshChats()
   }

@@ -22,19 +22,39 @@ actor ACPClient {
   private var readTask: Task<Void, Never>?
   private var ended = false
   private var subscribers: [UUID: AsyncStream<ChatState>.Continuation] = [:]
+  private let snapshotStore: (any ChatSnapshotStore)?
+  private var snapshotIdentity: Int?
+  private let snapshotInterval: Duration
+  private var lastSnapshot: ContinuousClock.Instant?
+  private var wasWorking = false
+  private var feedFailed = false
 
-  init(stream: any TerminalByteStream, store: any ChatJournalStore = InMemoryChatJournalStore()) {
+  /// `resume` must already be checked against the journal with `ChatSnapshot.isConsistent`; the
+  /// stream is then expected to start at its offset.
+  init(
+    stream: any TerminalByteStream, store: any ChatJournalStore = InMemoryChatJournalStore(),
+    resume: ChatSnapshot? = nil, snapshots: (any ChatSnapshotStore)? = nil, snapshotInterval: Duration = .seconds(3)
+  ) {
     self.stream = stream
     self.store = store
+    self.snapshotStore = snapshots
+    self.snapshotIdentity = resume?.identity
+    self.snapshotInterval = snapshotInterval
     let journal = store.load()
     self.journal = journal
-    self.builder = ChatTranscriptBuilder(journal: journal)
+    if let resume {
+      self.builder = ChatTranscriptBuilder(journal: journal, resuming: resume)
+    } else {
+      self.builder = ChatTranscriptBuilder(journal: journal)
+    }
   }
 
   var state: ChatState { builder.state }
   var sessionId: String? { journal.sessionId }
   /// Bytes taken from the stream so far.
   var receivedBytes: Int { builder.receivedBytes }
+  /// True when the agent's output could not be decoded; a resumed client then replays from zero.
+  var failedDecoding: Bool { feedFailed }
 
   /// Current snapshot first, then one per change.
   func updates() -> AsyncStream<ChatState> {
@@ -145,7 +165,29 @@ actor ACPClient {
     publish()
   }
 
+  /// Snapshots are only written once the host session's identity is known.
+  func setSnapshotIdentity(_ identity: Int) { snapshotIdentity = identity }
+
+  /// Writes the resume snapshot now. A state that lost its connection or failed is never saved:
+  /// it holds events the log does not.
+  func saveSnapshot() {
+    guard let snapshotStore, let snapshotIdentity, builder.state.connection == .live, !feedFailed else { return }
+    let consumed = builder.consumedOffset
+    guard consumed > 0 else { return }
+    lastSnapshot = .now
+    snapshotStore.save(
+      ChatSnapshot(identity: snapshotIdentity, offset: consumed, journal: journal, state: builder.state))
+  }
+
+  private func snapshotIfDue() {
+    let working = builder.state.turn == .working
+    let turnEnded = wasWorking && !working
+    wasWorking = working
+    if turnEnded || lastSnapshot.map({ ContinuousClock.now - $0 >= snapshotInterval }) ?? true { saveSnapshot() }
+  }
+
   func stop() async {
+    if !ended { saveSnapshot() }
     readTask?.cancel()
     await stream.close()
   }
@@ -220,14 +262,17 @@ actor ACPClient {
         do {
           route(try builder.feed(data))
         } catch {
+          feedFailed = true
           builder.apply(.failure("Agent output was not valid: \(error)"))
           finishLoop()
           await stream.close()
           return
         }
         publish()
+        snapshotIfDue()
       }
     } catch {}
+    saveSnapshot()
     builder.apply(.connectionLost)
     finishLoop()
   }

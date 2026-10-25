@@ -1,7 +1,7 @@
 import Foundation
 
 /// A subagent launch, as the adapter's `Agent` tool (older `Task`) describes it.
-struct ChatSubagent: Equatable, Sendable {
+struct ChatSubagent: Codable, Equatable, Sendable {
   var description: String?
   var model: String?
   var subagentType: String?
@@ -21,7 +21,7 @@ struct ChatSubagent: Equatable, Sendable {
   }
 }
 
-struct ChatToolCall: Equatable, Sendable {
+struct ChatToolCall: Codable, Equatable, Sendable {
   var id: String
   var title: String
   var kind: ACPToolKind
@@ -77,7 +77,7 @@ struct ChatToolCall: Equatable, Sendable {
   }
 }
 
-struct ChatPermission: Equatable, Sendable {
+struct ChatPermission: Codable, Equatable, Sendable {
   var requestId: ACPID
   var toolCallId: String
   var title: String
@@ -89,8 +89,8 @@ struct ChatPermission: Equatable, Sendable {
   var resolvedOptionId: String?
 }
 
-struct ChatItem: Equatable, Identifiable, Sendable {
-  enum Kind: Equatable, Sendable {
+struct ChatItem: Codable, Equatable, Identifiable, Sendable {
+  enum Kind: Codable, Equatable, Sendable {
     case user(text: String, imageCount: Int = 0, offset: Int)
     case assistant(text: String, messageId: String?)
     case thought(text: String)
@@ -105,9 +105,9 @@ struct ChatItem: Equatable, Identifiable, Sendable {
   var kind: Kind
 }
 
-struct ChatState: Equatable, Sendable {
-  enum Turn: Equatable, Sendable { case idle, working }
-  enum Connection: Equatable, Sendable { case live, lost }
+struct ChatState: Codable, Equatable, Sendable {
+  enum Turn: String, Codable, Equatable, Sendable { case idle, working }
+  enum Connection: String, Codable, Equatable, Sendable { case live, lost }
 
   var items: [ChatItem] = []
   var turn: Turn = .idle

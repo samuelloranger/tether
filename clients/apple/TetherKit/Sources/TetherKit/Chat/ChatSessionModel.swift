@@ -5,7 +5,10 @@ import Observation
 @MainActor
 @Observable
 final class ChatSessionModel {
-  typealias Dial = (_ spawn: Bool) async throws -> any TerminalByteStream
+  /// `from` is the log offset to attach at; a snapshot resume passes its own, anything else 0.
+  typealias Dial = (_ spawn: Bool, _ from: Int) async throws -> any TerminalByteStream
+  /// The host's `acp ls` row for this chat, or nil when it can't say.
+  typealias Inspect = @Sendable () async -> ACPChatSummary?
   /// The output of `tether-notify acp answers <name>`, or nil when the host can't say.
   typealias HostAnswers = @Sendable () async -> String?
 
@@ -32,6 +35,8 @@ final class ChatSessionModel {
   private let titleStore: ChatTitleStore?
   private let dial: Dial
   private let hostAnswers: HostAnswers?
+  private let snapshots: (any ChatSnapshotStore)?
+  private let inspect: Inspect?
   private var client: ACPClient?
   private var forwardTask: Task<Void, Never>?
   private var settleTask: Task<Void, Never>?
@@ -41,8 +46,17 @@ final class ChatSessionModel {
   /// While a reconnect replays, the old transcript stays on screen and the rebuilt one waits here.
   private var held: ChatState?
   private var holdingForReplay = false
+  private var attempt: ChatResume.Attempt?
+  private var skipSnapshot = false
+  private var stopping: Task<Void, Never>?
 
-  init(chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil, hostAnswers: HostAnswers? = nil, dial: @escaping Dial) {
+  init(
+    chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil,
+    hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
+    dial: @escaping Dial
+  ) {
+    self.snapshots = snapshots
+    self.inspect = inspect
     self.titleStore = titleStore
     self.hostAnswers = hostAnswers
     self.chatName = chatName
@@ -55,13 +69,16 @@ final class ChatSessionModel {
   static func live(route: ChatRoute, config: SSHConnectionConfig, hostKeyStore: HostKeyStore) -> ChatSessionModel {
     let store: any ChatJournalStore =
       route.readOnly ? InMemoryChatJournalStore() : UserDefaultsChatJournalStore(name: route.name)
+    let files = ChatLocalFiles(scope: ChatTitleStore.scope(for: config))
     return ChatSessionModel(chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, store: store,
       titleStore: ChatTitleStore(config: config),
-      hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) }
-    ) { spawn in
+      hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) },
+      snapshots: files.snapshots(route.name),
+      inspect: { await ACPHostInspect.summary(name: route.name, config: config, store: hostKeyStore) }
+    ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
-        command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn))
+        command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from))
     }
   }
 
@@ -78,17 +95,36 @@ final class ChatSessionModel {
     generation += 1
     let mine = generation
     detachClient()
+    await stopping?.value
     link.dialStarted()
     notice = nil
-    holdingForReplay = !state.items.isEmpty
     held = nil
-    let spawn = !readOnly && store.load().sessionId == nil
+    let journal = store.load()
+    let spawn = !readOnly && journal.sessionId == nil
     // Asked alongside the dial; the replay can't start before the answers are in the journal.
     let answersRead = Task { await self.hostAnswers?() }
+    let inspectRead = Task { await self.inspect?() }
+    let candidate = skipSnapshot || spawn ? nil : snapshots?.load()
+    skipSnapshot = false
+    var resume: ChatSnapshot?
+    if let candidate {
+      let summary = await inspectRead.value
+      resume = ChatResume.usable(candidate, journal: journal, summary: summary)
+      if resume == nil, summary != nil { snapshots?.clear() }
+    }
+    guard mine == generation, !left else {
+      answersRead.cancel()
+      inspectRead.cancel()
+      dialInFlight = false
+      return
+    }
+    attempt = resume.map { .init(offset: $0.offset, identity: $0.identity) }
+    holdingForReplay = !state.items.isEmpty && resume == nil
     let stream: any TerminalByteStream
     do {
-      stream = try await dial(spawn)
+      stream = try await dial(spawn, resume?.offset ?? 0)
     } catch {
+      inspectRead.cancel()
       answersRead.cancel()
       guard mine == generation else { return }
       dialInFlight = false
@@ -101,7 +137,8 @@ final class ChatSessionModel {
       await stream.close()
       return
     }
-    let fresh = ACPClient(stream: stream, store: store)
+    let fresh = ACPClient(stream: stream, store: store, resume: resume, snapshots: snapshots)
+    if resume == nil, snapshots != nil { learnIdentity(of: fresh, from: inspectRead, retry: spawn) }
     if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh
     link.dialSucceeded(at: .now)
@@ -119,6 +156,21 @@ final class ChatSessionModel {
     } catch {
       guard mine == generation else { return }
       fail(error)
+    }
+  }
+
+  /// The log's identity comes from `acp ls`; a chat the dial just spawned may not be listed yet.
+  private func learnIdentity(of client: ACPClient, from first: Task<ACPChatSummary?, Never>, retry: Bool) {
+    guard let inspect else { return }
+    Task {
+      var summary = await first.value
+      var tries = retry ? 3 : 0
+      while summary == nil, tries > 0 {
+        try? await Task.sleep(for: .seconds(1.5))
+        summary = await inspect()
+        tries -= 1
+      }
+      if let summary { await client.setSnapshotIdentity(ChatResume.identity(of: summary)) }
     }
   }
 
@@ -241,10 +293,12 @@ final class ChatSessionModel {
     guard mine == generation else { return }
     link.activity(at: .now)
     if next.connection == .lost {
+      let first = link.phase != .lost
       link.connectionLost()
       held = nil
       state = next
       persistTitle()
+      if first { Task { await resolveLoss(generation: mine) } }
       return
     }
     if holdingForReplay && link.phase == .catchingUp {
@@ -254,6 +308,24 @@ final class ChatSessionModel {
       persistTitle()
     }
     scheduleSettle()
+  }
+
+  /// A stream that ends is either a dropped connection, a resume the host could not serve, or a
+  /// chat that has ended: only the host's own listing tells them apart.
+  private func resolveLoss(generation mine: Int) async {
+    guard let lost = client, !left else { return }
+    let received = await lost.receivedBytes
+    let failed = await lost.failedDecoding
+    let summary = await inspect?()
+    guard mine == generation, !left else { return }
+    switch ChatResume.afterLoss(attempt: attempt, receivedBytes: received, failedDecoding: failed, summary: summary) {
+    case .replayFromZero:
+      snapshots?.clear()
+      skipSnapshot = true
+      await connect()
+    case .ended, .lost:
+      break
+    }
   }
 
   private func scheduleSettle() {
@@ -295,6 +367,6 @@ final class ChatSessionModel {
     settleTask = nil
     let old = client
     client = nil
-    if let old { Task { await old.stop() } }
+    if let old { stopping = Task { await old.stop() } }
   }
 }

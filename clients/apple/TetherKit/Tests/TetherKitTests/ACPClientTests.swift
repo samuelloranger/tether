@@ -16,6 +16,15 @@ final class ACPClientTests: XCTestCase {
     return false
   }
 
+  private func waitForBytes(_ client: ACPClient, _ count: Int) async -> Bool {
+    let end = Date().addingTimeInterval(3)
+    while Date() < end {
+      if await client.receivedBytes >= count { return true }
+      try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    return false
+  }
+
   private func writtenObjects(_ stream: ScriptedByteStream) -> [NSDictionary] {
     stream.writtenText.split(separator: "\n").compactMap {
       (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? NSDictionary
@@ -260,5 +269,100 @@ final class ACPClientTests: XCTestCase {
     XCTAssertEqual(state.turn, .idle)
     XCTAssertTrue(store.load().entries.isEmpty)
     await client.stop()
+  }
+
+  // MARK: Snapshots
+
+  private func turnWriteJournal() -> ChatJournal { ACPFixture.journal }
+
+  func test_a_client_snapshots_at_turn_end_and_a_resumed_one_matches_the_live_state() async throws {
+    let live = ScriptedByteStream()
+    let snapshots = InMemoryChatSnapshotStore()
+    let first = ACPClient(
+      stream: live, store: InMemoryChatJournalStore(turnWriteJournal()), snapshots: snapshots,
+      snapshotInterval: .seconds(3600))
+    await first.setSnapshotIdentity(42)
+    await first.startReading()
+    let cut = ACPFixture.agentLines.count - 3
+    live.push(ACPFixture.log(cut))
+    let sawCut = await waitForBytes(first, ACPFixture.offset(after: cut))
+    XCTAssertTrue(sawCut)
+    await first.stop()
+    let saved = try XCTUnwrap(snapshots.load())
+    XCTAssertEqual(saved.offset, ACPFixture.offset(after: cut))
+    XCTAssertEqual(saved.identity, 42)
+    XCTAssertTrue(saved.isConsistent(with: ACPFixture.journal))
+
+    let resumed = ScriptedByteStream()
+    let second = ACPClient(
+      stream: resumed, store: InMemoryChatJournalStore(turnWriteJournal()), resume: saved)
+    try await second.start(cwd: "/work/project")
+    let resumedBytes = ACPFixture.log().subdata(in: saved.offset..<ACPFixture.log().count)
+    resumed.push(resumedBytes)
+    let done = await waitUntil(second) { $0.turn == .idle && $0.lastStopReason == "end_turn" }
+    XCTAssertTrue(done)
+    let resumedState = await second.state
+    XCTAssertEqual(
+      resumedState, try ChatTranscriptBuilder.replay(log: ACPFixture.log(), journal: ACPFixture.journal))
+    XCTAssertEqual(resumed.writtenText, "")
+  }
+
+  func test_snapshots_are_throttled_while_streaming_but_a_turn_end_writes_one() async throws {
+    let stream = ScriptedByteStream()
+    let snapshots = InMemoryChatSnapshotStore()
+    let client = ACPClient(
+      stream: stream, store: InMemoryChatJournalStore(turnWriteJournal()), snapshots: snapshots,
+      snapshotInterval: .seconds(3600))
+    await client.setSnapshotIdentity(1)
+    await client.startReading()
+    let lines = ACPFixture.agentLines
+    for line in lines { stream.push(Data((line + "\n").utf8)) }
+    let done = await waitUntil(client) { $0.turn == .idle && $0.lastStopReason == "end_turn" }
+    XCTAssertTrue(done)
+    // The first line writes (nothing saved yet) and the end of the turn writes; the hour-long
+    // interval stops everything in between.
+    let settled = await eventually { snapshots.saveCount >= 2 }
+    XCTAssertTrue(settled)
+    XCTAssertLessThanOrEqual(snapshots.saveCount, 3)
+    XCTAssertEqual(snapshots.load()?.state.turn, .idle)
+  }
+
+  func test_no_snapshot_is_written_before_the_identity_is_known_or_after_the_connection_dropped() async throws {
+    let stream = ScriptedByteStream()
+    let snapshots = InMemoryChatSnapshotStore()
+    let client = ACPClient(
+      stream: stream, store: InMemoryChatJournalStore(turnWriteJournal()), snapshots: snapshots,
+      snapshotInterval: .zero)
+    await client.startReading()
+    stream.push(ACPFixture.log(4))
+    let got = await waitForBytes(client, ACPFixture.offset(after: 4))
+    XCTAssertTrue(got)
+    XCTAssertEqual(snapshots.saveCount, 0)
+    await client.setSnapshotIdentity(9)
+    await client.saveSnapshot()
+    XCTAssertEqual(snapshots.saveCount, 1)
+
+    await stream.close()
+    let lost = await waitUntil(client) { $0.connection == .lost }
+    XCTAssertTrue(lost)
+    XCTAssertEqual(snapshots.load()?.state.connection, .live)
+    XCTAssertEqual(snapshots.load()?.offset, ACPFixture.offset(after: 4))
+    let before = snapshots.saveCount
+    await client.saveSnapshot()
+    XCTAssertEqual(snapshots.saveCount, before, "a lost state holds events the log does not")
+  }
+
+  func test_undecodable_output_is_reported_so_a_resume_can_fall_back_to_a_replay() async throws {
+    let stream = ScriptedByteStream()
+    let snapshots = InMemoryChatSnapshotStore()
+    let client = ACPClient(stream: stream, snapshots: snapshots, snapshotInterval: .zero)
+    await client.setSnapshotIdentity(1)
+    await client.startReading()
+    stream.push(Data(repeating: 0x61, count: ACPLineSplitter.defaultMaxLineBytes + 10))
+    let lost = await waitUntil(client) { $0.connection == .lost }
+    XCTAssertTrue(lost)
+    let failed = await client.failedDecoding
+    XCTAssertTrue(failed)
+    XCTAssertEqual(snapshots.saveCount, 0)
   }
 }

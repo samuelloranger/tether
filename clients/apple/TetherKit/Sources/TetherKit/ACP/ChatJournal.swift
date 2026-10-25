@@ -63,6 +63,77 @@ struct ChatJournal: Codable, Equatable, Sendable {
   var answeredRequestIds: Set<ACPID> {
     Set(entries.compactMap { $0.kind == .answer || $0.kind == .hostAnswer ? $0.requestId : nil })
   }
+
+  /// The entries a reducer standing at `offset` has applied, in the order they were journaled.
+  func entries(upTo offset: Int) -> [Entry] { entries.filter { $0.offset <= offset } }
+}
+
+/// The reducer's state at a line boundary of the host's log, so a reconnect attaches from
+/// `offset` instead of replaying everything. The journal stays authoritative: the snapshot only
+/// counts which of its entries it already reflects.
+struct ChatSnapshot: Codable, Equatable, Sendable {
+  static let currentVersion = 1
+
+  var version = ChatSnapshot.currentVersion
+  /// The host session's created time (unix seconds): a session recreated under the same name has another.
+  var identity: Int
+  /// End of the last processed line; also where the next attach starts.
+  var offset: Int
+  /// How many of the journal's entries at or before `offset` the state reflects, and their digest.
+  var journalApplied: Int
+  var journalDigest: String
+  var state: ChatState
+
+  init(identity: Int, offset: Int, journal: ChatJournal, state: ChatState) {
+    let applied = journal.entries(upTo: offset)
+    self.identity = identity
+    self.offset = offset
+    self.journalApplied = applied.count
+    self.journalDigest = Self.digest(applied)
+    self.state = state
+  }
+
+  /// True when the journal still contains, in order, the entries this state was built from.
+  func isConsistent(with journal: ChatJournal) -> Bool {
+    let applied = journal.entries(upTo: offset)
+    return version == Self.currentVersion && applied.count >= journalApplied
+      && Self.digest(applied.prefix(journalApplied)) == journalDigest
+  }
+
+  /// FNV-1a over the entries' fields; `Hasher` is seeded per process, so it cannot be stored.
+  static func digest(_ entries: some Sequence<ChatJournal.Entry>) -> String {
+    var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+    for entry in entries {
+      let line = [
+        entry.kind.rawValue, "\(entry.offset)", entry.text ?? "", entry.requestId.map { "\($0)" } ?? "",
+        entry.optionId ?? "", "\(entry.imageCount)",
+      ].joined(separator: "\u{1F}") + "\n"
+      for byte in line.utf8 {
+        hash ^= UInt64(byte)
+        hash = hash &* 0x0000_0100_0000_01B3
+      }
+    }
+    return String(hash, radix: 16)
+  }
+}
+
+protocol ChatSnapshotStore: Sendable {
+  func load() -> ChatSnapshot?
+  func save(_ snapshot: ChatSnapshot)
+  func clear()
+}
+
+final class InMemoryChatSnapshotStore: ChatSnapshotStore, @unchecked Sendable {
+  private let lock = NSLock()
+  private var snapshot: ChatSnapshot?
+  private var saves = 0
+
+  init(_ snapshot: ChatSnapshot? = nil) { self.snapshot = snapshot }
+
+  var saveCount: Int { lock.lock(); defer { lock.unlock() }; return saves }
+  func load() -> ChatSnapshot? { lock.lock(); defer { lock.unlock() }; return snapshot }
+  func save(_ snapshot: ChatSnapshot) { lock.lock(); self.snapshot = snapshot; saves += 1; lock.unlock() }
+  func clear() { lock.lock(); snapshot = nil; lock.unlock() }
 }
 
 protocol ChatJournalStore: Sendable {
@@ -114,6 +185,23 @@ struct ChatTranscriptBuilder {
       .sorted { ($0.element.offset, $0.offset) < ($1.element.offset, $1.offset) }
       .map(\.element)
     drain(upTo: 0)
+  }
+
+  /// Continues from a snapshot the caller has checked with `isConsistent`. Journal entries
+  /// added since it was taken are applied now; the rest wait for the log to reach their offset.
+  init(journal: ChatJournal, resuming snapshot: ChatSnapshot) {
+    state = snapshot.state
+    state.connection = .live
+    consumedOffset = snapshot.offset
+    receivedBytes = snapshot.offset
+    splitter = ACPLineSplitter(startOffset: snapshot.offset)
+    pending = journal.entries.enumerated()
+      .filter { $0.element.offset > snapshot.offset }
+      .sorted { ($0.element.offset, $0.offset) < ($1.element.offset, $1.offset) }
+      .map(\.element)
+    for entry in journal.entries(upTo: snapshot.offset).dropFirst(snapshot.journalApplied) {
+      if let event = entry.event { state = ChatReducer.reduce(state, event) }
+    }
   }
 
   /// Returns the decoded messages so a live client can route responses to waiting requests.

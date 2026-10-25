@@ -13,9 +13,11 @@ final class ChatSessionModelTests: XCTestCase {
   private final class Dialer: @unchecked Sendable {
     var streams: [any TerminalByteStream]
     private(set) var spawns: [Bool] = []
+    private(set) var offsets: [Int] = []
     init(_ streams: [any TerminalByteStream]) { self.streams = streams }
-    func dial(spawn: Bool) throws -> any TerminalByteStream {
+    func dial(spawn: Bool, from: Int = 0) throws -> any TerminalByteStream {
       spawns.append(spawn)
+      offsets.append(from)
       guard !streams.isEmpty else { throw SSHConnectError.transport("no route") }
       return streams.removeFirst()
     }
@@ -26,7 +28,7 @@ final class ChatSessionModelTests: XCTestCase {
   ) -> ChatSessionModel {
     ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: readOnly, store: InMemoryChatJournalStore(journal)
-    ) { try dialer.dial(spawn: $0) }
+    ) { try dialer.dial(spawn: $0, from: $1) }
   }
 
   private func settled(_ model: ChatSessionModel) async -> Bool {
@@ -57,7 +59,7 @@ final class ChatSessionModelTests: XCTestCase {
     let model = ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(ACPFixture.journal), titleStore: titles
-    ) { _ in stream }
+    ) { _, _ in stream }
     Task { await model.connect() }
     stream.push(ACPFixture.log())
     let live = await settled(model)
@@ -183,7 +185,7 @@ final class ChatSessionModelTests: XCTestCase {
     let model = ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { "{\"0\":\"allow-once\"}\n" }
-    ) { _ in stream }
+    ) { _, _ in stream }
     Task { await model.connect() }
     stream.push(ACPFixture.log(permissionCut))
     let live = await settled(model)
@@ -198,7 +200,7 @@ final class ChatSessionModelTests: XCTestCase {
       let model = ChatSessionModel(
         chatName: "chat-t", cwd: "/work/project", readOnly: false,
         store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { output }
-      ) { _ in stream }
+      ) { _, _ in stream }
       Task { await model.connect() }
       stream.push(ACPFixture.log(permissionCut))
       let live = await settled(model)
@@ -214,7 +216,7 @@ final class ChatSessionModelTests: XCTestCase {
     let model = ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { hostSays.value }
-    ) { _ in WriteFailingStream(stream) }
+    ) { _, _ in WriteFailingStream(stream) }
     Task { await model.connect() }
     stream.push(ACPFixture.log(permissionCut))
     let live = await settled(model)
@@ -233,7 +235,7 @@ final class ChatSessionModelTests: XCTestCase {
     let model = ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { "{}" }
-    ) { _ in WriteFailingStream(stream) }
+    ) { _, _ in WriteFailingStream(stream) }
     Task { await model.connect() }
     stream.push(ACPFixture.log(permissionCut))
     let live = await settled(model)

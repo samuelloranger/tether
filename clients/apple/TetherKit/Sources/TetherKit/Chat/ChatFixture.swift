@@ -99,7 +99,7 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(journal)
-    ) { _ in FixtureByteStream(log: log) }
+    ) { _, _ in FixtureByteStream(log: log) }
   }
 
   private static let editDiff: [String: Any] = [
@@ -234,7 +234,7 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/tether", readOnly: false,
       store: InMemoryChatJournalStore(journal)
-    ) { _ in
+    ) { _, _ in
       guard let replyAfter else { return FixtureByteStream(log: log) }
       return AnswerOnPromptStream(log: log, chunks: dripChunks(requestId: 4), after: replyAfter)
     }
@@ -337,7 +337,7 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(journal)
-    ) { _ in FixtureByteStream(log: log) }
+    ) { _, _ in FixtureByteStream(log: log) }
   }
 
   @MainActor
@@ -349,7 +349,7 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(journal)
-    ) { _ in DripByteStream(chunks: dripChunks) }
+    ) { _, _ in DripByteStream(chunks: dripChunks) }
   }
 
   static func journal(pendingPermission: Bool) -> ChatJournal {
@@ -371,7 +371,7 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(journal(pendingPermission: pendingPermission))
-    ) { _ in FixtureByteStream(log: log) }
+    ) { _, _ in FixtureByteStream(log: log) }
   }
 }
 
