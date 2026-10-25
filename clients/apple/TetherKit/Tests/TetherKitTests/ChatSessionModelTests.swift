@@ -242,8 +242,10 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertTrue(live)
     let permission = try XCTUnwrap(model.state.pendingPermissions.first)
     model.approve(permission, option: try XCTUnwrap(permission.options.first))
-    let reported = await eventually { model.notice != nil }
+    let reported = await eventually { model.answerFailures.contains(permission.requestId) }
     XCTAssertTrue(reported)
+    XCTAssertEqual(model.state.pendingPermissions.map(\.requestId), [permission.requestId], "the card stays answerable")
+    XCTAssertNil(model.notice, "a quiet retry state, not a banner")
     model.leave()
   }
 
@@ -389,7 +391,7 @@ final class ChatSessionModelTests: XCTestCase {
 }
 
 /// Reads pass through; every write fails, as a socket the host already dropped would.
-private final class WriteFailingStream: TerminalByteStream, @unchecked Sendable {
+final class WriteFailingStream: TerminalByteStream, @unchecked Sendable {
   private let inner: ScriptedByteStream
   init(_ inner: ScriptedByteStream) { self.inner = inner }
   func read() async throws -> Data? { try await inner.read() }

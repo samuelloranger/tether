@@ -68,3 +68,23 @@ struct SeededGenerator: RandomNumberGenerator {
     return z ^ (z >> 31)
   }
 }
+
+/// Reads pass through; writes fail while `failing` is set, as a socket the host dropped would.
+final class SwitchableWriteStream: TerminalByteStream, @unchecked Sendable {
+  private let inner: ScriptedByteStream
+  private let flag = LockedBox(true)
+  init(_ inner: ScriptedByteStream, failing: Bool = true) {
+    self.inner = inner
+    flag.value = failing
+  }
+  var failing: Bool {
+    get { flag.value }
+    set { flag.value = newValue }
+  }
+  func read() async throws -> Data? { try await inner.read() }
+  func write(_ bytes: Data) async throws {
+    if failing { throw SSHConnectError.transport("closed") }
+    try await inner.write(bytes)
+  }
+  func close() async { await inner.close() }
+}

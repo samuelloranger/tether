@@ -365,4 +365,71 @@ final class ACPClientTests: XCTestCase {
     XCTAssertTrue(failed)
     XCTAssertEqual(snapshots.saveCount, 0)
   }
+
+  // MARK: Failed writes
+
+  private var unansweredJournal: ChatJournal {
+    var journal = ACPFixture.journal
+    journal.entries.removeLast()
+    return journal
+  }
+
+  func test_a_permission_answer_that_cannot_be_written_is_taken_back_and_can_be_retried() async throws {
+    let inner = ScriptedByteStream()
+    let stream = SwitchableWriteStream(inner)
+    let store = InMemoryChatJournalStore(unansweredJournal)
+    let client = ACPClient(stream: stream, store: store)
+    await client.startReading()
+    inner.push(ACPFixture.log(ACPFixture.index(containing: "session/request_permission") + 1))
+    let pending = await waitUntil(client) { !$0.pendingPermissions.isEmpty }
+    XCTAssertTrue(pending)
+
+    do {
+      try await client.answerPermission(requestId: .int(0), optionId: "allow-once")
+      XCTFail("the write was refused")
+    } catch {}
+    let after = await client.state
+    XCTAssertEqual(after.pendingPermissions.map(\.requestId), [.int(0)], "the card stays pending")
+    XCTAssertFalse(store.load().entries.contains { $0.kind == .answer }, "nothing journaled as answered")
+
+    stream.failing = false
+    try await client.answerPermission(requestId: .int(0), optionId: "allow-once")
+    let answered = await client.state
+    XCTAssertTrue(answered.pendingPermissions.isEmpty)
+    XCTAssertEqual(store.load().entries.filter { $0.kind == .answer }.count, 1)
+    XCTAssertTrue(inner.writtenText.contains("allow-once"))
+  }
+
+  func test_a_failed_cancel_leaves_the_pending_permission_cards() async throws {
+    let inner = ScriptedByteStream()
+    let stream = SwitchableWriteStream(inner)
+    let store = InMemoryChatJournalStore(unansweredJournal)
+    let client = ACPClient(stream: stream, store: store)
+    await client.startReading()
+    inner.push(ACPFixture.log(ACPFixture.index(containing: "session/request_permission") + 1))
+    let pending = await waitUntil(client) { !$0.pendingPermissions.isEmpty }
+    XCTAssertTrue(pending)
+    do {
+      try await client.cancel()
+      XCTFail("the write was refused")
+    } catch {}
+    let after = await client.state
+    XCTAssertEqual(after.pendingPermissions.count, 1)
+    XCTAssertFalse(store.load().entries.contains { $0.kind == .answer })
+  }
+
+  func test_a_host_answer_that_lands_during_a_failed_write_is_not_undone() {
+    var state = ChatState()
+    state = ChatReducer.reduce(
+      state,
+      .message(.permissionRequest(
+        id: .int(0),
+        request: ACPPermissionRequest(
+          tool: ACPToolFields(id: "t"), options: [ACPPermissionOption(optionId: "a", name: "A", kind: "allow_once")]))))
+    state = ChatReducer.reduce(state, .permissionAnswered(requestId: .int(0), optionId: "a"))
+    state = ChatReducer.reduce(state, .permissionAnswerUndelivered(requestId: .int(0), optionId: "other"))
+    XCTAssertTrue(state.pendingPermissions.isEmpty)
+    state = ChatReducer.reduce(state, .permissionAnswerUndelivered(requestId: .int(0), optionId: "a"))
+    XCTAssertEqual(state.pendingPermissions.count, 1)
+  }
 }

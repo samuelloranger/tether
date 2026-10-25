@@ -192,12 +192,26 @@ actor ACPClient {
     await stream.close()
   }
 
+  /// The answer is journaled and shown before the write so a replay resolves the card, and taken
+  /// back if the write fails: a card the agent never heard from must ask again.
   private func respond(to id: ACPID, outcome: [String: Any], optionId: String) async throws {
     journal.entries.append(.init(kind: .answer, offset: builder.consumedOffset, requestId: id, optionId: optionId))
     builder.apply(.permissionAnswered(requestId: id, optionId: optionId))
     publish()
     store.save(journal)
-    try await write(["jsonrpc": "2.0", "id": id.json, "result": ["outcome": outcome]])
+    do {
+      try await write(["jsonrpc": "2.0", "id": id.json, "result": ["outcome": outcome]])
+    } catch {
+      if let index = journal.entries.lastIndex(where: {
+        $0.kind == .answer && $0.requestId == id && $0.optionId == optionId
+      }) {
+        journal.entries.remove(at: index)
+      }
+      store.save(journal)
+      builder.apply(.permissionAnswerUndelivered(requestId: id, optionId: optionId))
+      publish()
+      throw error
+    }
   }
 
   private func allocateId() -> ACPID {

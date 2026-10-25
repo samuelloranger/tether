@@ -163,6 +163,8 @@ enum ChatEvent: Equatable, Sendable {
   /// A request whose error response must not surface as a transcript row.
   case silentRequest(requestId: ACPID)
   case permissionAnswered(requestId: ACPID, optionId: String)
+  /// The answer never reached the agent: the card asks again, unless something else resolved it since.
+  case permissionAnswerUndelivered(requestId: ACPID, optionId: String)
   /// The host answered this request itself; the card resolves now or when the request arrives.
   case hostAnswered(requestId: ACPID, optionId: String)
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
@@ -184,6 +186,8 @@ enum ChatReducer {
       next.silentRequestIds.insert(requestId)
     case let .permissionAnswered(requestId, optionId):
       resolve(requestId, optionId, in: &next)
+    case let .permissionAnswerUndelivered(requestId, optionId):
+      reopen(requestId, optionId, in: &next)
     case let .hostAnswered(requestId, optionId):
       next.hostAnswers[requestId] = optionId
       resolve(requestId, optionId, in: &next)
@@ -332,6 +336,18 @@ enum ChatReducer {
     state.items.indices.reversed().first { index in
       guard case let .tool(call) = state.items[index].kind else { return false }
       return call.id == parentId || call.children.contains { $0.id == parentId }
+    }
+  }
+
+  private static func reopen(_ requestId: ACPID, _ optionId: String, in state: inout ChatState) {
+    for index in state.items.indices.reversed() {
+      if case var .permission(permission) = state.items[index].kind,
+        permission.requestId == requestId, permission.resolvedOptionId == optionId
+      {
+        permission.resolvedOptionId = nil
+        state.items[index].kind = .permission(permission)
+        return
+      }
     }
   }
 

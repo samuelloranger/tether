@@ -19,6 +19,8 @@ final class ChatSessionModel {
   private(set) var state = ChatState()
   private(set) var link = ChatLinkTracker()
   private(set) var outbox = ChatOutbox()
+  /// Permission cards whose last answer did not reach the agent; they stay answerable.
+  private(set) var answerFailures: Set<ACPID> = []
   var notice: String?
   /// Option changes in flight or refused, by option id; the shown value only changes once the agent confirms.
   private(set) var optionChanges: [String: OptionChange] = [:]
@@ -251,11 +253,18 @@ final class ChatSessionModel {
 
   func cancel() {
     guard canInteract, let client else { return }
-    Task { try? await client.cancel() }
+    Task {
+      do {
+        try await client.cancel()
+      } catch {
+        notice = "Stop didn't reach the agent. Try again."
+      }
+    }
   }
 
   func approve(_ permission: ChatPermission, option: ACPPermissionOption) {
     guard canInteract, let client else { return }
+    answerFailures.remove(permission.requestId)
     Task {
       do {
         try await client.answerPermission(requestId: permission.requestId, optionId: option.optionId)
@@ -263,7 +272,8 @@ final class ChatSessionModel {
         // The host may have taken an answer from the lock screen first: then the card is
         // simply resolved, and there is nothing to report.
         if await adoptHostAnswer(for: permission.requestId, on: client) { return }
-        notice = "The answer didn't reach the agent. Reconnect to see if it is still waiting."
+        answerFailures.insert(permission.requestId)
+        receive(await client.state, generation: generation)
       }
     }
   }

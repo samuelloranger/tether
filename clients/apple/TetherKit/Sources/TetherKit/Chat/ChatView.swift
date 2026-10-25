@@ -355,6 +355,13 @@ struct ChatView: View {
           approve: { model.approve(permission, option: $0) },
           review: { reviewing = permission })
           .transition(.move(edge: .bottom).combined(with: .opacity))
+        if model.answerFailures.contains(permission.requestId) {
+          Text("Couldn't send your answer. Choose again to retry.")
+            .font(.caption).foregroundStyle(TetherColors.textFaint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .accessibilityIdentifier("chatAnswerRetry")
+        }
       }
       if model.readOnly {
         Label("Started on another device. Read only.", systemImage: "eye")
