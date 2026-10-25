@@ -16,6 +16,9 @@ struct ChatView: View {
   /// Set when the chat sits inside the terminal screen: the header button then opens its drawer.
   var onSessions: (() -> Void)?
   var seedAttachments = false
+  #if DEBUG
+  var sendDraft: String?
+  #endif
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
   @State private var expanded: Set<Int> = []
@@ -64,6 +67,13 @@ struct ChatView: View {
       guard focusComposer else { return }
       try? await Task.sleep(nanoseconds: 700_000_000)
       composerFocused = true
+      #if DEBUG
+      guard let sendDraft else { return }
+      try? await Task.sleep(nanoseconds: 4_000_000_000)
+      draft = sendDraft
+      try? await Task.sleep(nanoseconds: 1_000_000_000)
+      sendMessage()
+      #endif
     }
     .onChange(of: scenePhase) { _, phase in
       switch phase {
@@ -454,16 +464,17 @@ struct ChatView: View {
     return canSendNow ? TetherColors.onAccent : TetherColors.textSecondary
   }
 
+  private func sendMessage() {
+    guard canSendNow, model.send(text: draft, images: attachments.ready) else { return }
+    draft = ""
+    attachments.clear()
+    userScrolledUp = false
+    sendTick += 1
+  }
+
   private var actionButton: some View {
     Button {
-      if working {
-        model.cancel()
-      } else if canSendNow, model.send(text: draft, images: attachments.ready) {
-        draft = ""
-        attachments.clear()
-        userScrolledUp = false
-        sendTick += 1
-      }
+      if working { model.cancel() } else { sendMessage() }
     } label: {
       Image(systemName: working ? "stop.fill" : "arrow.up")
         .font(.system(size: 14, weight: .bold))
@@ -723,6 +734,7 @@ private struct FollowingTranscript<Content: View>: View {
   @ViewBuilder var content: () -> Content
 
   @State private var position = ScrollPosition(edge: .bottom)
+  @State private var sendPending = false
 
   var body: some View {
     ScrollView {
@@ -760,7 +772,16 @@ private struct FollowingTranscript<Content: View>: View {
       try? await Task.sleep(nanoseconds: 900_000_000)
       position.scrollTo(edge: .top)
     }
-    .onChange(of: sendTick) { _, _ in position.scrollTo(edge: .bottom) }
+    .onChange(of: sendTick) { _, _ in sendPending = true }
+    .onScrollGeometryChange(for: ChatScrollMetrics.self) { geometry in
+      ChatScrollMetrics(
+        offset: geometry.visibleRect.minY, content: geometry.contentSize.height,
+        container: geometry.visibleRect.height)
+    } action: { old, new in
+      guard ChatScrollFollow.shouldJumpToEnd(old: old, new: new, sendPending: sendPending) else { return }
+      if sendPending { sendPending = false }
+      position.scrollTo(edge: .bottom)
+    }
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: atBottom)
   }
 }

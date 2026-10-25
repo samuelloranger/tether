@@ -4,10 +4,12 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
+  static let sendDraft = "Thanks. Now do the same for the other helpers,\nthen run the whole suite\nand summarise anything that fails."
+
 
   private static func json(_ object: [String: Any]) -> String {
     let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
@@ -186,7 +188,9 @@ enum ChatFixture {
   }
 
   /// A long reply that overflows the screen, delivered a chunk at a time.
-  static let dripChunks: [String] = {
+  static let dripChunks: [String] = dripChunks(requestId: 3)
+
+  static func dripChunks(requestId: Int) -> [String] {
     var chunks = [update([
       "sessionUpdate": "agent_message_chunk", "messageId": "msg_stream",
       "content": ["type": "text", "text": "Here is the full walkthrough, one step at a time.\n\n"],
@@ -201,13 +205,13 @@ enum ChatFixture {
       "sessionUpdate": "agent_message_chunk", "messageId": "msg_stream",
       "content": ["type": "text", "text": "END OF REPLY"],
     ]))
-    chunks.append(json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]))
+    chunks.append(json(["jsonrpc": "2.0", "id": requestId, "result": ["stopReason": "end_turn"]]))
     return chunks
-  }()
+  }
 
   /// A long finished turn, rendered whole: grouped tool rows and plenty of prose.
   @MainActor
-  static func longModel() -> ChatSessionModel {
+  static func longModel(steps: Int = 6, replyAfter: Double? = nil) -> ChatSessionModel {
     var lines: [String] = [
       update(["sessionUpdate": "session_info_update", "title": "Chat feature"]),
       update(tool("t1", "Edit apps/tether-notify/README.md", kind: "edit", status: "completed")),
@@ -217,7 +221,7 @@ enum ChatFixture {
       message("Edited `apps/tether-notify/README.md` line 3: \"the v5 SSH host\" is now \"the SSH host\". It's uncommitted. Revert with `git checkout apps/tether-notify/README.md`.\n\nThe `ship:scout` subagent is exploring the repo in the background. I'll relay its report when it finishes."),
       message("\n\n## Entry points\n\n- iOS and Mac Catalyst: `clients/apple/TetherIOS` is the app target, with `TetherKit` holding the SSH transport and every screen\n- Windows and Linux: `clients/desktop/` is one Rust workspace with a Slint UI\n- Host side: `apps/tether-notify/` is a small Go tool for encrypted push\n\n"),
     ]
-    for step in 1...6 {
+    for step in 1...steps {
       lines.append(message("Step \(step): the helper keeps its state small, retries only on `5xx` server errors and waits a little longer each time, so a flaky upstream does not hammer the host.\n\n"))
     }
     lines.append(message("```ts\nfor (let attempt = 1; ; attempt++) { await sleep(2 ** attempt * 100) }\n```\n\nDone."))
@@ -230,7 +234,18 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/tether", readOnly: false,
       store: InMemoryChatJournalStore(journal)
-    ) { _ in FixtureByteStream(log: log) }
+    ) { _ in
+      guard let replyAfter else { return FixtureByteStream(log: log) }
+      return AnswerOnPromptStream(log: log, chunks: dripChunks(requestId: 4), after: replyAfter)
+    }
+  }
+
+  /// A long transcript with the composer focused; `ChatView` types a draft and sends it, and the
+  /// agent stays silent for `replyAfter` seconds before streaming a long reply.
+  @MainActor
+  static func sendModel() -> ChatSessionModel {
+    let after = Double(ProcessInfo.processInfo.environment["TETHER_DEBUG_REPLY_AFTER"] ?? "") ?? 8
+    return longModel(steps: 14, replyAfter: after)
   }
 
   private static func option(
@@ -433,6 +448,57 @@ final class DripByteStream: TerminalByteStream, @unchecked Sendable {
   }
 }
 
+/// Hands over its log, then stays silent until a prompt is written, waits `after` seconds and drips `chunks`.
+final class AnswerOnPromptStream: TerminalByteStream, @unchecked Sendable {
+  private let log: FixtureByteStream
+  private let drip: DripByteStream
+  private let after: UInt64
+  private let lock = NSLock()
+  private var prompted = false
+  private var logDone = false
+  private var answering = false
+
+  init(log: Data, chunks: [String], after: Double) {
+    self.log = FixtureByteStream(log: log)
+    drip = DripByteStream(chunks: chunks)
+    self.after = UInt64(after * 1_000_000_000)
+  }
+
+  func read() async throws -> Data? {
+    lock.lock()
+    let first = !logDone
+    logDone = true
+    lock.unlock()
+    if first { return try await log.read() }
+    while true {
+      lock.lock()
+      let ready = prompted
+      lock.unlock()
+      if ready { break }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    lock.lock()
+    let wait = !answering
+    answering = true
+    lock.unlock()
+    if wait { try await Task.sleep(nanoseconds: after) }
+    return try await drip.read()
+  }
+
+  func write(_ bytes: Data) async throws {
+    if String(decoding: bytes, as: UTF8.self).contains("session/prompt") {
+      lock.lock()
+      prompted = true
+      lock.unlock()
+    }
+  }
+
+  func close() async {
+    await log.close()
+    await drip.close()
+  }
+}
+
 /// DEBUG root for screenshots: the chat screen alone, over the fixture.
 public struct ChatFixtureRoot: View {
   @State private var model: ChatSessionModel
@@ -456,6 +522,7 @@ public struct ChatFixtureRoot: View {
     switch mode {
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
+    case "send": initial = ChatFixture.sendModel()
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
@@ -472,9 +539,10 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash", startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send", startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "attach" ? "Compare these two screenshots" : "",
-          openControls: mode == "controls-sheet", seedAttachments: mode == "attach")
+          openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
+          sendDraft: mode == "send" ? ChatFixture.sendDraft : nil)
       }
     }
       .tint(TetherColors.accent)

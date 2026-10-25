@@ -15,3 +15,24 @@ enum ChatScrollFollow {
     return end - offset <= threshold
   }
 }
+
+/// What the transcript's scroll view reported at one moment.
+struct ChatScrollMetrics: Equatable {
+  var offset: CGFloat
+  var content: CGFloat
+  var container: CGFloat
+
+  var isNearBottom: Bool {
+    ChatScrollFollow.isNearBottom(offset: offset, content: content, container: container)
+  }
+}
+
+extension ChatScrollFollow {
+  /// An imperative jump to the end, decided once the new layout is known. Content growth while
+  /// pinned is the scroll anchor's job; this covers what it does not: the user's own send, once
+  /// its rows exist, and a viewport that shrank (keyboard) under a view that was at the end.
+  static func shouldJumpToEnd(old: ChatScrollMetrics, new: ChatScrollMetrics, sendPending: Bool) -> Bool {
+    if sendPending { return new.content > old.content }
+    return old.isNearBottom && new.container != old.container && !new.isNearBottom
+  }
+}

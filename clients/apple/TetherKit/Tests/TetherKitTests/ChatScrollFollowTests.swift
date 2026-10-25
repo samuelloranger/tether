@@ -26,4 +26,30 @@ final class ChatScrollFollowTests: XCTestCase {
     XCTAssertTrue(ChatScrollFollow.isNearBottom(offset: 1434, content: 2000, container: 600, bottomInset: 34))
     XCTAssertFalse(ChatScrollFollow.isNearBottom(offset: 1300, content: 2000, container: 600, bottomInset: 34))
   }
+
+  private func metrics(_ offset: CGFloat, _ content: CGFloat, _ container: CGFloat) -> ChatScrollMetrics {
+    ChatScrollMetrics(offset: offset, content: content, container: container)
+  }
+
+  func test_a_pending_send_waits_for_its_rows() {
+    let before = metrics(1400, 2000, 600)
+    XCTAssertFalse(ChatScrollFollow.shouldJumpToEnd(old: before, new: metrics(1400, 2000, 700), sendPending: true))
+    XCTAssertTrue(ChatScrollFollow.shouldJumpToEnd(old: before, new: metrics(1400, 2150, 600), sendPending: true))
+  }
+
+  func test_a_pending_send_jumps_even_when_scrolled_up() {
+    XCTAssertTrue(ChatScrollFollow.shouldJumpToEnd(old: metrics(300, 2000, 600), new: metrics(300, 2150, 600), sendPending: true))
+  }
+
+  func test_a_viewport_that_shrinks_at_the_end_keeps_the_end() {
+    XCTAssertTrue(ChatScrollFollow.shouldJumpToEnd(old: metrics(1400, 2000, 600), new: metrics(1400, 2000, 330), sendPending: false))
+  }
+
+  func test_a_viewport_that_shrinks_while_scrolled_up_is_left_alone() {
+    XCTAssertFalse(ChatScrollFollow.shouldJumpToEnd(old: metrics(300, 2000, 600), new: metrics(300, 2000, 330), sendPending: false))
+  }
+
+  func test_content_growth_alone_is_left_to_the_anchor() {
+    XCTAssertFalse(ChatScrollFollow.shouldJumpToEnd(old: metrics(1400, 2000, 600), new: metrics(1400, 2200, 600), sendPending: false))
+  }
 }
