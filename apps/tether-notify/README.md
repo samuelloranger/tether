@@ -74,6 +74,27 @@ can see:
     tether-notify list
     tether-notify remove <apns-token>
 
+## ACP holder
+
+`acp` keeps an ACP agent (for example `npx -y @agentclientprotocol/claude-agent-acp`)
+alive on the host while the SSH connection comes and goes. The stream stays plain
+newline-delimited JSON-RPC; nothing is injected into it.
+
+    # run as a non-PTY ssh exec; stdin/stdout are the agent's, byte for byte
+    tether-notify acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
+    tether-notify acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
+    tether-notify acp ls                         # name, running|ended, log bytes, cwd, created, command
+    tether-notify acp kill chat1                 # stop the agent and remove the session
+
+The first `attach --spawn` starts a detached daemon that owns the agent and appends
+everything it prints to `acp/<name>/out.log`; an `attach` replays that log from `--from`
+and then follows it live, so a client that tracks `from + bytesReceived` sees no gap and
+no duplicate. A new `attach` replaces the previous one (that one exits 5). Without
+`--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
+exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `attach`
+sends what is already logged and exits; `--linger 30s` keeps following until output has
+been idle that long.
+
 Devices live in `~/.tether-notify/devices.json`, session state in
 `~/.tether-notify/sessions/` (override the directory with `TETHER_NOTIFY_HOME`).
 zmx is found at `TETHER_ZMX`, else `~/.local/bin/zmx`, else on `PATH`. Relay URL defaults to the official one; override with

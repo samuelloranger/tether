@@ -3,6 +3,7 @@ import SwiftUI
 public struct HomeView: View {
   @Bindable var model: HomeModel
   var onOpen: (SSHHostProfile) -> Void
+  var onChat: ((SSHHostProfile) -> Void)?
   var onClose: (() -> Void)?
 
   @State private var tab: Tab
@@ -24,10 +25,12 @@ public struct HomeView: View {
     model: HomeModel,
     initialTab: Tab = .machines,
     onOpen: @escaping (SSHHostProfile) -> Void,
+    onChat: ((SSHHostProfile) -> Void)? = nil,
     onClose: (() -> Void)? = nil
   ) {
     self.model = model
     self.onOpen = onOpen
+    self.onChat = onChat
     self.onClose = onClose
     _tab = State(initialValue: initialTab)
   }
@@ -228,9 +231,15 @@ public struct HomeView: View {
     ScrollView {
       LazyVStack(spacing: 10) {
         ForEach(model.profiles) { profile in
-          MachineCardView(profile: profile, authLabel: model.authLabel(for: profile), onOpen: { onOpen(profile) })
+          MachineCardView(
+            profile: profile, authLabel: model.authLabel(for: profile), onOpen: { onOpen(profile) },
+            onChat: onChat.map { chat in { chat(profile) } }
+          )
             .contextMenu {
               Group {
+                if let onChat {
+                  Button { onChat(profile) } label: { MenuLabel("Chat", systemImage: "bubble.left.and.text.bubble.right") }
+                }
                 if TetherPlatform.isMac {
                   Button { onOpen(profile) } label: { MenuLabel("Open", systemImage: "terminal") }
                   Button { UIPasteboard.general.string = "\(profile.username)@\(profile.host):\(profile.port)" } label: {

@@ -1,0 +1,245 @@
+import Foundation
+
+/// The `tether-notify acp` commands a chat runs over ssh exec.
+enum ACPHostCommand {
+  static let spawnCommand = "npx -y @agentclientprotocol/claude-agent-acp"
+  private static let prefix = "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp"
+
+  /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
+  /// a lost holder never starts a fresh agent under a journal that names the old session.
+  static func attach(name: String, cwd: String, spawn: Bool, from offset: Int = 0) -> String {
+    var command = "\(prefix) attach \(shellQuote(name)) --from \(offset)"
+    if spawn { command += " --spawn \(shellQuote(spawnCommand)) --cwd \(shellQuote(cwd))" }
+    return command
+  }
+
+  static let list = "\(prefix) ls"
+  static let home = "printf %s \"$HOME\""
+
+  static func kill(name: String) -> String { "\(prefix) kill \(shellQuote(name))" }
+}
+
+struct ACPChatSummary: Equatable, Identifiable, Sendable {
+  var name: String
+  var isRunning: Bool
+  var logBytes: Int
+  var cwd: String
+  var created: Date
+  var spawn: String
+
+  var id: String { name }
+
+  /// The folder name; a chat started in the home directory or the root has no better label.
+  var title: String { ChatFormat.folderName(cwd) }
+}
+
+/// `name<TAB>state<TAB>logBytes<TAB>cwd<TAB>createdUnix<TAB>spawn`, one chat per line.
+enum ACPChatListing {
+  struct Result: Equatable {
+    var chats: [ACPChatSummary]
+    var skipped: [String]
+  }
+
+  static func parse(_ output: String) -> Result {
+    var chats: [ACPChatSummary] = []
+    var skipped: [String] = []
+    for raw in output.split(whereSeparator: \.isNewline) {
+      let line = String(raw)
+      let fields = line.split(separator: "\t", maxSplits: 5, omittingEmptySubsequences: false).map(String.init)
+      guard fields.count >= 5, !fields[0].isEmpty,
+        fields[1] == "running" || fields[1] == "ended",
+        let bytes = Int(fields[2]), let created = TimeInterval(fields[4])
+      else {
+        skipped.append(line)
+        continue
+      }
+      chats.append(
+        ACPChatSummary(
+          name: fields[0], isRunning: fields[1] == "running", logBytes: bytes, cwd: fields[3],
+          created: Date(timeIntervalSince1970: created), spawn: fields.count > 5 ? fields[5] : ""))
+    }
+    chats.sort { $0.created > $1.created }
+    return Result(chats: chats, skipped: skipped)
+  }
+}
+
+enum ACPCwd {
+  /// `session/new` needs an absolute path, so a typed `~` is resolved against the host's home.
+  static func expand(_ text: String, home: String) -> String {
+    var path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if path.isEmpty || path == "~" { return home }
+    if path.hasPrefix("~/") { path = home + String(path.dropFirst(1)) }
+    while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+    return path
+  }
+
+  static func needsHome(_ text: String) -> Bool {
+    let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return path.isEmpty || path == "~" || path.hasPrefix("~/")
+  }
+}
+
+/// A chat this phone has a session id for resumes; any other can only be read.
+enum ChatOpenMode: Equatable {
+  case resume, readOnly
+
+  static func mode(for journal: ChatJournal) -> ChatOpenMode {
+    journal.sessionId == nil ? .readOnly : .resume
+  }
+}
+
+struct ChatRoute: Hashable, Identifiable {
+  var name: String
+  var cwd: String
+  var readOnly: Bool
+  var id: String { name }
+
+  static func newName() -> String {
+    let letters = Array("abcdefghijklmnopqrstuvwxyz0123456789")
+    return "chat-" + String((0..<6).map { _ in letters.randomElement()! })
+  }
+}
+
+/// Tracks the replay window after a (re)connect. The holder replays its whole log, so the
+/// transcript is only trustworthy once no new state has arrived for `settleWindow`.
+struct ChatLinkTracker: Equatable, Sendable {
+  enum Phase: Equatable, Sendable { case connecting, catchingUp, live, lost }
+
+  static let settleWindow: TimeInterval = 0.4
+
+  private(set) var phase: Phase = .connecting
+  private var lastActivity: Date?
+
+  var allowsInteraction: Bool { phase == .live }
+
+  mutating func dialStarted() { phase = .connecting }
+  mutating func dialFailed() { phase = .lost }
+  mutating func connectionLost() { phase = .lost }
+
+  mutating func dialSucceeded(at now: Date) {
+    phase = .catchingUp
+    lastActivity = now
+  }
+
+  mutating func activity(at now: Date) {
+    if phase == .catchingUp { lastActivity = now }
+  }
+
+  /// True when this call moved the link from catching up to live.
+  @discardableResult
+  mutating func settleIfQuiet(at now: Date) -> Bool {
+    guard phase == .catchingUp, let lastActivity, now.timeIntervalSince(lastActivity) >= Self.settleWindow else {
+      return false
+    }
+    phase = .live
+    return true
+  }
+}
+
+enum ChatReconnectPolicy {
+  static func shouldReconnect(phase: ChatLinkTracker.Phase, dialInFlight: Bool, left: Bool) -> Bool {
+    phase == .lost && !dialInFlight && !left
+  }
+}
+
+/// Messages the agent never received. Delivered ones live in the transcript; these stay visible
+/// with Retry and Discard rather than vanishing.
+struct ChatOutbox: Equatable {
+  struct Failed: Identifiable, Equatable {
+    let id: UUID
+    let text: String
+  }
+
+  private(set) var failed: [Failed] = []
+
+  @discardableResult
+  mutating func recordFailure(_ text: String, id: UUID = UUID()) -> Failed {
+    let entry = Failed(id: id, text: text)
+    failed.append(entry)
+    return entry
+  }
+
+  func text(for id: UUID) -> String? { failed.first { $0.id == id }?.text }
+
+  mutating func discard(_ id: UUID) { failed.removeAll { $0.id == id } }
+}
+
+enum ChatPermissionRole: Equatable {
+  case primary, secondary, destructive
+
+  init(kind: String) {
+    switch kind {
+    case "allow_once": self = .primary
+    case "reject_once", "reject_always": self = .destructive
+    default: self = .secondary
+    }
+  }
+}
+
+enum ChatPermissionOptions {
+  /// Allow once first, then the broader allows, reject last.
+  static func ordered(_ options: [ACPPermissionOption]) -> [(option: ACPPermissionOption, role: ChatPermissionRole)] {
+    func rank(_ role: ChatPermissionRole) -> Int {
+      switch role {
+      case .primary: 0
+      case .secondary: 1
+      case .destructive: 2
+      }
+    }
+    return options.enumerated()
+      .map { (index: $0.offset, option: $0.element, role: ChatPermissionRole(kind: $0.element.kind)) }
+      .sorted { (rank($0.role), $0.index) < (rank($1.role), $1.index) }
+      .map { ($0.option, $0.role) }
+  }
+}
+
+enum ChatFormat {
+  static func folderName(_ cwd: String) -> String {
+    let trimmed = cwd.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    guard let last = trimmed.split(separator: "/").last else { return cwd == "/" ? "/" : "Home" }
+    return String(last)
+  }
+
+  /// 31043 -> "31k", 1_000_000 -> "1M".
+  static func compactCount(_ value: Int) -> String {
+    switch value {
+    case 1_000_000...:
+      let millions = Double(value) / 1_000_000
+      return millions == millions.rounded() ? "\(Int(millions))M" : String(format: "%.1fM", millions)
+    case 1_000...: return "\(Int((Double(value) / 1_000).rounded()))k"
+    default: return "\(value)"
+    }
+  }
+
+  static func contextSummary(used: Int?, size: Int?) -> String? {
+    guard let used, let size, size > 0 else { return nil }
+    let percent = max(0, min(100, Int((Double(used) / Double(size) * 100).rounded())))
+    return "\(compactCount(used)) / \(compactCount(size)) · \(percent)%"
+  }
+
+  /// A path relative to the chat's folder when it sits inside it.
+  static func relativePath(_ path: String, to cwd: String) -> String {
+    let base = cwd.hasSuffix("/") ? cwd : cwd + "/"
+    return path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
+  }
+}
+
+extension ChatState {
+  /// Changes whenever the visible tail does; cheap to compare, unlike the whole state.
+  var tailSignature: Int {
+    var hasher = Hasher()
+    hasher.combine(items.count)
+    hasher.combine(turn)
+    hasher.combine(pendingPermissions.count)
+    if let last = items.last {
+      switch last.kind {
+      case let .assistant(text, _), let .thought(text), let .notice(text), let .error(text):
+        hasher.combine(text.utf8.count)
+      case let .user(text, _): hasher.combine(text.utf8.count)
+      case let .tool(call): hasher.combine(call.status.rawValue)
+      default: break
+      }
+    }
+    return hasher.finalize()
+  }
+}

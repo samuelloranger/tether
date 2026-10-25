@@ -47,6 +47,7 @@ struct MachineCardView: View {
   let profile: SSHHostProfile
   let authLabel: String
   var onOpen: () -> Void
+  var onChat: (() -> Void)?
 
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -85,6 +86,23 @@ struct MachineCardView: View {
       .tetherCard()
     }
     .buttonStyle(TetherPressStyle())
+    .overlay(alignment: .bottomLeading) {
+      if let onChat {
+        Button(action: onChat) {
+          Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 11).padding(.vertical, 6)
+            .background(TetherColors.accent.opacity(0.12), in: Capsule())
+            .foregroundStyle(TetherColors.accent)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(TetherPressStyle())
+        .padding(.leading, 8).padding(.bottom, 0)
+        .accessibilityIdentifier("homeChat_\(profile.name)")
+        .accessibilityLabel("Chat with an agent on \(profile.name)")
+      }
+    }
     .macHoverHighlight()
     .accessibilityIdentifier("homeMachine_\(profile.name)")
     .accessibilityLabel("\(profile.name), \(profile.username) at \(profile.host) port \(profile.port), \(authLabel)")

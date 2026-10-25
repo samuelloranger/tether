@@ -36,7 +36,9 @@ struct TetherIOSApp: App {
 
   @ViewBuilder private var content: some View {
       #if DEBUG
-      if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
+      if let fixture = ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] {
+        ChatFixtureRoot(pendingPermission: fixture == "permission")
+      } else if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
         AppRootView(demoModel: .liveDemoFromEnv())
       } else if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
         AppRootView(demoModel: .preview())
@@ -44,7 +46,8 @@ struct TetherIOSApp: App {
         HomeView(
           model: .preview(),
           initialTab: ProcessInfo.processInfo.environment["TETHER_HOME_TAB"] == "keys" ? .keys : .machines,
-          onOpen: { _ in }
+          onOpen: { _ in },
+          onChat: { _ in }
         )
         .tint(TetherColors.accent)
         .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)

@@ -5,6 +5,8 @@ protocol SSHConnectionOps: AnyObject {
   func hostKeyFingerprint() throws -> String
   func authenticate(_ credential: SSHCredential) throws -> Bool
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream
+  /// A non-PTY session channel running `command`, with stdin and stdout as plain bytes.
+  func openExecChannel(command: String) throws -> any TerminalByteStream
   func exec(_ command: String) throws -> String
   /// `onChunk` returns false to stop reading and tear the channel down.
   func execStream(_ command: String, onChunk: (String) -> Bool) throws
@@ -80,6 +82,21 @@ enum SSHConnectionSequence {
     try gate(config: config, ops: ops, store: store)
     do {
       return try ops.openPTYChannel(cols: config.cols, rows: config.rows)
+    } catch {
+      ops.teardown()
+      throw SSHConnectError.transport("\(error)")
+    }
+  }
+
+  static func runExec(
+    config: SSHConnectionConfig,
+    ops: SSHConnectionOps,
+    store: HostKeyStore,
+    command: String
+  ) throws -> any TerminalByteStream {
+    try gate(config: config, ops: ops, store: store)
+    do {
+      return try ops.openExecChannel(command: command)
     } catch {
       ops.teardown()
       throw SSHConnectError.transport("\(error)")

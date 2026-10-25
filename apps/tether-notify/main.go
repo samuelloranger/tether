@@ -111,6 +111,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, "tether-notify: nothing is waiting for an answer")
 			os.Exit(3)
 		}
+	case "acp":
+		err = runACP(os.Args[2:])
+		switch {
+		case errors.Is(err, errNoSession):
+			fmt.Fprintln(os.Stderr, "tether-notify: no such acp session")
+			os.Exit(3)
+		case errors.Is(err, errReplaced):
+			fmt.Fprintln(os.Stderr, "tether-notify: replaced by another client")
+			os.Exit(5)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -147,6 +157,11 @@ func usage() {
                                              {"release":"attached|stale"}
   pending --session S                        print the held question for the phone's answer sheet
                                              (exit 3 if none)
+  acp attach NAME [--spawn CMD] [--cwd DIR] [--from N] [--linger D]
+                                             hold an ACP agent that outlives ssh: raw JSON-RPC on
+                                             stdin/stdout, replayed from byte N of its log (exit 3
+                                             if no session and no --spawn; 5 if replaced)
+  acp ls | acp kill NAME                     list or stop held agents
   list                                       list registered phones
   remove <token>                             forget a phone
 `)

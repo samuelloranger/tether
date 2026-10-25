@@ -30,7 +30,7 @@ private struct NullByteStream: TerminalByteStream {
 }
 
 final class FakeOps: SSHConnectionOps, @unchecked Sendable {
-  enum Step: Equatable { case connect, fingerprint, auth(SSHCredential), openPTY, teardown }
+  enum Step: Equatable { case connect, fingerprint, auth(SSHCredential), openPTY, openExec(String), teardown }
 
   var calls: [Step] = []
   var handshakes = 0
@@ -89,6 +89,12 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
 
   func openPTYChannel(cols: Int, rows: Int) throws -> any TerminalByteStream {
     calls.append(.openPTY)
+    if let openError { throw openError }
+    return NullByteStream()
+  }
+
+  func openExecChannel(command: String) throws -> any TerminalByteStream {
+    calls.append(.openExec(command))
     if let openError { throw openError }
     return NullByteStream()
   }

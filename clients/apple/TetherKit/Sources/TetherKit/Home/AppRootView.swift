@@ -10,6 +10,7 @@ public struct AppRootView: View {
   @State private var tabs: MacSessionTabs?
   @State private var didAutoConnect = false
   @State private var openProfileID: String?
+  @State private var chat: ChatTarget?
   @State private var question: AgentQuestionTarget?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private let autoOpenFirst: Bool
@@ -43,12 +44,15 @@ public struct AppRootView: View {
       if let active = tabs?.activeController ?? controller {
         SSHTerminalView(controller: active, preferences: preferences, questionRunner: questionRunner, tabs: tabs, onHome: leaveTerminal)
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+      } else if let chat {
+        ChatFlowView(list: chat.list, config: chat.config, hostKeyStore: model.hostKeyStore, onClose: leaveChat)
+          .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       } else {
-        HomeView(model: model, onOpen: { open($0) })
+        HomeView(model: model, onOpen: { open($0) }, onChat: { openChat($0) })
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       }
     }
-    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen)
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen || chat != nil)
     .preferredColorScheme(preferences.colorScheme)
     // Here, not on the app's root: a theme change then redraws this view, not the scene.
     .tint(TetherColors.accent)
@@ -138,6 +142,24 @@ public struct AppRootView: View {
       if let opened { return await opened.activeController?.coversPush(link) ?? false }
       return await single?.coversPush(link) ?? false
     }
+  }
+
+  private struct ChatTarget {
+    let list: ChatListModel
+    let config: SSHConnectionConfig
+  }
+
+  private func openChat(_ profile: SSHHostProfile) {
+    guard let config = model.connectionConfig(for: profile) else {
+      model.errorMessage = SSHConnectError.missingCredential(name: profile.name).errorDescription
+      return
+    }
+    chat = ChatTarget(
+      list: .live(hostName: profile.name, config: config, hostKeyStore: model.hostKeyStore), config: config)
+  }
+
+  private func leaveChat() {
+    chat = nil
   }
 
   private func leaveTerminal() {
