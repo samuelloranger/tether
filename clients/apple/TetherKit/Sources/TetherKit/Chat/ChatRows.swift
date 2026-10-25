@@ -216,25 +216,56 @@ struct ToolCallRow: View {
 struct PlanRow: View {
   let entries: [ACPPlanEntry]
 
+  #if DEBUG
+  @State private var open = ProcessInfo.processInfo.environment["TETHER_DEBUG_PLAN_OPEN"] != nil
+  #else
+  @State private var open = false
+  #endif
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  private var done: Int { entries.filter { $0.status == "completed" }.count }
+  private var current: ACPPlanEntry? { entries.first { $0.status == "in_progress" } }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("PLAN").font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
-      ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-          glyph(entry.status).frame(width: 16)
-          Text(entry.content)
-            .font(.footnote)
-            .strikethrough(entry.status == "completed", color: TetherColors.textFaint)
-            .foregroundStyle(entry.status == "completed" ? TetherColors.textFaint : TetherColors.textPrimary)
+      Button {
+        withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { open.toggle() }
+      } label: {
+        HStack(spacing: 6) {
+          Image(systemName: "checklist").font(.caption)
+          Text("Plan · \(done) of \(entries.count)").font(.footnote.weight(.medium))
+          if !open, let current {
+            Text(current.content).font(.footnote).lineLimit(1)
+              .foregroundStyle(TetherColors.textFaint)
+          }
+          Spacer(minLength: 6)
+          Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.content), \(entry.status.replacingOccurrences(of: "_", with: " "))")
+        .foregroundStyle(TetherColors.textSecondary)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Plan, \(done) of \(entries.count) done")
+      .accessibilityHint(open ? "Hides the steps" : "Shows the steps")
+      if open {
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+              glyph(entry.status).frame(width: 16)
+              Text(entry.content)
+                .font(entry.status == "in_progress" ? .footnote.weight(.semibold) : .footnote)
+                .foregroundStyle(
+                  entry.status == "completed" ? TetherColors.textSecondary : TetherColors.textPrimary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(entry.content), \(entry.status.replacingOccurrences(of: "_", with: " "))")
+          }
+        }
+        .padding(.leading, 2)
       }
     }
-    .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(TetherColors.border))
   }
 
   @ViewBuilder private func glyph(_ status: String) -> some View {
