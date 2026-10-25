@@ -21,13 +21,13 @@ struct EmbeddedChat: View {
 /// The working-folder step of a new chat, opened from the drawer's "+" menu.
 struct NewChatSheet: View {
   let initialFolder: String
-  /// Resolves the folder and opens the chat; false leaves the sheet up with its message.
-  let onStart: (String) async -> Bool
+  /// Resolves the folder and opens the chat; a message leaves the sheet up showing it.
+  let onStart: (String) async -> String?
   let onCancel: () -> Void
 
   @State private var folder = ""
   @State private var starting = false
-  @State private var failed = false
+  @State private var failure: String?
   @FocusState private var focused: Bool
 
   var body: some View {
@@ -49,8 +49,10 @@ struct NewChatSheet: View {
           .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
           .accessibilityLabel("Working folder for the new chat")
           .accessibilityIdentifier("sshNewChatFolder")
-        if failed {
-          Text("Couldn't read the host's home folder.").font(.caption).foregroundStyle(TetherColors.warning)
+        if let failure {
+          Text(failure).font(.caption).foregroundStyle(TetherColors.warning)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("sshNewChatError")
         }
       }
       Button(action: start) {
@@ -71,18 +73,18 @@ struct NewChatSheet: View {
     }
     .padding(.horizontal, 16).padding(.top, 16)
     .background(TetherColors.background.ignoresSafeArea())
-    .presentationDetents([.height(222)])
+    .presentationDetents([.height(failure == nil ? 222 : 290)])
     .onAppear { if folder.isEmpty { folder = initialFolder } }
   }
 
   private func start() {
     guard !starting else { return }
     starting = true
-    failed = false
+    failure = nil
     focused = false
     Task {
       defer { starting = false }
-      if await !onStart(folder) { failed = true }
+      failure = await onStart(folder)
     }
   }
 }

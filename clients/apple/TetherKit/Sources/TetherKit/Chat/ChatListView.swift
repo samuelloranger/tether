@@ -15,6 +15,12 @@ struct ChatListView: View {
     List {
       Section {
         newChatRow.themedRow()
+        if let message = model.startError {
+          Label(message, systemImage: "exclamationmark.triangle")
+            .font(.footnote).foregroundStyle(TetherColors.warning)
+            .themedRow()
+            .accessibilityIdentifier("chatStartError")
+        }
       } header: {
         sectionHeader("New chat")
       }

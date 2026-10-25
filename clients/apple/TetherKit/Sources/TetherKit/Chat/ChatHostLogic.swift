@@ -18,6 +18,8 @@ enum ACPHostCommand {
   }
 
   static let list = "\(prefix) ls"
+  /// For the chat list screen, which has to show why a host that cannot list says nothing.
+  static let listWithErrors = "\(list) 2>&1"
   static let home = "printf %s \"$HOME\""
 
   static func kill(name: String) -> String { "\(prefix) kill \(shellQuote(name))" }

@@ -272,7 +272,7 @@ final class ChatSessionModelTests: XCTestCase {
     var commands: [String] = []
     let listModel = ChatListModel(hostName: "h") { command in
       commands.append(command)
-      if command == ACPHostCommand.list { return "chat-a\trunning\t1\t/srv/api\t5\tx\n" }
+      if command == ACPHostCommand.listWithErrors { return "chat-a\trunning\t1\t/srv/api\t5\tx\n" }
       if command == ACPHostCommand.home { return "/home/sam" }
       return ""
     }
@@ -296,6 +296,7 @@ final class ChatSessionModelTests: XCTestCase {
     await listModel.refresh()
     guard case let .failed(message) = listModel.load else { return XCTFail() }
     XCTAssertTrue(message.contains("missing or too old"))
+    XCTAssertTrue(message.contains("Update tether-notify on h"))
   }
 
   func test_a_failed_image_prompt_keeps_its_attachments_and_retries_with_them() async throws {

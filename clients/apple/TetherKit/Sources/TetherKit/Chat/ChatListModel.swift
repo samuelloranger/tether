@@ -17,6 +17,8 @@ final class ChatListModel {
   private(set) var chats: [ACPChatSummary] = []
   private(set) var load: Load = .loading
   var errorMessage: String?
+  /// Why the last "Start chat" did not start one, shown under the button.
+  private(set) var startError: String?
 
   private let exec: Exec
   private let titles: ChatTitleStore?
@@ -41,10 +43,10 @@ final class ChatListModel {
 
   func refresh() async {
     do {
-      let output = try await exec(ACPHostCommand.list)
+      let output = try await exec(ACPHostCommand.listWithErrors)
       let listing = ACPChatListing.parse(output)
       if listing.chats.isEmpty, let first = listing.skipped.first {
-        load = .failed(Self.explain(first))
+        load = .failed(Self.explain(first, host: hostName))
       } else {
         chats = listing.chats
         load = .loaded
@@ -67,11 +69,13 @@ final class ChatListModel {
   }
 
   func newRoute(cwdText: String) async -> ChatRoute? {
-    guard let route = await ChatRoute.fresh(cwdText: cwdText, exec: exec) else {
-      errorMessage = "Couldn't read the host's home folder."
+    startError = nil
+    switch await ChatRoute.start(cwdText: cwdText, host: hostName, exec: exec) {
+    case let .ready(route): return route
+    case let .failed(message):
+      startError = message
       return nil
     }
-    return route
   }
 
   func route(for chat: ACPChatSummary) -> ChatRoute {
@@ -81,10 +85,11 @@ final class ChatListModel {
 
   func close() async { await closeConnection() }
 
-  static func explain(_ line: String) -> String {
+  static func explain(_ line: String, host: String? = nil) -> String {
     let lower = line.lowercased()
     if lower.contains("not found") || lower.contains("unknown command") || lower.contains("usage") {
-      return "This host's tether-notify is missing or too old for chat. Reinstall it, then pull to refresh."
+      let update = host.map { "Update tether-notify on \($0). " } ?? ""
+      return update + "This host's tether-notify is missing or too old for chat. Reinstall it, then pull to refresh."
     }
     return line
   }

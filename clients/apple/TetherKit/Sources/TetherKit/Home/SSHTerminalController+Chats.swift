@@ -25,8 +25,8 @@ extension SSHTerminalController {
     return row.route(readOnly: mode == .readOnly)
   }
 
-  func newChatRoute(cwdText: String) async -> ChatRoute? {
-    await ChatRoute.fresh(cwdText: cwdText) { try await self.control.exec($0) }
+  func newChat(cwdText: String) async -> ChatStart {
+    await ChatRoute.start(cwdText: cwdText, host: config.host) { try await self.control.exec($0) }
   }
 
   /// The attached session's folder, the default for a new chat.

@@ -222,10 +222,13 @@ public struct SSHTerminalView: View {
       NewChatSheet(
         initialFolder: controller.activeSessionCwd ?? "~",
         onStart: { folder in
-          guard let route = await controller.newChatRoute(cwdText: folder) else { return false }
-          showNewChat = false
-          openChat(route)
-          return true
+          switch await controller.newChat(cwdText: folder) {
+          case let .failed(message): return message
+          case let .ready(route):
+            showNewChat = false
+            openChat(route)
+            return nil
+          }
         },
         onCancel: { showNewChat = false }
       )
