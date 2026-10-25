@@ -13,6 +13,7 @@ struct ChatView: View {
   @State private var viewportHeight: CGFloat = 0
   @State private var atBottom = true
   @State private var sendTick = 0
+  @State private var scrolledUnder = false
   @State private var reviewing: ChatPermission?
 
   private let bottomID = "chat-bottom"
@@ -23,8 +24,8 @@ struct ChatView: View {
     .background(TetherColors.background.ignoresSafeArea())
     .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     .navigationBarTitleDisplayMode(.inline)
-    .toolbarBackground(TetherColors.background, for: .navigationBar)
-    .toolbarBackground(.visible, for: .navigationBar)
+    .toolbarBackground(.regularMaterial, for: .navigationBar)
+    .toolbarBackground(scrolledUnder ? .visible : .hidden, for: .navigationBar)
     .toolbar {
       ToolbarItem(placement: .principal) { titleBlock }
       ToolbarItem(placement: .topBarTrailing) { connectionBadge }
@@ -46,7 +47,7 @@ struct ChatView: View {
 
   @ViewBuilder private var scroller: some View {
     if #available(iOS 18.0, *) {
-      FollowingTranscript(atBottom: $atBottom, sendTick: sendTick, reduceMotion: reduceMotion) { transcript }
+      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, sendTick: sendTick, reduceMotion: reduceMotion) { transcript }
     } else {
       legacyScroller
     }
@@ -79,6 +80,9 @@ struct ChatView: View {
       ScrollView {
         VStack(spacing: 0) {
           transcript
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: {
+              scrolledUnder = $0 < -1
+            }
           Color.clear.frame(height: 1).id(bottomID)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { bottomEdge = $0 }
             .onDisappear { bottomEdge = .infinity }
@@ -86,6 +90,7 @@ struct ChatView: View {
       }
       .coordinateSpace(name: Self.space)
       .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+      .chatEdgeFade(top: scrolledUnder, bottom: userScrolledUp)
       .defaultScrollAnchor(.bottom)
       .scrollDismissesKeyboard(.interactively)
       .simultaneousGesture(
@@ -446,6 +451,7 @@ struct JumpToLatestButton: View {
 @available(iOS 18.0, *)
 private struct FollowingTranscript<Content: View>: View {
   @Binding var atBottom: Bool
+  @Binding var scrolledUnder: Bool
   let sendTick: Int
   let reduceMotion: Bool
   @ViewBuilder var content: () -> Content
@@ -468,6 +474,12 @@ private struct FollowingTranscript<Content: View>: View {
     } action: { _, near in
       atBottom = near
     }
+    .onScrollGeometryChange(for: Bool.self) { geometry in
+      geometry.contentOffset.y + geometry.contentInsets.top > 1
+    } action: { _, under in
+      scrolledUnder = under
+    }
+    .chatEdgeFade(top: scrolledUnder, bottom: !atBottom)
     .overlay(alignment: .bottomTrailing) {
       if !atBottom {
         JumpToLatestButton {
@@ -479,5 +491,36 @@ private struct FollowingTranscript<Content: View>: View {
     }
     .onChange(of: sendTick) { _, _ in position.scrollTo(edge: .bottom) }
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: atBottom)
+  }
+}
+
+extension View {
+  /// Fades the last 12pt of scrolling content under the bars instead of slicing a line in half.
+  func chatEdgeFade(top: Bool, bottom: Bool) -> some View { modifier(ChatEdgeFade(top: top, bottom: bottom)) }
+}
+
+private struct ChatEdgeFade: ViewModifier {
+  let top: Bool
+  let bottom: Bool
+  @State private var insets = EdgeInsets()
+  private let fade: CGFloat = 12
+
+  func body(content: Content) -> some View {
+    content
+      .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets = $0 }
+      .mask {
+        VStack(spacing: 0) {
+          Color.black.frame(height: insets.top)
+          LinearGradient(colors: [top ? .clear : .black, .black], startPoint: .top, endPoint: .bottom)
+            .frame(height: fade)
+          Color.black
+          LinearGradient(colors: [.black, bottom ? .clear : .black], startPoint: .top, endPoint: .bottom)
+            .frame(height: fade)
+          Color.black.frame(height: insets.bottom)
+        }
+        .ignoresSafeArea()
+        .animation(.easeOut(duration: 0.15), value: top)
+        .animation(.easeOut(duration: 0.15), value: bottom)
+      }
   }
 }
