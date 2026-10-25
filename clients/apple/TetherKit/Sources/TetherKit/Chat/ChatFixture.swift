@@ -111,7 +111,7 @@ enum ChatFixture {
   private static let afterPermission: [String] = [
     update(tool("tool_edit", "Edit src/fetch.ts", kind: "edit", status: "completed", update: true)),
     update(tool("tool_test", "bun test src/fetch.test.ts", kind: "execute", status: "completed",
-      text: "✓ retries a 503 then succeeds\n✓ does not retry a 404\n\n 2 pass, 0 fail", update: false)),
+      text: "```console\n✓ retries a 503 then succeeds\n✓ does not retry a 404\n\n 2 pass, 0 fail\n```", update: false)),
     update(["sessionUpdate": "usage_update", "used": 48_900, "size": 1_000_000]),
     message("\n\nDone. `fetchJSON` now retries **5xx** responses up to three times with backoff, and the two new tests pass. A `404` still fails immediately."),
     json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]),

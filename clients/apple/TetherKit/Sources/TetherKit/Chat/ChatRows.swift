@@ -221,12 +221,7 @@ struct ToolCallRow: View {
   let expanded: Bool
   let toggle: () -> Void
 
-  private var detail: String? {
-    let text = ChatFormat.unfenced(call.text ?? call.rawOutput)
-    return text?.isEmpty == false ? text : nil
-  }
-
-  private var expandable: Bool { call.diff != nil || detail != nil }
+  private var expandable: Bool { call.diff != nil || ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -293,10 +288,8 @@ struct ToolCallRow: View {
     Group {
       if let diff = call.diff {
         DiffReviewView(files: [ACPDiffAdapter.file(for: diff, relativeTo: cwd)])
-      } else if let detail {
-        Text(String(detail.prefix(4000)) + (detail.count > 4000 ? "\n\u{2026}" : ""))
-          .font(.caption.monospaced())
-          .foregroundStyle(TetherColors.textSecondary)
+      } else {
+        MarkdownBodyView(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput))
           .textSelection(.enabled)
           .padding(10)
           .frame(maxWidth: .infinity, alignment: .leading)

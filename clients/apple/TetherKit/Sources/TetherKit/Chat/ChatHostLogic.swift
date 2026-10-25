@@ -211,19 +211,6 @@ extension ChatPermissionOptions {
 }
 
 enum ChatFormat {
-  /// The adapter wraps shell output in a markdown fence meant for a markdown renderer; the tool
-  /// detail shows it as plain monospaced text, so the fence lines would print literally.
-  static func unfenced(_ text: String?) -> String? {
-    guard var body = text else { return nil }
-    guard body.hasPrefix("```"), let firstBreak = body.firstIndex(of: "\n") else { return text }
-    body = String(body[body.index(after: firstBreak)...])
-    while body.hasSuffix("\n") { body.removeLast() }
-    guard body.hasSuffix("```") else { return text }
-    body.removeLast(3)
-    while body.hasSuffix("\n") { body.removeLast() }
-    return body
-  }
-
   static func folderName(_ cwd: String) -> String {
     let trimmed = cwd.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     guard let last = trimmed.split(separator: "/").last else { return cwd == "/" ? "/" : "Home" }

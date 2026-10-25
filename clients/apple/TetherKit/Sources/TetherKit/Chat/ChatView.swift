@@ -105,11 +105,11 @@ struct ChatView: View {
       ForEach(ChatGrouping.blocks(visibleItems)) { block in
         switch block {
         case let .item(item):
-          ChatItemRow(item: item, cwd: model.cwd, expanded: expanded.contains(item.id)) { toggleExpanded(item.id) }
+          ChatItemRow(item: item, cwd: model.cwd, expanded: isExpanded(item.id)) { toggleExpanded(item.id) }
             .equatable()
         case let .tools(items):
           ToolGroupView(
-            items: items, cwd: model.cwd, expandedIDs: expanded.intersection(items.map(\.id)),
+            items: items, cwd: model.cwd, expandedIDs: Set(items.map(\.id).filter(isExpanded)),
             toggle: toggleExpanded
           )
           .equatable()
@@ -171,6 +171,13 @@ struct ChatView: View {
       if case let .permission(permission) = $0.kind { return permission.resolvedOptionId != nil }
       return true
     }
+  }
+
+  private func isExpanded(_ id: Int) -> Bool {
+    #if DEBUG
+    if ProcessInfo.processInfo.environment["TETHER_DEBUG_TOOLS_OPEN"] != nil { return true }
+    #endif
+    return expanded.contains(id)
   }
 
   private func toggleExpanded(_ id: Int) {
