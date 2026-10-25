@@ -290,6 +290,23 @@ final class ChatSessionModel {
     }
   }
 
+  /// Answers, declines or cancels a pending question; on a failed write the card stays answerable.
+  func answerQuestion(
+    _ question: ChatQuestion, action: ChatQuestionAction, content: [String: ChatQuestionValue] = [:]
+  ) {
+    guard canInteract, let client else { return }
+    answerFailures.remove(question.requestId)
+    Task {
+      do {
+        try await client.answerQuestion(requestId: question.requestId, action: action, content: content)
+      } catch {
+        if await adoptHostAnswer(for: question.requestId, on: client) { return }
+        answerFailures.insert(question.requestId)
+        receive(await client.state, generation: generation)
+      }
+    }
+  }
+
   private func adoptHostAnswer(for requestId: ACPID, on client: ACPClient) async -> Bool {
     guard let output = await hostAnswers?() else { return false }
     let answers = ACPAnswerCommand.parseAnswers(output)

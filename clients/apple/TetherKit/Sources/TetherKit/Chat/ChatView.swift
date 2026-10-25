@@ -29,6 +29,7 @@ struct ChatView: View {
   @State private var sendTick = 0
   @State private var scrolledUnder = false
   @State private var reviewing: ChatPermission?
+  @State private var questionTyping = false
   @State private var showingControls = false
   @State private var attachments = ChatAttachments()
   @State private var pickingPhotos = false
@@ -84,6 +85,7 @@ struct ChatView: View {
     }
     .onDisappear { model.leave() }
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingPermissions.first?.requestId)
+    .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingQuestions.first?.requestId)
     .sheet(isPresented: $showingControls) { ChatControlsSheet(model: model) }
     .photosPicker(
       isPresented: $pickingPhotos, selection: $pickedPhotos, maxSelectionCount: max(1, attachments.room),
@@ -130,7 +132,7 @@ struct ChatView: View {
           message: message, canRetry: model.canSend,
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
-      if model.state.turn == .working && model.state.pendingPermissions.isEmpty { WorkingIndicator(activity: model.state.subagentActivity) }
+      if model.state.turn == .working && !answerPending { WorkingIndicator(activity: model.state.subagentActivity) }
     }
     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
   }
@@ -175,10 +177,11 @@ struct ChatView: View {
     }
   }
 
-  /// An unanswered permission lives in the card, not in the scroll.
+  /// An unanswered permission or question lives in the card, not in the scroll.
   private var visibleItems: [ChatItem] {
     model.state.items.filter {
       if case let .permission(permission) = $0.kind { return permission.resolvedOptionId != nil }
+      if case let .question(question) = $0.kind { return !question.isPending }
       return true
     }
   }
@@ -349,7 +352,23 @@ struct ChatView: View {
         .padding(10)
         .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
       }
-      if let permission = model.state.pendingPermissions.first, !model.readOnly, !model.hasEnded {
+      if let question = pendingQuestion, model.state.pendingPermissions.isEmpty, !model.readOnly, !model.hasEnded {
+        QuestionCard(
+          question: question,
+          position: model.state.pendingQuestions.count > 1 ? "1 of \(model.state.pendingQuestions.count)" : nil,
+          enabled: model.canInteract,
+          respond: { model.answerQuestion(question, action: $0, content: $1) },
+          typing: { questionTyping = $0 })
+          .id(question.requestId)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+        if model.answerFailures.contains(question.requestId) {
+          Text("Couldn't send your answer. Try again.")
+            .font(.caption).foregroundStyle(TetherColors.textFaint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .accessibilityIdentifier("chatAnswerRetry")
+        }
+      } else if let permission = model.state.pendingPermissions.first, !model.readOnly, !model.hasEnded {
         PermissionCard(
           permission: permission, cwd: model.cwd,
           position: model.state.pendingPermissions.count > 1 ? "1 of \(model.state.pendingPermissions.count)" : nil,
@@ -374,7 +393,7 @@ struct ChatView: View {
           .font(.footnote).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
           .accessibilityIdentifier("chatEnded")
-      } else {
+      } else if !(questionTyping && pendingQuestion != nil) {
         composer
       }
     }
@@ -382,6 +401,7 @@ struct ChatView: View {
     .background(TetherColors.background.ignoresSafeArea(.all, edges: .bottom))
     .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: model.state.pendingPermissions.first?.requestId)
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: pendingQuestion?.requestId)
   }
 
   private var composer: some View {
@@ -407,7 +427,7 @@ struct ChatView: View {
         attachButton
         TextField(
           "", text: $draft,
-          prompt: Text(permissionPending ? "Answer the permission above" : "Message the agent")
+          prompt: Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : "Message the agent")
             .foregroundStyle(TetherColors.placeholder),
           axis: .vertical
         )
@@ -416,9 +436,9 @@ struct ChatView: View {
           .focused($composerFocused)
           .padding(.horizontal, 14).padding(.vertical, 8)
           .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
-          .opacity(permissionPending ? 0.55 : 1)
+          .opacity(answerPending ? 0.55 : 1)
           .accessibilityLabel("Message the agent")
-          .accessibilityHint(permissionPending ? "A permission is waiting above" : "")
+          .accessibilityHint(permissionPending ? "A permission is waiting above" : questionPending ? "A question is waiting above" : "")
           .accessibilityIdentifier("chatComposer")
         actionButton.padding(.leading, 4)
       }
@@ -426,7 +446,7 @@ struct ChatView: View {
   }
 
   private var slashQuery: String? {
-    guard !permissionPending, !model.state.commands.isEmpty else { return nil }
+    guard !answerPending, !model.state.commands.isEmpty else { return nil }
     return ChatSlash.query(in: draft)
   }
 
@@ -444,8 +464,8 @@ struct ChatView: View {
         .background(TetherColors.surfaceRaised, in: Circle())
         .hitSlop(vertical: 8, horizontal: 8)
     }
-    .disabled(permissionPending || attachments.room == 0)
-    .opacity(permissionPending ? 0.55 : 1)
+    .disabled(answerPending || attachments.room == 0)
+    .opacity(answerPending ? 0.55 : 1)
     .padding(.bottom, 4)
     .accessibilityLabel("Attach image")
     .accessibilityIdentifier("chatAttach")
@@ -461,6 +481,9 @@ struct ChatView: View {
   }
 
   private var permissionPending: Bool { !model.state.pendingPermissions.isEmpty }
+  private var pendingQuestion: ChatQuestion? { model.state.pendingQuestions.first }
+  private var questionPending: Bool { pendingQuestion != nil }
+  private var answerPending: Bool { permissionPending || questionPending }
   private var canSendNow: Bool {
     ChatComposerRule.canSend(
       text: draft, readyImages: attachments.ready.count, encoding: attachments.encoding, sessionCanSend: model.canSend)
