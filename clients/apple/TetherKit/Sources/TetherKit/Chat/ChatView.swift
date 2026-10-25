@@ -307,39 +307,72 @@ struct PermissionCard: View {
     .accessibilityElement(children: .contain)
   }
 
+  @State private var previewWidth: CGFloat = 0
+
   @ViewBuilder private var preview: some View {
     if let diff = permission.diff {
       let file = ACPDiffAdapter.file(for: diff, relativeTo: cwd)
-      Button(action: review) {
-        VStack(alignment: .leading, spacing: 0) {
-          HStack(spacing: 8) {
-            Text(file.path).font(.caption.monospaced()).lineLimit(1).truncationMode(.head)
-              .foregroundStyle(TetherColors.textPrimary)
-            Spacer(minLength: 6)
+      let rows = previewRows(file)
+      VStack(alignment: .leading, spacing: 0) {
+        HStack(spacing: 8) {
+          Text(file.path).font(.caption.monospaced()).lineLimit(1).truncationMode(.head)
+            .foregroundStyle(TetherColors.textPrimary)
+          Spacer(minLength: 6)
+          HStack(spacing: 6) {
             if file.added > 0 { Text("+\(file.added)").foregroundStyle(TetherColors.success) }
             if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(TetherColors.danger) }
-            Image(systemName: "arrow.up.left.and.arrow.down.right").font(.caption2)
-              .foregroundStyle(TetherColors.textFaint)
           }
-          .font(.caption2.monospaced())
-          .padding(.horizontal, 10).padding(.vertical, 7)
-          .background(TetherColors.surfaceRaised)
-          ForEach(previewRows(file)) { row in
-            Text(row.text.isEmpty ? " " : row.text).font(.caption2.monospaced())
-              .foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+          .font(.system(size: 14, weight: .semibold, design: .monospaced))
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(TetherColors.surfaceRaised)
+        ScrollView(.horizontal, showsIndicators: false) {
+          VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+              HStack(spacing: 6) {
+                Text(gutter(row.kind)).foregroundStyle(edge(row.kind))
+                  .frame(width: 10)
+                Text(row.text.isEmpty ? " " : row.text)
+                  .foregroundStyle(TetherColors.textPrimary)
+                  .fixedSize(horizontal: true, vertical: false)
+              }
+              .font(.caption2.monospaced())
               .padding(.horizontal, 10).padding(.vertical, 1)
               .frame(maxWidth: .infinity, alignment: .leading)
               .background(edge(row.kind).opacity(0.10))
               .overlay(alignment: .leading) { edge(row.kind).frame(width: 2) }
+              .accessibilityLabel("\(accessibleKind(row.kind)) \(row.text)")
+            }
+          }
+          .frame(minWidth: previewWidth, alignment: .leading)
+          .fixedSize(horizontal: true, vertical: false)
+          .padding(.vertical, 4)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { previewWidth = $0 }
+        .mask {
+          VStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .black.opacity(0.15)], startPoint: .top, endPoint: .bottom)
+              .frame(height: 16)
           }
         }
-        .background(TetherColors.background.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+        Button(action: review) {
+          HStack(spacing: 6) {
+            Text("Show full diff").font(.footnote.weight(.semibold))
+            Image(systemName: "arrow.up.left.and.arrow.down.right").font(.footnote)
+            Spacer(minLength: 0)
+          }
+          .foregroundStyle(TetherColors.accent)
+          .padding(.horizontal, 10)
+          .frame(minHeight: 36)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show full diff of \(file.path), \(file.added) added, \(file.removed) removed")
       }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Change to \(file.path), \(file.added) added, \(file.removed) removed")
-      .accessibilityHint("Shows the full change")
+      .background(TetherColors.background.opacity(0.5))
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
     } else if let text = permission.text, !text.isEmpty {
       Text(String(text.prefix(300))).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(4)
@@ -349,11 +382,28 @@ struct PermissionCard: View {
     }
   }
 
-  /// A couple of removed lines, then the added ones, so a rewrite shows both sides.
+  /// Up to five lines: the first removed ones, then the added ones, so a rewrite shows both sides.
   private func previewRows(_ file: DiffFile) -> [DiffRow] {
-    let limit = dynamicTypeSize.isAccessibilitySize ? 2 : 3
-    return Array(file.rows.filter { $0.kind == .removed }.prefix(2))
-      + Array(file.rows.filter { $0.kind == .added }.prefix(limit))
+    let total = dynamicTypeSize.isAccessibilitySize ? 3 : 5
+    let removed = Array(file.rows.filter { $0.kind == .removed }.prefix(2))
+    let added = Array(file.rows.filter { $0.kind == .added }.prefix(total - removed.count))
+    return removed + added
+  }
+
+  private func gutter(_ kind: DiffRow.Kind) -> String {
+    switch kind {
+    case .added: "+"
+    case .removed: "−"
+    default: " "
+    }
+  }
+
+  private func accessibleKind(_ kind: DiffRow.Kind) -> String {
+    switch kind {
+    case .added: "Added"
+    case .removed: "Removed"
+    default: ""
+    }
   }
 
   private func edge(_ kind: DiffRow.Kind) -> Color {
