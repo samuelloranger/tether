@@ -5,6 +5,7 @@ struct ChatView: View {
   @Bindable var model: ChatSessionModel
 
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var draft = ""
   @State private var expanded: Set<Int> = []
@@ -77,7 +78,10 @@ struct ChatView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(TetherColors.background, for: .navigationBar)
     .toolbarBackground(.visible, for: .navigationBar)
+    .navigationBarBackButtonHidden(true)
+    .overlay(alignment: .top) { contextHairline }
     .toolbar {
+      ToolbarItem(placement: .topBarLeading) { backButton }
       ToolbarItem(placement: .principal) { titleBlock }
       ToolbarItem(placement: .topBarTrailing) { connectionBadge }
     }
@@ -121,21 +125,42 @@ struct ChatView: View {
 
   // MARK: Header
 
+  private var backButton: some View {
+    Button { dismiss() } label: {
+      Image(systemName: "chevron.backward")
+        .font(.system(size: 28, weight: .regular))
+        .foregroundStyle(TetherColors.accent)
+        .frame(width: 44, height: 44, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+    .accessibilityLabel("Chats")
+    .accessibilityIdentifier("chatBack")
+  }
+
   private var titleBlock: some View {
     VStack(spacing: 1) {
       Text(model.title).font(.headline).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
-      Text(subtitle).font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
-        .lineLimit(1).truncationMode(.head)
+      Text(ChatFormat.folderName(model.cwd)).font(.caption).foregroundStyle(TetherColors.textFaint)
+        .lineLimit(1)
     }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(model.title), \(model.cwd)")
   }
 
-  private var subtitle: String {
-    if let usage = ChatFormat.contextSummary(used: model.state.contextUsed, size: model.state.contextSize) {
-      return "\(model.cwd) · \(usage)"
+  /// Context usage as a 3pt line under the header instead of a third fact in the subtitle.
+  @ViewBuilder private var contextHairline: some View {
+    if let fraction = ChatFormat.contextFraction(used: model.state.contextUsed, size: model.state.contextSize) {
+      Rectangle().fill(TetherColors.border).frame(height: 3)
+        .overlay(alignment: .leading) {
+          GeometryReader { proxy in
+            Rectangle().fill(TetherColors.accent).frame(width: proxy.size.width * fraction)
+          }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Context used")
+        .accessibilityValue(
+          ChatFormat.contextSummary(used: model.state.contextUsed, size: model.state.contextSize) ?? "")
     }
-    return model.cwd
   }
 
   @ViewBuilder private var connectionBadge: some View {
@@ -143,6 +168,7 @@ struct ChatView: View {
     case .lost:
       Button { model.reconnect() } label: {
         Label("Reconnect", systemImage: "arrow.clockwise").font(.caption.weight(.semibold))
+          .frame(height: 24).hitSlop(vertical: 10)
       }
       .accessibilityHint("The connection to the host was lost")
     case .connecting, .catchingUp:
@@ -154,9 +180,12 @@ struct ChatView: View {
 
   private func badge(color: Color, text: String) -> some View {
     HStack(spacing: 5) {
-      Circle().fill(color).frame(width: 7, height: 7)
+      Circle().fill(color).frame(width: 6, height: 6)
       Text(text).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
     }
+    .padding(.horizontal, 9)
+    .frame(height: 24)
+    .background(color.opacity(0.14), in: Capsule())
     .accessibilityElement(children: .combine)
     .accessibilityLabel("Connection: \(text)")
   }
