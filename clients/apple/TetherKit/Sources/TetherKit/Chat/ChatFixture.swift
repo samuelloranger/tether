@@ -196,8 +196,8 @@ public struct ChatFixtureRoot: View {
     let now = Int(Date().timeIntervalSince1970)
     return [
       "chat-a\trunning\t48213\t/home/dev/projects/api-server\t\(now - 600)\tclaude",
-      "chat-b\tidle\t9120\t/home/dev/projects/mobile-app\t\(now - 86400)\tclaude",
-      "chat-c\tidle\t1840\t~\t\(now - 259200)\tcodex",
+      "chat-b\tended\t9120\t/home/dev/projects/mobile-app\t\(now - 86400)\tclaude",
+      "chat-c\tended\t1840\t~\t\(now - 259200)\tcodex",
     ].joined(separator: "\n")
   })
 
