@@ -78,6 +78,8 @@ struct ChatState: Equatable, Sendable {
   fileprivate var nextItemId = 0
   /// Requests whose failure belongs to the caller, not the transcript.
   fileprivate var silentRequestIds: Set<ACPID> = []
+  /// Answers the host took while no client was attached, so a replayed request shows resolved.
+  fileprivate var hostAnswers: [ACPID: String] = [:]
 
   func option(id: String) -> ACPConfigOption? { configOptions.first { $0.id == id } }
 
@@ -101,6 +103,8 @@ enum ChatEvent: Equatable, Sendable {
   /// A request whose error response must not surface as a transcript row.
   case silentRequest(requestId: ACPID)
   case permissionAnswered(requestId: ACPID, optionId: String)
+  /// The host answered this request itself; the card resolves now or when the request arrives.
+  case hostAnswered(requestId: ACPID, optionId: String)
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
   case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int)
   case connectionLost
@@ -119,6 +123,9 @@ enum ChatReducer {
     case let .silentRequest(requestId):
       next.silentRequestIds.insert(requestId)
     case let .permissionAnswered(requestId, optionId):
+      resolve(requestId, optionId, in: &next)
+    case let .hostAnswered(requestId, optionId):
+      next.hostAnswers[requestId] = optionId
       resolve(requestId, optionId, in: &next)
     case let .promptUndelivered(text, imageCount, offset):
       if let index = next.items.lastIndex(where: { $0.kind == .user(text: text, imageCount: imageCount, offset: offset) }) {
@@ -166,6 +173,7 @@ enum ChatReducer {
           options: request.options,
           resolvedOptionId: nil)),
         to: &state)
+      if let optionId = state.hostAnswers[id] { resolve(id, optionId, in: &state) }
     case let .update(update):
       apply(update, to: &state)
     case .unknown:

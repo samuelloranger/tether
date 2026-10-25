@@ -46,6 +46,14 @@ struct DrawerContent: Equatable {
 }
 
 extension ChatRoute {
+  /// A chat a push or link names. The folder only matters to a chat that has to be spawned,
+  /// which one this phone has no session for never is: that one opens read-only.
+  static func opening(name: String, chats: [ACPChatSummary], journal: ChatJournal) -> ChatRoute {
+    ChatRoute(
+      name: name, cwd: chats.first { $0.name == name }?.cwd ?? "",
+      readOnly: ChatOpenMode.mode(for: journal) == .readOnly)
+  }
+
   /// A fresh chat in `cwdText`; `~` needs the host's home, so a host that cannot report it gives nil.
   static func fresh(cwdText: String, exec: (String) async throws -> String) async -> ChatRoute? {
     var home = ""

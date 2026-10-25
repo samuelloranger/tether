@@ -119,6 +119,8 @@ public final class SSHTerminalController {
   public private(set) var sessions: [ZmxSession] = []
   /// The host's chats from `tether-notify acp ls`; empty when the host has none or lacks the command.
   var chats: [ACPChatSummary] = []
+  /// A chat a notification tap asked for; the terminal screen swaps it in and clears this.
+  var requestedChat: String?
   #if DEBUG
   @ObservationIgnored var debugChatModel: ((ChatRoute) -> ChatSessionModel)?
   #endif
@@ -326,7 +328,7 @@ public final class SSHTerminalController {
   private func schedulePushRegister() {
     guard !didRegisterPush, let id = pushIdentity else { return }
     didRegisterPush = true
-    let command = "\(Self.notify) register \(shellQuote(id.token)) \(shellQuote(id.secretKey)) \(shellQuote(id.label))"
+    let command = PushRegistrar.registerCommand(notify: Self.notify, identity: id)
     Task {
       try? await Task.sleep(nanoseconds: 2_000_000_000)
       _ = try? await control.exec(command)

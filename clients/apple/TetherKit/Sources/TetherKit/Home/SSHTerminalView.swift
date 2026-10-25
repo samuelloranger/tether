@@ -192,6 +192,12 @@ public struct SSHTerminalView: View {
     .onChange(of: drawerOpen) { _, open in
       if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer, !content.showsChat { focused = true }
     }
+    .onChange(of: controller.requestedChat, initial: true) { _, name in
+      guard let name else { return }
+      controller.requestedChat = nil
+      openChat(ChatRoute.opening(
+        name: name, chats: controller.chats, journal: UserDefaultsChatJournalStore(name: name).load()))
+    }
     .onChange(of: controller.attach) { _, _ in
       if content.showsChat { showTerminal() }
     }

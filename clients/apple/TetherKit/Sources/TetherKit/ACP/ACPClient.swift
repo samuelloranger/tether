@@ -131,6 +131,20 @@ actor ACPClient {
       to: requestId, outcome: ["outcome": "selected", "optionId": optionId], optionId: optionId)
   }
 
+  /// Answers the host recorded for requests this client never answered. The journal keeps them
+  /// so a replay from zero resolves the same cards.
+  func adoptHostAnswers(_ answers: [ACPID: String]) {
+    let known = journal.answeredRequestIds
+    let fresh = answers.filter { !known.contains($0.key) }.sorted { "\($0.key)" < "\($1.key)" }
+    guard !fresh.isEmpty else { return }
+    for (id, optionId) in fresh {
+      journal.entries.append(.init(kind: .hostAnswer, offset: 0, requestId: id, optionId: optionId))
+      builder.apply(.hostAnswered(requestId: id, optionId: optionId))
+    }
+    store.save(journal)
+    publish()
+  }
+
   func stop() async {
     readTask?.cancel()
     await stream.close()

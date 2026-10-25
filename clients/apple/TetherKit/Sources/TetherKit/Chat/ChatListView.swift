@@ -198,6 +198,8 @@ struct ChatFlowView: View {
   let list: ChatListModel
   let config: SSHConnectionConfig
   let hostKeyStore: HostKeyStore
+  /// A chat a notification asked for.
+  var opening: String?
   var onClose: () -> Void
 
   @State private var route: ChatRoute?
@@ -208,6 +210,10 @@ struct ChatFlowView: View {
         .navigationDestination(item: $route) { route in
           ChatScreen(route: route, config: config, hostKeyStore: hostKeyStore)
         }
+    }
+    .onChange(of: opening, initial: true) { _, name in
+      guard let name else { return }
+      route = ChatRoute.opening(name: name, chats: list.chats, journal: UserDefaultsChatJournalStore(name: name).load())
     }
     .onDisappear { Task { await list.close() } }
   }

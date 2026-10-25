@@ -33,6 +33,8 @@ public enum NotificationActionAttempt: Equatable, Sendable {
   case unanswerable(link: String?, reason: String)
   /// Answer… on a question: the app opens its answer sheet.
   case openQuestion(link: SessionDeepLink, expect: AgentExpectation)
+  /// A button on a held ACP chat permission.
+  case answerACP(ACPAnswerRequest)
 }
 
 /// Why the answer sheet couldn't load a question or send its answer.
@@ -50,7 +52,9 @@ public enum NotificationActions {
   /// `questionCategoryPrefix` + version, for one that has them.
   public static let questionCategory = "tether.agent.question"
   public static let questionCategoryPrefix = "tether.agent.question."
-  public static let categoryIdentifiers: Set<String> = [waitingCategory, doneCategory, questionCategory]
+  public static let categoryIdentifiers: Set<String> = [
+    waitingCategory, doneCategory, questionCategory, ACPPermissionPush.category, ACPPermissionPush.doneCategory,
+  ]
 
   static let approveAction = "tether.action.approve"
   static let denyAction = "tether.action.deny"
@@ -80,6 +84,8 @@ public enum NotificationActions {
       UNNotificationCategory(identifier: waitingCategory, actions: [approve, deny, reply], intentIdentifiers: []),
       UNNotificationCategory(identifier: doneCategory, actions: [reply], intentIdentifiers: []),
       UNNotificationCategory(identifier: questionCategory, actions: [answer], intentIdentifiers: []),
+      UNNotificationCategory(identifier: ACPPermissionPush.category, actions: [], intentIdentifiers: []),
+      UNNotificationCategory(identifier: ACPPermissionPush.doneCategory, actions: [], intentIdentifiers: []),
     ]
   }
 
@@ -106,7 +112,9 @@ public enum NotificationActions {
   /// Ours, plus the per-push question categories the NSE registered: replacing them at
   /// launch would strip the buttons off questions still on the lock screen.
   public static func launchCategories(existing: Set<UNNotificationCategory>) -> Set<UNNotificationCategory> {
-    categories().union(existing.filter { $0.identifier.hasPrefix(questionCategoryPrefix) })
+    categories().union(existing.filter {
+      $0.identifier.hasPrefix(questionCategoryPrefix) || $0.identifier.hasPrefix(ACPPermissionPush.categoryPrefix)
+    })
   }
 
   /// Approve is Return — the highlighted "Yes" in Claude Code's and Codex's approval
@@ -134,6 +142,11 @@ public enum NotificationActions {
   ) -> NotificationActionAttempt? {
     let isOption = actionIdentifier.hasPrefix(optionActionPrefix)
     guard actionIdentifiers.contains(actionIdentifier) || isOption else { return nil }
+    if isOption, let push = ACPPermissionPush(userInfo: userInfo) {
+      guard let option = push.option(forAction: actionIdentifier) else { return nil }
+      return .answerACP(ACPAnswerRequest(
+        chat: push.chat, acp: push.acp, requestId: push.requestId, optionId: option.id, optionLabel: option.label))
+    }
     let link = NotificationTapRouter.link(from: userInfo)
     let openInstead = "This notification can’t be answered from here; open the session instead."
     if actionIdentifier == answerAction {
@@ -240,6 +253,16 @@ public final class NotificationActionRunner {
     switch await dial(request.link, command: command) {
     case let .failure(reason): return reason.message
     case let .success(sent): return Self.failure(output: sent.output, session: request.link.sessionId, machine: sent.machine)
+    }
+  }
+
+  /// Returns what the host said about the answer.
+  func run(_ request: ACPAnswerRequest) async -> ACPAnswerOutcome {
+    let command = ACPAnswerCommand.command(notify: Self.notify, request: request) + " 2>&1"
+    let link = SessionDeepLink(sessionId: request.acp, identityName: request.chat.identityName)
+    switch await dial(link, command: command) {
+    case let .failure(reason): return .failed(reason.message)
+    case let .success(sent): return ACPAnswerOutcome.interpret(output: sent.output, machine: sent.machine)
     }
   }
 
@@ -366,7 +389,40 @@ public final class NotificationActionRunner {
     case .openQuestion:
       // The tap router hands these to the app's answer sheet.
       break
+    case let .answerACP(request):
+      let outcome = await run(request)
+      await notifyACP(outcome, request: request)
     }
+  }
+
+  /// Unlike the typed-input actions, a permission answer says what happened: the card on the
+  /// lock screen is gone either way.
+  private func notifyACP(_ outcome: ACPAnswerOutcome, request: ACPAnswerRequest) async {
+    let content = UNMutableNotificationContent()
+    switch outcome {
+    case .answered:
+      content.title = "Answered"
+      content.body = request.optionLabel
+    case .alreadyAnswered:
+      content.title = "Already answered"
+      content.body = "That request was answered somewhere else or the agent moved on."
+    case let .failed(message):
+      content.title = "Couldn’t answer"
+      content.body = message
+    }
+    content.interruptionLevel = .passive
+    content.userInfo["link"] = Self.chatLink(for: request.chat)
+    let notice = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+    try? await UNUserNotificationCenter.current().add(notice)
+  }
+
+  static func chatLink(for chat: ChatDeepLink) -> String? {
+    var link = URLComponents()
+    link.scheme = "tether"
+    link.host = "chat"
+    link.path = "/\(chat.chatName)"
+    link.queryItems = [URLQueryItem(name: "host", value: chat.identityName)]
+    return link.url?.absoluteString
   }
 
   /// The user acted from the lock screen and has no other place to see the error.
@@ -404,5 +460,27 @@ private final class ResumeOnce<Value: Sendable>: @unchecked Sendable {
     continuation = nil
     lock.unlock()
     pending?.resume(with: result)
+  }
+}
+
+/// What `tether-notify acp answer` reported.
+public enum ACPAnswerOutcome: Equatable, Sendable {
+  case answered
+  /// Exit 3: no longer outstanding.
+  case alreadyAnswered
+  case failed(String)
+
+  static func interpret(output: String, machine: String) -> ACPAnswerOutcome {
+    guard let marker = output.range(of: "__tether_sent=", options: .backwards) else {
+      return .failed("No answer from \(machine).")
+    }
+    let code = Int(output[marker.upperBound...].prefix { $0.isNumber }) ?? -1
+    let detail = output[..<marker.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+    switch code {
+    case 0: return .answered
+    case 3: return .alreadyAnswered
+    case 127, 2: return .failed("Update tether-notify on \(machine) to answer chats.")
+    default: return .failed(detail.isEmpty ? "tether-notify couldn’t answer on \(machine)." : detail)
+    }
   }
 }

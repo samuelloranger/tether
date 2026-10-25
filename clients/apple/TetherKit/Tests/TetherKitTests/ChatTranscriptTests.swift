@@ -100,6 +100,28 @@ final class ChatTranscriptTests: XCTestCase {
     XCTAssertEqual(permission.resolvedOptionId, "allow-once")
   }
 
+  func test_a_host_answer_resolves_the_replayed_permission_and_the_live_adoption_agrees() throws {
+    let cut = ACPFixture.index(containing: "session/request_permission") + 1
+    var unanswered = ACPFixture.journal
+    unanswered.entries.removeLast()
+    var replayJournal = unanswered
+    replayJournal.entries.append(.init(kind: .hostAnswer, offset: 0, requestId: .int(0), optionId: "reject"))
+    XCTAssertEqual(replayJournal.answeredRequestIds, [.int(0)])
+
+    let replayed = try replay(ACPFixture.log(cut), replayJournal)
+    XCTAssertTrue(replayed.pendingPermissions.isEmpty)
+    guard case let .permission(permission) = replayed.items.first(where: {
+      if case .permission = $0.kind { return true } else { return false }
+    })?.kind else { return XCTFail() }
+    XCTAssertEqual(permission.resolvedOptionId, "reject")
+
+    var live = ChatTranscriptBuilder(journal: unanswered)
+    try live.feed(ACPFixture.log(cut))
+    XCTAssertEqual(live.state.pendingPermissions.map(\.requestId), [.int(0)])
+    live.apply(.hostAnswered(requestId: .int(0), optionId: "reject"))
+    XCTAssertEqual(live.state, replayed)
+  }
+
   func test_unknown_kinds_and_garbage_lines_are_ignored() throws {
     let noise = [
       "{\"jsonrpc\":\"2.0\",\"method\":\"_auth/status_update\",\"params\":{\"status\":\"ok\"}}",

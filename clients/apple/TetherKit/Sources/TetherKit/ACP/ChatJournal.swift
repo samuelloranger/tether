@@ -4,7 +4,11 @@ import Foundation
 /// stamped with the log offset (end of the last processed line) at the moment it happened.
 struct ChatJournal: Codable, Equatable, Sendable {
   struct Entry: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case prompt, answer, silentRequest }
+    enum Kind: String, Codable, Sendable {
+      case prompt, answer, silentRequest
+      /// An answer the host recorded while no client was attached; offset 0, applied before the replay.
+      case hostAnswer
+    }
     var kind: Kind
     var offset: Int
     var text: String?
@@ -44,6 +48,9 @@ struct ChatJournal: Codable, Equatable, Sendable {
       case .answer:
         guard let requestId, let optionId else { return nil }
         return .permissionAnswered(requestId: requestId, optionId: optionId)
+      case .hostAnswer:
+        guard let requestId, let optionId else { return nil }
+        return .hostAnswered(requestId: requestId, optionId: optionId)
       }
     }
   }
@@ -54,7 +61,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
   var entries: [Entry] = []
 
   var answeredRequestIds: Set<ACPID> {
-    Set(entries.compactMap { $0.kind == .answer ? $0.requestId : nil })
+    Set(entries.compactMap { $0.kind == .answer || $0.kind == .hostAnswer ? $0.requestId : nil })
   }
 }
 

@@ -78,6 +78,10 @@ The steps name the iOS types; the desktop app runs the same loop through `tether
 
 `tether-notify` on the host encrypts each notification with the device's AES-256-GCM key — wire format `base64(nonce[12] ‖ ciphertext ‖ tag[16])`, byte-identical to what the NSE decrypts — and POSTs the ciphertext to the relay (`tether-relay.samlo.cloud`; override with `TETHER_PUSH_RELAY_URL`). The relay and Apple never see plaintext. The app registers its token over SSH on connect; agent hooks call `tether-notify notify` on session state changes. Devices live in `~/.tether-notify/devices.json`. With the Claude Code mod installed, a permission prompt in an unattached session is held instead of drawn; the phone's answer reaches it through `tether-notify answer` → the answer file → `wait`, not `zmx send`.
 
+## ACP chat push
+
+When nobody is attached to a held ACP chat, the host's `acp` holder pushes through the same relay: `tether.acp.permission` (urgent, one button per option, at most 4, from the push's `options`; the NSE registers a per-push category `tether.acp.permission.<version>` and the reject kinds are destructive) and a quiet `tether.acp.done` when a turn ends. A button runs `tether-notify acp answer <acp> --request <id> --option <optionId>` over a one-off SSH exec (exit 3 = already answered); the body links to `tether://chat/<name>?host=<label>`, which opens that chat in the terminal screen. On reconnect the chat reads `tether-notify acp answers <acp>` and merges those answers into its journal so the replay shows them resolved. The identity is registered from the terminal connection, or from the chat list when it is opened without one. Dev-signed builds get no push (the relay's APNs key is production-only), so the buttons are only exercisable on a TestFlight build.
+
 ## Security
 
 - **Transport is SSH.** No shared password, no setup flow without host-key verification. Private keys live in the iOS Keychain (Windows: DPAPI-protected files under `%LOCALAPPDATA%\Tether`; Linux: the Secret Service keyring, never a plaintext file) and leave the device only in memory, to the SSH library.

@@ -36,6 +36,30 @@ public final class PushRegistrar {
     public let label: String
   }
 
+  /// What the host's `tether-notify` runs to learn this device; every value is quoted.
+  nonisolated static func registerCommand(notify: String, identity: PushIdentity) -> String {
+    "\(notify) register \(shellQuote(identity.token)) \(shellQuote(identity.secretKey)) \(shellQuote(identity.label))"
+  }
+
+  /// Hosts already told this launch, by address: the chat-only flow has no terminal
+  /// connection to register from.
+  private nonisolated static let registeredHosts = LockedBox(Set<String>())
+
+  /// One-off registration for a host opened without a terminal. Best-effort, once per host
+  /// per launch.
+  nonisolated static func registerOverSSH(
+    identity: PushIdentity, config: SSHConnectionConfig, store: HostKeyStore
+  ) async {
+    let key = "\(config.username)@\(config.host):\(config.port)"
+    guard registeredHosts.update({ $0.insert(key).inserted }) else { return }
+    let command = registerCommand(notify: "~/.local/bin/tether-notify", identity: identity) + " >/dev/null 2>&1"
+    do {
+      try await SSHConnector.execStream(config: config, store: store, command: command) { _ in true }
+    } catch {
+      registeredHosts.update { $0.remove(key) }
+    }
+  }
+
   public func pushIdentity() -> PushIdentity? {
     guard let token = storedDeviceToken, let secret = try? loadOrCreateSecretKey() else { return nil }
     let label = UIDevice.current.name

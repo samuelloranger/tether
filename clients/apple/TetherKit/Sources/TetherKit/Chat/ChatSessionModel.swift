@@ -6,6 +6,8 @@ import Observation
 @Observable
 final class ChatSessionModel {
   typealias Dial = (_ spawn: Bool) async throws -> any TerminalByteStream
+  /// The output of `tether-notify acp answers <name>`, or nil when the host can't say.
+  typealias HostAnswers = @Sendable () async -> String?
 
   let chatName: String
   let cwd: String
@@ -29,6 +31,7 @@ final class ChatSessionModel {
   private let store: any ChatJournalStore
   private let titleStore: ChatTitleStore?
   private let dial: Dial
+  private let hostAnswers: HostAnswers?
   private var client: ACPClient?
   private var forwardTask: Task<Void, Never>?
   private var settleTask: Task<Void, Never>?
@@ -39,8 +42,9 @@ final class ChatSessionModel {
   private var held: ChatState?
   private var holdingForReplay = false
 
-  init(chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil, dial: @escaping Dial) {
+  init(chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil, hostAnswers: HostAnswers? = nil, dial: @escaping Dial) {
     self.titleStore = titleStore
+    self.hostAnswers = hostAnswers
     self.chatName = chatName
     self.cwd = cwd
     self.readOnly = readOnly
@@ -52,7 +56,8 @@ final class ChatSessionModel {
     let store: any ChatJournalStore =
       route.readOnly ? InMemoryChatJournalStore() : UserDefaultsChatJournalStore(name: route.name)
     return ChatSessionModel(chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, store: store,
-      titleStore: ChatTitleStore(config: config)
+      titleStore: ChatTitleStore(config: config),
+      hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) }
     ) { spawn in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -78,21 +83,26 @@ final class ChatSessionModel {
     holdingForReplay = !state.items.isEmpty
     held = nil
     let spawn = !readOnly && store.load().sessionId == nil
+    // Asked alongside the dial; the replay can't start before the answers are in the journal.
+    let answersRead = Task { await self.hostAnswers?() }
     let stream: any TerminalByteStream
     do {
       stream = try await dial(spawn)
     } catch {
+      answersRead.cancel()
       guard mine == generation else { return }
       dialInFlight = false
       fail(error)
       return
     }
+    let answersOutput = await answersRead.value
     dialInFlight = false
     guard mine == generation, !left else {
       await stream.close()
       return
     }
     let fresh = ACPClient(stream: stream, store: store)
+    if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh
     link.dialSucceeded(at: .now)
     let updates = await fresh.updates()
@@ -198,9 +208,21 @@ final class ChatSessionModel {
       do {
         try await client.answerPermission(requestId: permission.requestId, optionId: option.optionId)
       } catch {
+        // The host may have taken an answer from the lock screen first: then the card is
+        // simply resolved, and there is nothing to report.
+        if await adoptHostAnswer(for: permission.requestId, on: client) { return }
         notice = "The answer didn't reach the agent. Reconnect to see if it is still waiting."
       }
     }
+  }
+
+  private func adoptHostAnswer(for requestId: ACPID, on client: ACPClient) async -> Bool {
+    guard let output = await hostAnswers?() else { return false }
+    let answers = ACPAnswerCommand.parseAnswers(output)
+    guard answers[requestId] != nil else { return false }
+    await client.adoptHostAnswers(answers)
+    receive(await client.state, generation: generation)
+    return true
   }
 
   private func deliver(_ text: String, _ images: [ChatImageAttachment]) async {

@@ -170,6 +170,81 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  private var unansweredJournal: ChatJournal {
+    var journal = ACPFixture.journal
+    journal.entries.removeLast()
+    return journal
+  }
+
+  private var permissionCut: Int { ACPFixture.index(containing: "session/request_permission") + 1 }
+
+  func test_answers_the_host_took_resolve_the_replayed_permission() async throws {
+    let stream = ScriptedByteStream()
+    let model = ChatSessionModel(
+      chatName: "chat-t", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { "{\"0\":\"allow-once\"}\n" }
+    ) { _ in stream }
+    Task { await model.connect() }
+    stream.push(ACPFixture.log(permissionCut))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.state.pendingPermissions.isEmpty)
+    model.leave()
+  }
+
+  func test_a_host_without_answers_or_with_garbage_leaves_the_permission_pending() async throws {
+    for output in [nil, "", "Usage: acp answers <name>", "{\"0\": 3}"] as [String?] {
+      let stream = ScriptedByteStream()
+      let model = ChatSessionModel(
+        chatName: "chat-t", cwd: "/work/project", readOnly: false,
+        store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { output }
+      ) { _ in stream }
+      Task { await model.connect() }
+      stream.push(ACPFixture.log(permissionCut))
+      let live = await settled(model)
+      XCTAssertTrue(live, output ?? "nil")
+      XCTAssertEqual(model.state.pendingPermissions.map(\.requestId), [.int(0)], output ?? "nil")
+      model.leave()
+    }
+  }
+
+  func test_an_in_app_answer_the_host_already_has_resolves_quietly() async throws {
+    let stream = ScriptedByteStream()
+    let hostSays = LockedBox<String?>(nil)
+    let model = ChatSessionModel(
+      chatName: "chat-t", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { hostSays.value }
+    ) { _ in WriteFailingStream(stream) }
+    Task { await model.connect() }
+    stream.push(ACPFixture.log(permissionCut))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    let permission = try XCTUnwrap(model.state.pendingPermissions.first)
+    hostSays.value = "{\"0\":\"reject\"}"
+    model.approve(permission, option: try XCTUnwrap(permission.options.first))
+    let resolved = await eventually { model.state.pendingPermissions.isEmpty }
+    XCTAssertTrue(resolved)
+    XCTAssertNil(model.notice)
+    model.leave()
+  }
+
+  func test_an_in_app_answer_that_fails_without_a_host_answer_reports_it() async throws {
+    let stream = ScriptedByteStream()
+    let model = ChatSessionModel(
+      chatName: "chat-t", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(unansweredJournal), hostAnswers: { "{}" }
+    ) { _ in WriteFailingStream(stream) }
+    Task { await model.connect() }
+    stream.push(ACPFixture.log(permissionCut))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    let permission = try XCTUnwrap(model.state.pendingPermissions.first)
+    model.approve(permission, option: try XCTUnwrap(permission.options.first))
+    let reported = await eventually { model.notice != nil }
+    XCTAssertTrue(reported)
+    model.leave()
+  }
+
   func test_entering_the_background_drops_the_socket_and_the_return_redials() async throws {
     let first = ScriptedByteStream()
     let second = ScriptedByteStream()
@@ -309,4 +384,13 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertNil(model.optionChanges["effort"])
     model.leave()
   }
+}
+
+/// Reads pass through; every write fails, as a socket the host already dropped would.
+private final class WriteFailingStream: TerminalByteStream, @unchecked Sendable {
+  private let inner: ScriptedByteStream
+  init(_ inner: ScriptedByteStream) { self.inner = inner }
+  func read() async throws -> Data? { try await inner.read() }
+  func write(_ bytes: Data) async throws { throw SSHConnectError.transport("closed") }
+  func close() async { await inner.close() }
 }
