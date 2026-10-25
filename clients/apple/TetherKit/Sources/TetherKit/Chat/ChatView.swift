@@ -22,13 +22,18 @@ struct ChatView: View {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 14) {
           if model.state.items.isEmpty { emptyState }
-          ForEach(visibleItems) { item in
-            ChatItemRow(item: item, cwd: model.cwd, expanded: expanded.contains(item.id)) {
-              withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
-                if expanded.contains(item.id) { expanded.remove(item.id) } else { expanded.insert(item.id) }
-              }
+          ForEach(ChatGrouping.blocks(visibleItems)) { block in
+            switch block {
+            case let .item(item):
+              ChatItemRow(item: item, cwd: model.cwd, expanded: expanded.contains(item.id)) { toggleExpanded(item.id) }
+                .equatable()
+            case let .tools(items):
+              ToolGroupView(
+                items: items, cwd: model.cwd, expandedIDs: expanded.intersection(items.map(\.id)),
+                toggle: toggleExpanded
+              )
+              .equatable()
             }
-            .equatable()
           }
           ForEach(model.outbox.failed) { message in
             FailedMessageRow(
@@ -105,6 +110,12 @@ struct ChatView: View {
     model.state.items.filter {
       if case let .permission(permission) = $0.kind { return permission.resolvedOptionId != nil }
       return true
+    }
+  }
+
+  private func toggleExpanded(_ id: Int) {
+    withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
+      if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
     }
   }
 
@@ -239,20 +250,40 @@ struct ChatView: View {
         .padding(.leading, 6)
       }
       HStack(alignment: .bottom, spacing: 8) {
-        TextField("Message the agent", text: $draft, axis: .vertical)
+        TextField(
+          "", text: $draft,
+          prompt: Text(permissionPending ? "Answer the permission above" : "Message the agent")
+            .foregroundStyle(TetherColors.placeholder),
+          axis: .vertical
+        )
           .lineLimit(1...6)
           .font(.body)
-          .padding(.horizontal, 14).padding(.vertical, 10)
-          .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 20))
-          .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(TetherColors.border))
+          .padding(.horizontal, 14).padding(.vertical, 9)
+          .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
+          .opacity(permissionPending ? 0.55 : 1)
+          .accessibilityLabel("Message the agent")
+          .accessibilityHint(permissionPending ? "A permission is waiting above" : "")
           .accessibilityIdentifier("chatComposer")
         actionButton
       }
     }
   }
 
+  private var permissionPending: Bool { !model.state.pendingPermissions.isEmpty }
+  private var canSendNow: Bool { !draftIsEmpty && model.canSend }
+
   private var working: Bool { model.state.turn == .working }
   private var draftIsEmpty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+  private var discColor: Color {
+    if working { return TetherColors.danger.opacity(0.2) }
+    return canSendNow ? TetherColors.accent : TetherColors.textFaint.opacity(0.35)
+  }
+
+  private var glyphColor: Color {
+    if working { return TetherColors.danger }
+    return canSendNow ? TetherColors.onAccent : TetherColors.textSecondary
+  }
 
   private var actionButton: some View {
     Button {
@@ -264,11 +295,11 @@ struct ChatView: View {
       }
     } label: {
       Image(systemName: working ? "stop.fill" : "arrow.up")
-        .font(.body.weight(.bold))
-        .frame(width: 38, height: 38)
-        .foregroundStyle(TetherColors.onAccent)
-        .background(working ? TetherColors.textPrimary.opacity(0.85) : TetherColors.accent, in: Circle())
-        .opacity(working || (!draftIsEmpty && model.canSend) ? 1 : 0.35)
+        .font(.system(size: 14, weight: .bold))
+        .frame(width: 32, height: 32)
+        .foregroundStyle(glyphColor)
+        .background(discColor, in: Circle())
+        .hitSlop(vertical: 6, horizontal: 6)
     }
     .buttonStyle(TetherPressStyle())
     .disabled(working ? !model.canInteract : (draftIsEmpty || !model.canSend))
@@ -303,11 +334,7 @@ struct PermissionCard: View {
         }
       }
       preview
-      VStack(spacing: 8) {
-        ForEach(Array(ChatPermissionOptions.ordered(permission.options).enumerated()), id: \.offset) { _, entry in
-          optionButton(entry.option, role: entry.role)
-        }
-      }
+      actions
     }
     .padding(14)
     .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 18))
@@ -373,45 +400,47 @@ struct PermissionCard: View {
     }
   }
 
-  private func optionButton(_ option: ACPPermissionOption, role: ChatPermissionRole) -> some View {
-    Button { approve(option) } label: {
+  /// Deny and Allow share one row; broader allows are a quiet link below.
+  private var actions: some View {
+    let slots = ChatPermissionOptions.slots(permission.options)
+    let pair = [slots.deny, slots.allow].compactMap { $0 }
+    return VStack(spacing: 2) {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, slots: slots) } }
+      } else {
+        HStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, slots: slots) } }
+      }
+      ForEach(slots.extras, id: \.optionId) { option in
+        Button { approve(option) } label: {
+          Text(option.name).font(.footnote.weight(.medium)).foregroundStyle(TetherColors.accent)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, minHeight: 24)
+            .hitSlop(vertical: 10)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+        .accessibilityLabel(option.name)
+      }
+    }
+  }
+
+  private func actionButton(_ option: ACPPermissionOption, slots: (allow: ACPPermissionOption?, deny: ACPPermissionOption?, extras: [ACPPermissionOption])) -> some View {
+    let deny = option.optionId == slots.deny?.optionId
+    return Button { approve(option) } label: {
       Text(option.name)
-        .font(.body.weight(role == .primary ? .semibold : .medium))
+        .font(.subheadline.weight(deny ? .medium : .semibold))
         .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 34)
         .padding(.horizontal, 10)
-        .foregroundStyle(foreground(role))
-        .background(background(role), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(border(role)))
+        .foregroundStyle(deny ? TetherColors.danger : TetherColors.onAccent)
+        .background(deny ? TetherColors.danger.opacity(0.14) : TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+        .hitSlop(vertical: 5)
     }
     .buttonStyle(TetherPressStyle())
     .disabled(!enabled)
     .opacity(enabled ? 1 : 0.5)
     .accessibilityLabel(option.name)
-  }
-
-  private func foreground(_ role: ChatPermissionRole) -> Color {
-    switch role {
-    case .primary: TetherColors.onAccent
-    case .secondary: TetherColors.textPrimary
-    case .destructive: TetherColors.danger
-    }
-  }
-
-  private func background(_ role: ChatPermissionRole) -> Color {
-    switch role {
-    case .primary: TetherColors.accent
-    case .secondary: TetherColors.surfaceRaised
-    case .destructive: TetherColors.danger.opacity(0.10)
-    }
-  }
-
-  private func border(_ role: ChatPermissionRole) -> Color {
-    switch role {
-    case .primary: .clear
-    case .secondary: TetherColors.border
-    case .destructive: TetherColors.danger.opacity(0.4)
-    }
   }
 }
 
