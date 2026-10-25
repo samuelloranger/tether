@@ -379,7 +379,7 @@ public struct ChatFixtureRoot: View {
   @State private var model: ChatSessionModel
 
   private let listMode: Bool
-  @State private var listModel = ChatListModel(hostName: "homelab", exec: { _ in
+  @State private var listModel = ChatListModel(hostName: "devbox", exec: { _ in
     let now = Int(Date().timeIntervalSince1970)
     return [
       "chat-a\trunning\t48213\t/home/dev/projects/api-server\t\(now - 600)\tclaude",

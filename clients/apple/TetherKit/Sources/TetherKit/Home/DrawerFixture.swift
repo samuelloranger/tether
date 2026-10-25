@@ -17,7 +17,7 @@ public struct DrawerFixtureRoot: View {
     titles.clear("chat-d4e5f6")
     let ops = FixtureOps(now: now)
     let created = SSHTerminalController(
-      title: "homelab", config: config, hostKeyStore: store, attach: "api",
+      title: "devbox", config: config, hostKeyStore: store, attach: "api",
       choosesInitialSession: false,
       dial: { _, _ in FixtureTerminal() },
       control: ControlConnection(config: config, store: store) { ops })
@@ -40,7 +40,7 @@ private final class FixtureHostKeys: HostKeyStore, @unchecked Sendable {
 private struct FixtureTerminal: TerminalByteStream {
   private let sent = FixtureOnce()
   func read() async throws -> Data? {
-    if sent.take() { return Data("dev@homelab:~/projects/api-server$ \u{1B}[32mgit status\u{1B}[0m\r\n".utf8) }
+    if sent.take() { return Data("dev@devbox:~/projects/api-server$ \u{1B}[32mgit status\u{1B}[0m\r\n".utf8) }
     try await Task.sleep(nanoseconds: 3_600_000_000_000)
     return nil
   }
@@ -76,7 +76,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
       return [
         ("api", "/home/dev/projects/api-server", 1), ("default", "/home/dev", 0),
         ("tether", "/home/dev/projects/tether", 0),
-      ].map { "name=\($0.0)\tpid=1\tclients=\($0.2)\tcreated=\(now - 9000)\tcwd=file://homelab\($0.1)" }
+      ].map { "name=\($0.0)\tpid=1\tclients=\($0.2)\tcreated=\(now - 9000)\tcwd=file://devbox\($0.1)" }
         .joined(separator: "\n")
     }
     if command.contains("status") {
