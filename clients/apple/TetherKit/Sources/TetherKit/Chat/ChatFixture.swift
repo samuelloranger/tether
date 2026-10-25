@@ -191,12 +191,30 @@ final class FixtureByteStream: TerminalByteStream, @unchecked Sendable {
 public struct ChatFixtureRoot: View {
   @State private var model: ChatSessionModel
 
-  public init(pendingPermission: Bool) {
+  private let listMode: Bool
+  @State private var listModel = ChatListModel(hostName: "homelab", exec: { _ in
+    let now = Int(Date().timeIntervalSince1970)
+    return [
+      "chat-a\trunning\t48213\t/home/dev/projects/api-server\t\(now - 600)\tclaude",
+      "chat-b\tidle\t9120\t/home/dev/projects/mobile-app\t\(now - 86400)\tclaude",
+      "chat-c\tidle\t1840\t~\t\(now - 259200)\tcodex",
+    ].joined(separator: "\n")
+  })
+
+  public init(pendingPermission: Bool, list: Bool = false) {
+    listMode = list
     _model = State(initialValue: ChatFixture.model(pendingPermission: pendingPermission))
   }
 
   public var body: some View {
-    NavigationStack { ChatView(model: model) }
+    NavigationStack {
+      if listMode {
+        ChatListView(model: listModel, onOpen: { _ in }, onClose: {})
+          .task { await listModel.refresh() }
+      } else {
+        ChatView(model: model)
+      }
+    }
       .tint(TetherColors.accent)
       .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
   }

@@ -37,7 +37,7 @@ struct TetherIOSApp: App {
   @ViewBuilder private var content: some View {
       #if DEBUG
       if let fixture = ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] {
-        ChatFixtureRoot(pendingPermission: fixture == "permission")
+        ChatFixtureRoot(pendingPermission: fixture == "permission", list: fixture == "list")
       } else if ProcessInfo.processInfo.environment["TETHER_SSH_LIVE"] != nil {
         AppRootView(demoModel: .liveDemoFromEnv())
       } else if ProcessInfo.processInfo.environment["TETHER_SSH_DEMO"] != nil {
