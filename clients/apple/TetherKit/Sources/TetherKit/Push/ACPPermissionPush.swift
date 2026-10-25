@@ -22,6 +22,8 @@ public struct ACPPermissionPush: Equatable, Sendable {
     public var kind: String
 
     public var isReject: Bool { kind.hasPrefix("reject") }
+    /// An answer to a question (`elicitation: true` in the payload), not a permission.
+    public var isChoice: Bool { kind == "choice" }
   }
 
   /// nil unless the userInfo holds a link, a usable holder name, a request id and at least
@@ -74,6 +76,7 @@ public struct ACPAnswerRequest: Equatable, Sendable {
   public var requestId: String
   public var optionId: String
   public var optionLabel: String
+  public var isChoice = false
 }
 
 enum ACPAnswerCommand {

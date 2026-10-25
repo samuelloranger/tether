@@ -145,7 +145,8 @@ public enum NotificationActions {
     if isOption, let push = ACPPermissionPush(userInfo: userInfo) {
       guard let option = push.option(forAction: actionIdentifier) else { return nil }
       return .answerACP(ACPAnswerRequest(
-        chat: push.chat, acp: push.acp, requestId: push.requestId, optionId: option.id, optionLabel: option.label))
+        chat: push.chat, acp: push.acp, requestId: push.requestId, optionId: option.id, optionLabel: option.label,
+        isChoice: option.isChoice))
     }
     let link = NotificationTapRouter.link(from: userInfo)
     let openInstead = "This notification can’t be answered from here; open the session instead."
@@ -402,7 +403,7 @@ public final class NotificationActionRunner {
     switch outcome {
     case .answered:
       content.title = "Answered"
-      content.body = request.optionLabel
+      content.body = request.isChoice ? "Chose \(request.optionLabel)" : request.optionLabel
     case .alreadyAnswered:
       content.title = "Already answered"
       content.body = "That request was answered somewhere else or the agent moved on."

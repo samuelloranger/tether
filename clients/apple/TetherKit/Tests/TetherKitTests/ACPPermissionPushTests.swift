@@ -95,6 +95,46 @@ final class ACPPermissionPushTests: XCTestCase {
       "~/.local/bin/tether-notify acp answer 'it'\"'\"'s; rm -rf /' --request '\"a b\"; id' --option 'x'\"'\"' y;$(id)'")
   }
 
+  private let questionInfo: [AnyHashable: Any] = [
+    "link": "tether://chat/chat-ab12?host=devbox",
+    "agentState": "waiting",
+    "agentVersion": "q1",
+    "acpName": "chat-ab12",
+    "acpRequestId": "3",
+    "acpOptions": ["red", "green", "blue"],
+    "acpOptionIds": ["red", "green", "it's \"blue\"; x"],
+    "acpOptionKinds": ["choice", "choice", "choice"],
+    "elicitation": true,
+  ]
+
+  func test_a_question_push_is_answered_by_a_button_and_says_what_was_chosen() throws {
+    let push = try XCTUnwrap(ACPPermissionPush(userInfo: questionInfo))
+    XCTAssertEqual(push.options.map(\.isChoice), [true, true, true])
+    XCTAssertEqual(push.options.map(\.isReject), [false, false, false])
+    XCTAssertEqual(
+      NotificationActions.attempt(actionIdentifier: "tether.action.option.2", text: nil, userInfo: questionInfo),
+      .answerACP(ACPAnswerRequest(
+        chat: ChatDeepLink(chatName: "chat-ab12", identityName: "devbox"), acp: "chat-ab12", requestId: "3",
+        optionId: "green", optionLabel: "green", isChoice: true)))
+    let permission = try XCTUnwrap(ACPPermissionPush(userInfo: userInfo))
+    XCTAssertEqual(permission.options.map(\.isChoice), [false, false, false])
+
+    let category = ACPPermissionPush.notificationCategory(
+      version: "q1", labels: ["red", "green", "blue"], kinds: ["choice", "choice", "choice"])
+    XCTAssertEqual(category.actions.map(\.title), ["red", "green", "blue"])
+    XCTAssertEqual(category.actions.map { $0.options.contains(.destructive) }, [false, false, false])
+  }
+
+  func test_a_question_answer_command_quotes_a_value_with_quotes_spaces_and_semicolons() {
+    let value = "it's \"two words\"; rm -rf ~ $(id)"
+    let request = ACPAnswerRequest(
+      chat: ChatDeepLink(chatName: "c", identityName: "h"), acp: "chat-ab12", requestId: "3",
+      optionId: value, optionLabel: value, isChoice: true)
+    XCTAssertEqual(
+      ACPAnswerCommand.command(notify: "tn", request: request),
+      "tn acp answer 'chat-ab12' --request '3' --option 'it'\"'\"'s \"two words\"; rm -rf ~ $(id)'")
+  }
+
   func test_the_answers_command_quotes_the_name() {
     XCTAssertEqual(
       ACPAnswerCommand.answersCommand(notify: "tn", acp: "a b;c"), "tn acp answers 'a b;c'")
