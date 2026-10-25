@@ -72,6 +72,8 @@ final class ACPClientTests: XCTestCase {
 
     let live = await client.state
     let journal = store.load()
+    XCTAssertEqual(live.modelId, "claude-sonnet-5-5")
+    XCTAssertEqual(live.cost?.currency, "USD")
     XCTAssertEqual(journal.sessionId, "sess-1")
     XCTAssertEqual(journal.entries, ACPFixture.journal.entries)
     XCTAssertEqual(live, try ChatTranscriptBuilder.replay(log: ACPFixture.log(), journal: journal))
@@ -125,5 +127,138 @@ final class ACPClientTests: XCTestCase {
     XCTAssertTrue(failed)
     let state = await client.state
     guard case .error = state.items.last?.kind else { return XCTFail("\(state.items)") }
+  }
+
+  private struct FailingWriteStream: TerminalByteStream {
+    func read() async throws -> Data? { try await Task.sleep(nanoseconds: 60_000_000_000); return nil }
+    func write(_ bytes: Data) async throws { throw ACPClientError.connectionLost }
+    func close() async {}
+  }
+
+  private func controlsJournal() -> ChatJournal {
+    var journal = ChatJournal()
+    journal.sessionId = "sess-2"
+    journal.nextRequestId = 3
+    return journal
+  }
+
+  func test_set_config_option_waits_for_the_agent_and_live_state_equals_replay() async throws {
+    let stream = ScriptedByteStream()
+    let store = InMemoryChatJournalStore(controlsJournal())
+    let client = ACPClient(stream: stream, store: store)
+    await client.startReading()
+    let extra = [
+      "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"available_commands_update\",\"availableCommands\":[{\"name\":\"context\",\"description\":\"d\",\"input\":null}]}}}"
+    ]
+    let change = Task { try await client.setConfigOption(id: "model", value: "haiku") }
+    let sent = await eventually { stream.writtenText.contains("session/set_config_option") }
+    XCTAssertTrue(sent)
+    let request = writtenObjects(stream).first { $0["method"] as? String == "session/set_config_option" }
+    XCTAssertEqual(
+      request?["params"] as? NSDictionary, ["sessionId": "sess-2", "configId": "model", "value": "haiku"] as NSDictionary)
+    XCTAssertEqual(request?["id"] as? Int, 3)
+    let beforeConfirm = await client.state
+    XCTAssertTrue(beforeConfirm.configOptions.isEmpty)
+
+    let lines = ACPFixture.Controls.agentLines
+    stream.push(Data((lines[2..<4].joined(separator: "\n") + "\n").utf8))
+    try await change.value
+    let confirmed = await client.state
+    XCTAssertEqual(confirmed.option(id: "model")?.currentValue, "haiku")
+
+    stream.push(Data(((Array(lines[4..<lines.count]) + extra).joined(separator: "\n") + "\n").utf8))
+    let done = await waitUntil(client) { !$0.commands.isEmpty && $0.modeId == "default" }
+    XCTAssertTrue(done)
+    let live = await client.state
+    let log = Data(((Array(lines[2..<lines.count]) + extra).joined(separator: "\n") + "\n").utf8)
+    XCTAssertEqual(live, try ChatTranscriptBuilder.replay(log: log, journal: store.load()))
+    XCTAssertEqual(live.currentChoice(of: "model"), "Haiku 5.5")
+  }
+
+  func test_a_refused_option_change_throws_the_agent_error_without_touching_the_transcript() async throws {
+    let stream = ScriptedByteStream()
+    let store = InMemoryChatJournalStore(controlsJournal())
+    let client = ACPClient(stream: stream, store: store)
+    await client.startReading()
+    let change = Task { try await client.setConfigOption(id: "model", value: "nope") }
+    _ = await eventually { stream.writtenText.contains("session/set_config_option") }
+    let error = "{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32602,\"message\":\"bad value\"}}"
+    stream.push(Data((error + "\n").utf8))
+    do {
+      try await change.value
+      XCTFail("expected a failure")
+    } catch {
+      XCTAssertEqual(error as? ACPClientError, .agent(code: -32602, message: "bad value"))
+    }
+    let live = await client.state
+    XCTAssertTrue(live.items.isEmpty)
+    let replayed = try ChatTranscriptBuilder.replay(log: Data((error + "\n").utf8), journal: store.load())
+    XCTAssertEqual(live, replayed, "a replay must not surface the refusal either")
+  }
+
+  func test_set_config_option_fails_without_a_session_or_on_a_dead_connection() async throws {
+    let none = ACPClient(stream: ScriptedByteStream())
+    do {
+      try await none.setConfigOption(id: "mode", value: "plan")
+      XCTFail("expected noSession")
+    } catch {
+      XCTAssertEqual(error as? ACPClientError, .noSession)
+    }
+    let stream = ScriptedByteStream()
+    let client = ACPClient(stream: stream, store: InMemoryChatJournalStore(controlsJournal()))
+    await client.startReading()
+    await stream.close()
+    _ = await waitUntil(client) { $0.connection == .lost }
+    do {
+      try await client.setConfigOption(id: "mode", value: "plan")
+      XCTFail("expected connectionLost")
+    } catch {
+      XCTAssertEqual(error as? ACPClientError, .connectionLost)
+    }
+  }
+
+  func test_an_image_prompt_sends_images_first_then_text_and_journals_the_count() async throws {
+    let stream = ScriptedByteStream()
+    let store = InMemoryChatJournalStore(controlsJournal())
+    let client = ACPClient(stream: stream, store: store)
+    await client.startReading()
+    let images = [ChatImageAttachment(mimeType: "image/png", data: "AAAA"), ChatImageAttachment(mimeType: "image/jpeg", data: "BBBB")]
+    try await client.prompt(text: "what is this", images: images)
+    let prompt = writtenObjects(stream).first { $0["method"] as? String == "session/prompt" }
+    XCTAssertEqual(
+      (prompt?["params"] as? NSDictionary)?["prompt"] as? NSArray,
+      [
+        ["type": "image", "mimeType": "image/png", "data": "AAAA"],
+        ["type": "image", "mimeType": "image/jpeg", "data": "BBBB"],
+        ["type": "text", "text": "what is this"],
+      ] as NSArray)
+    XCTAssertEqual(store.load().entries.map(\.imageCount), [2])
+    let state = await client.state
+    XCTAssertEqual(state.items.map(\.kind).count, 1)
+    guard case let .user(_, count, _)? = state.items.first?.kind else { return XCTFail() }
+    XCTAssertEqual(count, 2)
+
+    try await client.prompt(text: "", images: [images[0]])
+    let second = writtenObjects(stream).filter { $0["method"] as? String == "session/prompt" }.last
+    XCTAssertEqual(
+      (second?["params"] as? NSDictionary)?["prompt"] as? NSArray,
+      [["type": "image", "mimeType": "image/png", "data": "AAAA"]] as NSArray)
+  }
+
+  func test_an_image_prompt_that_cannot_be_written_is_removed_again() async throws {
+    let store = InMemoryChatJournalStore(controlsJournal())
+    let client = ACPClient(stream: FailingWriteStream(), store: store)
+    let image = ChatImageAttachment(mimeType: "image/png", data: "AAAA")
+    do {
+      try await client.prompt(text: "x", images: [image])
+      XCTFail("expected a failure")
+    } catch {
+      XCTAssertEqual(error as? ACPClientError, .connectionLost)
+    }
+    let state = await client.state
+    XCTAssertTrue(state.items.isEmpty)
+    XCTAssertEqual(state.turn, .idle)
+    XCTAssertTrue(store.load().entries.isEmpty)
+    await client.stop()
   }
 }

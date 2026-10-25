@@ -148,18 +148,22 @@ struct ChatOutbox: Equatable {
   struct Failed: Identifiable, Equatable {
     let id: UUID
     let text: String
+    /// Kept in memory only, so a retry can send them again.
+    var images: [ChatImageAttachment] = []
   }
 
   private(set) var failed: [Failed] = []
 
   @discardableResult
-  mutating func recordFailure(_ text: String, id: UUID = UUID()) -> Failed {
-    let entry = Failed(id: id, text: text)
+  mutating func recordFailure(_ text: String, images: [ChatImageAttachment] = [], id: UUID = UUID()) -> Failed {
+    let entry = Failed(id: id, text: text, images: images)
     failed.append(entry)
     return entry
   }
 
   func text(for id: UUID) -> String? { failed.first { $0.id == id }?.text }
+
+  func entry(for id: UUID) -> Failed? { failed.first { $0.id == id } }
 
   mutating func discard(_ id: UUID) { failed.removeAll { $0.id == id } }
 }
@@ -271,7 +275,9 @@ extension ChatState {
       switch last.kind {
       case let .assistant(text, _), let .thought(text), let .notice(text), let .error(text):
         hasher.combine(text.utf8.count)
-      case let .user(text, _): hasher.combine(text.utf8.count)
+      case let .user(text, images, _):
+        hasher.combine(images)
+        hasher.combine(text.utf8.count)
       case let .tool(call): hasher.combine(call.status.rawValue)
       default: break
       }

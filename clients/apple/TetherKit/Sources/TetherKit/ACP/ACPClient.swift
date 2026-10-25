@@ -83,27 +83,38 @@ actor ACPClient {
     return id
   }
 
-  func prompt(text: String) async throws {
+  func prompt(text: String, images: [ChatImageAttachment] = []) async throws {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
     guard !ended else { throw ACPClientError.connectionLost }
     let offset = builder.consumedOffset
-    journal.entries.append(.init(kind: .prompt, offset: offset, text: text))
-    builder.apply(.userPrompt(text: text, atOffset: offset))
+    let count = images.count
+    journal.entries.append(.init(kind: .prompt, offset: offset, text: text, imageCount: count))
+    builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset))
     publish()
     store.save(journal)
+    var blocks: [[String: Any]] = images.map { ["type": "image", "mimeType": $0.mimeType, "data": $0.data] }
+    if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
     do {
-      try await send(
-        method: "session/prompt",
-        params: ["sessionId": sessionId, "prompt": [["type": "text", "text": text]]])
+      try await send(method: "session/prompt", params: ["sessionId": sessionId, "prompt": blocks])
     } catch {
-      if let index = journal.entries.lastIndex(where: { $0.kind == .prompt && $0.offset == offset && $0.text == text }) {
+      if let index = journal.entries.lastIndex(where: {
+        $0.kind == .prompt && $0.offset == offset && $0.text == text && $0.imageCount == count
+      }) {
         journal.entries.remove(at: index)
       }
       store.save(journal)
-      builder.apply(.promptUndelivered(text: text, atOffset: offset))
+      builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset))
       publish()
       throw error
     }
+  }
+
+  /// Returns once the agent confirmed; the new value reaches `state` through the result's options.
+  func setConfigOption(id: String, value: String) async throws {
+    guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
+    guard !ended else { throw ACPClientError.connectionLost }
+    _ = try await request(
+      "session/set_config_option", ["sessionId": sessionId, "configId": id, "value": value], silent: true)
   }
 
   func cancel() async throws {
@@ -140,8 +151,13 @@ actor ACPClient {
     return id
   }
 
-  private func request(_ method: String, _ params: [String: Any]) async throws -> ACPResult {
+  private func request(_ method: String, _ params: [String: Any], silent: Bool = false) async throws -> ACPResult {
     let id = allocateId()
+    if silent {
+      journal.entries.append(.init(kind: .silentRequest, offset: builder.consumedOffset, requestId: id))
+      builder.apply(.silentRequest(requestId: id))
+      store.save(journal)
+    }
     let data = try encode(["jsonrpc": "2.0", "id": id.json, "method": method, "params": params])
     return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ACPResult, Error>) in
       if ended {

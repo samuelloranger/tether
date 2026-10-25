@@ -64,7 +64,7 @@ struct ChatItemRow: View, Equatable {
 
   var body: some View {
     switch item.kind {
-    case let .user(text, _):
+    case let .user(text, _, _):
       UserMessageRow(text: text)
     case let .assistant(text, _):
       AssistantTextView(text: text)

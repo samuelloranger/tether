@@ -6,11 +6,24 @@ enum ACPFixture {
   static let agentLines: [String] = lines(prefix: "< ")
   static let clientLines: [String] = lines(prefix: "> ")
 
-  private static func lines(prefix: String) -> [String] {
+  private static func lines(prefix: String, file: String = "acp-turn-write.log") -> [String] {
     let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-      .appendingPathComponent("Fixtures/acp-turn-write.log")
+      .appendingPathComponent("Fixtures/\(file)")
     let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     return text.split(separator: "\n").filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+  }
+
+  /// The recorded controls session: config options, mode changes and a `/context` prompt.
+  enum Controls {
+    static let agentLines: [String] = ACPFixture.lines(prefix: "< ", file: "acp-controls.log")
+
+    static func line(containing needle: String, after: Int = -1) -> Int {
+      agentLines.indices.first { $0 > after && agentLines[$0].contains(needle) } ?? -1
+    }
+
+    static func log(_ range: Range<Int>) -> Data {
+      Data((agentLines[range].joined(separator: "\n") + "\n").utf8)
+    }
   }
 
   static func index(containing needle: String) -> Int {

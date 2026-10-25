@@ -202,4 +202,95 @@ final class ChatSessionModelTests: XCTestCase {
     guard case let .failed(message) = listModel.load else { return XCTFail() }
     XCTAssertTrue(message.contains("missing or too old"))
   }
+
+  func test_a_failed_image_prompt_keeps_its_attachments_and_retries_with_them() async throws {
+    let inner = ScriptedByteStream()
+    let broken = FailingWriteStream(inner: inner)
+    let good = ScriptedByteStream()
+    let dialer = Dialer([broken, good])
+    let model = model(dialer)
+    Task { await model.connect() }
+    inner.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    let image = ChatImageAttachment(mimeType: "image/png", data: "AAAA")
+    XCTAssertFalse(model.send(text: "  ", images: []))
+    XCTAssertTrue(model.send(text: "see this", images: [image]))
+    let failed = await eventually { !model.outbox.failed.isEmpty }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(model.outbox.failed.first?.images, [image])
+
+    await inner.close()
+    _ = await eventually { model.link.phase == .lost }
+    model.reconnect()
+    good.push(ACPFixture.log())
+    let again = await settled(model)
+    XCTAssertTrue(again)
+    let id = try XCTUnwrap(model.outbox.failed.first?.id)
+    model.retry(id)
+    let sent = await eventually { good.writtenText.contains("\"data\":\"AAAA\"") && good.writtenText.contains("see this") }
+    XCTAssertTrue(sent)
+    XCTAssertTrue(model.outbox.failed.isEmpty)
+    model.leave()
+  }
+
+  func test_an_image_only_prompt_is_allowed() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send(text: "", images: [ChatImageAttachment(mimeType: "image/jpeg", data: "QQ==")]))
+    let sent = await eventually { stream.writtenText.contains("\"mimeType\":\"image/jpeg\"") }
+    XCTAssertTrue(sent)
+    model.leave()
+  }
+
+  private func controlsModel(_ stream: ScriptedByteStream) -> ChatSessionModel {
+    var journal = ChatJournal()
+    journal.sessionId = "sess-2"
+    journal.nextRequestId = 3
+    return model(Dialer([stream]), journal: journal)
+  }
+
+  func test_set_option_is_pending_until_the_agent_confirms_then_shows_the_new_value() async throws {
+    let stream = ScriptedByteStream()
+    let model = controlsModel(stream)
+    Task { await model.connect() }
+    stream.push(ACPFixture.Controls.log(1..<2))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertEqual(model.state.currentChoice(of: "model"), "Sonnet 5.5")
+
+    model.setOption(id: "model", value: "haiku")
+    XCTAssertEqual(model.optionChanges["model"], .pending(value: "haiku"))
+    let sent = await eventually { stream.writtenText.contains("session/set_config_option") }
+    XCTAssertTrue(sent)
+    XCTAssertEqual(model.state.currentChoice(of: "model"), "Sonnet 5.5")
+    stream.push(ACPFixture.Controls.log(2..<3))
+    let done = await eventually { model.optionChanges["model"] == nil && model.state.currentChoice(of: "model") == "Haiku 5.5" }
+    XCTAssertTrue(done)
+    model.leave()
+  }
+
+  func test_a_refused_option_change_is_recorded_as_failed_and_can_be_dismissed() async throws {
+    let stream = ScriptedByteStream()
+    let model = controlsModel(stream)
+    Task { await model.connect() }
+    stream.push(ACPFixture.Controls.log(1..<2))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    model.setOption(id: "effort", value: "max")
+    _ = await eventually { stream.writtenText.contains("session/set_config_option") }
+    stream.push(Data("{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32602,\"message\":\"unsupported\"}}\n".utf8))
+    let failed = await eventually { model.optionChanges["effort"] != nil && model.optionChanges["effort"] != .pending(value: "max") }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(model.optionChanges["effort"], .failed(value: "max", message: "unsupported"))
+    XCTAssertEqual(model.state.currentChoice(of: "effort"), "Medium")
+    XCTAssertTrue(model.state.items.isEmpty)
+    model.dismissOptionFailure(id: "effort")
+    XCTAssertNil(model.optionChanges["effort"])
+    model.leave()
+  }
 }

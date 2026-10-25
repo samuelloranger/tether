@@ -20,8 +20,9 @@ final class ChatTranscriptTests: XCTestCase {
     XCTAssertEqual(state.contextUsed, 39457)
 
     guard state.items.count == 5 else { return XCTFail("items: \(state.items)") }
-    guard case let .user(text, offset) = state.items[0].kind else { return XCTFail() }
+    guard case let .user(text, images, offset) = state.items[0].kind else { return XCTFail() }
     XCTAssertEqual(text, ACPFixture.promptText)
+    XCTAssertEqual(images, 0)
     XCTAssertEqual(offset, ACPFixture.promptOffset)
 
     let calls = tools(state)
@@ -126,7 +127,7 @@ final class ChatTranscriptTests: XCTestCase {
     }
     func normalized(_ state: ChatState) -> [ChatItem.Kind] {
       state.items.map {
-        if case let .user(text, _) = $0.kind { return .user(text: text, offset: 0) }
+        if case let .user(text, _, _) = $0.kind { return .user(text: text, offset: 0) }
         return $0.kind
       }
     }

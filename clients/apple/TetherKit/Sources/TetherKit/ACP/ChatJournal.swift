@@ -4,17 +4,43 @@ import Foundation
 /// stamped with the log offset (end of the last processed line) at the moment it happened.
 struct ChatJournal: Codable, Equatable, Sendable {
   struct Entry: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case prompt, answer }
+    enum Kind: String, Codable, Sendable { case prompt, answer, silentRequest }
     var kind: Kind
     var offset: Int
     var text: String?
     var requestId: ACPID?
     var optionId: String?
+    /// Image bytes are never stored; only how many went with the prompt.
+    var imageCount = 0
+
+    init(
+      kind: Kind, offset: Int, text: String? = nil, requestId: ACPID? = nil, optionId: String? = nil,
+      imageCount: Int = 0
+    ) {
+      self.kind = kind
+      self.offset = offset
+      self.text = text
+      self.requestId = requestId
+      self.optionId = optionId
+      self.imageCount = imageCount
+    }
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      kind = try container.decode(Kind.self, forKey: .kind)
+      offset = try container.decode(Int.self, forKey: .offset)
+      text = try container.decodeIfPresent(String.self, forKey: .text)
+      requestId = try container.decodeIfPresent(ACPID.self, forKey: .requestId)
+      optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
+      imageCount = try container.decodeIfPresent(Int.self, forKey: .imageCount) ?? 0
+    }
 
     var event: ChatEvent? {
       switch kind {
       case .prompt:
-        return text.map { .userPrompt(text: $0, atOffset: offset) }
+        return text.map { .userPrompt(text: $0, imageCount: imageCount, atOffset: offset) }
+      case .silentRequest:
+        return requestId.map { .silentRequest(requestId: $0) }
       case .answer:
         guard let requestId, let optionId else { return nil }
         return .permissionAnswered(requestId: requestId, optionId: optionId)

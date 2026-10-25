@@ -43,7 +43,7 @@ struct ChatPermission: Equatable, Sendable {
 
 struct ChatItem: Equatable, Identifiable, Sendable {
   enum Kind: Equatable, Sendable {
-    case user(text: String, offset: Int)
+    case user(text: String, imageCount: Int = 0, offset: Int)
     case assistant(text: String, messageId: String?)
     case thought(text: String)
     case tool(ChatToolCall)
@@ -67,11 +67,25 @@ struct ChatState: Equatable, Sendable {
   var sessionId: String?
   var title: String?
   var modeId: String?
+  var configOptions: [ACPConfigOption] = []
+  var commands: [ACPCommand] = []
+  var cost: ChatCost?
+  var modelId: String?
   var contextUsed: Int?
   var contextSize: Int?
   var lastStopReason: String?
   var loadSession: Bool?
   fileprivate var nextItemId = 0
+  /// Requests whose failure belongs to the caller, not the transcript.
+  fileprivate var silentRequestIds: Set<ACPID> = []
+
+  func option(id: String) -> ACPConfigOption? { configOptions.first { $0.id == id } }
+
+  /// The human name of the option's current choice, for a chip.
+  func currentChoice(of id: String) -> String? {
+    guard let option = option(id: id) else { return nil }
+    return option.choices.first { $0.value == option.currentValue }?.name ?? option.currentValue
+  }
 
   var pendingPermissions: [ChatPermission] {
     items.compactMap {
@@ -83,10 +97,12 @@ struct ChatState: Equatable, Sendable {
 
 enum ChatEvent: Equatable, Sendable {
   case message(ACPInbound)
-  case userPrompt(text: String, atOffset: Int)
+  case userPrompt(text: String, imageCount: Int = 0, atOffset: Int)
+  /// A request whose error response must not surface as a transcript row.
+  case silentRequest(requestId: ACPID)
   case permissionAnswered(requestId: ACPID, optionId: String)
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
-  case promptUndelivered(text: String, atOffset: Int)
+  case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int)
   case connectionLost
   case failure(String)
 }
@@ -97,13 +113,15 @@ enum ChatReducer {
     switch event {
     case let .message(message):
       apply(message, to: &next)
-    case let .userPrompt(text, offset):
-      append(.user(text: text, offset: offset), to: &next)
+    case let .userPrompt(text, imageCount, offset):
+      append(.user(text: text, imageCount: imageCount, offset: offset), to: &next)
       next.turn = .working
+    case let .silentRequest(requestId):
+      next.silentRequestIds.insert(requestId)
     case let .permissionAnswered(requestId, optionId):
       resolve(requestId, optionId, in: &next)
-    case let .promptUndelivered(text, offset):
-      if let index = next.items.lastIndex(where: { $0.kind == .user(text: text, offset: offset) }) {
+    case let .promptUndelivered(text, imageCount, offset):
+      if let index = next.items.lastIndex(where: { $0.kind == .user(text: text, imageCount: imageCount, offset: offset) }) {
         next.items.remove(at: index)
       }
       next.turn = .idle
@@ -126,11 +144,13 @@ enum ChatReducer {
     case let .response(_, result):
       if let id = result.sessionId { state.sessionId = id }
       if let load = result.loadSession { state.loadSession = load }
+      if let options = result.configOptions { setConfigOptions(options, in: &state) }
       if let reason = result.stopReason {
         state.turn = .idle
         state.lastStopReason = reason
       }
-    case let .errorResponse(_, code, text):
+    case let .errorResponse(id, code, text):
+      if let id, state.silentRequestIds.contains(id) { return }
       append(.error(text.isEmpty ? "Agent error \(code)" : text), to: &state)
       state.turn = .idle
     case let .permissionRequest(id, request):
@@ -170,8 +190,8 @@ enum ChatReducer {
         append(.thought(text: text), to: &state)
       }
     case let .userMessage(text):
-      if let last = state.items.indices.last, case let .user(existing, offset) = state.items[last].kind {
-        state.items[last].kind = .user(text: existing + text, offset: offset)
+      if let last = state.items.indices.last, case let .user(existing, images, offset) = state.items[last].kind {
+        state.items[last].kind = .user(text: existing + text, imageCount: images, offset: offset)
       } else {
         append(.user(text: text, offset: 0), to: &state)
       }
@@ -190,14 +210,28 @@ enum ChatReducer {
       if !replaced { append(.plan(entries), to: &state) }
     case let .currentMode(mode):
       state.modeId = mode
+      if let index = state.configOptions.firstIndex(where: { $0.id == "mode" }) {
+        state.configOptions[index].currentValue = mode
+      }
+    case let .configOptions(options):
+      setConfigOptions(options, in: &state)
+    case let .commands(commands):
+      state.commands = commands
     case let .sessionInfo(title):
       if let title { state.title = title }
-    case let .usage(used, size):
+    case let .usage(used, size, cost, modelId):
       state.contextUsed = used
       state.contextSize = size
+      if let cost { state.cost = cost }
+      if let modelId { state.modelId = modelId }
     case .unknown:
       break
     }
+  }
+
+  private static func setConfigOptions(_ options: [ACPConfigOption], in state: inout ChatState) {
+    state.configOptions = options
+    if let mode = options.first(where: { $0.id == "mode" }) { state.modeId = mode.currentValue }
   }
 
   private static func mergeTool(_ fields: ACPToolFields, creating: Bool, into state: inout ChatState) {

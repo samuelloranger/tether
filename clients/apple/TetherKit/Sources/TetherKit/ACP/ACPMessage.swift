@@ -76,6 +76,35 @@ struct ACPPermissionRequest: Equatable, Sendable {
   var options: [ACPPermissionOption]
 }
 
+struct ACPConfigChoice: Equatable, Sendable {
+  var value: String
+  var name: String
+  var description: String
+}
+
+/// A select-type session setting such as mode, model or effort; `currentValue` is one of the choices' values.
+struct ACPConfigOption: Equatable, Sendable, Identifiable {
+  var id: String
+  var name: String
+  var description: String
+  var category: String?
+  var currentValue: String
+  var choices: [ACPConfigChoice]
+}
+
+struct ACPCommand: Equatable, Sendable, Identifiable {
+  var name: String
+  var description: String
+  /// Present when the command takes arguments.
+  var hint: String?
+  var id: String { name }
+}
+
+struct ChatCost: Equatable, Sendable {
+  var amount: Double
+  var currency: String
+}
+
 enum ACPUpdate: Equatable, Sendable {
   case agentMessage(text: String, messageId: String?)
   case agentThought(text: String)
@@ -85,7 +114,9 @@ enum ACPUpdate: Equatable, Sendable {
   case plan([ACPPlanEntry])
   case currentMode(String)
   case sessionInfo(title: String?)
-  case usage(used: Int, size: Int)
+  case usage(used: Int, size: Int, cost: ChatCost?, modelId: String?)
+  case configOptions([ACPConfigOption])
+  case commands([ACPCommand])
   case unknown(kind: String)
 }
 
@@ -94,6 +125,7 @@ struct ACPResult: Equatable, Sendable {
   var loadSession: Bool?
   var sessionId: String?
   var stopReason: String?
+  var configOptions: [ACPConfigOption]?
 }
 
 enum ACPInbound: Equatable, Sendable {
@@ -147,7 +179,8 @@ enum ACPDecoder {
     return ACPResult(
       loadSession: capabilities?["loadSession"] as? Bool,
       sessionId: result["sessionId"] as? String,
-      stopReason: result["stopReason"] as? String)
+      stopReason: result["stopReason"] as? String,
+      configOptions: (result["configOptions"] as? [JSON]).map(configOptions))
   }
 
   private static func decodeUpdate(_ update: JSON) -> ACPUpdate {
@@ -182,9 +215,40 @@ enum ACPDecoder {
       guard let used = update["used"] as? Int, let size = update["size"] as? Int else {
         return .unknown(kind: kind)
       }
-      return .usage(used: used, size: size)
+      var cost: ChatCost?
+      if let raw = update["cost"] as? JSON, let amount = (raw["amount"] as? NSNumber)?.doubleValue {
+        cost = ChatCost(amount: amount, currency: raw["currency"] as? String ?? "USD")
+      }
+      let modelId = (update["_meta"] as? JSON)?["_claude/model"] as? String
+      return .usage(used: used, size: size, cost: cost, modelId: modelId)
+    case "config_option_update":
+      guard let raw = update["configOptions"] as? [JSON] else { return .unknown(kind: kind) }
+      return .configOptions(configOptions(raw))
+    case "available_commands_update":
+      guard let raw = update["availableCommands"] as? [JSON] else { return .unknown(kind: kind) }
+      return .commands(raw.compactMap { command in
+        guard let name = command["name"] as? String, !name.isEmpty else { return nil }
+        let hint = (command["input"] as? JSON)?["hint"] as? String
+        return ACPCommand(name: name, description: command["description"] as? String ?? "", hint: hint)
+      })
     default:
       return .unknown(kind: kind)
+    }
+  }
+
+  private static func configOptions(_ raw: [JSON]) -> [ACPConfigOption] {
+    raw.compactMap { option in
+      guard (option["type"] as? String ?? "select") == "select",
+        let id = option["id"] as? String, let current = option["currentValue"] as? String
+      else { return nil }
+      let choices = (option["options"] as? [JSON] ?? []).compactMap { choice -> ACPConfigChoice? in
+        guard let value = choice["value"] as? String else { return nil }
+        return ACPConfigChoice(
+          value: value, name: choice["name"] as? String ?? value, description: choice["description"] as? String ?? "")
+      }
+      return ACPConfigOption(
+        id: id, name: option["name"] as? String ?? id, description: option["description"] as? String ?? "",
+        category: option["category"] as? String, currentValue: current, choices: choices)
     }
   }
 

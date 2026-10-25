@@ -15,6 +15,13 @@ final class ChatSessionModel {
   private(set) var link = ChatLinkTracker()
   private(set) var outbox = ChatOutbox()
   var notice: String?
+  /// Option changes in flight or refused, by option id; the shown value only changes once the agent confirms.
+  private(set) var optionChanges: [String: OptionChange] = [:]
+
+  enum OptionChange: Equatable {
+    case pending(value: String)
+    case failed(value: String, message: String)
+  }
 
   /// UI updates stop at about 30 fps; the client already coalesces, so the newest state wins.
   static let frameInterval: Duration = .milliseconds(33)
@@ -126,17 +133,52 @@ final class ChatSessionModel {
   }
 
   @discardableResult
-  func send(_ text: String) -> Bool {
+  func send(_ text: String) -> Bool { send(text: text, images: []) }
+
+  @discardableResult
+  func send(text: String, images: [ChatImageAttachment] = []) -> Bool {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, canSend else { return false }
-    Task { await deliver(trimmed) }
+    guard !trimmed.isEmpty || !images.isEmpty, canSend else { return false }
+    Task { await deliver(trimmed, images) }
     return true
   }
 
   func retry(_ id: UUID) {
-    guard canSend, let text = outbox.text(for: id) else { return }
+    guard canSend, let entry = outbox.entry(for: id) else { return }
     outbox.discard(id)
-    Task { await deliver(text) }
+    Task { await deliver(entry.text, entry.images) }
+  }
+
+  func setOption(id: String, value: String) {
+    guard canInteract, let client else { return }
+    if case .pending = optionChanges[id] { return }
+    guard state.option(id: id)?.currentValue != value else {
+      optionChanges[id] = nil
+      return
+    }
+    optionChanges[id] = .pending(value: value)
+    let mine = generation
+    Task {
+      do {
+        try await client.setConfigOption(id: id, value: value)
+        optionChanges[id] = nil
+        receive(await client.state, generation: mine)
+      } catch {
+        optionChanges[id] = .failed(value: value, message: Self.describe(error))
+      }
+    }
+  }
+
+  func dismissOptionFailure(id: String) {
+    if case .failed = optionChanges[id] { optionChanges[id] = nil }
+  }
+
+  private static func describe(_ error: Error) -> String {
+    switch error as? ACPClientError {
+    case let .agent(_, message)? where !message.isEmpty: return message
+    case .agent?: return "The agent refused the change."
+    default: return "The change didn't reach the agent."
+    }
   }
 
   func discard(_ id: UUID) { outbox.discard(id) }
@@ -157,15 +199,15 @@ final class ChatSessionModel {
     }
   }
 
-  private func deliver(_ text: String) async {
+  private func deliver(_ text: String, _ images: [ChatImageAttachment]) async {
     guard let client else {
-      outbox.recordFailure(text)
+      outbox.recordFailure(text, images: images)
       return
     }
     do {
-      try await client.prompt(text: text)
+      try await client.prompt(text: text, images: images)
     } catch {
-      outbox.recordFailure(text)
+      outbox.recordFailure(text, images: images)
     }
   }
 
