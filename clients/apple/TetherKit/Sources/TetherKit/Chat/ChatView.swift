@@ -233,7 +233,7 @@ struct ChatView: View {
       HStack(spacing: 0) {
         if let name = line.model { Text(name).foregroundStyle(TetherColors.textSecondary) }
         if line.model != nil, line.mode != nil { Text(" · ").foregroundStyle(TetherColors.textFaint) }
-        if let mode = line.mode { Text(mode).foregroundStyle(tint(line.tint)) }
+        if let mode = line.mode { Text(mode).foregroundStyle(tint(line.tint)).fixedSize() }
       }
       .lineLimit(1)
       if let stats = line.stats {

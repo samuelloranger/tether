@@ -38,10 +38,15 @@ struct ChatStatusLine: Equatable {
 
   init(state: ChatState) {
     model = state.currentChoice(of: "model") ?? state.modelId
-    mode = state.currentChoice(of: "mode")
+    mode = state.option(id: "mode").flatMap { Self.shortMode($0.currentValue) } ?? state.currentChoice(of: "mode")
     tint = ChatModeTint(modeId: state.option(id: "mode")?.currentValue)
     percent = ChatFormat.contextPercent(used: state.contextUsed, size: state.contextSize)
     cost = state.cost.map(ChatFormat.cost)
+  }
+
+  /// "Bypass permissions" would crowd the model and stats out of the header line.
+  static func shortMode(_ value: String) -> String? {
+    value == "bypassPermissions" ? "Bypass" : nil
   }
 
   /// The line only opens the controls once there is something to change.

@@ -222,7 +222,7 @@ struct ToolCallRow: View {
   let toggle: () -> Void
 
   private var detail: String? {
-    let text = call.text ?? call.rawOutput
+    let text = ChatFormat.unfenced(call.text ?? call.rawOutput)
     return text?.isEmpty == false ? text : nil
   }
 
