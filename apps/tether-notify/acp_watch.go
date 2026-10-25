@@ -268,6 +268,34 @@ func (s *acpDaemonState) attached() bool {
 	return s.cur != nil
 }
 
+// acpHandshakeGrace is how long a push waits when a client has connected but not yet sent its
+// first line: that client is about to be the attached one and must not be pushed over.
+const acpHandshakeGrace = 400 * time.Millisecond
+
+// whenDetached runs push, after claim succeeds, only if no client is attached. A client that is
+// mid-handshake when the event arrives is given acpHandshakeGrace to finish before deciding.
+func (s *acpDaemonState) whenDetached(claim func() bool, push func()) {
+	s.mu.Lock()
+	attached, dialing := s.cur != nil, s.handshaking > 0
+	s.mu.Unlock()
+	switch {
+	case attached:
+	case !dialing:
+		if claim() {
+			push()
+		}
+	default:
+		s.pushes.Add(1)
+		go func() {
+			defer s.pushes.Done()
+			time.Sleep(acpHandshakeGrace)
+			if !s.attached() && claim() {
+				push()
+			}
+		}()
+	}
+}
+
 // scanAgent is called only from the stdout reader goroutine.
 func (s *acpDaemonState) scanAgent(chunk []byte) {
 	if s.skip {
@@ -285,10 +313,14 @@ func (s *acpDaemonState) scanAgent(chunk []byte) {
 	for _, l := range lines {
 		ev := s.tr.agentLine(l)
 		switch {
-		case ev.permission != nil && !s.attached() && s.tr.claimNotify(ev.key):
-			s.pushAsync(s.permissionPush(ev.permission), "acp-"+s.collapseSuffix(ev.key))
-		case ev.turnEnded && !s.attached():
-			s.pushAsync(s.donePush(ev.stopReason), "acp-done-"+threadKey(hostLabel(), s.tr.name))
+		case ev.permission != nil:
+			s.whenDetached(func() bool { return s.tr.claimNotify(ev.key) }, func() {
+				s.pushAsync(s.permissionPush(ev.permission), "acp-"+s.collapseSuffix(ev.key))
+			})
+		case ev.turnEnded:
+			s.whenDetached(func() bool { return true }, func() {
+				s.pushAsync(s.donePush(ev.stopReason), "acp-done-"+threadKey(hostLabel(), s.tr.name))
+			})
 		}
 	}
 }

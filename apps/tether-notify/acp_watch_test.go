@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -163,6 +164,8 @@ func TestACPNoPushWhenClientAttached(t *testing.T) {
 	a, script := newScriptedAgent(t)
 	cleanupSession(t, "c")
 	p := startAttach(t, "c", "--spawn", script, "--cwd", t.TempDir())
+	// The daemon only counts a client once its first line is in; emitting earlier races the attach process.
+	waitFor(t, "client attached", func() bool { m, err := readACPMeta("c"); return err == nil && m.Attached })
 	a.emit(t, permReq)
 	if l := p.readLine(t); !strings.Contains(l, "request_permission") {
 		t.Fatalf("got %q", l)
@@ -420,4 +423,47 @@ func TestACPPushRelayDownDoesNotBreakAgent(t *testing.T) {
 	if _, errs, code := runAcp(t, "answer", "dn", "--request", "7", "--option", "allow"); code != 0 {
 		t.Fatalf("answer exit %d %q", code, errs)
 	}
+}
+
+func dialUnhandshaken(t *testing.T, name string) net.Conn {
+	t.Helper()
+	m, err := readACPMeta(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := net.Dial("unix", m.Sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+func TestACPNoPushWhenClientFinishesHandshakeWithinGrace(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "g", script)
+	c := dialUnhandshaken(t, "g")
+	a.emit(t, permReq)
+	waitFor(t, "request tracked", func() bool { return pendingCount("g") == 1 })
+	if _, err := fmt.Fprint(c, "0 0\n"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(acpHandshakeGrace + 500*time.Millisecond)
+	if n := len(fr.pushes()); n != 0 {
+		t.Fatalf("pushed %d over a client that was mid-handshake", n)
+	}
+}
+
+func TestACPPushesWhenHandshakingClientNeverArrives(t *testing.T) {
+	acpEnv(t)
+	fr := newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	startDetached(t, "h", script)
+	c := dialUnhandshaken(t, "h")
+	a.emit(t, permReq)
+	waitFor(t, "request tracked", func() bool { return pendingCount("h") == 1 })
+	c.Close()
+	fr.waitPushes(t, 1)
 }

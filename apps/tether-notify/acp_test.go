@@ -39,6 +39,7 @@ type attachProc struct {
 	stdin io.WriteCloser
 	out   *bufio.Reader
 	got   bytes.Buffer
+	errb  bytes.Buffer
 }
 
 func startAttach(t *testing.T, args ...string) *attachProc {
@@ -48,13 +49,14 @@ func startAttach(t *testing.T, args ...string) *attachProc {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe, append([]string{"acp", "attach"}, args...)...)
-	cmd.Stderr = io.Discard
+	p := &attachProc{cmd: cmd}
+	cmd.Stderr = &p.errb
 	in, _ := cmd.StdinPipe()
 	out, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	p := &attachProc{cmd: cmd, stdin: in, out: bufio.NewReader(out)}
+	p.stdin, p.out = in, bufio.NewReader(out)
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	return p
 }
@@ -326,4 +328,53 @@ func TestACPLongStateDirFallsBackToShortSocket(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(m.Sock)); !os.IsNotExist(err) {
 		t.Fatalf("short sock dir leaked: %v", err)
 	}
+}
+
+func TestACPAgentFailingWithOnlyStderrIsReported(t *testing.T) {
+	acpEnv(t)
+	cleanupSession(t, "f")
+	p := startAttach(t, "f", "--spawn", "echo 'npx: not found' >&2; exit 127")
+	if got := p.readAll(t); got != "" {
+		t.Fatalf("stdout %q", got)
+	}
+	if code := p.exitCode(t); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if got := p.errb.String(); got != "agent exited with status 127: npx: not found\n" {
+		t.Fatalf("stderr %q", got)
+	}
+	again := startAttach(t, "f")
+	again.readAll(t)
+	if again.exitCode(t) != 0 || !strings.Contains(again.errb.String(), "status 127") {
+		t.Fatalf("replay stderr %q", again.errb.String())
+	}
+}
+
+func TestACPReplayEndedResumesFromOffsetAndStaysQuietOnOutput(t *testing.T) {
+	acpEnv(t)
+	if err := os.MkdirAll(acpDir("r"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code := 2
+	if err := writeACPMeta(&acpMeta{Name: "r", State: "ended", ExitCode: &code}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(acpDir("r"), "out.log"), []byte("abcdef"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errw bytes.Buffer
+	if err := replayEnded("r", 4, &out, &errw); err != nil || out.String() != "ef" || errw.Len() != 0 {
+		t.Fatalf("out %q err %q %v", out.String(), errw.String(), err)
+	}
+}
+
+func TestACPMetaReportsAttachedOnlyAfterHandshake(t *testing.T) {
+	acpEnv(t)
+	cleanupSession(t, "m")
+	attached := func() bool { m, err := readACPMeta("m"); return err == nil && m.Attached }
+	p := startAttach(t, "m", "--spawn", echoAgent, "--cwd", t.TempDir())
+	waitFor(t, "attached", attached)
+	_ = p.stdin.Close()
+	_ = p.exitCode(t)
+	waitFor(t, "detached", func() bool { return !attached() })
 }

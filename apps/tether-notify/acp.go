@@ -40,6 +40,8 @@ type acpMeta struct {
 	Sock     string `json:"sock"`
 	Pid      int    `json:"pid,omitempty"`
 	AgentPid int    `json:"agentPid,omitempty"`
+	// Attached is true while a client has completed the first-line handshake and is the current client.
+	Attached bool `json:"attached,omitempty"`
 }
 
 func acpDir(name string) string { return filepath.Join(home(), "acp", name) }
@@ -147,7 +149,7 @@ func acpAttach(args []string) error {
 		return err
 	}
 	if m != nil && m.State == "ended" {
-		return replayLog(name, *from, os.Stdout)
+		return replayEnded(name, *from, os.Stdout, os.Stderr)
 	}
 	if m == nil || !metaRunning(m) {
 		if *spawn == "" {
@@ -158,6 +160,34 @@ func acpAttach(args []string) error {
 		}
 	}
 	return attachConn(m.Sock, *from, *linger, name)
+}
+
+// replayEnded serves a session whose agent has exited: the log from `from`, then, when the agent
+// produced nothing and failed, one line of why on stderr so the chat is not silently dead.
+func replayEnded(name string, from int64, w, errw io.Writer) error {
+	if err := replayLog(name, from, w); err != nil {
+		return err
+	}
+	reportSilentFailure(name, errw)
+	return nil
+}
+
+func reportSilentFailure(name string, errw io.Writer) {
+	m, err := readACPMeta(name)
+	if err != nil || m.State != "ended" || m.ExitCode == nil || *m.ExitCode == 0 {
+		return
+	}
+	if st, err := os.Stat(filepath.Join(acpDir(name), "out.log")); err != nil || st.Size() > 0 {
+		return
+	}
+	msg := fmt.Sprintf("agent exited with status %d", *m.ExitCode)
+	if data, err := os.ReadFile(filepath.Join(acpDir(name), "err.log")); err == nil {
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
+			msg += ": " + clip(last, 300)
+		}
+	}
+	fmt.Fprintln(errw, msg)
 }
 
 func replayLog(name string, from int64, w io.Writer) error {
@@ -176,6 +206,10 @@ func replayLog(name string, from int64, w io.Writer) error {
 func attachConn(sock string, from int64, linger time.Duration, name string) error {
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
+		// The daemon may have finished and closed its socket since we last looked.
+		if m, merr := readACPMeta(name); merr == nil && m.State == "ended" {
+			return replayEnded(name, from, os.Stdout, os.Stderr)
+		}
 		return err
 	}
 	defer conn.Close()
@@ -191,7 +225,12 @@ func attachConn(sock string, from int64, linger time.Duration, name string) erro
 		close(stdinEOF)
 		conn.(*net.UnixConn).CloseWrite()
 	}()
-	_, copyErr := io.Copy(os.Stdout, conn)
+	n, copyErr := io.Copy(os.Stdout, conn)
+	// A connection that was accepted just before the daemon shut down can be cut short; the log is
+	// complete once the meta says ended, so serve whatever the socket did not deliver.
+	if m, err := readACPMeta(name); err == nil && m.State == "ended" {
+		return replayEnded(name, from+n, os.Stdout, os.Stderr)
+	}
 	if copyErr != nil {
 		return nil
 	}
@@ -199,9 +238,6 @@ func attachConn(sock string, from int64, linger time.Duration, name string) erro
 	case <-stdinEOF:
 		return nil
 	default:
-	}
-	if m, err := readACPMeta(name); err == nil && m.State == "ended" {
-		return nil
 	}
 	return errReplaced
 }
@@ -243,6 +279,15 @@ func spawnACPDaemon(name, spawn, cwd string) (*acpMeta, error) {
 			c.Close()
 			return m, nil
 		}
+		// An agent that dies at once can finish the daemon before this loop ever sees the socket.
+		if cur, err := readACPMeta(name); err == nil {
+			if cur.State == "ended" {
+				return cur, nil
+			}
+			if cur.Pid > 0 && !procUp(cur.Pid) {
+				return nil, fmt.Errorf("acp daemon exited before it was ready")
+			}
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("acp daemon did not start")
@@ -267,6 +312,26 @@ type acpDaemonState struct {
 	pushes  sync.WaitGroup
 	partial []byte
 	skip    bool
+
+	handshaking int // connections accepted whose first line is not read yet, guarded by mu
+	metaMu      sync.Mutex
+	meta        *acpMeta
+}
+
+// setMeta applies fn to the daemon's meta and writes it; the one writer once the daemon runs.
+func (s *acpDaemonState) setMeta(fn func(m *acpMeta)) {
+	if s.meta == nil {
+		return
+	}
+	s.metaMu.Lock()
+	defer s.metaMu.Unlock()
+	fn(s.meta)
+	_ = writeACPMeta(s.meta)
+}
+
+// syncAttached publishes whether a client is attached: one that has completed the handshake.
+func (s *acpDaemonState) syncAttached() {
+	s.setMeta(func(m *acpMeta) { m.Attached = s.attached() })
 }
 
 func (s *acpDaemonState) broadcast() {
@@ -326,7 +391,7 @@ func acpDaemon(name string) error {
 
 	s := &acpDaemonState{
 		notify: make(chan struct{}), stdin: stdin, log: logf, errf: errf,
-		tr:   loadACPTracker(name),
+		tr: loadACPTracker(name), meta: m,
 		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
 	}
 	startErr := cmd.Start()
@@ -380,9 +445,7 @@ func acpDaemon(name string) error {
 	_ = pr.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 	<-readDone
 
-	m.State = "ended"
-	m.ExitCode = &code
-	_ = writeACPMeta(m)
+	s.setMeta(func(m *acpMeta) { m.State, m.ExitCode, m.Attached = "ended", &code, false })
 	s.mu.Lock()
 	s.ended = true
 	s.broadcast()
@@ -406,7 +469,13 @@ func acpDaemon(name string) error {
 func (s *acpDaemonState) serve(conn net.Conn) {
 	me := &acpClient{conn: conn}
 	r := bufio.NewReader(conn)
+	s.mu.Lock()
+	s.handshaking++
+	s.mu.Unlock()
 	line, err := r.ReadString('\n')
+	s.mu.Lock()
+	s.handshaking--
+	s.mu.Unlock()
 	if err != nil {
 		conn.Close()
 		return
@@ -432,6 +501,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 	s.cur = me
 	s.clients++
 	s.mu.Unlock()
+	s.syncAttached()
 	defer func() {
 		conn.Close()
 		s.mu.Lock()
@@ -440,6 +510,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 			s.cur = nil
 		}
 		s.mu.Unlock()
+		s.syncAttached()
 	}()
 
 	var stdinClosed bool // guarded by s.mu
