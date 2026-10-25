@@ -38,6 +38,7 @@ final class ChatSessionModel {
   private let dial: Dial
   private let hostAnswers: HostAnswers?
   private let snapshots: (any ChatSnapshotStore)?
+  private let outboxStore: (any ChatOutboxStore)?
   private let inspect: Inspect?
   private var client: ACPClient?
   private var forwardTask: Task<Void, Never>?
@@ -55,8 +56,10 @@ final class ChatSessionModel {
   init(
     chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
-    dial: @escaping Dial
+    outbox outboxStore: (any ChatOutboxStore)? = nil, dial: @escaping Dial
   ) {
+    self.outboxStore = outboxStore
+    self.outbox = ChatOutbox(restoring: outboxStore?.load() ?? [])
     self.snapshots = snapshots
     self.inspect = inspect
     self.titleStore = titleStore
@@ -76,7 +79,8 @@ final class ChatSessionModel {
       titleStore: ChatTitleStore(config: config),
       hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) },
       snapshots: files.snapshots(route.name),
-      inspect: { await ACPHostInspect.summary(name: route.name, config: config, store: hostKeyStore) }
+      inspect: { await ACPHostInspect.summary(name: route.name, config: config, store: hostKeyStore) },
+      outbox: files.outbox(route.name)
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -213,8 +217,9 @@ final class ChatSessionModel {
 
   func retry(_ id: UUID) {
     guard canSend, let entry = outbox.entry(for: id) else { return }
+    guard entry.canRetry else { return }
     outbox.discard(id)
-    Task { await deliver(entry.text, entry.images) }
+    Task { await deliver(entry.text, entry.images, imagesLost: entry.imagesLost) }
   }
 
   func setOption(id: String, value: String) {
@@ -249,7 +254,12 @@ final class ChatSessionModel {
     }
   }
 
-  func discard(_ id: UUID) { outbox.discard(id) }
+  func discard(_ id: UUID) {
+    outbox.discard(id)
+    persistOutbox()
+  }
+
+  private func persistOutbox() { outboxStore?.save(outbox.persisted) }
 
   func cancel() {
     guard canInteract, let client else { return }
@@ -287,16 +297,20 @@ final class ChatSessionModel {
     return true
   }
 
-  private func deliver(_ text: String, _ images: [ChatImageAttachment]) async {
+  /// A retry takes the entry out of memory first but the stored copy only changes with the
+  /// outcome, so a message is never lost between the tap and the answer.
+  private func deliver(_ text: String, _ images: [ChatImageAttachment], imagesLost: Int = 0) async {
     guard let client else {
-      outbox.recordFailure(text, images: images)
+      outbox.recordFailure(text, images: images, imagesLost: imagesLost)
+      persistOutbox()
       return
     }
     do {
       try await client.prompt(text: text, images: images)
     } catch {
-      outbox.recordFailure(text, images: images)
+      outbox.recordFailure(text, images: images, imagesLost: imagesLost)
     }
+    persistOutbox()
   }
 
   private func receive(_ next: ChatState, generation mine: Int) {

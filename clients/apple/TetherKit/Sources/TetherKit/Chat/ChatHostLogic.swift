@@ -147,20 +147,37 @@ enum ChatReconnectPolicy {
 }
 
 /// Messages the agent never received. Delivered ones live in the transcript; these stay visible
-/// with Retry and Discard rather than vanishing.
+/// with Retry and Discard rather than vanishing, and survive the chat being closed.
 struct ChatOutbox: Equatable {
   struct Failed: Identifiable, Equatable {
     let id: UUID
     let text: String
-    /// Kept in memory only, so a retry can send them again.
+    /// Kept in memory only, so a retry in this session can send them again.
     var images: [ChatImageAttachment] = []
+    /// Images that went with the message but were not kept across a restart.
+    var imagesLost = 0
+
+    var imageCount: Int { images.count + imagesLost }
+    var imagesNotKept: Bool { imagesLost > 0 }
+    /// A message that was only images has nothing left to send once they are gone.
+    var canRetry: Bool { !text.isEmpty || !images.isEmpty }
   }
 
   private(set) var failed: [Failed] = []
 
+  init() {}
+
+  init(restoring messages: [PersistedFailedMessage]) {
+    failed = messages.map { Failed(id: $0.id, text: $0.text, imagesLost: $0.imageCount) }
+  }
+
+  var persisted: [PersistedFailedMessage] {
+    failed.map { PersistedFailedMessage(id: $0.id, text: $0.text, imageCount: $0.imageCount) }
+  }
+
   @discardableResult
-  mutating func recordFailure(_ text: String, images: [ChatImageAttachment] = [], id: UUID = UUID()) -> Failed {
-    let entry = Failed(id: id, text: text, images: images)
+  mutating func recordFailure(_ text: String, images: [ChatImageAttachment] = [], imagesLost: Int = 0, id: UUID = UUID()) -> Failed {
+    let entry = Failed(id: id, text: text, images: images, imagesLost: imagesLost)
     failed.append(entry)
     return entry
   }

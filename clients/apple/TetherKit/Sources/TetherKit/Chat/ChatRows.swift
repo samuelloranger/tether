@@ -420,14 +420,20 @@ struct FailedMessageRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(message.text).font(.callout).foregroundStyle(TetherColors.textSecondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
+      if !message.text.isEmpty {
+        Text(message.text).font(.callout).foregroundStyle(TetherColors.textSecondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      if message.imagesNotKept {
+        Label("Images not kept", systemImage: "photo")
+          .font(.caption).foregroundStyle(TetherColors.textFaint)
+      }
       HStack(spacing: 14) {
         Label("Not sent", systemImage: "exclamationmark.circle.fill")
           .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.danger)
         Spacer()
         Button("Discard", role: .destructive, action: discard).font(.caption.weight(.semibold))
-        Button("Retry", action: retry).font(.caption.weight(.semibold)).disabled(!canRetry)
+        Button("Retry", action: retry).font(.caption.weight(.semibold)).disabled(!canRetry || !message.canRetry)
       }
     }
     .padding(.horizontal, 14).padding(.vertical, 10)

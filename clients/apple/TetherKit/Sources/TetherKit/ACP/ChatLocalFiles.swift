@@ -36,9 +36,11 @@ struct ChatLocalFiles: Sendable {
   func remove(_ name: String, _ kind: String) { try? FileManager.default.removeItem(at: url(name, kind)) }
 
   func snapshots(_ name: String) -> FileChatSnapshotStore { FileChatSnapshotStore(files: self, name: name) }
+  func outbox(_ name: String) -> FileChatOutboxStore { FileChatOutboxStore(files: self, name: name) }
 
   func clear(_ name: String) {
     remove(name, FileChatSnapshotStore.kind)
+    remove(name, FileChatOutboxStore.kind)
   }
 }
 
@@ -71,4 +73,53 @@ final class FileChatSnapshotStore: ChatSnapshotStore, @unchecked Sendable {
   }
 
   func clear() { files.remove(name, Self.kind) }
+}
+
+/// A message the agent never received, as it is kept across the chat being closed.
+struct PersistedFailedMessage: Codable, Equatable, Sendable {
+  var id: UUID
+  var text: String
+  /// Image bytes are never stored; only how many went with the message.
+  var imageCount: Int
+}
+
+protocol ChatOutboxStore: Sendable {
+  func load() -> [PersistedFailedMessage]
+  func save(_ messages: [PersistedFailedMessage])
+}
+
+final class InMemoryChatOutboxStore: ChatOutboxStore, @unchecked Sendable {
+  private let lock = NSLock()
+  private var messages: [PersistedFailedMessage]
+
+  init(_ messages: [PersistedFailedMessage] = []) { self.messages = messages }
+
+  func load() -> [PersistedFailedMessage] { lock.lock(); defer { lock.unlock() }; return messages }
+  func save(_ messages: [PersistedFailedMessage]) { lock.lock(); self.messages = messages; lock.unlock() }
+}
+
+final class FileChatOutboxStore: ChatOutboxStore, @unchecked Sendable {
+  static let kind = "outbox"
+  private let files: ChatLocalFiles
+  private let name: String
+
+  init(files: ChatLocalFiles, name: String) {
+    self.files = files
+    self.name = name
+  }
+
+  func load() -> [PersistedFailedMessage] {
+    guard let data = files.read(name, Self.kind) else { return [] }
+    return (try? JSONDecoder().decode([PersistedFailedMessage].self, from: data)) ?? []
+  }
+
+  /// An empty outbox removes the file.
+  func save(_ messages: [PersistedFailedMessage]) {
+    guard !messages.isEmpty else {
+      files.remove(name, Self.kind)
+      return
+    }
+    guard let data = try? JSONEncoder().encode(messages) else { return }
+    files.write(data, name, Self.kind)
+  }
 }
