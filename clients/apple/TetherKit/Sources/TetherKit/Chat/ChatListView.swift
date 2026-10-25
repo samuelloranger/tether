@@ -53,31 +53,46 @@ struct ChatListView: View {
   }
 
   private func sectionHeader(_ text: String) -> some View {
-    Text(text).font(.footnote.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
-      .textCase(nil)
+    Text(text).font(.system(size: 12, weight: .semibold)).tracking(0.6)
+      .foregroundStyle(TetherColors.textSecondary)
+      .textCase(.uppercase)
   }
 
   private var newChatRow: some View {
-    HStack(spacing: 10) {
-      Image(systemName: "folder").foregroundStyle(TetherColors.textFaint)
-      TextField("Folder on the host", text: $newFolder)
-        .font(.body.monospaced())
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
-        .focused($folderFocused)
-        .submitLabel(.go)
-        .onSubmit(start)
-        .accessibilityLabel("Folder for the new chat")
-      Button(action: start) {
-        if starting {
-          ProgressView().tint(TetherColors.onAccent)
-        } else {
-          Text("Start").font(.subheadline.weight(.semibold))
+    VStack(alignment: .leading, spacing: 10) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Working folder").font(.caption).foregroundStyle(TetherColors.textSecondary)
+        HStack(spacing: 8) {
+          TextField("Folder on the host", text: $newFolder)
+            .font(.body.monospaced())
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .focused($folderFocused)
+            .submitLabel(.go)
+            .onSubmit(start)
+            .accessibilityLabel("Working folder for the new chat")
+          Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+            .foregroundStyle(TetherColors.textFaint)
+            .accessibilityHidden(true)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { folderFocused = true }
       }
-      .padding(.horizontal, 14).padding(.vertical, 8)
-      .background(TetherColors.accent, in: Capsule())
-      .foregroundStyle(TetherColors.onAccent)
+      Button(action: start) {
+        Group {
+          if starting {
+            ProgressView().tint(TetherColors.onAccent)
+          } else {
+            Text("Start chat").font(.subheadline.weight(.semibold))
+          }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 36)
+        .foregroundStyle(TetherColors.onAccent)
+        .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+      }
       .buttonStyle(TetherPressStyle())
       .disabled(starting)
       .accessibilityIdentifier("chatNew")
