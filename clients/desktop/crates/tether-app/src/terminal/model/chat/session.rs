@@ -117,6 +117,7 @@ pub struct Session {
     pub question_drafts: HashMap<String, QuestionDraft>,
     rev: u64,
     shown_rev: u64,
+    snapshot_rev: u64,
 }
 
 /// A chat's local files are a cache of the host's log: a failed write only costs a longer replay.
@@ -192,6 +193,7 @@ impl Session {
             question_drafts: HashMap::new(),
             rev: 1,
             shown_rev: 0,
+            snapshot_rev: 0,
         }
     }
 
@@ -252,7 +254,13 @@ impl Session {
 
     pub fn connect(&mut self, ctx: &mut Ctx<'_>) {
         let client_usable = self.client.is_some() && self.link.phase() != LinkPhase::Lost;
-        if self.dialing || self.left || client_usable || !ctx.connected {
+        if self.dialing || self.left || client_usable {
+            return;
+        }
+        // Opened while the terminal is down: lost, so the reconnect picks it up.
+        if !ctx.connected {
+            self.link.connection_lost();
+            self.touched();
             return;
         }
         self.dialing = true;
@@ -637,7 +645,10 @@ impl Session {
             self.learn_at = None;
             self.inspect(InspectWhy::Learn, ctx);
         }
-        if self.client.is_some() && ctx.now.saturating_sub(self.snapshot_at) >= SNAPSHOT_EVERY {
+        if self.client.is_some()
+            && self.rev != self.snapshot_rev
+            && ctx.now.saturating_sub(self.snapshot_at) >= SNAPSHOT_EVERY
+        {
             self.save_snapshot(ctx);
         }
         if changed {
@@ -656,6 +667,7 @@ impl Session {
     /// Only once the host log's identity is known, and never for a state that lost its link.
     fn save_snapshot(&mut self, ctx: &mut Ctx<'_>) {
         self.snapshot_at = ctx.now;
+        self.snapshot_rev = self.rev;
         let (Some(files), Some(client), Some(identity)) = (ctx.files, &self.client, self.identity)
         else {
             return;
@@ -739,21 +751,68 @@ impl Session {
             generation: self.generation,
             bytes,
             tag,
+            ack: false,
         });
+    }
+
+    /// A Stop lands first and is journaled after, as iOS does: a cancel that never reached the
+    /// agent must not read "Stopped" or drop the queued messages.
+    pub fn on_written(&mut self, generation: u64, tag: WriteTag, ctx: &mut Ctx<'_>) {
+        if generation != self.generation || !matches!(tag, WriteTag::Cancel(_)) {
+            return;
+        }
+        let Some(client) = self.client.as_mut() else {
+            return;
+        };
+        let answers = client.cancelled();
+        self.persist_journal(ctx);
+        for out in answers {
+            self.write(out.line.clone(), Some(WriteTag::Answer(out)), ctx);
+        }
+        self.touched();
+    }
+
+    /// A write that failed after the chat redialed: the client that journaled it is gone, so the
+    /// stored journal is corrected instead, or a replay would show it delivered.
+    fn undo_stored(&self, out: &Outbound, ctx: &mut Ctx<'_>) {
+        use tether_core::acp::journal::EntryKind;
+        let (Some(files), Some(id)) = (ctx.files, out.id.as_ref()) else {
+            return;
+        };
+        if self.client.is_some() {
+            return;
+        }
+        let kinds: &[EntryKind] = match out.undo {
+            Undo::Prompt => &[EntryKind::Prompt],
+            Undo::Permission { .. } | Undo::Question { .. } => {
+                &[EntryKind::Answer, EntryKind::QuestionAnswer]
+            }
+            _ => return,
+        };
+        let mut journal = files.journal(&self.name);
+        if let Some(i) = journal
+            .entries
+            .iter()
+            .rposition(|e| kinds.contains(&e.kind) && e.request_id.as_ref() == Some(id))
+        {
+            journal.entries.remove(i);
+            saved(files.save_journal(&self.name, &journal));
+        }
     }
 
     pub fn on_write_failed(&mut self, generation: u64, tag: WriteTag, ctx: &mut Ctx<'_>) {
         let current = generation == self.generation && self.client.is_some();
-        let undo = |s: &mut Self, out: &Outbound| -> Option<Completion> {
+        let undo = |s: &mut Self, out: &Outbound, ctx: &mut Ctx<'_>| -> Option<Completion> {
             if current {
                 s.client.as_mut().and_then(|c| c.undelivered(out))
             } else {
+                s.undo_stored(out, ctx);
                 None
             }
         };
         match tag {
             WriteTag::Request(out) => {
-                if let Some(c) = undo(self, &out) {
+                if let Some(c) = undo(self, &out, ctx) {
                     self.on_completion(c, ctx);
                 }
             }
@@ -763,22 +822,21 @@ impl Session {
                 images,
                 lost,
             } => {
-                undo(self, &out);
+                undo(self, &out, ctx);
                 self.outbox.record_failure(&text, images, lost, None);
                 self.persist_outbox(ctx);
             }
             WriteTag::Answer(out) => {
-                undo(self, &out);
+                undo(self, &out, ctx);
                 if let Some(request) = out.id {
                     self.ask_host_answer(request, ctx);
                 }
             }
-            WriteTag::Cancel(out) => {
-                undo(self, &out);
+            WriteTag::Cancel(_) => {
                 self.notice = Some("Stop didn't reach the agent. Try again.".into());
             }
             WriteTag::Config { out, id, value } => {
-                undo(self, &out);
+                undo(self, &out, ctx);
                 self.option_changes.insert(
                     id,
                     OptionChange::Failed(value, "The change didn't reach the agent.".into()),
@@ -888,9 +946,10 @@ impl Session {
             }
             None => {
                 self.outbox.record_failure(&text, images, lost, None);
-                self.persist_outbox(ctx);
             }
         }
+        // A retried message left the outbox before this attempt; the stored copy follows the outcome.
+        self.persist_outbox(ctx);
         self.touched();
     }
 
@@ -1217,13 +1276,14 @@ impl Session {
         let Some(client) = self.client.as_mut() else {
             return;
         };
-        match client.cancel() {
-            Ok(lines) => {
-                self.persist_journal(ctx);
-                for out in lines {
-                    self.write(out.line.clone(), Some(WriteTag::Cancel(out)), ctx);
-                }
-            }
+        match client.cancel_line() {
+            Ok(out) => ctx.out.jobs.push(ChatJob::Write {
+                name: self.name.clone(),
+                generation: self.generation,
+                bytes: out.line.clone(),
+                tag: Some(WriteTag::Cancel(out)),
+                ack: true,
+            }),
             Err(_) => self.notice = Some("Stop didn't reach the agent. Try again.".into()),
         }
     }

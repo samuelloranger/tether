@@ -353,18 +353,31 @@ impl ChatClient {
     /// every pending question. Everything is journaled and shown at once: report each line that
     /// failed to write with [`ChatClient::undelivered`] and its card asks again.
     pub fn cancel(&mut self) -> Result<Vec<Outbound>, ClientError> {
+        let mut out = vec![self.cancel_line()?];
+        out.extend(self.cancelled());
+        Ok(out)
+    }
+
+    /// The `session/cancel` notification alone, journaling nothing: a caller that learns when its
+    /// write lands sends this first and calls [`ChatClient::cancelled`] after, as iOS does.
+    pub fn cancel_line(&self) -> Result<Outbound, ClientError> {
         let session_id = self
             .journal
             .session_id
             .clone()
             .ok_or(ClientError::NoSession)?;
-        let mut out = vec![Outbound {
+        Ok(Outbound {
             id: None,
             line: encode(
                 json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}),
             ),
             undo: Undo::None,
-        }];
+        })
+    }
+
+    /// Journals a delivered cancel and answers every pending permission and question with it.
+    pub fn cancelled(&mut self) -> Vec<Outbound> {
+        let mut out = Vec::new();
         self.journal.entries.push(Entry::new(
             EntryKind::Cancel,
             self.builder.consumed_offset(),
@@ -407,7 +420,7 @@ impl ChatClient {
                 });
             }
         }
-        Ok(out)
+        out
     }
 
     /// The answer is journaled and shown before the write so a replay resolves the card; if the

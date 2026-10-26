@@ -794,3 +794,194 @@ fn scrolled_up_the_window_holds_its_start_and_back_at_the_end_it_follows_again()
     h.msg(ChatMsg::Following(true));
     assert_ne!(first(&h.screen()), before);
 }
+
+fn fail_last_write(h: &mut Harness, name: &str, generation: u64) {
+    let tag = h
+        .take()
+        .into_iter()
+        .rev()
+        .find_map(|j| match j {
+            ChatJob::Write { tag: Some(tag), .. } => Some(tag),
+            _ => None,
+        })
+        .unwrap();
+    h.msg(ChatMsg::WriteFailed {
+        name: name.into(),
+        generation,
+        tag,
+    });
+}
+
+#[test]
+fn a_retried_message_that_lands_leaves_the_stored_outbox() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.msg(ChatMsg::DraftEdited {
+        text: "lost".into(),
+        cursor_byte: 4,
+    });
+    h.msg(ChatMsg::Send);
+    fail_last_write(&mut h, &name, generation);
+    assert_eq!(h.files.outbox(&name).len(), 1);
+    let key = h
+        .screen()
+        .rows
+        .iter()
+        .find(|r| matches!(r.body, RowBody::NotSent { .. }))
+        .unwrap()
+        .key
+        .clone();
+    h.msg(ChatMsg::Retry(key));
+    assert!(h.writes()[0].contains("lost"));
+    assert!(
+        h.files.outbox(&name).is_empty(),
+        "a restart must not bring it back"
+    );
+}
+
+#[test]
+fn a_chat_opened_while_disconnected_dials_once_the_connection_returns() {
+    let mut h = Harness::new();
+    h.exec(
+        |t| *t == ExecTag::Status,
+        r#"{"name":"chat-a","state":"running","logBytes":10,"cwd":"/home/sam/web","created":100,"turn":"idle"}"#,
+    );
+    h.run(|c, now, out| c.on_dropped(now, out));
+    h.msg(ChatMsg::Select("chat-a".into()));
+    let jobs = h.take();
+    assert!(h.dial_of(&jobs).is_none());
+    h.run(|c, now, out| c.on_connected(now, out));
+    h.run(|c, now, out| c.on_tick(now, out));
+    let jobs = h.take();
+    assert!(h.dial_of(&jobs).is_some(), "{jobs:?}");
+}
+
+#[test]
+fn stop_reads_stopped_only_once_the_cancel_landed() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.msg(ChatMsg::DraftEdited {
+        text: "go".into(),
+        cursor_byte: 2,
+    });
+    h.msg(ChatMsg::Send);
+    h.writes();
+    h.msg(ChatMsg::Stop);
+    let tag = h
+        .take()
+        .into_iter()
+        .find_map(|j| match j {
+            ChatJob::Write {
+                tag: Some(tag),
+                ack: true,
+                ..
+            } => Some(tag),
+            _ => None,
+        })
+        .expect("an acknowledged cancel");
+    let stopped = |h: &mut Harness| {
+        rows(&h.screen())
+            .iter()
+            .any(|r| matches!(r, RowBody::Notice(t) if t == "Stopped"))
+    };
+    assert!(!stopped(&mut h));
+    h.msg(ChatMsg::WriteFailed {
+        name: name.clone(),
+        generation,
+        tag: tag.clone(),
+    });
+    assert!(!stopped(&mut h));
+    assert_eq!(h.screen().notice, "Stop didn't reach the agent. Try again.");
+    h.msg(ChatMsg::Written {
+        name,
+        generation,
+        tag,
+    });
+    assert!(stopped(&mut h));
+}
+
+#[test]
+fn a_prompt_that_fails_after_a_redial_is_taken_out_of_the_stored_journal() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.msg(ChatMsg::DraftEdited {
+        text: "late".into(),
+        cursor_byte: 4,
+    });
+    h.msg(ChatMsg::Send);
+    let tag = h
+        .take()
+        .into_iter()
+        .find_map(|j| match j {
+            ChatJob::Write { tag: Some(tag), .. } => Some(tag),
+            _ => None,
+        })
+        .unwrap();
+    h.run(|c, now, out| c.leave_active(now, out));
+    assert!(
+        h.files
+            .journal(&name)
+            .entries
+            .iter()
+            .any(|e| e.text.as_deref() == Some("late"))
+    );
+    h.msg(ChatMsg::WriteFailed {
+        name: name.clone(),
+        generation,
+        tag,
+    });
+    assert!(
+        !h.files
+            .journal(&name)
+            .entries
+            .iter()
+            .any(|e| e.text.as_deref() == Some("late"))
+    );
+    assert_eq!(h.files.outbox(&name).len(), 1);
+}
+
+#[test]
+fn an_idle_open_chat_does_not_rewrite_its_snapshot() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Learn,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\trunning\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}}"#,
+    );
+    h.now += 4000;
+    h.run(|c, now, out| c.on_tick(now, out));
+    assert!(h.files.snapshot(&name).is_some());
+    h.files.clear_snapshot(&name);
+    for _ in 0..3 {
+        h.now += 4000;
+        h.run(|c, now, out| c.on_tick(now, out));
+    }
+    assert!(h.files.snapshot(&name).is_none());
+}
+
+#[test]
+fn answering_a_card_hands_the_keyboard_back_to_the_composer() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":"p1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"toolCallId":"t1","title":"Run ls","kind":"execute"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}"#,
+    );
+    let before = h.screen().focus_seq;
+    h.msg(ChatMsg::Approve("allow".into()));
+    assert!(h.screen().focus_seq > before);
+}

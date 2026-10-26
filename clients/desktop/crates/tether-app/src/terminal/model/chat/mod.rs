@@ -116,6 +116,8 @@ pub enum ChatJob {
         generation: u64,
         bytes: Vec<u8>,
         tag: Option<WriteTag>,
+        /// Report the write once it landed: a Stop is journaled only after its cancel is sent.
+        ack: bool,
     },
     Hangup {
         name: String,
@@ -221,6 +223,11 @@ pub enum ChatMsg {
         generation: u64,
     },
     WriteFailed {
+        name: String,
+        generation: u64,
+        tag: WriteTag,
+    },
+    Written {
         name: String,
         generation: u64,
         tag: WriteTag,
@@ -780,6 +787,13 @@ impl Chats {
                     s.on_write_failed(generation, tag, ctx)
                 });
             }
+            ChatMsg::Written {
+                name,
+                generation,
+                tag,
+            } => {
+                self.with_session(&name, now, out, |s, ctx| s.on_written(generation, tag, ctx));
+            }
             ChatMsg::Encoded { name, key, result } => {
                 self.with_session(&name, now, out, |s, _| s.on_encoded(&key, result));
             }
@@ -817,6 +831,16 @@ impl Chats {
             }
             // The rest act on the chat in front.
             other => {
+                // An answered card leaves; the keyboard goes back to the composer.
+                if matches!(
+                    other,
+                    ChatMsg::QuestionSubmit
+                        | ChatMsg::QuestionDecline
+                        | ChatMsg::QuestionChoose { .. }
+                        | ChatMsg::Approve(_)
+                ) {
+                    self.focus_seq += 1;
+                }
                 if let Some(name) = self.active.clone() {
                     self.with_session(&name, now, out, |s, ctx| s.handle_ui(other, ctx));
                 }
@@ -926,10 +950,11 @@ impl Chats {
 
     /// A chunk that arrived inside the frame window still has to be drawn once the window passes.
     pub fn flush_due(&mut self, now: Duration) {
+        let active = self.active.as_ref().and_then(|n| self.sessions.get(n));
         if self
             .shown_at
             .is_some_and(|t| now.saturating_sub(t) >= FRAME)
-            && self.sessions.values().any(Session::changed_since_shown)
+            && active.is_some_and(Session::changed_since_shown)
         {
             self.dirty = true;
         }

@@ -71,7 +71,7 @@ fn spawn_writer<S: PtySink>(
 pub type MsgSink = Arc<dyn Fn(Msg) + Send + Sync>;
 
 /// One chat's stream: the task that owns it writes these in order, and stops when the sender goes.
-type ChatWriter = mpsc::UnboundedSender<(Vec<u8>, Option<WriteTag>)>;
+type ChatWriter = mpsc::UnboundedSender<(Vec<u8>, Option<WriteTag>, bool)>;
 
 /// Opens the chat's stream and runs it: holder output becomes messages, queued lines are
 /// written in order, and a dropped queue closes the channel.
@@ -80,7 +80,7 @@ async fn run_chat_stream<R: Remote>(
     name: String,
     generation: u64,
     command: String,
-    mut writes: mpsc::UnboundedReceiver<(Vec<u8>, Option<WriteTag>)>,
+    mut writes: mpsc::UnboundedReceiver<(Vec<u8>, Option<WriteTag>, bool)>,
     send: MsgSink,
 ) {
     let chat = |m: ChatMsg| send(Msg::Chat(m));
@@ -117,12 +117,19 @@ async fn run_chat_stream<R: Remote>(
             send(Msg::Chat(ChatMsg::Closed { name, generation }));
         })
     };
-    while let Some((bytes, tag)) = writes.recv().await {
-        if sink.write(bytes).await.is_err()
-            && let Some(tag) = tag
-        {
+    while let Some((bytes, tag, ack)) = writes.recv().await {
+        let landed = sink.write(bytes).await.is_ok();
+        let Some(tag) = tag else { continue };
+        let name = name.clone();
+        if !landed {
             chat(ChatMsg::WriteFailed {
-                name: name.clone(),
+                name,
+                generation,
+                tag,
+            });
+        } else if ack {
+            chat(ChatMsg::Written {
+                name,
                 generation,
                 tag,
             });
@@ -543,12 +550,13 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                 generation,
                 bytes,
                 tag,
+                ack,
             } => {
                 let open = self
                     .chats
                     .get(&name)
                     .filter(|(g, _)| *g == generation)
-                    .is_some_and(|(_, w)| w.send((bytes, tag.clone())).is_ok());
+                    .is_some_and(|(_, w)| w.send((bytes, tag.clone(), ack)).is_ok());
                 if !open && let Some(tag) = tag {
                     send(Msg::Chat(ChatMsg::WriteFailed {
                         name,
