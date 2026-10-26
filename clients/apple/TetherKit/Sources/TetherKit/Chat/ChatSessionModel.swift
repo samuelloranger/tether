@@ -15,6 +15,8 @@ final class ChatSessionModel {
   let chatName: String
   let cwd: String
   let readOnly: Bool
+  /// What the host is called in messages about it; the connection's host name.
+  let hostLabel: String
 
   private(set) var state = ChatState()
   private(set) var link = ChatLinkTracker()
@@ -24,6 +26,10 @@ final class ChatSessionModel {
   var notice: String?
   /// Option changes in flight or refused, by option id; the shown value only changes once the agent confirms.
   private(set) var optionChanges: [String: OptionChange] = [:]
+
+  enum SignInRetry: Equatable { case idle, checking, stillSignedOut }
+
+  private(set) var signInRetry: SignInRetry = .idle
 
   enum OptionChange: Equatable {
     case pending(value: String)
@@ -56,8 +62,9 @@ final class ChatSessionModel {
   init(
     chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
-    outbox outboxStore: (any ChatOutboxStore)? = nil, dial: @escaping Dial
+    outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", dial: @escaping Dial
   ) {
+    self.hostLabel = hostLabel
     self.outboxStore = outboxStore
     self.outbox = ChatOutbox(restoring: outboxStore?.load() ?? [])
     self.snapshots = snapshots
@@ -80,7 +87,7 @@ final class ChatSessionModel {
       hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) },
       snapshots: files.snapshots(route.name),
       inspect: { await ACPHostInspect.summary(name: route.name, config: config, store: hostKeyStore) },
-      outbox: files.outbox(route.name)
+      outbox: files.outbox(route.name), hostLabel: config.host
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -93,7 +100,14 @@ final class ChatSessionModel {
   /// Send, Stop and Approve wait for the replay: until then the transcript may still be partial
   /// and a pending permission may already have been answered.
   var canInteract: Bool { link.allowsInteraction && !readOnly }
-  var canSend: Bool { canInteract && state.turn == .idle }
+  /// A message can be sent at any time a turn is running too: the agent queues it.
+  var canSend: Bool { canInteract && !needsSignIn }
+  /// The agent refused to start for want of a login on the host, so there is no session to talk to yet.
+  var needsSignIn: Bool {
+    guard state.sessionId == nil, case .signedOut? = state.items.last?.kind else { return false }
+    return true
+  }
+  var isWorking: Bool { state.turn == .working }
   /// The agent is gone for good: the transcript stays readable, nothing can be sent and nothing redials.
   var hasEnded: Bool { link.phase == .ended }
 
@@ -163,7 +177,30 @@ final class ChatSessionModel {
       if readOnly { await fresh.startReading() } else { try await fresh.start(cwd: cwd) }
     } catch {
       guard mine == generation else { return }
-      fail(error)
+      // The transcript already carries the sign-in row; the link itself is fine.
+      if !ChatAuthError.matches(error) { fail(error) }
+    }
+  }
+
+  /// After signing in on the host: asks the agent for a session again on the same connection.
+  func retrySignIn() {
+    guard canInteract, needsSignIn, signInRetry != .checking, let client else { return }
+    signInRetry = .checking
+    let mine = generation
+    Task {
+      do {
+        try await client.start(cwd: cwd)
+        guard mine == generation else { return }
+        signInRetry = .idle
+      } catch {
+        guard mine == generation else { return }
+        if ChatAuthError.matches(error) {
+          signInRetry = .stillSignedOut
+        } else {
+          signInRetry = .idle
+          notice = "Couldn't reach the agent: \(Self.describe(error))"
+        }
+      }
     }
   }
 

@@ -6,6 +6,8 @@ struct ChatJournal: Codable, Equatable, Sendable {
   struct Entry: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
       case prompt, answer, silentRequest
+      /// Stop was pressed: replay shows the same notice and drops the same queued labels.
+      case cancel
       /// A question answered here: `optionId` holds the action and `content` the form values.
       case questionAnswer
       /// An answer the host recorded while no client was attached; offset 0, applied before the replay.
@@ -47,7 +49,9 @@ struct ChatJournal: Codable, Equatable, Sendable {
     var event: ChatEvent? {
       switch kind {
       case .prompt:
-        return text.map { .userPrompt(text: $0, imageCount: imageCount, atOffset: offset) }
+        return text.map { .userPrompt(text: $0, imageCount: imageCount, atOffset: offset, requestId: requestId) }
+      case .cancel:
+        return .cancelRequested
       case .silentRequest:
         return requestId.map { .silentRequest(requestId: $0) }
       case .answer:
@@ -80,7 +84,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
 /// `offset` instead of replaying everything. The journal stays authoritative: the snapshot only
 /// counts which of its entries it already reflects.
 struct ChatSnapshot: Codable, Equatable, Sendable {
-  static let currentVersion = 2
+  static let currentVersion = 3
 
   var version = ChatSnapshot.currentVersion
   /// The host session's created time (unix seconds): a session recreated under the same name has another.

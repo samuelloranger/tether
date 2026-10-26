@@ -112,22 +112,23 @@ actor ACPClient {
     guard !ended else { throw ACPClientError.connectionLost }
     let offset = builder.consumedOffset
     let count = images.count
-    journal.entries.append(.init(kind: .prompt, offset: offset, text: text, imageCount: count))
-    builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset))
+    let requestId = allocateId()
+    journal.entries.append(.init(kind: .prompt, offset: offset, text: text, requestId: requestId, imageCount: count))
+    builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset, requestId: requestId))
     publish()
     store.save(journal)
     var blocks: [[String: Any]] = images.map { ["type": "image", "mimeType": $0.mimeType, "data": $0.data] }
     if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
     do {
-      try await send(method: "session/prompt", params: ["sessionId": sessionId, "prompt": blocks])
+      try await send(method: "session/prompt", id: requestId, params: ["sessionId": sessionId, "prompt": blocks])
     } catch {
       if let index = journal.entries.lastIndex(where: {
-        $0.kind == .prompt && $0.offset == offset && $0.text == text && $0.imageCount == count
+        $0.kind == .prompt && $0.requestId == requestId
       }) {
         journal.entries.remove(at: index)
       }
       store.save(journal)
-      builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset))
+      builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset, requestId: requestId))
       publish()
       throw error
     }
@@ -144,6 +145,10 @@ actor ACPClient {
   func cancel() async throws {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
     try await write(["jsonrpc": "2.0", "method": "session/cancel", "params": ["sessionId": sessionId]])
+    journal.entries.append(.init(kind: .cancel, offset: builder.consumedOffset))
+    builder.apply(.cancelRequested)
+    publish()
+    store.save(journal)
     for permission in builder.state.pendingPermissions {
       try await respond(to: permission.requestId, outcome: ["outcome": "cancelled"], optionId: "cancelled")
     }
@@ -282,8 +287,7 @@ actor ACPClient {
     pending.removeValue(forKey: id)?.continuation?.resume(throwing: error)
   }
 
-  private func send(method: String, params: [String: Any]) async throws {
-    let id = allocateId()
+  private func send(method: String, id: ACPID, params: [String: Any]) async throws {
     pending[id] = Pending(continuation: nil)
     do {
       try await write(["jsonrpc": "2.0", "id": id.json, "method": method, "params": params])

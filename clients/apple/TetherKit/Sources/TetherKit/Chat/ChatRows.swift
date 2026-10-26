@@ -57,15 +57,21 @@ struct ChatItemRow: View, Equatable {
   let cwd: String
   let expanded: Bool
   let toggle: () -> Void
+  var queued = false
+  var host = "the host"
+  /// Set while the agent has no session for want of a login: the row then offers another try.
+  var signInRetry: ChatSessionModel.SignInRetry?
+  var retrySignIn: () -> Void = {}
 
   static func == (lhs: ChatItemRow, rhs: ChatItemRow) -> Bool {
-    lhs.item == rhs.item && lhs.cwd == rhs.cwd && lhs.expanded == rhs.expanded
+    lhs.item == rhs.item && lhs.cwd == rhs.cwd && lhs.expanded == rhs.expanded && lhs.queued == rhs.queued
+      && lhs.host == rhs.host && lhs.signInRetry == rhs.signInRetry
   }
 
   var body: some View {
     switch item.kind {
     case let .user(text, images, _):
-      UserMessageRow(text: text, imageCount: images)
+      UserMessageRow(text: text, imageCount: images, queued: queued)
     case let .assistant(text, _):
       AssistantTextView(text: text)
     case let .thought(text):
@@ -80,15 +86,93 @@ struct ChatItemRow: View, Equatable {
       QuietRow(symbol: "info.circle", text: text, tint: TetherColors.textFaint)
     case let .error(text):
       QuietRow(symbol: "exclamationmark.triangle", text: text, tint: TetherColors.danger)
+    case let .divider(text):
+      ChatDividerRow(text: text)
+    case .signedOut:
+      SignedOutRow(host: host, retry: signInRetry, action: retrySignIn)
     }
+  }
+}
+
+/// A hairline with a short label: where the agent's context was cleared or compacted.
+struct ChatDividerRow: View {
+  let text: String
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Rectangle().fill(TetherColors.border).frame(height: 0.5)
+      Text(text).font(.caption).foregroundStyle(TetherColors.textFaint).fixedSize()
+      Rectangle().fill(TetherColors.border).frame(height: 0.5)
+    }
+    .padding(.vertical, 4)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(text)
+  }
+}
+
+enum ChatSignInCopy {
+  static func message(host: String) -> String {
+    "Claude isn't signed in on \(host). Open a terminal there and run claude to sign in."
+  }
+}
+
+struct SignedOutRow: View {
+  let host: String
+  let retry: ChatSessionModel.SignInRetry?
+  let action: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Image(systemName: "person.crop.circle.badge.exclamationmark").font(.caption).foregroundStyle(TetherColors.warning)
+        Text(ChatSignInCopy.message(host: host)).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          .textSelection(.enabled)
+      }
+      if let retry {
+        HStack(spacing: 8) {
+          Button(action: action) {
+            HStack(spacing: 6) {
+              if retry == .checking { ProgressView().controlSize(.mini) }
+              Text(retry == .checking ? "Checking" : "Try again").font(.subheadline.weight(.semibold))
+            }
+            .padding(.horizontal, 14).frame(minHeight: 34)
+            .foregroundStyle(TetherColors.accent)
+            .background(TetherColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+            .hitSlop(vertical: 5)
+          }
+          .buttonStyle(TetherPressStyle())
+          .disabled(retry == .checking)
+          .accessibilityIdentifier("chatSignInRetry")
+          if retry == .stillSignedOut {
+            Text("Still signed out").font(.caption).foregroundStyle(TetherColors.textFaint)
+          }
+        }
+        .padding(.leading, 20)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .contain)
   }
 }
 
 struct UserMessageRow: View {
   let text: String
   var imageCount = 0
+  var queued = false
 
   var body: some View {
+    VStack(alignment: .trailing, spacing: 3) {
+      bubble
+      if queued {
+        Label("Queued", systemImage: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
+          .padding(.trailing, 4)
+      }
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("You: \(imageCount > 0 ? ChatComposerRule.imageLabel(imageCount) + ". " : "")\(text)\(queued ? ". Queued" : "")")
+  }
+
+  private var bubble: some View {
     VStack(alignment: .leading, spacing: 4) {
       if imageCount > 0 {
         Label(ChatComposerRule.imageLabel(imageCount), systemImage: "photo")
@@ -104,8 +188,8 @@ struct UserMessageRow: View {
       .padding(.horizontal, 14).padding(.vertical, 10)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
+      .opacity(queued ? 0.72 : 1)
       .padding(.leading, 28)
-      .accessibilityLabel("You: \(imageCount > 0 ? ChatComposerRule.imageLabel(imageCount) + ". " : "")\(text)")
   }
 }
 

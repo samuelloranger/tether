@@ -117,8 +117,13 @@ struct ChatView: View {
       ForEach(ChatGrouping.blocks(visibleItems)) { block in
         switch block {
         case let .item(item):
-          ChatItemRow(item: item, cwd: model.cwd, expanded: isExpanded(item)) { toggleExpanded(item.id) }
-            .equatable()
+          ChatItemRow(
+            item: item, cwd: model.cwd, expanded: isExpanded(item), toggle: { toggleExpanded(item.id) },
+            queued: model.state.isQueued(item.id), host: model.hostLabel,
+            signInRetry: model.needsSignIn && item.id == model.state.items.last?.id ? model.signInRetry : nil,
+            retrySignIn: { model.retrySignIn() }
+          )
+          .equatable()
         case let .tools(items):
           ToolGroupView(
             items: items, cwd: model.cwd, expandedIDs: Set(items.filter(isExpanded).map(\.id)),
@@ -427,7 +432,7 @@ struct ChatView: View {
         attachButton
         TextField(
           "", text: $draft,
-          prompt: Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : "Message the agent")
+          prompt: Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : "Message the agent")
             .foregroundStyle(TetherColors.placeholder),
           axis: .vertical
         )
@@ -490,14 +495,19 @@ struct ChatView: View {
   }
 
   private var working: Bool { model.state.turn == .working }
+  private var action: ChatComposerRule.Action {
+    ChatComposerRule.action(
+      working: working, hasContent: !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.items.isEmpty)
+  }
+  private var stopping: Bool { action == .stop }
 
   private var discColor: Color {
-    if working { return TetherColors.danger.opacity(0.2) }
+    if stopping { return TetherColors.danger.opacity(0.2) }
     return canSendNow ? TetherColors.accent : TetherColors.textFaint.opacity(0.35)
   }
 
   private var glyphColor: Color {
-    if working { return TetherColors.danger }
+    if stopping { return TetherColors.danger }
     return canSendNow ? TetherColors.onAccent : TetherColors.textSecondary
   }
 
@@ -511,9 +521,9 @@ struct ChatView: View {
 
   private var actionButton: some View {
     Button {
-      if working { model.cancel() } else { sendMessage() }
+      if stopping { model.cancel() } else { sendMessage() }
     } label: {
-      Image(systemName: working ? "stop.fill" : "arrow.up")
+      Image(systemName: stopping ? "stop.fill" : "arrow.up")
         .font(.system(size: 14, weight: .bold))
         .frame(width: 32, height: 32)
         .foregroundStyle(glyphColor)
@@ -521,8 +531,8 @@ struct ChatView: View {
         .hitSlop(vertical: 6, horizontal: 6)
     }
     .buttonStyle(TetherPressStyle())
-    .disabled(working ? !model.canInteract : !canSendNow)
-    .accessibilityLabel(working ? "Stop" : "Send")
+    .disabled(stopping ? !model.canInteract : !canSendNow)
+    .accessibilityLabel(stopping ? "Stop" : working ? "Queue message" : "Send")
     .accessibilityIdentifier("chatAction")
   }
 }

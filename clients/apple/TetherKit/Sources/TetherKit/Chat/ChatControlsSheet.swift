@@ -220,8 +220,8 @@ struct ChatControlsSheet: View {
               .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(!model.canSend)
-            .opacity(model.canSend ? 1 : 0.55)
+            .disabled(!model.canSend || model.isWorking)
+            .opacity(model.canSend && !model.isWorking ? 1 : 0.55)
             .accessibilityLabel("\(command.title), \(command.detail)")
           }
         }

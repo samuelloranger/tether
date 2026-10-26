@@ -68,6 +68,11 @@ struct ChatStatusLine: Equatable {
 }
 
 enum ChatComposerRule {
+  enum Action: Equatable { case send, stop }
+
+  /// While the agent works an empty draft stops it and anything typed queues behind it.
+  static func action(working: Bool, hasContent: Bool) -> Action { working && !hasContent ? .stop : .send }
+
   /// Text or at least one encoded image, and nothing still being encoded.
   static func canSend(text: String, readyImages: Int, encoding: Int, sessionCanSend: Bool) -> Bool {
     guard sessionCanSend, encoding == 0 else { return false }

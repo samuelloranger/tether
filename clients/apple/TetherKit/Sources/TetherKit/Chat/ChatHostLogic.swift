@@ -89,8 +89,10 @@ enum ACPCwd {
 enum ChatOpenMode: Equatable {
   case resume, readOnly
 
+  /// A chat this phone began but never got a session for (a signed-out agent) has sent requests,
+  /// so it reopens as live and asks again; a chat it never touched stays read only.
   static func mode(for journal: ChatJournal) -> ChatOpenMode {
-    journal.sessionId == nil ? .readOnly : .resume
+    journal.sessionId == nil && journal.nextRequestId <= 1 ? .readOnly : .resume
   }
 }
 
@@ -296,6 +298,7 @@ extension ChatState {
     hasher.combine(items.count)
     hasher.combine(turn)
     hasher.combine(pendingPermissions.count)
+    hasher.combine(queuedItemIds.count)
     if let last = items.last {
       switch last.kind {
       case let .assistant(text, _), let .thought(text), let .notice(text), let .error(text):

@@ -100,6 +100,10 @@ struct ChatItem: Codable, Equatable, Identifiable, Sendable {
     case plan([ACPPlanEntry])
     case notice(String)
     case error(String)
+    /// A quiet rule in the transcript, such as where the agent's context was cleared.
+    case divider(String)
+    /// The agent refused for lack of a login on its host; the view names the host.
+    case signedOut
   }
 
   var id: Int
@@ -124,6 +128,11 @@ struct ChatState: Codable, Equatable, Sendable {
   var contextSize: Int?
   var lastStopReason: String?
   var loadSession: Bool?
+  /// User messages sent while an earlier prompt was still running, until the agent starts them.
+  fileprivate(set) var queuedItemIds: [Int] = []
+  fileprivate var inFlight: [InFlightPrompt] = []
+  /// A prompt just ended while others wait: the next agent output or echoed message starts the oldest.
+  fileprivate var startPending = false
   fileprivate var nextItemId = 0
   /// Requests whose failure belongs to the caller, not the transcript.
   fileprivate var silentRequestIds: Set<ACPID> = []
@@ -131,6 +140,14 @@ struct ChatState: Codable, Equatable, Sendable {
   fileprivate var hostAnswers: [ACPID: String] = [:]
   /// The question tool's own calls: the question row stands for them.
   fileprivate var questionToolIds: Set<String> = []
+
+  struct InFlightPrompt: Codable, Equatable, Sendable {
+    var itemId: Int
+    /// Nil for a prompt journaled before ids were recorded; such a response matches the oldest.
+    var requestId: ACPID?
+  }
+
+  func isQueued(_ itemId: Int) -> Bool { queuedItemIds.contains(itemId) }
 
   func option(id: String) -> ACPConfigOption? { configOptions.first { $0.id == id } }
 
@@ -171,7 +188,9 @@ extension ChatState {
 
 enum ChatEvent: Equatable, Sendable {
   case message(ACPInbound)
-  case userPrompt(text: String, imageCount: Int = 0, atOffset: Int)
+  case userPrompt(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil)
+  /// The user pressed Stop: messages still waiting to start are no longer shown as queued.
+  case cancelRequested
   /// A request whose error response must not surface as a transcript row.
   case silentRequest(requestId: ACPID)
   case permissionAnswered(requestId: ACPID, optionId: String)
@@ -184,7 +203,7 @@ enum ChatEvent: Equatable, Sendable {
   /// The answer never reached the agent: the question asks again, unless something else resolved it since.
   case questionAnswerUndelivered(requestId: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue])
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
-  case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int)
+  case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil)
   case connectionLost
   case failure(String)
 }
@@ -195,9 +214,16 @@ enum ChatReducer {
     switch event {
     case let .message(message):
       apply(message, to: &next)
-    case let .userPrompt(text, imageCount, offset):
+    case let .userPrompt(text, imageCount, offset, requestId):
+      let itemId = next.nextItemId
       append(.user(text: text, imageCount: imageCount, offset: offset), to: &next)
+      if !next.inFlight.isEmpty { next.queuedItemIds.append(itemId) }
+      next.inFlight.append(.init(itemId: itemId, requestId: requestId))
       next.turn = .working
+    case .cancelRequested:
+      next.queuedItemIds = []
+      next.startPending = false
+      if next.turn == .working { append(.notice("Stopped"), to: &next) }
     case let .silentRequest(requestId):
       next.silentRequestIds.insert(requestId)
     case let .permissionAnswered(requestId, optionId):
@@ -212,11 +238,15 @@ enum ChatReducer {
       next.hostAnswers[requestId] = optionId
       resolve(requestId, optionId, in: &next)
       resolveQuestion(requestId, hostValue: optionId, in: &next)
-    case let .promptUndelivered(text, imageCount, offset):
+    case let .promptUndelivered(text, imageCount, offset, _):
       if let index = next.items.lastIndex(where: { $0.kind == .user(text: text, imageCount: imageCount, offset: offset) }) {
+        let itemId = next.items[index].id
         next.items.remove(at: index)
+        next.inFlight.removeAll { $0.itemId == itemId }
+        next.queuedItemIds.removeAll { $0 == itemId }
+        if next.queuedItemIds.isEmpty { next.startPending = false }
       }
-      next.turn = .idle
+      next.turn = next.inFlight.isEmpty ? .idle : .working
     case .connectionLost:
       next.connection = .lost
     case let .failure(message):
@@ -233,21 +263,27 @@ enum ChatReducer {
 
   private static func apply(_ message: ACPInbound, to state: inout ChatState) {
     switch message {
-    case let .response(_, result):
+    case let .response(responseId, result):
       if let id = result.sessionId { state.sessionId = id }
       if let load = result.loadSession { state.loadSession = load }
       if let options = result.configOptions { setConfigOptions(options, in: &state) }
       if let reason = result.stopReason {
-        state.turn = .idle
+        let finished = finishPrompt(responseId, in: &state)
         state.lastStopReason = reason
+        if let finished { markEnd(of: finished, reason: reason, in: &state) }
         endPendingQuestions(in: &state)
       }
     case let .errorResponse(id, code, text):
       if let id, state.silentRequestIds.contains(id) { return }
-      append(.error(text.isEmpty ? "Agent error \(code)" : text), to: &state)
-      state.turn = .idle
+      if let id { finishPrompt(id, in: &state) } else { state.turn = state.inFlight.isEmpty ? .idle : .working }
+      if ChatAuthError.matches(code: code, message: text) {
+        if case .signedOut? = state.items.last?.kind {} else { append(.signedOut, to: &state) }
+      } else {
+        append(.error(text.isEmpty ? "Agent error \(code)" : text), to: &state)
+      }
       endPendingQuestions(in: &state)
     case let .permissionRequest(id, request):
+      startQueued(in: &state)
       mergeTool(request.tool, creating: false, into: &state)
       append(
         .permission(ChatPermission(
@@ -262,6 +298,7 @@ enum ChatReducer {
         to: &state)
       if let optionId = state.hostAnswers[id] { resolve(id, optionId, in: &state) }
     case let .elicitation(id, request):
+      startQueued(in: &state)
       if let toolId = request.toolCallId { state.questionToolIds.insert(toolId) }
       append(
         .question(ChatQuestion(
@@ -278,6 +315,7 @@ enum ChatReducer {
   private static func apply(_ update: ACPUpdate, to state: inout ChatState) {
     switch update {
     case let .agentMessage(text, messageId):
+      startQueued(in: &state)
       if let last = state.items.indices.last,
         case let .assistant(existing, existingId) = state.items[last].kind, existingId == messageId
       {
@@ -286,22 +324,34 @@ enum ChatReducer {
         append(.assistant(text: text, messageId: messageId), to: &state)
       }
     case let .agentThought(text):
+      startQueued(in: &state)
       if let last = state.items.indices.last, case let .thought(existing) = state.items[last].kind {
         state.items[last].kind = .thought(text: existing + text)
       } else {
         append(.thought(text: text), to: &state)
       }
     case let .userMessage(text):
+      if let first = state.queuedItemIds.first {
+        state.queuedItemIds.removeFirst()
+        state.startPending = false
+        if let index = state.items.firstIndex(where: { $0.id == first }),
+          case let .user(echoed, _, _) = state.items[index].kind, echoed == text
+        {
+          return
+        }
+      }
       if let last = state.items.indices.last, case let .user(existing, images, offset) = state.items[last].kind {
         state.items[last].kind = .user(text: existing + text, imageCount: images, offset: offset)
       } else {
         append(.user(text: text, offset: 0), to: &state)
       }
     case let .toolCall(fields), let .toolCallUpdate(fields):
+      startQueued(in: &state)
       if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }
       if state.questionToolIds.contains(fields.id) { return }
       mergeTool(fields, creating: true, into: &state)
     case let .plan(entries):
+      startQueued(in: &state)
       var replaced = false
       for index in state.items.indices.reversed() {
         if case .user = state.items[index].kind { break }
@@ -331,6 +381,57 @@ enum ChatReducer {
     case .unknown:
       break
     }
+  }
+
+  /// Agent output after a prompt ended is what tells the next waiting message has begun.
+  private static func startQueued(in state: inout ChatState) {
+    guard state.startPending, !state.queuedItemIds.isEmpty else { return }
+    state.queuedItemIds.removeFirst()
+    state.startPending = false
+  }
+
+  private struct FinishedPrompt {
+    var itemId: Int
+  }
+
+  /// Takes the prompt a response answers out of the in-flight list; the turn stays working until the last one is answered.
+  @discardableResult
+  private static func finishPrompt(_ id: ACPID, in state: inout ChatState) -> FinishedPrompt? {
+    let index = state.inFlight.firstIndex { $0.requestId == id } ?? state.inFlight.firstIndex { $0.requestId == nil }
+    var finished: FinishedPrompt?
+    if let index {
+      let prompt = state.inFlight.remove(at: index)
+      state.queuedItemIds.removeAll { $0 == prompt.itemId }
+      finished = FinishedPrompt(itemId: prompt.itemId)
+      state.startPending = !state.queuedItemIds.isEmpty
+    }
+    state.turn = state.inFlight.isEmpty ? .idle : .working
+    return finished
+  }
+
+  /// `/clear` and `/compact` end silently; a rule marks where the agent's context changed.
+  private static func markEnd(of prompt: FinishedPrompt, reason: String, in state: inout ChatState) {
+    guard reason == "end_turn", let start = state.items.firstIndex(where: { $0.id == prompt.itemId }),
+      case let .user(text, _, _) = state.items[start].kind
+    else { return }
+    let label: String
+    switch text.trimmingCharacters(in: .whitespacesAndNewlines) {
+    case "/clear": label = "Context cleared"
+    case "/compact":
+      let announced = state.items[(start + 1)...].contains {
+        if case let .assistant(reply, _) = $0.kind { return reply.lowercased().contains("compact") }
+        return false
+      }
+      guard !announced else { return }
+      label = "Context compacted"
+    default: return
+    }
+    let later = state.items.indices.first { index in
+      index > start && state.inFlight.contains { $0.itemId == state.items[index].id }
+    }
+    let item = ChatItem(id: state.nextItemId, kind: .divider(label))
+    state.nextItemId += 1
+    state.items.insert(item, at: later ?? state.items.endIndex)
   }
 
   private static func setConfigOptions(_ options: [ACPConfigOption], in state: inout ChatState) {
