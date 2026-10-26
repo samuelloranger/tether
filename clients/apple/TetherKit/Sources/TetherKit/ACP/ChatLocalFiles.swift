@@ -28,9 +28,25 @@ struct ChatLocalFiles: Sendable {
 
   func read(_ name: String, _ kind: String) -> Data? { try? Data(contentsOf: url(name, kind)) }
 
+  /// Readable once the device has been unlocked after boot, so a background push or the notification
+  /// extension still works while the phone is locked; never before the first unlock.
+  static let protection: FileProtectionType = .completeUntilFirstUserAuthentication
+
   func write(_ data: Data, _ name: String, _ kind: String) {
-    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    try? data.write(to: url(name, kind), options: .atomic)
+    prepareDirectory()
+    try? data.write(to: url(name, kind), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+  }
+
+  /// Chat transcripts are not worth carrying into a backup or onto another device.
+  private func prepareDirectory() {
+    let manager = FileManager.default
+    try? manager.createDirectory(
+      at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
+    try? manager.setAttributes([.protectionKey: Self.protection], ofItemAtPath: directory.path)
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    var target = directory
+    try? target.setResourceValues(values)
   }
 
   func remove(_ name: String, _ kind: String) { try? FileManager.default.removeItem(at: url(name, kind)) }
