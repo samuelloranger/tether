@@ -8,7 +8,7 @@ use tether_core::resize::GridSize;
 use tether_core::secrets::SecretStore;
 use tether_core::upload::{UPLOADS_COMMAND, uploads_directory};
 use tether_core::zmx::{ZmxSession, kill_command, ls_command, parse_ls};
-use tether_ssh::{ConnectionEvent, PtyEvent};
+use tether_ssh::{ConnectionEvent, ExecEvent, PtyEvent};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
 pub trait PtySink: Clone + Send + Sync + 'static {
@@ -17,8 +17,19 @@ pub trait PtySink: Clone + Send + Sync + 'static {
     fn close(&self) -> impl Future<Output = ()> + Send;
 }
 
+/// A long-lived command's stdin, as the chat holder reads it.
+pub trait StreamSink: Clone + Send + Sync + 'static {
+    fn write(&self, bytes: Vec<u8>) -> impl Future<Output = Result<(), ConnectError>> + Send;
+    fn close(&self) -> impl Future<Output = ()> + Send;
+}
+
 pub trait SessionConn: Connection + Sync + 'static {
     type Sink: PtySink;
+    type Stream: StreamSink;
+    fn open_exec(
+        &self,
+        command: &str,
+    ) -> impl Future<Output = Result<(Self::Stream, mpsc::Receiver<ExecEvent>), ConnectError>> + Send;
     fn open_pty(
         &self,
         size: GridSize,
@@ -34,6 +45,12 @@ pub trait SessionConn: Connection + Sync + 'static {
 
 pub trait Remote: Send + Sync + 'static {
     type Sink: PtySink;
+    type Stream: StreamSink;
+    /// A command whose stdin and stdout stay open, on the terminal connection like a tab's PTY.
+    fn open_stream(
+        &self,
+        command: &str,
+    ) -> impl Future<Output = Result<(Self::Stream, mpsc::Receiver<ExecEvent>), ConnectError>> + Send;
     fn open(
         &self,
     ) -> impl Future<
@@ -123,6 +140,20 @@ where
     T::Conn: SessionConn,
 {
     type Sink = <T::Conn as SessionConn>::Sink;
+    type Stream = <T::Conn as SessionConn>::Stream;
+
+    async fn open_stream(
+        &self,
+        command: &str,
+    ) -> Result<(Self::Stream, mpsc::Receiver<ExecEvent>), ConnectError> {
+        let conn = self
+            .terminal
+            .lock()
+            .await
+            .clone()
+            .ok_or(ConnectError::Transport("not connected".into()))?;
+        conn.open_exec(command).await
+    }
 
     async fn open(
         &self,
@@ -224,8 +255,25 @@ impl PtySink for tether_ssh::PtyWriter {
     }
 }
 
+impl StreamSink for tether_ssh::ExecWriter {
+    async fn write(&self, bytes: Vec<u8>) -> Result<(), ConnectError> {
+        tether_ssh::ExecWriter::write(self, &bytes).await
+    }
+    async fn close(&self) {
+        tether_ssh::ExecWriter::close(self).await
+    }
+}
+
 impl SessionConn for tether_ssh::RusshConnection {
     type Sink = tether_ssh::PtyWriter;
+    type Stream = tether_ssh::ExecWriter;
+    async fn open_exec(
+        &self,
+        command: &str,
+    ) -> Result<(Self::Stream, mpsc::Receiver<ExecEvent>), ConnectError> {
+        let ch = tether_ssh::RusshConnection::open_exec(self, command).await?;
+        Ok((ch.writer, ch.events))
+    }
     async fn open_pty(
         &self,
         size: GridSize,

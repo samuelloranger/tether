@@ -78,7 +78,7 @@ fn remeasure_well(ui: &AppWindow) {
     });
 }
 
-fn platform() -> Arc<dyn Platform> {
+pub(crate) fn platform() -> Arc<dyn Platform> {
     PLATFORM
         .with(|p| p.borrow().clone())
         .unwrap_or_else(|| Arc::new(crate::platform::NullPlatform))
@@ -86,15 +86,17 @@ fn platform() -> Arc<dyn Platform> {
 
 /// The body of M5's `open_machine::on_open_machine`.
 pub fn open_machine(app: &Rc<App>, machine: Machine) {
-    let (style, hostkeys, secrets, jumps) = {
+    let (style, hostkeys, secrets, jumps, chats_root) = {
         let s = app.state.borrow();
         (
             TermStyle::from_prefs(&s.prefs.terminal),
             s.hostkeys.clone(),
             s.secrets.clone(),
             tether_core::connect::jump_chain(&s.profiles.machines, &machine),
+            s.data.root().join("chats"),
         )
     };
+    let chat_scope = format!("{}:{}", machine.host, machine.port);
     let rt = app.runtime.handle().clone();
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = msg_sink(tx.clone());
@@ -122,6 +124,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     let network_target = (machine.host.clone(), machine.port);
     set_well_color(&app.ui, style.theme.background);
     crate::extras::set_foreground(&app.ui, style.theme.foreground);
+    crate::terminal::chatview::reset(&app.ui);
     app.ui.global::<ConnectVm>().set_who(
         format!(
             "{} · {}@{}:{}",
@@ -129,7 +132,11 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         )
         .into(),
     );
-    let (model, initial) = TerminalModel::new(machine, style, size);
+    let (mut model, initial) = TerminalModel::new(machine, style, size);
+    model.set_chat_files(tether_core::acp::files::ChatFiles::new(
+        chats_root,
+        &chat_scope,
+    ));
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
@@ -137,6 +144,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(target_os = "linux")]
     crate::platform::linux::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    dev_chat();
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
         wire_callbacks(&app.ui);
@@ -147,6 +155,30 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         .ui
         .window()
         .with_winit_window(|w| w.set_ime_allowed(true));
+}
+
+/// Debug builds only: `TETHER_DEV_CHAT` starts a chat in that folder once the machine is open,
+/// and `TETHER_DEV_CHAT_SEND` sends its `|`-separated prompts a few seconds apart.
+fn dev_chat() {
+    use crate::terminal::model::chat::ChatMsg;
+    let Some(folder) = crate::app::dev_env("TETHER_DEV_CHAT") else {
+        return;
+    };
+    slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
+        send(Msg::Chat(ChatMsg::NewChat(0)));
+        send(Msg::Chat(ChatMsg::NewChatFolder(folder)));
+        send(Msg::Chat(ChatMsg::NewChatStart));
+    });
+    let prompts = crate::app::dev_env("TETHER_DEV_CHAT_SEND").unwrap_or_default();
+    for (i, text) in prompts.split('|').filter(|p| !p.is_empty()).enumerate() {
+        let text = text.to_string();
+        let at = std::time::Duration::from_secs(7 + 6 * i as u64);
+        slint::Timer::single_shot(at, move || {
+            let cursor_byte = text.len();
+            send(Msg::Chat(ChatMsg::DraftEdited { text, cursor_byte }));
+            send(Msg::Chat(ChatMsg::Send));
+        });
+    }
 }
 
 /// Callbacks route through `current()`, so wiring them once per window is enough:
@@ -239,6 +271,7 @@ fn wire_callbacks(ui: &AppWindow) {
     cv.on_back_home(|| send(Msg::Back));
     vm.on_retry_session(|| send(Msg::RetrySession));
     crate::terminal::gitview::wire(ui);
+    crate::terminal::chatview::wire(ui);
 
     use crate::terminal::mouse::{Button, MouseKind, MouseMsg};
     let started = std::time::Instant::now();
@@ -326,6 +359,7 @@ fn keys_to_pty(app: &App) -> bool {
         && !crate::extras::overlay_open(&app.ui)
         && !app.ui.global::<AgentVm>().get_open()
         && !app.ui.global::<crate::GitVm>().get_modal()
+        && !crate::terminal::chatview::takes_keys(&app.ui)
 }
 
 /// Slint learns modifiers from key events, and the terminal consumes those before Slint sees
@@ -488,6 +522,14 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         | UiEffect::PickFiles => {}
         UiEffect::FocusSearch => vm.set_search_focus_seq(vm.get_search_focus_seq() + 1),
         UiEffect::Git(view) => crate::terminal::gitview::apply(w, *view),
+        UiEffect::Chat(screen) => crate::terminal::chatview::apply(w, *screen),
+        UiEffect::PickImages => platform().pick_files(Box::new(|files| {
+            if !files.is_empty() {
+                send(Msg::Chat(
+                    crate::terminal::model::chat::ChatMsg::AttachFiles(files),
+                ));
+            }
+        })),
         UiEffect::AllowIme => {
             app.ui
                 .window()

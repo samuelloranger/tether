@@ -6,6 +6,7 @@ import { Aurora, GhostButton, IconButton, Lamp, OriginTag, Pill, PrimaryButton, 
 component MachineCardView inherits Rectangle {
     in property <MachineCard> card;
     callback open();
+    callback chat();
     callback edit();
     callback remove();
     height: body.preferred-height;
@@ -18,6 +19,7 @@ component MachineCardView inherits Rectangle {
         width: 100%;
         height: 100%;
         Menu {
+            MenuItem { title: "Chat"; activated => { root.chat(); } }
             MenuItem { title: "Edit"; activated => { root.edit(); } }
             MenuItem { title: "Remove"; activated => { root.remove(); } }
         }
@@ -54,9 +56,26 @@ component MachineCardView inherits Rectangle {
             Text { text: "· " + root.card.auth; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text-faint; }
         }
         HorizontalLayout {
-            alignment: end;
             spacing: 4px;
-            Text { text: "Open"; color: Tokens.accent; font-size: 12px; font-weight: 650; }
+            // A chat with the host's agent, as on iOS: the machine opens with the new-chat dialog up.
+            chat-pill := Rectangle {
+                height: 26px;
+                width: chat-row.preferred-width + 22px;
+                border-radius: 13px;
+                background: Tokens.accent.with-alpha(chat-touch.has-hover ? 0.2 : 0.12);
+                chat-row := HorizontalLayout {
+                    x: 11px;
+                    spacing: 5px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image { source: @image-url("icons/chat.svg"); colorize: Tokens.accent; width: 12px; height: 12px; }
+                    }
+                    Text { text: "Chat"; color: Tokens.accent; font-size: 12px; font-weight: 650; vertical-alignment: center; }
+                }
+                chat-touch := TouchArea { mouse-cursor: pointer; clicked => { root.chat(); } }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "Open"; color: Tokens.accent; font-size: 12px; font-weight: 650; vertical-alignment: center; }
             VerticalLayout {
                 alignment: center;
                 Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.accent; width: 12px; height: 12px; }
@@ -219,6 +238,7 @@ export component HomePage inherits Rectangle {
                     MachineCardView {
                         card: card;
                         open => { HomeBridge.open-machine(card.id); }
+                        chat => { HomeBridge.chat-machine(card.id); }
                         edit => { HomeBridge.edit-machine(card.id); }
                         remove => { HomeBridge.remove-machine(card.id); }
                     }

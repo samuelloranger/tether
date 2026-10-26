@@ -71,7 +71,7 @@ fn page_kind(page: &Page) -> PageKind {
 }
 
 /// Debug builds only: lets `packaging/screenshots.ps1` open any page against sample data.
-fn dev_env(name: &str) -> Option<String> {
+pub(crate) fn dev_env(name: &str) -> Option<String> {
     if cfg!(debug_assertions) {
         std::env::var(name).ok().filter(|v| !v.is_empty())
     } else {
@@ -163,6 +163,21 @@ impl App {
             if matches!(app.router.current(), Page::ServerForm { .. }) {
                 app.forget_form_secrets();
             }
+            if app.router.current() == Page::Terminal
+                && crate::terminal::chatview::close_add_menu(&app.ui)
+            {
+                return true;
+            }
+            if app.router.current() == Page::Terminal
+                && crate::terminal::chatview::takes_keys(&app.ui)
+            {
+                if let Some(s) = crate::terminal::glue::current() {
+                    s(crate::terminal::model::Msg::Chat(
+                        crate::terminal::model::chat::ChatMsg::Escape,
+                    ));
+                }
+                return true;
+            }
             let handled = app.router.on_escape();
             app.refresh_router();
             handled
@@ -215,6 +230,17 @@ impl App {
             let machine = app.state.borrow().profiles.get(id).cloned();
             if let Some(m) = machine {
                 on_open_machine(app, m);
+            }
+        }));
+        home.on_chat_machine(on_id(self, |app, id| {
+            let machine = app.state.borrow().profiles.get(id).cloned();
+            if let Some(m) = machine {
+                on_open_machine(app, m);
+                if let Some(s) = crate::terminal::glue::current() {
+                    s(crate::terminal::model::Msg::Chat(
+                        crate::terminal::model::chat::ChatMsg::NewChatWhenReady,
+                    ));
+                }
             }
         }));
         home.on_edit_machine(on_id(self, |app, id| app.open_server_form(Some(id))));

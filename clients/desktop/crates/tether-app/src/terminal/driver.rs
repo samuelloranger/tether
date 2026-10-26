@@ -9,8 +9,9 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior, interval};
 
 use crate::terminal::frame::FramePacer;
+use crate::terminal::model::chat::{ChatJob, ChatMsg, WriteTag};
 use crate::terminal::model::{Effect, Msg, TICK, TerminalModel, TerminalView};
-use crate::terminal::remote::{PtySink, Remote};
+use crate::terminal::remote::{PtySink, Remote, StreamSink};
 use crate::terminal::ui_port::UiPort;
 
 pub enum DriverMsg<S> {
@@ -69,6 +70,75 @@ fn spawn_writer<S: PtySink>(
 
 pub type MsgSink = Arc<dyn Fn(Msg) + Send + Sync>;
 
+/// One chat's stream: the task that owns it writes these in order, and stops when the sender goes.
+type ChatWriter = mpsc::UnboundedSender<(Vec<u8>, Option<WriteTag>, bool)>;
+
+/// Opens the chat's stream and runs it: holder output becomes messages, queued lines are
+/// written in order, and a dropped queue closes the channel.
+async fn run_chat_stream<R: Remote>(
+    remote: Arc<R>,
+    name: String,
+    generation: u64,
+    command: String,
+    mut writes: mpsc::UnboundedReceiver<(Vec<u8>, Option<WriteTag>, bool)>,
+    send: MsgSink,
+) {
+    let chat = |m: ChatMsg| send(Msg::Chat(m));
+    let (sink, mut events) = match remote.open_stream(&command).await {
+        Ok(opened) => opened,
+        Err(e) => {
+            chat(ChatMsg::Dialed {
+                name,
+                generation,
+                result: Err(e.sentence()),
+            });
+            return;
+        }
+    };
+    chat(ChatMsg::Dialed {
+        name: name.clone(),
+        generation,
+        result: Ok(()),
+    });
+    let reader = {
+        let (send, name) = (send.clone(), name.clone());
+        tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                match event {
+                    tether_ssh::ExecEvent::Data(bytes) => send(Msg::Chat(ChatMsg::Data {
+                        name: name.clone(),
+                        generation,
+                        bytes,
+                    })),
+                    tether_ssh::ExecEvent::Exit(_) => {}
+                    tether_ssh::ExecEvent::Closed => break,
+                }
+            }
+            send(Msg::Chat(ChatMsg::Closed { name, generation }));
+        })
+    };
+    while let Some((bytes, tag, ack)) = writes.recv().await {
+        let landed = sink.write(bytes).await.is_ok();
+        let Some(tag) = tag else { continue };
+        let name = name.clone();
+        if !landed {
+            chat(ChatMsg::WriteFailed {
+                name,
+                generation,
+                tag,
+            });
+        } else if ack {
+            chat(ChatMsg::Written {
+                name,
+                generation,
+                tag,
+            });
+        }
+    }
+    reader.abort();
+    sink.close().await;
+}
+
 pub fn msg_sink<S: Send + 'static>(tx: mpsc::UnboundedSender<DriverMsg<S>>) -> MsgSink {
     Arc::new(move |m| {
         let _ = tx.send(DriverMsg::Model(m));
@@ -95,6 +165,7 @@ pub struct Driver<R: Remote, U: UiPort> {
     ls_seq: u64,
     pacer: FramePacer,
     last_view: Option<TerminalView>,
+    chats: HashMap<String, (u64, ChatWriter)>,
 }
 
 impl<R: Remote, U: UiPort> Driver<R, U> {
@@ -111,6 +182,7 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             ls_seq: 0,
             pacer: FramePacer::default(),
             last_view: None,
+            chats: HashMap::new(),
         }
     }
 
@@ -261,6 +333,7 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             h.abort();
         }
         self.wanted.lock().unwrap().clear();
+        self.chats.clear();
         for (_, reader) in self.readers.drain() {
             reader.abort();
         }
@@ -432,6 +505,7 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
                         msg_sink(self.tx.clone()),
                     ));
                 }
+                Effect::Chat(job) => self.chat_job(job),
                 Effect::Redraw => {
                     if self.pacer.mark_dirty() {
                         self.render(model);
@@ -441,6 +515,86 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             }
         }
         exit
+    }
+}
+
+impl<R: Remote, U: UiPort> Driver<R, U> {
+    fn chat_job(&mut self, job: ChatJob) {
+        let send = msg_sink(self.tx.clone());
+        match job {
+            ChatJob::Exec { tag, command } => {
+                let remote = self.remote.clone();
+                tokio::spawn(async move {
+                    let result = remote.exec(&command).await;
+                    send(Msg::Chat(ChatMsg::ExecDone { tag, result }));
+                });
+            }
+            ChatJob::Dial {
+                name,
+                generation,
+                command,
+            } => {
+                let (wtx, wrx) = mpsc::unbounded_channel();
+                self.chats.insert(name.clone(), (generation, wtx));
+                tokio::spawn(run_chat_stream(
+                    self.remote.clone(),
+                    name,
+                    generation,
+                    command,
+                    wrx,
+                    send,
+                ));
+            }
+            ChatJob::Write {
+                name,
+                generation,
+                bytes,
+                tag,
+                ack,
+            } => {
+                let open = self
+                    .chats
+                    .get(&name)
+                    .filter(|(g, _)| *g == generation)
+                    .is_some_and(|(_, w)| w.send((bytes, tag.clone(), ack)).is_ok());
+                if !open && let Some(tag) = tag {
+                    send(Msg::Chat(ChatMsg::WriteFailed {
+                        name,
+                        generation,
+                        tag,
+                    }));
+                }
+            }
+            ChatJob::Hangup { name } => {
+                self.chats.remove(&name);
+            }
+            ChatJob::Encode { name, key, source } => {
+                tokio::task::spawn_blocking(move || {
+                    use crate::terminal::chatmedia;
+                    use crate::terminal::model::chat::ImageSource;
+                    let bytes = match source {
+                        ImageSource::File(path) => chatmedia::read_source(&path),
+                        ImageSource::Bytes(bytes) => Ok(bytes),
+                    };
+                    let result = bytes
+                        .and_then(|b| chatmedia::encode(&b))
+                        .map_err(|e| e.message().to_string());
+                    send(Msg::Chat(ChatMsg::Encoded { name, key, result }));
+                });
+            }
+            ChatJob::Thumb { id, path } => {
+                tokio::task::spawn_blocking(move || {
+                    use crate::terminal::chatmedia;
+                    let edge = if id.starts_with("full:") {
+                        chatmedia::FULL_EDGE
+                    } else {
+                        chatmedia::THUMB_EDGE
+                    };
+                    let pixels = chatmedia::thumbnail(&path, edge);
+                    send(Msg::Chat(ChatMsg::Thumb { id, pixels }));
+                });
+            }
+        }
     }
 }
 
@@ -682,6 +836,45 @@ mod tests {
             l.starts_with("exec ~/.local/bin/tether answer --session 'default' --state 'waiting' --version 'v1' --input")
         }));
         assert!(ui.last_view().agent.sheet.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_new_chat_streams_over_the_terminal_connection() {
+        use crate::terminal::model::chat::ChatMsg;
+        let remote = Arc::new(FakeRemote::default());
+        *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
+        remote.exec_replies.lock().unwrap().extend([
+            (
+                "tether=found".to_string(),
+                Ok("tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n".into()),
+            ),
+            ("printf %s".to_string(), Ok("/home/sam".into())),
+        ]);
+        let (_ui, send, _h) = start(remote.clone()).await;
+        send(Msg::Chat(ChatMsg::NewChat(0)));
+        send(Msg::Chat(ChatMsg::NewChatFolder("~/proj".into())));
+        send(Msg::Chat(ChatMsg::NewChatStart));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            remote
+                .log()
+                .iter()
+                .any(|l| l.starts_with("stream ") && l.contains("--cwd '/home/sam/proj'"))
+        );
+        let (sink, tx) = remote.stream("acp attach");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(sink.log.lock().unwrap()[0].contains("\"method\":\"initialize\""));
+        tx.send(tether_ssh::ExecEvent::Data(
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n".to_vec(),
+        ))
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let log = sink.log.lock().unwrap().clone();
+        assert!(
+            log.iter().any(|l| l.contains("\"method\":\"session/new\"")),
+            "{log:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]

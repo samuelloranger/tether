@@ -1,0 +1,1979 @@
+import { Tokens } from "tokens.slint";
+import { IconButton, Segment, ConfirmDialog } from "components.slint";
+import { MdLinkVm, MdItemVm, DiffLineVm } from "git.slint";
+import { Heat, TextDot } from "agents.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct ChatImageVm {
+    id: string,
+    image: image,
+    width: int,
+    height: int,
+    loaded: bool,
+}
+
+// kind: 0 tool header, 1 resolved permission, 2 markdown, 3 diff line, 4 images, 5 brief toggle,
+// 6 report label, 7 plan step.
+export struct ChatEntryVm {
+    kind: int,
+    key: string,
+    depth: int,
+    first: bool,
+    icon: int,
+    title: string,
+    subtitle: string,
+    state: int,             // tool: 0 running, 1 done, 2 failed. plan step: 0 pending, 1 in progress, 2 done.
+    added: int,
+    removed: int,
+    expandable: bool,
+    open: bool,
+    md-kind: int,
+    level: int,
+    text: string,
+    links: [MdLinkVm],
+    diff-kind: int,
+    old-no: string,
+    new-no: string,
+    images: [ChatImageVm],
+}
+
+// kind: 0 user, 1 assistant markdown block, 2 assistant images, 3 thinking, 4 tool group, 5 plan,
+// 6 notice, 7 error, 8 divider, 9 signed out, 10 answered question, 11 not sent, 12 working,
+// 13 earlier messages, 14 empty state.
+export struct ChatRowVm {
+    kind: int,
+    key: string,
+    text: string,
+    detail: string,
+    meta: string,
+    state: int,
+    flag: bool,
+    open: bool,
+    md-kind: int,
+    level: int,
+    links: [MdLinkVm],
+    images: [ChatImageVm],
+    entries: [ChatEntryVm],
+}
+
+// state: -1 nothing to say, 0 working, 1 needs you, 2 idle, 3 running, 4 ended.
+export struct ChatTabVm {
+    name: string,
+    title: string,
+    state: int,
+    label: string,
+    active: bool,
+}
+
+export struct PaletteItemVm {
+    primary: string,
+    secondary: string,
+}
+
+export struct AttachmentVm {
+    key: string,
+    image: image,
+    ready: bool,
+}
+
+export struct PermOptionVm {
+    id: string,
+    label: string,
+}
+
+export struct QChoiceVm {
+    value: string,
+    title: string,
+    description: string,
+    picked: bool,
+}
+
+// kind: 0 single choice, 1 multiple choice, 2 text, 3 yes or no.
+export struct QFieldVm {
+    name: string,
+    title: string,
+    show-title: bool,
+    kind: int,
+    choices: [QChoiceVm],
+    custom-name: string,
+    custom-open: bool,
+    custom-text: string,
+    text: string,
+    placeholder: string,
+    flag: bool,
+}
+
+export struct CtlChoiceVm {
+    value: string,
+    name: string,
+    description: string,
+    selected: bool,
+    pending: bool,
+}
+
+export struct CtlOptionVm {
+    id: string,
+    name: string,
+    choices: [CtlChoiceVm],
+    failure: string,
+}
+
+export struct CtlCommandVm {
+    title: string,
+    detail: string,
+    text: string,
+}
+
+export struct SavedSessionVm {
+    id: string,
+    title: string,
+    when: string,
+    recent: bool,
+    busy: bool,
+}
+
+export global ChatVm {
+    in property <bool> active;
+    in property <[ChatTabVm]> tabs;
+    // The tab strip's "+" menu: a new session, a new chat, or an earlier conversation.
+    in-out property <bool> add-menu;
+    in-out property <length> add-menu-x;
+    in-out property <length> add-menu-y;
+    in property <bool> has-chats;
+    // The header line: the chat's title and how its link stands.
+    in property <string> title;
+    in property <string> folder;
+    in property <bool> folder-copied;
+    in property <int> phase;                 // 0 connecting, 1 catching up, 2 live, 3 lost, 4 ended
+    in property <string> phase-word;
+    in property <bool> has-status;
+    in property <string> model-name;
+    in property <string> mode-name;
+    in property <int> mode-tint;             // 0 secondary, 1 accent, 2 success, 3 danger
+    in property <string> stats;
+    in property <float> context: -1;
+    in property <string> context-text;
+    in property <[ChatRowVm]> rows;
+    in property <int> follow-seq;
+    in property <string> notice;
+    // Composer.
+    in-out property <string> draft;
+    in property <int> caret-seq;
+    in property <int> caret;
+    in property <int> focus-seq;
+    in property <bool> composer-shown: true;
+    in property <string> banner;
+    in property <int> banner-icon;
+    in property <string> placeholder: "Message the agent";
+    in property <bool> dimmed;
+    in property <bool> catching-up;
+    in property <bool> can-send;
+    in property <bool> stopping;
+    in property <bool> action-enabled;
+    in property <string> action-label: "Send";
+    in property <bool> can-attach: true;
+    in property <[AttachmentVm]> attachments;
+    in property <string> attach-error;
+    in property <int> palette-kind;          // 0 none, 1 slash commands, 2 files
+    in property <[PaletteItemVm]> palette;
+    in-out property <int> palette-index;
+    // Permission card.
+    in property <bool> perm-shown;
+    in property <bool> perm-plan;
+    in property <int> perm-icon;
+    in property <string> perm-title;
+    in property <string> perm-position;
+    in property <string> perm-path;
+    in property <int> perm-added;
+    in property <int> perm-removed;
+    in property <[DiffLineVm]> perm-rows;
+    in property <[MdItemVm]> perm-md;
+    in property <string> perm-text;
+    in property <bool> perm-reviewable;
+    in property <PermOptionVm> perm-primary;
+    in property <PermOptionVm> perm-reject;
+    in property <[PermOptionVm]> perm-more;
+    in property <bool> perm-collapsed;
+    in property <bool> perm-enabled;
+    in property <string> perm-failure;
+    // Question card.
+    in property <bool> q-shown;
+    in property <string> q-message;
+    in property <string> q-position;
+    in property <[QFieldVm]> q-fields;
+    in property <bool> q-show-submit;
+    in property <bool> q-can-submit;
+    in property <bool> q-enabled;
+    in property <string> q-failure;
+    // Session controls.
+    in property <bool> ctl-open;
+    in property <bool> ctl-read-only;
+    in property <[CtlOptionVm]> ctl-options;
+    in property <bool> ctl-enabled;
+    in property <string> ctl-cost;
+    in property <string> ctl-model-id;
+    in property <[CtlCommandVm]> ctl-commands;
+    in property <bool> ctl-commands-enabled;
+    in property <bool> bypass-confirm;
+    // Full diff or plan.
+    in property <bool> review-open;
+    in property <string> review-title;
+    in property <[DiffLineVm]> review-diff;
+    in property <[MdItemVm]> review-md;
+    in property <bool> viewer-open;
+    in property <image> viewer-image;
+    in property <bool> viewer-missing;
+    // New chat.
+    in property <bool> nc-open;
+    in-out property <int> nc-mode;
+    in-out property <string> nc-folder;
+    in property <bool> nc-busy;
+    in property <string> nc-error;
+    in property <int> nc-listing;            // 0 loading, 1 failed, 2 loaded
+    in property <string> nc-listing-error;
+    in property <[SavedSessionVm]> nc-sessions;
+    in property <bool> nc-continuing;
+    in property <string> delete-title;
+
+    callback select(string);
+    callback delete(string);
+    callback delete-confirmed();
+    callback delete-cancelled();
+    callback new-chat(int);
+    callback toggle(string);
+    callback open-link(string);
+    callback open-image(string);
+    callback close-viewer();
+    callback copy-folder();
+    callback earlier();
+    // The reader left the end of the transcript (false) or came back to it (true).
+    callback following(bool);
+    callback retry(string);
+    callback discard(string);
+    callback sign-in-retry();
+    callback dismiss-notice();
+    callback reconnect();
+    callback draft-edited(string, int);
+    callback send();
+    callback stop();
+    callback pick-images();
+    pure callback paste-image() -> bool;
+    callback remove-attachment(string);
+    callback dismiss-attach-error();
+    callback palette-pick(int);
+    callback palette-close();
+    callback approve(string);
+    callback review();
+    callback close-review();
+    callback q-choose(string, string);
+    callback q-text(string, string);
+    callback q-flag(string, bool);
+    callback q-open-custom(string);
+    callback q-submit();
+    callback q-decline();
+    callback controls();
+    callback ctl-close();
+    callback ctl-choose(string, string);
+    callback ctl-dismiss(string);
+    callback ctl-command(string);
+    callback bypass-confirmed();
+    callback bypass-cancelled();
+    callback nc-start();
+    callback nc-cancel();
+    callback nc-mode-changed(int);
+    callback nc-folder-edited(string);
+    callback nc-continue(string);
+    callback nc-retry();
+}
+
+export global ChatStyle {
+    public pure function icon(i: int) -> image {
+        return i == 0 ? @image-url("icons/file.svg")
+            : i == 1 ? @image-url("icons/pencil.svg")
+            : i == 2 ? @image-url("icons/trash.svg")
+            : i == 3 ? @image-url("icons/move.svg")
+            : i == 4 ? @image-url("icons/search.svg")
+            : i == 5 ? @image-url("icons/terminal.svg")
+            : i == 6 ? @image-url("icons/think.svg")
+            : i == 7 ? @image-url("icons/globe.svg")
+            : i == 8 ? @image-url("icons/swap.svg")
+            : i == 10 ? @image-url("icons/branch.svg")
+            : i == 11 ? @image-url("icons/image.svg")
+            : i == 12 ? @image-url("icons/shield.svg")
+            : i == 13 ? @image-url("icons/shieldx.svg")
+            : i == 14 ? @image-url("icons/plan.svg")
+            : i == 15 ? @image-url("icons/info.svg")
+            : i == 16 ? @image-url("icons/alert.svg")
+            : i == 17 ? @image-url("icons/question.svg")
+            : i == 18 ? @image-url("icons/chat.svg")
+            : i == 19 ? @image-url("icons/clock.svg")
+            : i == 20 ? @image-url("icons/moon.svg")
+            : i == 21 ? @image-url("icons/eye.svg")
+            : i == 22 ? @image-url("icons/user.svg")
+            : i == 23 ? @image-url("icons/check.svg")
+            : @image-url("icons/gear.svg");
+    }
+    public pure function tint(t: int) -> color {
+        return t == 1 ? Tokens.accent : t == 2 ? Tokens.success : t == 3 ? Tokens.danger : Tokens.text-secondary;
+    }
+    public pure function phase-ink(p: int) -> color {
+        return p == 2 ? Tokens.success : p == 3 ? Tokens.danger : p == 4 ? Tokens.text-faint : Tokens.warning;
+    }
+    // Chats use the session heat words: working is amber, needs you is coral, the rest is quiet.
+    public pure function tab-heat(s: int) -> int {
+        return s == 0 ? 0 : s == 1 ? 1 : -1;
+    }
+    out property <length> column: 760px;
+    out property <length> row-height: 34px;
+}
+
+component Glyph inherits Image {
+    in property <int> which;
+    in property <color> ink: Tokens.text-faint;
+    in property <length> size: 14px;
+    source: ChatStyle.icon(root.which);
+    colorize: root.ink;
+    width: root.size;
+    height: root.size;
+}
+
+component Chevron inherits Rectangle {
+    in property <bool> open;
+    width: 10px;
+    height: 10px;
+    Image {
+        source: @image-url("icons/chevron.svg");
+        colorize: Tokens.text-faint;
+        width: 10px;
+        height: 10px;
+        transform-rotation: root.open ? 90deg : 0deg;
+    }
+}
+
+component Pressable inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <bool> hover-fill: true;
+    callback clicked();
+    out property <bool> hovered: touch.has-hover;
+    background: root.hover-fill && touch.has-hover && root.enabled ? Tokens.surface-hover : transparent;
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SmallAction inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    // 0 plain, 1 accent fill, 2 danger tint, 3 accent tint.
+    in property <int> style;
+    callback clicked();
+    height: 32px;
+    min-width: label.preferred-width + 24px;
+    border-radius: 9px;
+    opacity: root.enabled ? 1 : 0.5;
+    background: root.style == 1 ? (touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent)
+        : root.style == 2 ? Tokens.danger.with-alpha(touch.has-hover ? 0.2 : 0.14)
+        : root.style == 3 ? Tokens.accent.with-alpha(touch.has-hover ? 0.2 : 0.14)
+        : touch.has-hover ? Tokens.surface-hover : Tokens.raised;
+    border-width: root.style == 0 ? 1px : 0px;
+    border-color: Tokens.border;
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    label := Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.text;
+        font-size: 13px;
+        font-weight: root.style == 1 ? 650 : 550;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+        color: root.style == 1 ? Tokens.on-accent : root.style == 2 ? Tokens.danger : root.style == 3 ? Tokens.accent : Tokens.text;
+    }
+}
+
+// Read-only, selectable prose: the agent's words can be copied a block at a time.
+component Prose inherits TextInput {
+    read-only: true;
+    single-line: false;
+    wrap: word-wrap;
+    color: Tokens.text;
+    font-size: 14px;
+    selection-background-color: Tokens.accent.with-alpha(0.35);
+}
+
+component Md inherits VerticalLayout {
+    in property <int> kind;
+    in property <int> level;
+    in property <string> text;
+    in property <[MdLinkVm]> links;
+    in property <length> font: 14px;
+    in property <color> ink: Tokens.text;
+    spacing: 4px;
+    if root.kind == 6: Rectangle { height: 1px; background: Tokens.border; }
+    if root.kind == 4: Rectangle {
+        background: Tokens.input;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        height: code.preferred-height + 16px;
+        code := Prose {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            height: parent.height - 16px;
+            text: root.text;
+            wrap: char-wrap;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+        }
+    }
+    if root.kind == 5: HorizontalLayout {
+        spacing: 10px;
+        Rectangle { width: 3px; background: Tokens.accent.with-alpha(0.6); border-radius: 2px; }
+        Prose { text: root.text; font-size: root.font; color: Tokens.text-secondary; }
+    }
+    if root.kind == 0: Prose {
+        text: root.text;
+        font-weight: 700;
+        font-size: root.level == 1 ? 20px : root.level == 2 ? 17px : 15px;
+    }
+    if root.kind == 1 || root.kind == 2 || root.kind == 3: HorizontalLayout {
+        padding-left: root.kind == 1 ? 0px : root.level * 18px;
+        Prose { text: root.text; font-size: root.font; color: root.ink; }
+    }
+    if root.links.length > 0: HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        for link in root.links: Rectangle {
+            height: 22px;
+            width: min(360px, link-label.preferred-width + 16px);
+            border-radius: 11px;
+            background: link-touch.has-hover ? Tokens.accent.with-alpha(0.2) : Tokens.accent.with-alpha(0.1);
+            link-label := Text {
+                x: 8px;
+                width: parent.width - 16px;
+                text: link.label;
+                overflow: elide;
+                font-size: 11.5px;
+                vertical-alignment: center;
+                color: Tokens.accent;
+            }
+            link-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.open-link(link.url); } }
+        }
+    }
+}
+
+component DiffRow inherits Rectangle {
+    in property <int> kind;     // as DiffLineVm: 1 hunk, 2 added, 3 removed, 4 context, 5 plain
+    in property <string> old-no;
+    in property <string> new-no;
+    in property <string> text;
+    in property <bool> numbers: true;
+    height: max(root.kind == 0 ? 28px : 18px, body.preferred-height + 2px);
+    background: root.kind == 0 ? Tokens.raised : root.kind == 1 ? Tokens.accent.with-alpha(0.08) : root.kind == 2 ? Tokens.success.with-alpha(0.12) : root.kind == 3 ? Tokens.danger.with-alpha(0.12) : transparent;
+    if root.kind == 2 || root.kind == 3: Rectangle {
+        x: 0;
+        width: 2px;
+        background: root.kind == 2 ? Tokens.success : Tokens.danger;
+    }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 8px;
+        if root.numbers: Text { width: 34px; text: root.old-no; horizontal-alignment: right; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.text-faint; }
+        if root.numbers: Text { width: 38px; text: root.new-no; horizontal-alignment: right; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.text-faint; }
+        Text {
+            width: 16px;
+            text: root.kind == 2 ? "+" : root.kind == 3 ? "\u{2212}" : "";
+            horizontal-alignment: center;
+            font-family: Tokens.mono-font;
+            font-size: 11.5px;
+            color: root.kind == 2 ? Tokens.success : Tokens.danger;
+        }
+        body := Text {
+            horizontal-stretch: 1;
+            text: root.kind == 1 ? "\u{22EF}" : root.text;
+            wrap: char-wrap;
+            vertical-alignment: center;
+            font-family: Tokens.mono-font;
+            font-size: 11.5px;
+            font-weight: root.kind == 0 ? 700 : 400;
+            color: root.kind == 1 ? Tokens.text-faint : root.kind == 5 ? Tokens.text-secondary : Tokens.text;
+        }
+    }
+}
+
+component Thumbs inherits HorizontalLayout {
+    in property <[ChatImageVm]> images;
+    in property <length> tall: 180px;
+    spacing: 8px;
+    alignment: start;
+    for img in root.images: Rectangle {
+        property <float> aspect: img.height > 0 ? img.width / img.height : 1.33;
+        height: root.tall;
+        width: min(root.tall * self.aspect, 420px);
+        border-radius: 10px;
+        clip: true;
+        background: Tokens.raised;
+        border-width: 1px;
+        border-color: Tokens.border;
+        if img.loaded: Image {
+            width: parent.width;
+            height: parent.height;
+            source: img.image;
+            image-fit: cover;
+        }
+        if !img.loaded: Glyph { which: 11; size: 20px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+        TouchArea { mouse-cursor: pointer; clicked => { ChatVm.open-image(img.id); } }
+    }
+}
+
+component StatusMark inherits Rectangle {
+    in property <int> state;
+    width: 14px;
+    height: 14px;
+    // A running call is a still amber dot: the chrome has no looping motion (DESIGN.md).
+    if root.state == 0: Rectangle {
+        x: 4px;
+        y: 4px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Tokens.warning;
+    }
+    if root.state == 1: Glyph { which: 23; size: 12px; ink: Tokens.success; x: 1px; y: 1px; }
+    if root.state == 2: Image { source: @image-url("icons/close.svg"); colorize: Tokens.danger; width: 10px; height: 10px; x: 2px; y: 2px; }
+}
+
+component Entry inherits Rectangle {
+    in property <ChatEntryVm> e;
+    property <length> indent: root.e.depth * 22px;
+    if !root.e.first && (root.e.kind == 0 || root.e.kind == 1): Rectangle {
+        x: root.indent + 46px;
+        y: 0;
+        height: 1px;
+        width: parent.width - self.x;
+        background: Tokens.border;
+    }
+    if root.e.depth > 0: Rectangle {
+        x: 33px;
+        width: 2px;
+        background: Tokens.border;
+    }
+    VerticalLayout {
+        if root.e.kind == 0 || root.e.kind == 1: Pressable {
+            enabled: root.e.expandable;
+            hover-fill: root.e.expandable;
+            min-height: ChatStyle.row-height;
+            clicked => { ChatVm.toggle(root.e.key); }
+            HorizontalLayout {
+                padding-left: 12px + root.indent;
+                padding-right: 12px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    width: 24px;
+                    Glyph {
+                        which: root.e.icon;
+                        ink: root.e.state == 2 ? Tokens.danger : root.e.state == 3 ? Tokens.warning : Tokens.text-faint;
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    padding-top: root.e.subtitle != "" ? 5px : 0px;
+                    padding-bottom: root.e.subtitle != "" ? 5px : 0px;
+                    Text {
+                        text: root.e.title;
+                        font-size: 12.5px;
+                        overflow: elide;
+                        color: root.e.state == 2 && root.e.kind == 0 ? Tokens.danger : root.e.kind == 1 ? Tokens.text-faint : Tokens.text-secondary;
+                    }
+                    if root.e.subtitle != "": Text { text: root.e.subtitle; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
+                }
+                if root.e.added + root.e.removed > 0: HorizontalLayout {
+                    spacing: 5px;
+                    alignment: center;
+                    if root.e.added > 0: Text { text: "+" + root.e.added; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.success; vertical-alignment: center; }
+                    if root.e.removed > 0: Text { text: "\u{2212}" + root.e.removed; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.danger; vertical-alignment: center; }
+                }
+                if root.e.kind == 0: VerticalLayout { alignment: center; StatusMark { state: root.e.state; } }
+                VerticalLayout {
+                    alignment: center;
+                    width: 10px;
+                    if root.e.expandable: Chevron { open: root.e.open; }
+                }
+            }
+        }
+        if root.e.kind == 2: HorizontalLayout {
+            padding-left: 12px + root.indent + 34px;
+            padding-right: 12px;
+            padding-bottom: 4px;
+            Md {
+                kind: root.e.md-kind;
+                level: root.e.level;
+                text: root.e.text;
+                links: root.e.links;
+                font: 12.5px;
+                ink: Tokens.text-secondary;
+            }
+        }
+        if root.e.kind == 3: HorizontalLayout {
+            padding-left: 8px + root.indent;
+            padding-right: 8px;
+            DiffRow {
+                kind: root.e.diff-kind;
+                old-no: root.e.old-no;
+                new-no: root.e.new-no;
+                text: root.e.text;
+            }
+        }
+        if root.e.kind == 4: HorizontalLayout {
+            padding-left: 12px + root.indent + 34px;
+            padding-top: 4px;
+            padding-bottom: 8px;
+            Thumbs { images: root.e.images; tall: 160px; }
+        }
+        if root.e.kind == 5 || root.e.kind == 6: Pressable {
+            enabled: root.e.kind == 5;
+            hover-fill: false;
+            height: 26px;
+            clicked => { ChatVm.toggle(root.e.key); }
+            HorizontalLayout {
+                padding-left: 12px + root.indent + 34px;
+                spacing: 6px;
+                alignment: start;
+                Text { text: root.e.title; font-size: 11.5px; font-weight: 600; color: Tokens.text-faint; vertical-alignment: center; }
+                if root.e.kind == 5: VerticalLayout { alignment: center; Chevron { open: root.e.open; } }
+            }
+        }
+        if root.e.kind == 7: HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 12px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            spacing: 9px;
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                y: 2px;
+                border-radius: 7px;
+                border-width: root.e.state == 0 ? 1.5px : 0px;
+                border-color: Tokens.text-faint;
+                background: root.e.state == 2 ? Tokens.success : root.e.state == 1 ? Tokens.accent : transparent;
+                if root.e.state == 2: Glyph { which: 23; size: 10px; ink: Tokens.on-accent; x: 2px; y: 2px; }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.e.text;
+                wrap: word-wrap;
+                font-size: 13px;
+                font-weight: root.e.state == 1 ? 600 : 400;
+                color: root.e.state == 2 ? Tokens.text-secondary : Tokens.text;
+            }
+        }
+    }
+}
+
+component QuietRow inherits HorizontalLayout {
+    in property <int> icon;
+    in property <string> text;
+    in property <color> ink: Tokens.text-faint;
+    in property <color> text-ink: Tokens.text-secondary;
+    spacing: 8px;
+    VerticalLayout { padding-top: 2px; Glyph { which: root.icon; ink: root.ink; size: 13px; } }
+    Prose { text: root.text; font-size: 12.5px; color: root.text-ink; }
+}
+
+component Row inherits VerticalLayout {
+    in property <ChatRowVm> r;
+    // User: a quiet surface inset from the left, so the agent's prose keeps the full measure.
+    if root.r.kind == 0: HorizontalLayout {
+        padding-left: 48px;
+        VerticalLayout {
+            spacing: 3px;
+            Rectangle {
+                background: Tokens.surface;
+                border-radius: 14px;
+                opacity: root.r.flag ? 0.72 : 1;
+                height: user-col.preferred-height;
+                user-col := VerticalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    padding-top: 9px;
+                    padding-bottom: 9px;
+                    spacing: 6px;
+                    if root.r.images.length > 0: Thumbs { images: root.r.images; tall: 120px; }
+                    if root.r.images.length == 0 && root.r.meta != "": HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        Glyph { which: 11; size: 13px; }
+                        Text { text: root.r.meta; font-size: 12px; color: Tokens.text-secondary; }
+                    }
+                    if root.r.text != "": Prose { text: root.r.text; }
+                }
+            }
+            if root.r.flag: HorizontalLayout {
+                alignment: end;
+                spacing: 4px;
+                padding-right: 4px;
+                Glyph { which: 19; size: 11px; }
+                Text { text: "Queued"; font-size: 11px; color: Tokens.text-faint; }
+            }
+        }
+    }
+    if root.r.kind == 1: Md {
+        kind: root.r.md-kind;
+        level: root.r.level;
+        text: root.r.text;
+        links: root.r.links;
+    }
+    if root.r.kind == 2: Thumbs { images: root.r.images; }
+    if root.r.kind == 3: VerticalLayout {
+        spacing: 6px;
+        Pressable {
+            hover-fill: false;
+            height: 24px;
+            clicked => { ChatVm.toggle(root.r.key); }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                VerticalLayout { alignment: center; Glyph { which: 6; size: 13px; } }
+                Text { text: "Thinking"; font-size: 12.5px; color: Tokens.text-faint; vertical-alignment: center; }
+                VerticalLayout { alignment: center; Chevron { open: root.r.open; } }
+            }
+        }
+        if root.r.open: HorizontalLayout {
+            spacing: 10px;
+            Rectangle { width: 2px; background: Tokens.border; }
+            Prose { text: root.r.text; font-size: 12.5px; font-italic: true; color: Tokens.text-faint; }
+        }
+    }
+    if root.r.kind == 4 || root.r.kind == 5: Rectangle {
+        background: Tokens.surface;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        clip: true;
+        height: group.preferred-height;
+        group := VerticalLayout {
+            if root.r.kind == 5: Pressable {
+                height: ChatStyle.row-height;
+                clicked => { ChatVm.toggle(root.r.key); }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    VerticalLayout { alignment: center; width: 24px; Glyph { which: 14; } }
+                    Text { text: root.r.text; font-size: 12.5px; font-weight: 550; color: Tokens.text-secondary; vertical-alignment: center; }
+                    if !root.r.open && root.r.detail != "": Text {
+                        horizontal-stretch: 1;
+                        text: root.r.detail;
+                        font-size: 12.5px;
+                        color: Tokens.text-faint;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    if root.r.open || root.r.detail == "": Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center; Chevron { open: root.r.open; } }
+                }
+            }
+            for e in root.r.entries: Entry { e: e; }
+            if root.r.kind == 5 && root.r.open: Rectangle { height: 6px; }
+        }
+    }
+    if root.r.kind == 6: QuietRow { icon: 15; text: root.r.text; }
+    if root.r.kind == 7: QuietRow { icon: 16; text: root.r.text; ink: Tokens.danger; text-ink: Tokens.danger; }
+    if root.r.kind == 8: HorizontalLayout {
+        spacing: 10px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        VerticalLayout { alignment: center; horizontal-stretch: 1; Rectangle { height: 1px; background: Tokens.border; } }
+        Text { text: root.r.text; font-size: 11.5px; color: Tokens.text-faint; }
+        VerticalLayout { alignment: center; horizontal-stretch: 1; Rectangle { height: 1px; background: Tokens.border; } }
+    }
+    if root.r.kind == 9: VerticalLayout {
+        spacing: 8px;
+        QuietRow { icon: 22; text: root.r.text; ink: Tokens.warning; }
+        if root.r.state >= 0: HorizontalLayout {
+            padding-left: 21px;
+            spacing: 8px;
+            alignment: start;
+            SmallAction {
+                text: root.r.state == 1 ? "Checking\u{2026}" : "Try again";
+                style: 3;
+                enabled: root.r.state != 1;
+                clicked => { ChatVm.sign-in-retry(); }
+            }
+            if root.r.state == 2: Text { text: "Still signed out"; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
+        }
+    }
+    if root.r.kind == 10: HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout { padding-top: 2px; Glyph { which: root.r.flag ? 23 : 18; size: 13px; } }
+        Prose { text: root.r.text + "  \u{2192}  " + root.r.detail; font-size: 12.5px; color: Tokens.text-secondary; }
+    }
+    if root.r.kind == 11: HorizontalLayout {
+        padding-left: 48px;
+        Rectangle {
+            background: Tokens.danger.with-alpha(0.08);
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: Tokens.danger.with-alpha(0.35);
+            height: failed-col.preferred-height;
+            failed-col := VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                if root.r.text != "": Prose { text: root.r.text; color: Tokens.text-secondary; }
+                if root.r.meta != "": Text { text: root.r.meta; font-size: 11.5px; color: Tokens.text-faint; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        VerticalLayout { alignment: center; Glyph { which: 16; size: 12px; ink: Tokens.danger; } }
+                        Text { text: "Not sent"; font-size: 12px; font-weight: 600; color: Tokens.danger; vertical-alignment: center; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    SmallAction { text: "Discard"; style: 2; clicked => { ChatVm.discard(root.r.key); } }
+                    SmallAction { text: "Retry"; enabled: root.r.open; clicked => { ChatVm.retry(root.r.key); } }
+                }
+            }
+        }
+    }
+    if root.r.kind == 12: HorizontalLayout {
+        spacing: 8px;
+        padding-top: 2px;
+        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; } }
+        Text { text: root.r.text; font-size: 12.5px; font-weight: 550; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
+    }
+    if root.r.kind == 13: Pressable {
+        height: 32px;
+        border-radius: 8px;
+        clicked => { ChatVm.earlier(); }
+        Text { width: 100%; height: 100%; text: "Earlier messages"; font-size: 12.5px; color: Tokens.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    if root.r.kind == 14: VerticalLayout {
+        padding-top: 80px;
+        spacing: 8px;
+        alignment: center;
+        HorizontalLayout { alignment: center; Glyph { which: 18; size: 26px; } }
+        Text { text: root.r.text; font-size: 14px; color: Tokens.text-secondary; horizontal-alignment: center; }
+        Text { text: root.r.detail; font-size: 12px; font-family: Tokens.mono-font; color: Tokens.text-faint; horizontal-alignment: center; overflow: elide; }
+    }
+}
+
+component ChatHeader inherits Rectangle {
+    height: 48px;
+    background: Tokens.background;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 1px;
+            Text { text: ChatVm.title; font-size: 14px; font-weight: 650; color: Tokens.text; overflow: elide; }
+            folder := Pressable {
+                hover-fill: false;
+                height: 16px;
+                clicked => { ChatVm.copy-folder(); }
+                Text {
+                    width: 100%;
+                    text: ChatVm.folder-copied ? "Folder copied" : ChatVm.folder;
+                    font-family: ChatVm.folder-copied ? Tokens.ui-font : Tokens.mono-font;
+                    font-size: 11px;
+                    color: folder.hovered ? Tokens.text-secondary : Tokens.text-faint;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        if ChatVm.has-status: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            status := Pressable {
+                height: 28px;
+                width: status-row.preferred-width + 16px;
+                border-radius: 8px;
+                background: ChatVm.ctl-open || self.hovered ? Tokens.surface-hover : transparent;
+                clicked => { ChatVm.controls(); }
+                status-row := HorizontalLayout {
+                    x: 8px;
+                    spacing: 0px;
+                    if ChatVm.model-name != "": Text { text: ChatVm.model-name; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
+                    if ChatVm.model-name != "" && ChatVm.mode-name != "": Text { text: " \u{00B7} "; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
+                    if ChatVm.mode-name != "": Text { text: ChatVm.mode-name; font-size: 12px; color: ChatStyle.tint(ChatVm.mode-tint); vertical-alignment: center; }
+                    if ChatVm.stats != "": Text { text: "   " + ChatVm.stats; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
+                    Rectangle { width: 8px; }
+                    VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 9px; height: 9px; transform-rotation: 90deg; } }
+                }
+            }
+        }
+        if ChatVm.phase == 3: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            SmallAction { text: "Reconnect"; style: 3; clicked => { ChatVm.reconnect(); } }
+        }
+        if ChatVm.phase != 3: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 6px;
+            TextDot { ink: ChatStyle.phase-ink(ChatVm.phase); line-height: word.preferred-height; }
+            word := Text { text: ChatVm.phase-word; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
+        }
+    }
+    // Context in use, as a 3 px rule under the header; otherwise a hairline.
+    Rectangle {
+        y: parent.height - self.height;
+        height: ChatVm.context >= 0 ? 3px : 1px;
+        background: Tokens.border;
+        if ChatVm.context >= 0: Rectangle {
+            x: 0;
+            width: parent.width * clamp(ChatVm.context, 0, 1);
+            background: Tokens.accent;
+        }
+    }
+}
+
+component PaletteList inherits Rectangle {
+    background: Tokens.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    clip: true;
+    height: min(list.preferred-height, 248px);
+    Flickable {
+        content-height: list.preferred-height;
+        list := VerticalLayout {
+            padding: 4px;
+            if ChatVm.palette.length == 0: Text {
+                height: 32px;
+                x: 10px;
+                text: ChatVm.palette-kind == 1 ? "No command" : "No file";
+                font-size: 12.5px;
+                color: Tokens.text-faint;
+                vertical-alignment: center;
+            }
+            for item[i] in ChatVm.palette: Rectangle {
+                height: 32px;
+                border-radius: 8px;
+                background: i == ChatVm.palette-index ? Tokens.raised : row-touch.has-hover ? Tokens.surface-hover : transparent;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    Text {
+                        text: item.primary;
+                        font-family: Tokens.mono-font;
+                        font-size: 12.5px;
+                        color: ChatVm.palette-kind == 1 ? Tokens.accent : Tokens.text;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: item.secondary;
+                        font-family: ChatVm.palette-kind == 2 ? Tokens.mono-font : Tokens.ui-font;
+                        font-size: 12px;
+                        color: Tokens.text-faint;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+                row-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.palette-pick(i); } }
+            }
+        }
+    }
+}
+
+component Card inherits Rectangle {
+    background: Tokens.surface;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: Tokens.accent.with-alpha(0.45);
+}
+
+component CardHeader inherits HorizontalLayout {
+    in property <int> icon;
+    in property <string> eyebrow;
+    in property <string> title;
+    in property <string> position;
+    spacing: 10px;
+    VerticalLayout { padding-top: 2px; Glyph { which: root.icon; ink: Tokens.accent; size: 16px; } }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 1px;
+        Text { text: root.eyebrow; font-size: 11px; font-weight: 600; color: Tokens.text-faint; }
+        Text { text: root.title; font-size: 13.5px; font-weight: 650; color: Tokens.text; wrap: word-wrap; }
+    }
+    if root.position != "": Text { text: root.position; font-size: 11px; font-family: Tokens.mono-font; color: Tokens.text-faint; }
+}
+
+component PermissionCard inherits Card {
+    property <bool> more-open;
+    height: col.preferred-height;
+    col := VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+        CardHeader {
+            icon: ChatVm.perm-icon;
+            eyebrow: ChatVm.perm-plan ? "Plan" : "Permission";
+            title: ChatVm.perm-title;
+            position: ChatVm.perm-position;
+        }
+        if ChatVm.perm-path != "": Rectangle {
+            background: Tokens.input;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            clip: true;
+            height: diff-col.preferred-height;
+            diff-col := VerticalLayout {
+                Rectangle {
+                    height: 30px;
+                    background: Tokens.raised;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        Text { horizontal-stretch: 1; text: ChatVm.perm-path; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text; overflow: elide; vertical-alignment: center; }
+                        if ChatVm.perm-added > 0: Text { text: "+" + ChatVm.perm-added; font-family: Tokens.mono-font; font-size: 12px; font-weight: 600; color: Tokens.success; vertical-alignment: center; }
+                        if ChatVm.perm-removed > 0: Text { text: "\u{2212}" + ChatVm.perm-removed; font-family: Tokens.mono-font; font-size: 12px; font-weight: 600; color: Tokens.danger; vertical-alignment: center; }
+                    }
+                }
+                VerticalLayout {
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    for line in ChatVm.perm-rows: DiffRow { kind: line.kind; text: line.text; numbers: false; }
+                }
+                review-link := Pressable {
+                    height: 32px;
+                    hover-fill: false;
+                    clicked => { ChatVm.review(); }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 6px;
+                        alignment: start;
+                        Text { text: "Show full diff"; font-size: 12.5px; font-weight: 600; color: review-link.hovered ? Tokens.accent.brighter(0.15) : Tokens.accent; vertical-alignment: center; }
+                        VerticalLayout { alignment: center; Image { source: @image-url("icons/expand.svg"); colorize: Tokens.accent; width: 12px; height: 12px; } }
+                    }
+                }
+            }
+        }
+        if ChatVm.perm-plan: Rectangle {
+            background: Tokens.input;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            clip: true;
+            height: plan-col.preferred-height;
+            plan-col := VerticalLayout {
+                Flickable {
+                    height: min(plan-body.preferred-height, 160px);
+                    content-height: plan-body.preferred-height;
+                    plan-body := VerticalLayout {
+                        padding: 10px;
+                        spacing: 4px;
+                        for item in ChatVm.perm-md: Md { kind: item.kind; level: item.level; text: item.text; links: item.links; font: 13px; }
+                    }
+                }
+                Rectangle { height: 1px; background: Tokens.border; }
+                plan-link := Pressable {
+                    height: 32px;
+                    hover-fill: false;
+                    clicked => { ChatVm.review(); }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 6px;
+                        alignment: start;
+                        Text { text: "Show full plan"; font-size: 12.5px; font-weight: 600; color: plan-link.hovered ? Tokens.accent.brighter(0.15) : Tokens.accent; vertical-alignment: center; }
+                        VerticalLayout { alignment: center; Image { source: @image-url("icons/expand.svg"); colorize: Tokens.accent; width: 12px; height: 12px; } }
+                    }
+                }
+            }
+        }
+        if ChatVm.perm-path == "" && !ChatVm.perm-plan && ChatVm.perm-text != "": Rectangle {
+            background: Tokens.input;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            height: min(perm-text.preferred-height + 20px, 96px);
+            clip: true;
+            perm-text := Text {
+                x: 10px;
+                y: 10px;
+                width: parent.width - 20px;
+                text: ChatVm.perm-text;
+                wrap: char-wrap;
+                font-family: Tokens.mono-font;
+                font-size: 11.5px;
+                color: Tokens.text-secondary;
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            if ChatVm.perm-reject.id != "": SmallAction {
+                horizontal-stretch: 1;
+                text: ChatVm.perm-reject.label;
+                style: 2;
+                enabled: ChatVm.perm-enabled;
+                clicked => { ChatVm.approve(ChatVm.perm-reject.id); }
+            }
+            if ChatVm.perm-primary.id != "": SmallAction {
+                horizontal-stretch: 1;
+                text: ChatVm.perm-primary.label;
+                style: 1;
+                enabled: ChatVm.perm-enabled;
+                clicked => { ChatVm.approve(ChatVm.perm-primary.id); }
+            }
+        }
+        if ChatVm.perm-collapsed && ChatVm.perm-more.length > 0: more-toggle := Pressable {
+            height: 26px;
+            hover-fill: false;
+            clicked => { root.more-open = !root.more-open; }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 5px;
+                Text { text: "More options"; font-size: 12px; color: more-toggle.hovered ? Tokens.text : Tokens.text-secondary; vertical-alignment: center; }
+                VerticalLayout { alignment: center; Chevron { open: root.more-open; } }
+            }
+        }
+        if !ChatVm.perm-collapsed || root.more-open: VerticalLayout {
+            spacing: 6px;
+            for option in ChatVm.perm-more: SmallAction {
+                text: option.label;
+                style: ChatVm.perm-collapsed ? 0 : 3;
+                enabled: ChatVm.perm-enabled;
+                clicked => { ChatVm.approve(option.id); }
+            }
+        }
+        if ChatVm.perm-failure != "": Text { text: ChatVm.perm-failure; font-size: 11.5px; color: Tokens.text-faint; }
+    }
+}
+
+component QField inherits Rectangle {
+    in property <string> name;
+    in property <string> text;
+    in property <string> placeholder;
+    in property <bool> focus-on-open;
+    height: max(34px, input.preferred-height + 16px);
+    border-radius: 10px;
+    background: Tokens.raised;
+    border-width: 1px;
+    border-color: input.has-focus ? Tokens.accent.with-alpha(0.55) : Tokens.border;
+    init => { if (root.focus-on-open) { input.focus(); } }
+    input := TextInput {
+        x: 12px;
+        y: 8px;
+        width: parent.width - 24px;
+        text: root.text;
+        single-line: false;
+        wrap: word-wrap;
+        font-size: 13px;
+        color: Tokens.text;
+        enabled: ChatVm.q-enabled;
+        selection-background-color: Tokens.accent.with-alpha(0.35);
+        edited => { ChatVm.q-text(root.name, self.text); }
+        key-pressed(e) => {
+            if (e.text == Key.Return && !e.modifiers.shift) { self.clear-focus(); return accept; }
+            reject
+        }
+    }
+    if input.text == "": Text {
+        x: 12px;
+        y: 8px;
+        text: root.placeholder;
+        font-size: 13px;
+        color: Tokens.placeholder;
+    }
+}
+
+component QuestionCard inherits Card {
+    height: col.preferred-height;
+    col := VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+        CardHeader { icon: 17; eyebrow: "Question"; title: ChatVm.q-message; position: ChatVm.q-position; }
+        if ChatVm.q-fields.length > 0: Flickable {
+            height: min(fields.preferred-height, 300px);
+            content-height: fields.preferred-height;
+            fields := VerticalLayout {
+                spacing: 12px;
+                for field in ChatVm.q-fields: VerticalLayout {
+                    spacing: 6px;
+                    if field.show-title: Text { text: field.title; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+                    if field.kind <= 1: VerticalLayout {
+                        spacing: 6px;
+                        for choice in field.choices: choice-row := Pressable {
+                            enabled: ChatVm.q-enabled;
+                            hover-fill: false;
+                            min-height: 34px;
+                            border-radius: 10px;
+                            background: choice.picked ? Tokens.accent.with-alpha(0.10) : self.hovered ? Tokens.surface-hover : Tokens.input;
+                            border-width: 1px;
+                            border-color: choice.picked ? Tokens.accent.with-alpha(0.55) : Tokens.border;
+                            clicked => { ChatVm.q-choose(field.name, choice.value); }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 6px;
+                                padding-bottom: 6px;
+                                spacing: 10px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 14px;
+                                        height: 14px;
+                                        border-radius: field.kind == 1 ? 3px : 7px;
+                                        border-width: choice.picked ? 0px : 1.5px;
+                                        border-color: Tokens.text-faint;
+                                        background: choice.picked ? Tokens.accent : transparent;
+                                        if choice.picked && field.kind == 1: Glyph { which: 23; size: 10px; ink: Tokens.on-accent; x: 2px; y: 2px; }
+                                        if choice.picked && field.kind == 0: Rectangle { x: 4px; y: 4px; width: 6px; height: 6px; border-radius: 3px; background: Tokens.on-accent; }
+                                    }
+                                }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    Text { text: choice.title; font-size: 13px; color: Tokens.text; wrap: word-wrap; }
+                                    if choice.description != "": Text { text: choice.description; font-size: 11.5px; color: Tokens.text-secondary; wrap: word-wrap; }
+                                }
+                            }
+                        }
+                        if field.custom-name != "" && !field.custom-open: other := Pressable {
+                            enabled: ChatVm.q-enabled;
+                            height: 32px;
+                            border-radius: 10px;
+                            clicked => { ChatVm.q-open-custom(field.custom-name); }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                spacing: 10px;
+                                VerticalLayout { alignment: center; Glyph { which: 1; size: 13px; } }
+                                Text { text: "Other\u{2026}"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                            }
+                        }
+                        if field.custom-name != "" && field.custom-open: QField {
+                            name: field.custom-name;
+                            text: field.custom-text;
+                            placeholder: "Your own answer, or a note";
+                            focus-on-open: true;
+                        }
+                    }
+                    if field.kind == 2: QField { name: field.name; text: field.text; placeholder: field.placeholder; }
+                    if field.kind == 3: HorizontalLayout {
+                        spacing: 10px;
+                        Text { horizontal-stretch: 1; text: field.placeholder; font-size: 13px; color: Tokens.text; wrap: word-wrap; vertical-alignment: center; }
+                        flag-switch := Rectangle {
+                            width: 40px;
+                            height: 22px;
+                            border-radius: 11px;
+                            background: field.flag ? Tokens.accent : Tokens.raised;
+                            border-width: 1px;
+                            border-color: field.flag ? Tokens.accent : Tokens.border;
+                            Rectangle {
+                                x: field.flag ? parent.width - self.width - 4px : 4px;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                border-radius: 7px;
+                                background: field.flag ? Tokens.on-accent : Tokens.text-secondary;
+                            }
+                            TouchArea { enabled: ChatVm.q-enabled; mouse-cursor: pointer; clicked => { ChatVm.q-flag(field.name, !field.flag); } }
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            SmallAction { horizontal-stretch: 1; text: "Decline"; style: 2; enabled: ChatVm.q-enabled; clicked => { ChatVm.q-decline(); } }
+            if ChatVm.q-show-submit: SmallAction { horizontal-stretch: 1; text: "Submit"; style: 1; enabled: ChatVm.q-can-submit; clicked => { ChatVm.q-submit(); } }
+        }
+        if ChatVm.q-failure != "": Text { text: ChatVm.q-failure; font-size: 11.5px; color: Tokens.text-faint; }
+    }
+}
+
+component Composer inherits VerticalLayout {
+    spacing: 6px;
+    init => { input.focus(); }
+    property <int> focus-seq: ChatVm.focus-seq;
+    property <int> caret-seq: ChatVm.caret-seq;
+    changed focus-seq => { input.focus(); }
+    changed caret-seq => {
+        input.focus();
+        input.set-selection-offsets(ChatVm.caret, ChatVm.caret);
+    }
+    if ChatVm.palette-kind != 0: PaletteList { }
+    if ChatVm.catching-up: HorizontalLayout {
+        padding-left: 6px;
+        spacing: 6px;
+        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; } }
+        Text { text: "Catching up\u{2026}"; font-size: 11.5px; color: Tokens.text-faint; }
+    }
+    if ChatVm.attach-error != "": HorizontalLayout {
+        padding-left: 6px;
+        spacing: 8px;
+        VerticalLayout { alignment: center; Glyph { which: 16; size: 12px; ink: Tokens.warning; } }
+        Text { horizontal-stretch: 1; text: ChatVm.attach-error; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
+        IconButton { flat: true; size: 22px; icon: @image-url("icons/close.svg"); tooltip: "Dismiss"; clicked => { ChatVm.dismiss-attach-error(); } }
+    }
+    if ChatVm.attachments.length > 0: HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        for a in ChatVm.attachments: Rectangle {
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            clip: true;
+            background: Tokens.raised;
+            border-width: 1px;
+            border-color: Tokens.border;
+            if a.ready: Image { width: parent.width; height: parent.height; source: a.image; image-fit: cover; }
+            if !a.ready: Text { width: 100%; height: 100%; text: "\u{2026}"; color: Tokens.text-faint; horizontal-alignment: center; vertical-alignment: center; }
+            Rectangle {
+                x: parent.width - 20px;
+                y: 2px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                background: Tokens.background.with-alpha(0.8);
+                Image { source: @image-url("icons/close.svg"); colorize: Tokens.text; width: 9px; height: 9px; x: 4.5px; y: 4.5px; }
+                TouchArea { mouse-cursor: pointer; clicked => { ChatVm.remove-attachment(a.key); } }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout {
+            alignment: end;
+            padding-bottom: 2px;
+            attach := Rectangle {
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                opacity: ChatVm.can-attach && !ChatVm.dimmed ? 1 : 0.45;
+                background: attach-touch.has-hover && ChatVm.can-attach ? Tokens.surface-hover : Tokens.raised;
+                Image { source: @image-url("icons/plus.svg"); colorize: Tokens.text-secondary; width: 13px; height: 13px; x: 8.5px; y: 8.5px; }
+                attach-touch := TouchArea {
+                    enabled: ChatVm.can-attach && !ChatVm.dimmed;
+                    mouse-cursor: pointer;
+                    clicked => { ChatVm.pick-images(); }
+                }
+            }
+        }
+        field := Rectangle {
+            horizontal-stretch: 1;
+            height: min(max(36px, input.preferred-height + 18px), 200px);
+            border-radius: 18px;
+            background: Tokens.raised;
+            border-width: 1px;
+            border-color: input.has-focus ? Tokens.accent.with-alpha(0.6) : Tokens.border;
+            opacity: ChatVm.dimmed ? 0.55 : 1;
+            clip: true;
+            scroller := Flickable {
+                x: 14px;
+                y: 9px;
+                width: parent.width - 28px;
+                height: parent.height - 18px;
+                content-height: max(self.height, input.preferred-height);
+                input := TextInput {
+                    width: scroller.width;
+                    height: max(scroller.height, self.preferred-height);
+                    text <=> ChatVm.draft;
+                    single-line: false;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    color: Tokens.text;
+                    selection-background-color: Tokens.accent.with-alpha(0.35);
+                    accessible-label: "Message the agent";
+                    edited => { ChatVm.draft-edited(self.text, self.cursor-position-byte-offset); }
+                    cursor-position-changed(p) => {
+                        ChatVm.draft-edited(self.text, self.cursor-position-byte-offset);
+                        if (p.y + 20px > scroller.height - scroller.content-y) { scroller.content-y = scroller.height - p.y - 20px; }
+                        if (p.y < -scroller.content-y) { scroller.content-y = -p.y; }
+                    }
+                    key-pressed(e) => {
+                        if (ChatVm.palette-kind != 0) {
+                            if (e.text == Key.UpArrow) { ChatVm.palette-index = max(0, ChatVm.palette-index - 1); return accept; }
+                            if (e.text == Key.DownArrow) { ChatVm.palette-index = min(ChatVm.palette.length - 1, ChatVm.palette-index + 1); return accept; }
+                            if ((e.text == Key.Return || e.text == Key.Tab) && ChatVm.palette.length > 0) { ChatVm.palette-pick(ChatVm.palette-index); return accept; }
+                            if (e.text == Key.Escape) { ChatVm.palette-close(); return accept; }
+                        }
+                        if (e.text == Key.Return && !e.modifiers.shift && !e.modifiers.alt) { ChatVm.send(); return accept; }
+                        if (e.text == "v" && e.modifiers.control && !e.modifiers.alt && ChatVm.paste-image()) { return accept; }
+                        reject
+                    }
+                }
+            }
+            if input.text == "": Text {
+                x: 15px;
+                height: 36px;
+                text: ChatVm.placeholder;
+                font-size: 14px;
+                color: Tokens.placeholder;
+                vertical-alignment: center;
+            }
+        }
+        VerticalLayout {
+            alignment: end;
+            padding-bottom: 2px;
+            action := Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 16px;
+                background: ChatVm.stopping ? Tokens.danger.with-alpha(0.2) : ChatVm.action-enabled ? (action-touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent) : Tokens.text-faint.with-alpha(0.25);
+                accessible-role: button;
+                accessible-label: ChatVm.action-label;
+                if ChatVm.stopping: Image { source: @image-url("icons/stop.svg"); colorize: Tokens.danger; width: 14px; height: 14px; x: 9px; y: 9px; }
+                if !ChatVm.stopping: Image { source: @image-url("icons/arrow-up.svg"); colorize: ChatVm.action-enabled ? Tokens.on-accent : Tokens.text-secondary; width: 14px; height: 14px; x: 9px; y: 9px; }
+                action-touch := TouchArea {
+                    enabled: ChatVm.action-enabled;
+                    mouse-cursor: pointer;
+                    clicked => { if (ChatVm.stopping) { ChatVm.stop(); } else { ChatVm.send(); } }
+                }
+            }
+        }
+    }
+}
+
+component BottomBar inherits Rectangle {
+    background: Tokens.background;
+    height: col.preferred-height;
+    Rectangle { y: 0; height: 1px; background: Tokens.border; }
+    col := VerticalLayout {
+        padding-top: 10px;
+        padding-bottom: 12px;
+        padding-left: max(16px, (root.width - ChatStyle.column) / 2);
+        padding-right: max(16px, (root.width - ChatStyle.column) / 2);
+        spacing: 10px;
+        if ChatVm.notice != "": Rectangle {
+            background: Tokens.surface;
+            border-radius: 12px;
+            height: notice-row.preferred-height;
+            notice-row := HorizontalLayout {
+                padding: 10px;
+                spacing: 8px;
+                VerticalLayout { padding-top: 1px; Glyph { which: 16; size: 13px; ink: Tokens.warning; } }
+                Text { horizontal-stretch: 1; text: ChatVm.notice; font-size: 12.5px; color: Tokens.text-secondary; wrap: word-wrap; }
+                IconButton { flat: true; size: 22px; icon: @image-url("icons/close.svg"); tooltip: "Dismiss"; clicked => { ChatVm.dismiss-notice(); } }
+            }
+        }
+        if ChatVm.q-shown: QuestionCard { }
+        if ChatVm.perm-shown && !ChatVm.q-shown: PermissionCard { }
+        if ChatVm.banner != "": HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding-top: 4px;
+            padding-bottom: 4px;
+            VerticalLayout { alignment: center; Glyph { which: ChatVm.banner-icon; size: 13px; ink: Tokens.text-secondary; } }
+            Text { text: ChatVm.banner; font-size: 12.5px; color: Tokens.text-secondary; }
+        }
+        if ChatVm.banner == "" && ChatVm.composer-shown: Composer { }
+    }
+}
+
+export component ChatPane inherits Rectangle {
+    background: Tokens.background;
+    // Keys belong to the composer, never the PTY behind it.
+    TouchArea { }
+    VerticalLayout {
+        ChatHeader { }
+        Rectangle {
+            vertical-stretch: 1;
+            scroll := ScrollView {
+                property <bool> sticking: true;
+                property <int> follow: ChatVm.follow-seq;
+                property <length> end: min(0px, self.visible-height - self.content-height);
+                changed follow => { self.sticking = true; self.content-y = self.end; }
+                changed content-height => { if (self.sticking) { self.content-y = self.end; } }
+                changed visible-height => { if (self.sticking) { self.content-y = self.end; } }
+                changed sticking => { ChatVm.following(self.sticking); }
+                scrolled => { self.sticking = self.content-y - self.end <= 48px; }
+                VerticalLayout {
+                    padding-left: max(20px, (scroll.visible-width - ChatStyle.column) / 2);
+                    padding-right: max(20px, (scroll.visible-width - ChatStyle.column) / 2);
+                    padding-top: 16px;
+                    padding-bottom: 20px;
+                    spacing: 12px;
+                    alignment: start;
+                    for r in ChatVm.rows: Row { r: r; }
+                }
+            }
+            if !scroll.sticking: Rectangle {
+                y: parent.height - 40px;
+                height: 28px;
+                width: jump-row.preferred-width + 24px;
+                x: (parent.width - self.width) / 2;
+                border-radius: 14px;
+                background: jump-touch.has-hover ? Tokens.surface-hover : Tokens.raised;
+                border-width: 1px;
+                border-color: Tokens.border;
+                jump-row := HorizontalLayout {
+                    x: 12px;
+                    spacing: 5px;
+                    VerticalLayout { alignment: center; Image { source: @image-url("icons/arrow-down.svg"); colorize: Tokens.text; width: 11px; height: 11px; } }
+                    Text { text: "Jump to latest"; font-size: 12px; font-weight: 550; color: Tokens.text; vertical-alignment: center; }
+                }
+                jump-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { scroll.sticking = true; scroll.content-y = scroll.end; }
+                }
+            }
+        }
+        BottomBar { }
+    }
+}
+
+component ChoiceRow inherits Pressable {
+    in property <CtlChoiceVm> c;
+    in property <string> option;
+    in property <bool> divider;
+    enabled: ChatVm.ctl-enabled;
+    min-height: 40px;
+    opacity: ChatVm.ctl-enabled ? 1 : 0.55;
+    clicked => { ChatVm.ctl-choose(root.option, root.c.value); }
+    if root.divider: Rectangle { x: 12px; y: 0; height: 1px; width: parent.width - 12px; background: Tokens.border; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 10px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text { text: root.c.name; font-size: 13px; color: Tokens.text; overflow: elide; }
+            if root.c.description != "": Text { text: root.c.description; font-size: 11.5px; color: Tokens.text-secondary; overflow: elide; }
+        }
+        if root.c.pending: VerticalLayout { alignment: center; Text { text: "\u{2026}"; color: Tokens.text-faint; } }
+        if root.c.selected && !root.c.pending: VerticalLayout { alignment: center; Glyph { which: 23; ink: Tokens.accent; size: 13px; } }
+    }
+}
+
+component Group inherits Rectangle {
+    background: Tokens.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    clip: true;
+}
+
+component Section inherits Text {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: Tokens.text-faint;
+}
+
+component InfoRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> mono;
+    in property <bool> divider: true;
+    in property <color> dot: transparent;
+    height: 40px;
+    if root.divider: Rectangle { x: 12px; y: 0; height: 1px; width: parent.width - 12px; background: Tokens.border; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Text { text: root.label; font-size: 13px; color: Tokens.text; vertical-alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+        if root.dot != transparent: VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: root.dot; } }
+        TextInput {
+            read-only: true;
+            single-line: true;
+            horizontal-stretch: 2;
+            text: root.value;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            font-family: root.mono ? Tokens.mono-font : Tokens.ui-font;
+            font-size: root.mono ? 11.5px : 13px;
+            color: Tokens.text-secondary;
+        }
+    }
+}
+
+export component ChatControls inherits Rectangle {
+    background: Tokens.background.with-alpha(0.5);
+    TouchArea { clicked => { ChatVm.ctl-close(); } }
+    Rectangle {
+        x: parent.width - self.width;
+        width: min(380px, parent.width);
+        background: Tokens.background;
+        Rectangle { x: 0; width: 1px; background: Tokens.border; }
+        TouchArea { }
+        VerticalLayout {
+            Rectangle {
+                height: 52px;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text { text: ChatVm.title; font-size: 14px; font-weight: 650; color: Tokens.text; overflow: elide; }
+                        Text { text: ChatVm.folder; font-size: 11px; font-family: Tokens.mono-font; color: Tokens.text-faint; overflow: elide; }
+                    }
+                    VerticalLayout { alignment: center; IconButton { flat: true; size: 28px; icon: @image-url("icons/close.svg"); tooltip: "Close · Esc"; clicked => { ChatVm.ctl-close(); } } }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 18px;
+                    alignment: start;
+                    if ChatVm.ctl-read-only: HorizontalLayout {
+                        spacing: 8px;
+                        Glyph { which: 21; size: 13px; ink: Tokens.text-secondary; }
+                        Text { text: "Started on another device. Read only."; font-size: 12.5px; color: Tokens.text-secondary; }
+                    }
+                    for option in ChatVm.ctl-options: VerticalLayout {
+                        spacing: 6px;
+                        Section { text: option.name; }
+                        Group {
+                            height: choices.preferred-height;
+                            choices := VerticalLayout {
+                                for c[i] in option.choices: ChoiceRow { c: c; option: option.id; divider: i > 0; }
+                            }
+                        }
+                        if option.failure != "": HorizontalLayout {
+                            spacing: 6px;
+                            Text { horizontal-stretch: 1; text: option.failure; font-size: 11.5px; color: Tokens.danger; wrap: word-wrap; }
+                            IconButton { flat: true; size: 20px; icon: @image-url("icons/close.svg"); tooltip: "Dismiss"; clicked => { ChatVm.ctl-dismiss(option.id); } }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        Section { text: "Session"; }
+                        Group {
+                            height: session.preferred-height;
+                            session := VerticalLayout {
+                                if ChatVm.context >= 0: Rectangle {
+                                    height: 56px;
+                                    VerticalLayout {
+                                        padding: 12px;
+                                        spacing: 8px;
+                                        HorizontalLayout {
+                                            Text { text: "Context"; font-size: 13px; color: Tokens.text; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Text { text: ChatVm.context-text; font-size: 11.5px; color: Tokens.text-secondary; }
+                                        }
+                                        Rectangle {
+                                            height: 4px;
+                                            border-radius: 2px;
+                                            background: Tokens.border;
+                                            Rectangle { x: 0; width: max(4px, parent.width * clamp(ChatVm.context, 0, 1)); border-radius: 2px; background: Tokens.accent; }
+                                        }
+                                    }
+                                }
+                                if ChatVm.ctl-cost != "": InfoRow { label: "Cost"; value: ChatVm.ctl-cost; divider: ChatVm.context >= 0; }
+                                if ChatVm.ctl-model-id != "": InfoRow { label: "Model id"; value: ChatVm.ctl-model-id; mono: true; divider: ChatVm.context >= 0 || ChatVm.ctl-cost != ""; }
+                                InfoRow { label: "Folder"; value: ChatVm.folder; mono: true; divider: ChatVm.context >= 0 || ChatVm.ctl-cost != "" || ChatVm.ctl-model-id != ""; }
+                                InfoRow { label: "Connection"; value: ChatVm.phase-word; dot: ChatStyle.phase-ink(ChatVm.phase); }
+                            }
+                        }
+                    }
+                    if ChatVm.ctl-commands.length > 0: VerticalLayout {
+                        spacing: 6px;
+                        Section { text: "Commands"; }
+                        Group {
+                            height: commands.preferred-height;
+                            commands := VerticalLayout {
+                                for cmd[i] in ChatVm.ctl-commands: Pressable {
+                                    enabled: ChatVm.ctl-commands-enabled;
+                                    opacity: ChatVm.ctl-commands-enabled ? 1 : 0.55;
+                                    height: 44px;
+                                    clicked => { ChatVm.ctl-command(cmd.text); }
+                                    if i > 0: Rectangle { x: 12px; y: 0; height: 1px; width: parent.width - 12px; background: Tokens.border; }
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text { text: cmd.title; font-size: 13px; color: Tokens.text; }
+                                            Text { text: cmd.detail; font-size: 11.5px; color: Tokens.text-secondary; overflow: elide; }
+                                        }
+                                        Text { text: cmd.text; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ChatVm.bypass-confirm: ConfirmDialog {
+        title: "Bypass permissions?";
+        body: "The agent runs every tool without asking.";
+        action: "Bypass permissions";
+        confirmed => { ChatVm.bypass-confirmed(); }
+        cancelled => { ChatVm.bypass-cancelled(); }
+    }
+}
+
+// Covers the chat under the terminal header, like the git viewer.
+export component ChatReview inherits Rectangle {
+    background: Tokens.background;
+    TouchArea { }
+    VerticalLayout {
+        Rectangle {
+            height: 48px;
+            background: Tokens.surface;
+            HorizontalLayout {
+                padding: 9px;
+                padding-left: 10px;
+                spacing: 10px;
+                VerticalLayout { alignment: center; IconButton { flat: true; size: 30px; icon: @image-url("icons/back.svg"); tooltip: "Back · Esc"; clicked => { ChatVm.close-review(); } } }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text { text: ChatVm.review-title; font-size: 14px; font-weight: 600; color: Tokens.text; overflow: elide; }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding-left: max(24px, (root.width - ChatStyle.column) / 2);
+                padding-right: max(24px, (root.width - ChatStyle.column) / 2);
+                padding-top: 16px;
+                padding-bottom: 28px;
+                spacing: 4px;
+                alignment: start;
+                if ChatVm.review-diff.length > 0: Group {
+                    height: review-lines.preferred-height;
+                    review-lines := VerticalLayout {
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        for line in ChatVm.review-diff: DiffRow { kind: line.kind; old-no: line.old-no; new-no: line.new-no; text: line.kind == 0 ? line.text + "   " + line.stat : line.text; }
+                    }
+                }
+                for item in ChatVm.review-md: Md { kind: item.kind; level: item.level; text: item.text; links: item.links; }
+            }
+        }
+    }
+}
+
+export component ChatViewer inherits Rectangle {
+    background: #000000e0;
+    TouchArea { clicked => { ChatVm.close-viewer(); } }
+    // At most the picture's own size: a small screenshot is not blown up to the window.
+    if !ChatVm.viewer-missing: Image {
+        property <float> fit: min(1, min((parent.width - 48px) / max(1px, self.source.width * 1px), (parent.height - 48px) / max(1px, self.source.height * 1px)));
+        width: self.source.width * 1px * self.fit;
+        height: self.source.height * 1px * self.fit;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        source: ChatVm.viewer-image;
+    }
+    if ChatVm.viewer-missing: Text { text: "Image not on this computer"; color: #ffffffcc; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+    IconButton {
+        x: parent.width - self.width - 16px;
+        y: 16px;
+        size: 32px;
+        icon: @image-url("icons/close.svg");
+        tooltip: "Close · Esc";
+        clicked => { ChatVm.close-viewer(); }
+    }
+}
+
+export component NewChatDialog inherits Rectangle {
+    background: Tokens.background.with-alpha(0.62);
+    TouchArea { }
+    Rectangle {
+        width: min(480px, parent.width - 48px);
+        height: min(dialog.preferred-height, parent.height - 48px);
+        x: (parent.width - self.width) / 2;
+        y: max(24px, (parent.height - self.height) / 2 - 40px);
+        background: Tokens.surface;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        clip: true;
+        dialog := VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+            HorizontalLayout {
+                Text { horizontal-stretch: 1; text: ChatVm.nc-mode == 0 ? "New chat" : "Continue a chat"; font-size: 16px; font-weight: 650; color: Tokens.text; vertical-alignment: center; }
+                IconButton { flat: true; size: 28px; icon: @image-url("icons/close.svg"); tooltip: "Cancel · Esc"; clicked => { ChatVm.nc-cancel(); } }
+            }
+            Segment {
+                options: ["New", "Continue"];
+                selected <=> ChatVm.nc-mode;
+                changed(i) => { ChatVm.nc-mode-changed(i); }
+            }
+            VerticalLayout {
+                spacing: 5px;
+                Text { text: "Working folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+                Rectangle {
+                    height: 38px;
+                    background: Tokens.input;
+                    border-radius: Tokens.radius-control;
+                    border-width: 1px;
+                    border-color: folder-input.has-focus ? Tokens.accent : Tokens.border;
+                    folder-input := TextInput {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        single-line: true;
+                        text <=> ChatVm.nc-folder;
+                        font-family: Tokens.mono-font;
+                        font-size: 13px;
+                        color: Tokens.text;
+                        selection-background-color: Tokens.accent.with-alpha(0.35);
+                        init => { self.focus(); self.select-all(); }
+                        edited => { ChatVm.nc-folder-edited(self.text); }
+                        accepted => { if (ChatVm.nc-mode == 0) { ChatVm.nc-start(); } else { ChatVm.nc-retry(); } }
+                        key-pressed(e) => {
+                            if (e.text == Key.Escape) { ChatVm.nc-cancel(); return accept; }
+                            reject
+                        }
+                    }
+                }
+                if ChatVm.nc-error != "": Text { text: ChatVm.nc-error; font-size: 12px; color: Tokens.warning; wrap: word-wrap; }
+            }
+            if ChatVm.nc-mode == 0: HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                SmallAction { text: "Cancel"; clicked => { ChatVm.nc-cancel(); } }
+                SmallAction { text: ChatVm.nc-busy ? "Starting\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
+            }
+            if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 0: HorizontalLayout {
+                spacing: 8px;
+                height: 40px;
+                VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; } }
+                Text { text: "Looking for earlier conversations\u{2026}"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+            }
+            if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 1: HorizontalLayout {
+                spacing: 8px;
+                Text { horizontal-stretch: 1; text: ChatVm.nc-listing-error; font-size: 12px; color: Tokens.warning; wrap: word-wrap; vertical-alignment: center; }
+                SmallAction { text: "Retry"; style: 3; clicked => { ChatVm.nc-retry(); } }
+            }
+            if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 2 && ChatVm.nc-sessions.length == 0: Text {
+                height: 40px;
+                text: "No earlier conversations in this folder";
+                font-size: 13px;
+                color: Tokens.text-secondary;
+                vertical-alignment: center;
+            }
+            if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 2 && ChatVm.nc-sessions.length > 0: Group {
+                height: min(sessions.preferred-height, 320px);
+                Flickable {
+                    content-height: sessions.preferred-height;
+                    sessions := VerticalLayout {
+                        for s[i] in ChatVm.nc-sessions: Pressable {
+                            enabled: !ChatVm.nc-continuing;
+                            min-height: 40px;
+                            clicked => { ChatVm.nc-continue(s.id); }
+                            if i > 0: Rectangle { y: 0; height: 1px; background: Tokens.border; }
+                            VerticalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+                                spacing: 2px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { horizontal-stretch: 1; text: s.title; font-size: 13px; color: Tokens.text; overflow: elide; }
+                                    Text { text: s.busy ? "Opening\u{2026}" : s.when; font-size: 11.5px; color: Tokens.text-faint; }
+                                }
+                                if s.recent: Text { text: "Updated minutes ago: it may still be open in a terminal"; font-size: 11px; color: Tokens.warning; wrap: word-wrap; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ChatTab inherits Rectangle {
+    in property <ChatTabVm> tab;
+    width: label.preferred-width;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    background: root.tab.active ? Tokens.background : touch.has-hover ? Tokens.surface-hover : transparent;
+    if root.tab.active: Rectangle { y: parent.height; height: 1px; background: Tokens.background; }
+    label := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 7px;
+        VerticalLayout {
+            alignment: center;
+            Glyph { which: 18; size: 12px; ink: root.tab.active ? Tokens.accent : Tokens.text-faint; }
+        }
+        name := Text {
+            text: root.tab.title;
+            max-width: 220px;
+            overflow: elide;
+            color: root.tab.active || touch.has-hover ? Tokens.text : Tokens.text-secondary;
+            font-size: 12.5px;
+            font-weight: root.tab.active ? 600 : 500;
+            vertical-alignment: center;
+        }
+        if ChatStyle.tab-heat(root.tab.state) >= 0: HorizontalLayout {
+            spacing: 5px;
+            TextDot { ink: Heat.ink(ChatStyle.tab-heat(root.tab.state)); line-height: word.preferred-height; }
+            word := Text { text: root.tab.label; color: Heat.ink(ChatStyle.tab-heat(root.tab.state)); font-size: 11.5px; vertical-alignment: center; }
+        }
+        if ChatStyle.tab-heat(root.tab.state) < 0 && root.tab.label != "": Text { text: root.tab.label; color: Tokens.text-faint; font-size: 11.5px; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 5px;
+                background: close-touch.has-hover ? Tokens.raised : transparent;
+                opacity: touch.has-hover || close-touch.has-hover ? 1 : 0;
+                Image {
+                    source: @image-url("icons/close.svg");
+                    colorize: close-touch.has-hover ? Tokens.text : Tokens.text-secondary;
+                    width: 10px;
+                    height: 10px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { ChatVm.select(root.tab.name); }
+    }
+    close-touch := TouchArea {
+        x: parent.width - 12px - 16px;
+        y: (parent.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        mouse-cursor: pointer;
+        clicked => { ChatVm.delete(root.tab.name); }
+    }
+}
+
+export component ChatOverlays inherits Rectangle {
+    if ChatVm.active && ChatVm.ctl-open: ChatControls { y: 52px; height: parent.height - 52px; }
+    if ChatVm.active && ChatVm.review-open: ChatReview { y: 52px; height: parent.height - 52px; }
+    if ChatVm.viewer-open: ChatViewer { }
+    if ChatVm.nc-open: NewChatDialog { }
+    if ChatVm.delete-title != "": ConfirmDialog {
+        title: "Delete " + ChatVm.delete-title + "?";
+        body: "The agent stops and the conversation is removed from the host.";
+        action: "Delete chat";
+        confirmed => { ChatVm.delete-confirmed(); }
+        cancelled => { ChatVm.delete-cancelled(); }
+    }
+}

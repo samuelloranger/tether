@@ -1,3 +1,5 @@
+pub mod chatmedia;
+pub mod chatview;
 pub mod clip;
 pub mod dib;
 pub mod driver;

@@ -2882,6 +2882,9 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "color_quant",
+ "gif",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
@@ -5548,6 +5551,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "similar"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f8bec09ae8fae0f4f265a4559a9334be3929d8504e9b536df0a41302bd1733"
+
+[[package]]
 name = "simplecss"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6097,6 +6106,7 @@ name = "tether-app"
 version = "6.1.1"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "image",
  "netlink-sys",
@@ -6131,6 +6141,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
  "futures",
+ "imagesize",
  "p256 0.13.2",
  "p384 0.13.1",
  "pulldown-cmark",
@@ -6141,6 +6152,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "similar",
  "ssh-key 0.6.7",
  "tempfile",
  "thiserror 2.0.21",
