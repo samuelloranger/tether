@@ -480,6 +480,9 @@ impl Session {
             .files
             .map(|f| Arc::new(f.images(&self.name)) as Arc<dyn ImageSink>);
         let mut client = ChatClient::new(journal, self.resume.take(), images);
+        if self.joined {
+            client.join();
+        }
         if let Some(Some(answers)) = self.answers.take() {
             client.adopt_host_answers(&answers);
         }

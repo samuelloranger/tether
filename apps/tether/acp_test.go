@@ -228,14 +228,32 @@ func TestACPReplayFromZeroWhileAgentRuns(t *testing.T) {
 	}
 }
 
+func TestACPAttachWithTheSameClientReplacesTheOldConnection(t *testing.T) {
+	acpEnv(t)
+	cleanupSession(t, "s")
+	a := startAttach(t, "s", "--spawn", echoAgent, "--client", "dev-a")
+	fmt.Fprint(a.stdin, "a1\n")
+	a.readLine(t)
+	b := startAttach(t, "s", "--from", "0", "--client", "dev-a")
+	if got := b.readLine(t); got != "echo:a1\n" {
+		t.Fatalf("got %q", got)
+	}
+	if code := a.exitCode(t); code != 5 {
+		t.Fatalf("replaced connection exit %d, want 5", code)
+	}
+	_ = b.stdin.Close()
+	b.exitCode(t)
+	waitFor(t, "detached", func() bool { m, _ := readACPMeta("s"); return m != nil && !m.Attached })
+}
+
 func TestACPSecondAttachLeavesTheFirstLive(t *testing.T) {
 	acpEnv(t)
 	cleanupSession(t, "k")
-	a := startAttach(t, "k", "--spawn", echoAgent)
+	a := startAttach(t, "k", "--spawn", echoAgent, "--client", "dev-a")
 	fmt.Fprint(a.stdin, "a1\n")
 	a.readLine(t)
 
-	b := startAttach(t, "k", "--from", "0")
+	b := startAttach(t, "k", "--from", "0", "--client", "dev-b")
 	if got := b.readLine(t); got != "echo:a1\n" {
 		t.Fatalf("got %q", got)
 	}

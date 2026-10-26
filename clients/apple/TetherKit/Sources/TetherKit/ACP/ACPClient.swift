@@ -376,7 +376,7 @@ actor ACPClient {
         }
         adoptSession(result.sessionId)
         pending.removeValue(forKey: id)?.continuation?.resume(returning: result)
-      case let .clientEcho(_, .prompt(_, _, _, sessionId)):
+      case let .clientEcho(_, .prompt(_, _, _, sessionId)), let .clientEcho(_, .load(sessionId)):
         adoptSession(sessionId)
       case let .errorResponse(id?, code, text):
         pending.removeValue(forKey: id)?.continuation?.resume(

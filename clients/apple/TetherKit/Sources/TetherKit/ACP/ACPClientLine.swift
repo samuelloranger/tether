@@ -7,6 +7,8 @@ enum ACPClientLine: Equatable, Sendable {
   static let echoMethod = "_tether/client"
 
   case prompt(id: ACPID?, text: String, imageCount: Int, sessionId: String?)
+  /// Continuing an earlier conversation: names the session before any prompt does.
+  case load(sessionId: String?)
   case cancel
   case permissionAnswer(id: ACPID, optionId: String)
   case questionAnswer(id: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue])
@@ -23,7 +25,7 @@ enum ACPClientLine: Equatable, Sendable {
       return [.permissionAnswered(requestId: id, optionId: optionId)]
     case let .questionAnswer(id, action, content):
       return [.questionAnswered(requestId: id, action: action, content: content)]
-    case .other:
+    case .load, .other:
       return []
     }
   }

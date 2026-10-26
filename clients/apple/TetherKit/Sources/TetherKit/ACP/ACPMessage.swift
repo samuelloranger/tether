@@ -203,6 +203,8 @@ enum ACPDecoder {
       return .prompt(
         id: id, text: text, imageCount: blocks.filter { $0["type"] as? String == "image" }.count,
         sessionId: params?["sessionId"] as? String)
+    case "session/load":
+      return .load(sessionId: (line["params"] as? JSON)?["sessionId"] as? String)
     case "session/cancel":
       return .cancel
     case .some:

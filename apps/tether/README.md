@@ -94,8 +94,8 @@ The first `attach --spawn` starts a detached daemon that owns the agent and appe
 everything it prints to `acp/<name>/out.log`; an `attach` replays that log from `--from`
 and then follows it live, so a client that tracks `from + bytesReceived` sees no gap and
 no duplicate. Any number of clients can be attached at once; each one follows the log and
-writes to the agent (a holder started by a tether older than protocol 2 still closes the
-previous client, which exits 5). Without `--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
+writes to the agent. Only an attach with the same `--client` closes the previous one, which
+exits 5 (a holder started by a tether older than protocol 2 closes any previous client). Without `--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
 exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `attach`
 sends what is already logged and exits; `--linger 30s` keeps following until output has
 been idle that long.
@@ -108,8 +108,11 @@ written into the log, just before the line goes to the agent, as an ACP extensio
 
     {"jsonrpc":"2.0","method":"_tether/client","params":{"client":"a1b2c3","message":{…the line…}}}
 
-This covers `session/prompt`, `session/cancel` and responses to the agent's requests, so every
-client, live or replaying later, sees the others' prompts, stops and answers in order. An answer
+This covers `session/new`, `session/load`, `session/prompt`, `session/cancel` and responses to
+the agent's requests, so every client, live or replaying later, sees the others' sessions,
+prompts, stops and answers in order. A client that attaches again with the same `--client` (or
+with none, as a client that predates echoes) replaces its older connection, which exits 5: a
+connection the host never saw drop would otherwise count as attached and hold back pushes. An answer
 `tether acp answer` writes is echoed with `"client":"host"`. Clients use their own request ids
 (for example strings prefixed with their id) so two clients never send the same id. An answer to
 a request that was already answered, from any client or from `acp answer`, is not sent to the

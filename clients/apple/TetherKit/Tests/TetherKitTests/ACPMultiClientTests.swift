@@ -76,6 +76,18 @@ final class ACPMultiClientTests: XCTestCase {
     XCTAssertEqual(store.load().sessionId, "s1", "the next open resumes")
   }
 
+  func test_a_joining_client_takes_the_session_a_continued_chat_loaded() async throws {
+    let stream = ScriptedByteStream()
+    let client = ACPClient(stream: stream, store: named("me"))
+    await client.startJoining()
+    stream.push(
+      Data(
+        (echo("ph", #"{"jsonrpc":"2.0","id":"ph-2","method":"session/load","params":{"sessionId":"old-1","cwd":"/w","mcpServers":[]}}"#)
+          + #"{"jsonrpc":"2.0","id":"ph-2","result":{}}"# + "\n").utf8))
+    let learned = await poll { await client.sessionId == "old-1" }
+    XCTAssertTrue(learned)
+  }
+
   func test_an_unnamed_client_keeps_number_ids_and_does_not_join() async throws {
     let stream = ScriptedByteStream()
     let client = ACPClient(stream: stream, store: InMemoryChatJournalStore())

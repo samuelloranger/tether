@@ -286,6 +286,9 @@ func (t *acpTracker) clientLine(line []byte) (forward, echo bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	switch {
+	case m.Method == "session/new" || m.Method == "session/load":
+		// A client joining later learns the session from these when no prompt names it yet.
+		return true, true
 	case m.Method == "session/prompt":
 		t.st.Prompts = append(t.st.Prompts, key)
 		t.saveLocked()

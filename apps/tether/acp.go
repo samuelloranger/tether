@@ -589,6 +589,14 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 		conn.Close()
 		return
 	}
+	// The same client attaching again (a redial after a drop the host never saw) replaces its
+	// old connection, which would otherwise count as attached and hold back every push.
+	for c := range s.live {
+		if c.id == me.id {
+			c.conn.Close()
+			delete(s.live, c)
+		}
+	}
 	s.live[me] = struct{}{}
 	s.clients++
 	s.mu.Unlock()

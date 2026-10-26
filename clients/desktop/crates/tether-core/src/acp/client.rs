@@ -82,6 +82,7 @@ pub struct ChatClient {
     failed: bool,
     was_working: bool,
     journal_changed: bool,
+    joining: bool,
 }
 
 fn encode(message: Value) -> Vec<u8> {
@@ -110,7 +111,14 @@ impl ChatClient {
             failed: false,
             was_working: false,
             journal_changed: false,
+            joining: false,
         }
+    }
+
+    /// For a chat another client started on a holder that takes several: no handshake of its
+    /// own, the session comes from the log.
+    pub fn join(&mut self) {
+        self.joining = true;
     }
 
     pub fn state(&self) -> &ChatState {
@@ -660,7 +668,10 @@ impl ChatClient {
                     });
                 }
                 Inbound::ClientEcho { message, .. } => {
-                    if message.get("method").and_then(Value::as_str) == Some("session/prompt") {
+                    if matches!(
+                        message.get("method").and_then(Value::as_str),
+                        Some("session/prompt" | "session/load")
+                    ) {
                         let session = message
                             .get("params")
                             .and_then(|p| p.get("sessionId"))
@@ -688,14 +699,10 @@ impl ChatClient {
     }
 
     /// A client that joined a chat another one started learns the session from the log: the
-    /// answer to the other client's `session/new` or `session/load` names it, and so does every
-    /// prompt another client sent.
+    /// answer to the other client's `session/new` names it, and so do its `session/load` and
+    /// every prompt it sent.
     fn adopt_session(&mut self, session_id: Option<&str>) {
-        let asking = self
-            .pending
-            .values()
-            .any(|p| matches!(p.kind, RequestKind::NewSession | RequestKind::LoadSession));
-        if self.journal.client_id.is_none() || self.journal.session_id.is_some() || asking {
+        if !self.joining || self.journal.session_id.is_some() {
             return;
         }
         if let Some(id) = session_id {
@@ -828,6 +835,7 @@ mod tests {
         );
 
         let mut b = client(named("bb"));
+        b.join();
         b.feed(&log);
         assert_eq!(b.session_id(), Some("s1"), "learned from the log");
         assert_eq!(user_texts(b.state()), ["from a"]);
@@ -861,8 +869,24 @@ mod tests {
         let mut c = client(Journal::default());
         assert_eq!(c.initialize().id, Some(AcpId::Int(1)));
         c.feed(&echoed("zz", br#"{"jsonrpc":"2.0","id":"zz-3","method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hi"}]}}"#));
-        assert_eq!(c.session_id(), None, "only a named client joins");
+        assert_eq!(
+            c.session_id(),
+            None,
+            "only a joining client takes the session"
+        );
         assert_eq!(user_texts(c.state()), ["hi"]);
+    }
+
+    #[test]
+    fn a_joining_client_takes_the_session_a_continued_chat_loaded() {
+        let mut c = client(Journal {
+            client_id: Some("bb".into()),
+            ..Journal::default()
+        });
+        c.join();
+        c.feed(&echoed("aa", br#"{"jsonrpc":"2.0","id":"aa-2","method":"session/load","params":{"sessionId":"old-1","cwd":"/w","mcpServers":[]}}"#));
+        c.feed(b"{\"jsonrpc\":\"2.0\",\"id\":\"aa-2\",\"result\":{}}\n");
+        assert_eq!(c.session_id(), Some("old-1"));
     }
 
     #[test]
