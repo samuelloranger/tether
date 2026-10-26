@@ -19,6 +19,8 @@ use crate::terminal::geometry::{Layout, TermStyle};
 use crate::terminal::status::{ConnStatus, Lamp};
 
 mod agents;
+pub(crate) mod chat;
+mod chats;
 mod events;
 pub(crate) mod extras;
 mod gitpanel;
@@ -213,6 +215,7 @@ pub enum Msg {
     AgentDeny,
     AgentReply(String),
     Git(GitMsg),
+    Chat(chat::ChatMsg),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -257,6 +260,7 @@ pub enum Effect {
         target: GitTarget,
         job: GitJob,
     },
+    Chat(chat::ChatJob),
     Redraw,
     Ui(UiEffect),
 }
@@ -288,6 +292,9 @@ pub enum UiEffect {
     AllowIme,
     FocusSearch,
     Git(Box<GitView>),
+    Chat(Box<chat::ChatScreen>),
+    /// The system picker for images to attach to the chat in front.
+    PickImages,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -392,11 +399,13 @@ pub struct TerminalModel {
     git: GitPanel,
     git_shown: GitView,
     session_pids: HashMap<String, i64>,
+    chats: chat::Chats,
 }
 
 impl TerminalModel {
     pub fn new(machine: Machine, style: TermStyle, size: GridSize) -> (Self, Vec<Effect>) {
-        let m = Self {
+        let host = machine.host.clone();
+        let mut m = Self {
             machine,
             style,
             size,
@@ -436,7 +445,9 @@ impl TerminalModel {
             git: GitPanel::default(),
             git_shown: GitView::default(),
             session_pids: HashMap::new(),
+            chats: chat::Chats::new(None, ""),
         };
+        m.chats = chat::Chats::new(None, &host);
         (m, vec![Effect::Open])
     }
 
@@ -460,14 +471,24 @@ impl TerminalModel {
                 self.channels.remove(&name);
                 fx.push(Effect::Ls);
             }
-            Msg::Dropped => self.on_dropped(&mut fx),
+            Msg::Dropped => {
+                self.on_dropped(&mut fx);
+                self.chats_dropped(now, &mut fx);
+            }
             Msg::Tick => {
                 self.on_tick(now, &mut fx);
                 self.git_tick(now, &mut fx);
+                self.chats_tick(now, &mut fx);
             }
-            Msg::Focus(f) => self.on_focus(f, now, &mut fx),
+            Msg::Focus(f) => {
+                self.on_focus(f, now, &mut fx);
+                self.chats_focus(f, now, &mut fx);
+            }
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
-            Msg::SelectTab(name) => self.activate(&name, &mut fx),
+            Msg::SelectTab(name) => {
+                self.chat_leave(now, &mut fx);
+                self.activate(&name, &mut fx);
+            }
             Msg::TabShortcut(jump) => self.on_jump(jump, &mut fx),
             Msg::NewSessionBegin => self.on_new_begin(),
             Msg::NewSessionCommit(name) => self.on_new_commit(&name, now, &mut fx),
@@ -506,7 +527,12 @@ impl TerminalModel {
             Msg::ToastClicked { machine, name } => {
                 fx.push(Effect::Ui(UiEffect::BringToFront));
                 if machine == self.machine.id.to_string() {
-                    self.activate(&name, &mut fx);
+                    if self.chats.is_chat(&name) {
+                        self.chat_select(&name, now, &mut fx);
+                    } else {
+                        self.chat_leave(now, &mut fx);
+                        self.activate(&name, &mut fx);
+                    }
                 }
             }
             Msg::Retry => self.on_retry(&mut fx),
@@ -518,6 +544,9 @@ impl TerminalModel {
                 fx.push(Effect::Ui(UiEffect::Home));
             }
             Msg::RedialDue { generation } => self.on_redial_due(generation, &mut fx),
+            Msg::DroppedFiles(paths) | Msg::SendFiles(paths) if self.chat_active() => {
+                self.on_chat(chat::ChatMsg::AttachFiles(paths), now, &mut fx);
+            }
             Msg::DroppedFiles(paths) | Msg::SendFiles(paths) => self.on_send_files(paths, &mut fx),
             Msg::SendStarted { names } => self.on_send_started(names),
             Msg::SendFileStarted { index } => self.on_send_file_started(index),
@@ -569,8 +598,10 @@ impl TerminalModel {
                 self.on_agent_answer(Some(tether_core::agents::Answer::Reply(text)), &mut fx);
             }
             Msg::Git(m) => self.on_git(m, now, &mut fx),
+            Msg::Chat(m) => self.on_chat(m, now, &mut fx),
         }
         self.sync_search(now);
+        self.chat_sync(now, &mut fx);
         fx
     }
 
@@ -584,6 +615,7 @@ impl TerminalModel {
         self.attempt = 0;
         self.last_refresh = now;
         self.agents_on_opened();
+        self.chats_connected(now, fx);
         fx.push(Effect::Ls);
         if was_reconnect && !self.lock_detached {
             self.reattach_all(fx);
@@ -785,7 +817,7 @@ impl TerminalModel {
                                 .map(str::to_string)
                             })
                             .or_else(|| t.cwd_leaf.clone()),
-                        active: s.active.as_deref() == Some(&t.name),
+                        active: s.active.as_deref() == Some(&t.name) && !self.chat_active(),
                         attention: t.attention,
                         progress: self
                             .tabs

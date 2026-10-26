@@ -163,6 +163,16 @@ impl App {
             if matches!(app.router.current(), Page::ServerForm { .. }) {
                 app.forget_form_secrets();
             }
+            if app.router.current() == Page::Terminal
+                && crate::terminal::chatview::takes_keys(&app.ui)
+            {
+                if let Some(s) = crate::terminal::glue::current() {
+                    s(crate::terminal::model::Msg::Chat(
+                        crate::terminal::model::chat::ChatMsg::Escape,
+                    ));
+                }
+                return true;
+            }
             let handled = app.router.on_escape();
             app.refresh_router();
             handled

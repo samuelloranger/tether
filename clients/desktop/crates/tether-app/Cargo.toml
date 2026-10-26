@@ -23,7 +23,8 @@ rfd = "0.15"
 arboard = { version = "3.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+base64.workspace = true
 ureq = "3.4"
 tracing-appender = "0.2.5"
 
@@ -44,7 +45,7 @@ velopack = "1.2.161"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 zbus = "5.19"
 nix = { version = "0.31", default-features = false, features = ["net", "poll"] }
 smithay-client-toolkit = { version = "0.19.2", default-features = false }

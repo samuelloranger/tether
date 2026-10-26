@@ -3,6 +3,7 @@ import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton 
 import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
 import { AgentVm, AgentChip, AgentBanner, AgentSheet, Heat, TextDot } from "agents.slint";
 import { GitVm, GitSidePanel, GitOverlays } from "git.slint";
+import { ChatVm, ChatPane, ChatTab, ChatOverlays } from "chat.slint";
 
 export struct TermTab {
     name: string, cwd: string, active: bool, attention: bool,
@@ -158,7 +159,13 @@ component Header inherits Rectangle {
         VerticalLayout {
             alignment: center;
             Text { text: TerminalVm.machine; color: Tokens.text; font-size: 14px; font-weight: 600; }
-            HorizontalLayout {
+            if ChatVm.active: HorizontalLayout {
+                spacing: 4px;
+                Text { text: "chat"; color: Tokens.text-secondary; font-size: 12px; }
+                Text { text: "·"; color: Tokens.text-secondary; font-size: 12px; }
+                Text { text: TerminalVm.word; font-size: 12px; color: TerminalVm.lamp == 0 ? Tokens.warning : TerminalVm.lamp == 1 ? Tokens.success : Tokens.danger; }
+            }
+            if !ChatVm.active: HorizontalLayout {
                 spacing: 4px;
                 Text { text: TerminalVm.session; color: Tokens.text-secondary; font-size: 12px; }
                 Text { text: "·"; color: Tokens.text-secondary; font-size: 12px; visible: TerminalVm.session != ""; }
@@ -176,11 +183,12 @@ component Header inherits Rectangle {
             }
         }
         Rectangle { horizontal-stretch: 1; }
-        IconButton { icon: @image-url("icons/search.svg"); tooltip: "Find in scrollback · Ctrl+Shift+F"; active: TerminalVm.search-open; clicked => { TerminalVm.find(); } }
-        IconButton { icon: @image-url("icons/snippets.svg"); tooltip: "Snippets · Ctrl+Shift+P"; active: PaletteVm.open; clicked => { TerminalVm.snippets(); } }
-        IconButton { icon: @image-url("icons/history.svg"); tooltip: "History · Ctrl+Shift+H"; active: HistoryVm.open; clicked => { TerminalVm.history(); } }
-        IconButton { icon: @image-url("icons/git.svg"); tooltip: "Git"; active: GitVm.open; clicked => { GitVm.toggle(); } }
-        IconButton { icon: @image-url("icons/upload.svg"); tooltip: "Send file"; clicked => { TerminalVm.send-file(); } }
+        if !ChatVm.active: IconButton { icon: @image-url("icons/search.svg"); tooltip: "Find in scrollback · Ctrl+Shift+F"; active: TerminalVm.search-open; clicked => { TerminalVm.find(); } }
+        if !ChatVm.active: IconButton { icon: @image-url("icons/snippets.svg"); tooltip: "Snippets · Ctrl+Shift+P"; active: PaletteVm.open; clicked => { TerminalVm.snippets(); } }
+        if !ChatVm.active: IconButton { icon: @image-url("icons/history.svg"); tooltip: "History · Ctrl+Shift+H"; active: HistoryVm.open; clicked => { TerminalVm.history(); } }
+        if !ChatVm.active: IconButton { icon: @image-url("icons/git.svg"); tooltip: "Git"; active: GitVm.open; clicked => { GitVm.toggle(); } }
+        if !ChatVm.active: IconButton { icon: @image-url("icons/upload.svg"); tooltip: "Send file"; clicked => { TerminalVm.send-file(); } }
+        if ChatVm.active: IconButton { icon: @image-url("icons/image.svg"); tooltip: "Attach images"; enabled: ChatVm.can-attach && ChatVm.composer-shown; clicked => { ChatVm.pick-images(); } }
         IconButton { icon: @image-url("icons/gear.svg"); tooltip: "Settings"; clicked => { TerminalVm.settings(); } }
     }
 }
@@ -286,7 +294,29 @@ component AddTab inherits Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
     }
-    touch := TouchArea { mouse-cursor: pointer; clicked => { TerminalVm.new-session(); } }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { menu.show(); } }
+    menu := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        Rectangle {
+            width: 190px;
+            height: items.preferred-height;
+            background: Tokens.surface;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000080;
+            drop-shadow-offset-y: 4px;
+            items := VerticalLayout {
+                padding: 4px;
+                MenuItem { text: "New session"; clicked => { menu.close(); TerminalVm.new-session(); } }
+                MenuItem { text: "New chat\u{2026}"; clicked => { menu.close(); ChatVm.new-chat(0); } }
+                MenuItem { text: "Continue a chat\u{2026}"; clicked => { menu.close(); ChatVm.new-chat(1); } }
+            }
+        }
+    }
 }
 
 component TabStrip inherits Rectangle {
@@ -301,6 +331,14 @@ component TabStrip inherits Rectangle {
             padding-top: 5px;
             spacing: 2px;
             for tab in TerminalVm.tabs: SessionTab { tab: tab; }
+            if ChatVm.tabs.length > 0 && TerminalVm.tabs.length > 0: VerticalLayout {
+                alignment: center;
+                padding-bottom: 4px;
+                padding-left: 4px;
+                padding-right: 4px;
+                Rectangle { width: 1px; height: 16px; background: Tokens.border; }
+            }
+            for chat in ChatVm.tabs: ChatTab { tab: chat; }
             if TerminalVm.naming: Rectangle {
                 width: 170px;
                 border-top-left-radius: 8px;
@@ -396,14 +434,15 @@ export component TerminalPage inherits Rectangle {
                 x: parent.width - self.width - 12px;
                 y: 10px;
             }
-            if TerminalVm.tooltip != "": Rectangle {
+            if ChatVm.active: ChatPane { }
+            if TerminalVm.tooltip != "" && !ChatVm.active: Rectangle {
                 x: TerminalVm.pointer-x + 12px; y: TerminalVm.pointer-y + 16px;
                 width: tip.preferred-width + 16px; height: 24px;
                 background: Tokens.surface; border-radius: 6px; border-width: 1px; border-color: Tokens.border;
                 tip := Text { text: TerminalVm.tooltip; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
             }
         }
-        if GitVm.open: GitSidePanel { max-panel-width: root.width / 2; }
+        if GitVm.open && !ChatVm.active: GitSidePanel { max-panel-width: root.width / 2; }
         }
     }
     if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
@@ -439,4 +478,5 @@ export component TerminalPage inherits Rectangle {
         cancelled => { TerminalVm.kill-cancelled(); }
     }
     GitOverlays { }
+    ChatOverlays { }
 }

@@ -7,11 +7,11 @@ use tether_core::connect::{ConnectError, Connection, Credential, Transport};
 use tether_core::profiles::{Auth, Machine};
 use tether_core::resize::GridSize;
 use tether_core::zmx::ZmxSession;
-use tether_ssh::{ConnectionEvent, PtyEvent};
+use tether_ssh::{ConnectionEvent, ExecEvent, PtyEvent};
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
-use super::remote::{PtySink, Remote, SessionConn};
+use super::remote::{PtySink, Remote, SessionConn, StreamSink};
 
 pub fn machine() -> Machine {
     Machine {
@@ -65,6 +65,28 @@ impl PtySink for FakeSink {
             .lock()
             .unwrap()
             .push(format!("resize {}x{}", size.cols, size.rows));
+    }
+    async fn close(&self) {
+        self.log.lock().unwrap().push("close".into());
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct FakeStream {
+    pub log: Arc<Mutex<Vec<String>>>,
+    pub fail_writes: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl StreamSink for FakeStream {
+    async fn write(&self, bytes: Vec<u8>) -> Result<(), ConnectError> {
+        if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(ConnectError::Transport("the channel is closed".into()));
+        }
+        self.log
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(&bytes).into_owned());
+        Ok(())
     }
     async fn close(&self) {
         self.log.lock().unwrap().push("close".into());
@@ -135,6 +157,15 @@ impl Connection for FakeConn {
 
 impl SessionConn for FakeConn {
     type Sink = FakeSink;
+    type Stream = FakeStream;
+    async fn open_exec(
+        &self,
+        command: &str,
+    ) -> Result<(FakeStream, mpsc::Receiver<ExecEvent>), ConnectError> {
+        self.t.log.lock().unwrap().push(format!("stream {command}"));
+        let (_tx, rx) = mpsc::channel(8);
+        Ok((FakeStream::default(), rx))
+    }
     async fn open_pty(
         &self,
         size: GridSize,
@@ -179,6 +210,9 @@ pub struct FakeRemote {
     pub exec_replies: Mutex<Vec<(String, Result<String, ConnectError>)>>,
     /// Answers `exec` in order after `exec_replies`; an empty queue answers with empty output.
     pub exec_queue: Mutex<VecDeque<Result<String, ConnectError>>>,
+    /// Open streams by command, newest last; a test pushes holder output through the sender.
+    pub streams: Mutex<Vec<(String, FakeStream, mpsc::Sender<ExecEvent>)>>,
+    pub stream_results: Mutex<VecDeque<Result<(), ConnectError>>>,
 }
 
 impl Default for FakeRemote {
@@ -196,6 +230,8 @@ impl Default for FakeRemote {
             histories: Mutex::default(),
             exec_queue: Mutex::default(),
             exec_replies: Mutex::default(),
+            streams: Mutex::default(),
+            stream_results: Mutex::default(),
         }
     }
 }
@@ -211,6 +247,15 @@ impl FakeRemote {
         let tx = self.ptys.lock().unwrap()[name].1.clone();
         tx.send(PtyEvent::Data(bytes.to_vec())).await.unwrap();
     }
+    pub fn stream(&self, needle: &str) -> (FakeStream, mpsc::Sender<ExecEvent>) {
+        let streams = self.streams.lock().unwrap();
+        let (_, sink, tx) = streams
+            .iter()
+            .rev()
+            .find(|(command, _, _)| command.contains(needle))
+            .expect("a stream for that command");
+        (sink.clone(), tx.clone())
+    }
     pub fn drop_connection(&self) {
         let _ = self.drop_tx.send(ConnectionEvent::Dropped);
     }
@@ -221,6 +266,25 @@ impl FakeRemote {
 
 impl Remote for FakeRemote {
     type Sink = FakeSink;
+    type Stream = FakeStream;
+    async fn open_stream(
+        &self,
+        command: &str,
+    ) -> Result<(FakeStream, mpsc::Receiver<ExecEvent>), ConnectError> {
+        self.log.lock().unwrap().push(format!("stream {command}"));
+        self.stream_results
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Ok(()))?;
+        let (tx, rx) = mpsc::channel(64);
+        let sink = FakeStream::default();
+        self.streams
+            .lock()
+            .unwrap()
+            .push((command.to_string(), sink.clone(), tx));
+        Ok((sink, rx))
+    }
     async fn open(
         &self,
     ) -> Result<
