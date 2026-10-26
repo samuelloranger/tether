@@ -57,6 +57,8 @@ struct ACPToolFields: Equatable, Sendable {
   var diff: ACPDiff?
   var text: String?
   var rawOutput: String?
+  /// Image blocks of the call's content, already handed to the image store.
+  var images: [ChatImageRef]?
   /// `_meta.claudeCode.toolName`, which tells a subagent launch ("Agent", older "Task") from any other call.
   var toolName: String?
   /// `_meta.claudeCode.parentToolUseId`: set on a subagent's own tool calls.
@@ -113,6 +115,7 @@ struct ChatCost: Codable, Equatable, Sendable {
 
 enum ACPUpdate: Equatable, Sendable {
   case agentMessage(text: String, messageId: String?)
+  case agentImage(ChatImageRef, messageId: String?)
   case agentThought(text: String)
   case userMessage(text: String, messageId: String? = nil)
   case toolCall(ACPToolFields)
@@ -150,7 +153,8 @@ enum ACPInbound: Equatable, Sendable {
 enum ACPDecoder {
   private typealias JSON = [String: Any]
 
-  static func decode(_ line: Data) -> ACPInbound {
+  /// Image bytes in the line go to `images` (when given) and only references come out.
+  static func decode(_ line: Data, images: (any ChatImageSink)? = nil) -> ACPInbound {
     guard let object = (try? JSONSerialization.jsonObject(with: line)) as? JSON else {
       return .unknown(method: nil)
     }
@@ -165,7 +169,7 @@ enum ACPDecoder {
         return .unknown(method: method)
       }
       if method == "session/update", let update = params["update"] as? JSON {
-        return .update(decodeUpdate(update))
+        return .update(decodeUpdate(update, images: images))
       }
       if method == "_auth/status_update", let status = (params["authStatus"] as? JSON)?["kind"] as? String {
         return .authStatus(signedIn: status != "none")
@@ -197,10 +201,14 @@ enum ACPDecoder {
       configOptions: (result["configOptions"] as? [JSON]).map(configOptions))
   }
 
-  private static func decodeUpdate(_ update: JSON) -> ACPUpdate {
+  private static func decodeUpdate(_ update: JSON, images: (any ChatImageSink)?) -> ACPUpdate {
     let kind = update["sessionUpdate"] as? String ?? ""
     switch kind {
     case "agent_message_chunk":
+      if let block = update["content"] as? JSON, block["type"] as? String == "image" {
+        guard let ref = imageRef(block, images) else { return .unknown(kind: kind) }
+        return .agentImage(ref, messageId: update["messageId"] as? String)
+      }
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
       return .agentMessage(text: text, messageId: update["messageId"] as? String)
     case "agent_thought_chunk":
@@ -210,7 +218,7 @@ enum ACPDecoder {
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
       return .userMessage(text: text, messageId: update["messageId"] as? String)
     case "tool_call", "tool_call_update":
-      guard let fields = toolFields(update) else { return .unknown(kind: kind) }
+      guard let fields = toolFields(update, images: images) else { return .unknown(kind: kind) }
       return kind == "tool_call" ? .toolCall(fields) : .toolCallUpdate(fields)
     case "plan":
       let entries = (update["entries"] as? [JSON] ?? []).map {
@@ -271,7 +279,24 @@ enum ACPDecoder {
     return block["text"] as? String
   }
 
-  private static func toolFields(_ object: JSON) -> ACPToolFields? {
+  /// A block that is not an image, not base64, or too large is skipped; the stream carries on.
+  private static func imageRef(_ block: JSON, _ sink: (any ChatImageSink)?) -> ChatImageRef? {
+    guard let encoded = block["data"] as? String,
+      let prepared = ChatImageIntake.prepare(base64: encoded, mimeType: block["mimeType"] as? String)
+    else { return nil }
+    sink?.write(prepared.data, for: prepared.ref)
+    return prepared.ref
+  }
+
+  /// An image result as raw output (or its JSON text): the content already carries the picture.
+  private static func isImagePayload(_ value: Any) -> Bool {
+    if let items = value as? [Any] { return items.contains(where: isImagePayload) }
+    guard let object = value as? JSON else { return false }
+    if object["type"] as? String == "image" { return true }
+    return (object["source"] as? JSON)?["type"] as? String == "base64"
+  }
+
+  private static func toolFields(_ object: JSON, images sink: (any ChatImageSink)? = nil, collectImages: Bool = true) -> ACPToolFields? {
     guard let id = object["toolCallId"] as? String else { return nil }
     var fields = ACPToolFields(id: id)
     fields.title = object["title"] as? String
@@ -292,6 +317,7 @@ enum ACPDecoder {
     fields.kind = (object["kind"] as? String).flatMap(ACPToolKind.init(rawValue:)) ?? (object["kind"] == nil ? nil : .other)
     fields.status = (object["status"] as? String).flatMap(ACPToolStatus.init(rawValue:))
     var texts: [String] = []
+    var refs: [ChatImageRef] = []
     for item in object["content"] as? [JSON] ?? [] {
       switch item["type"] as? String {
       case "diff":
@@ -300,17 +326,24 @@ enum ACPDecoder {
           oldText: item["oldText"] as? String,
           newText: item["newText"] as? String ?? "")
       case "content":
-        if let text = contentText(item["content"]) { texts.append(text) }
+        if let text = contentText(item["content"]) {
+          if !ChatToolDetail.looksLikeBlob(text) { texts.append(text) }
+        } else if collectImages, let block = item["content"] as? JSON, block["type"] as? String == "image",
+          let ref = imageRef(block, sink)
+        {
+          refs.append(ref)
+        }
       default:
         break
       }
     }
     if !texts.isEmpty { fields.text = texts.joined(separator: "\n") }
+    if !refs.isEmpty { fields.images = refs }
     switch object["rawOutput"] {
     case let text as String:
-      fields.rawOutput = text
+      if !ChatToolDetail.looksLikeBlob(text) { fields.rawOutput = text }
     case let other? where !(other is NSNull):
-      if JSONSerialization.isValidJSONObject(other),
+      if !isImagePayload(other), JSONSerialization.isValidJSONObject(other),
         let data = try? JSONSerialization.data(withJSONObject: other, options: [.sortedKeys])
       {
         fields.rawOutput = String(decoding: data, as: UTF8.self)
@@ -331,7 +364,7 @@ enum ACPDecoder {
   }
 
   private static func permission(_ params: JSON) -> ACPPermissionRequest? {
-    guard let call = params["toolCall"] as? JSON, let tool = toolFields(call) else { return nil }
+    guard let call = params["toolCall"] as? JSON, let tool = toolFields(call, collectImages: false) else { return nil }
     let options = (params["options"] as? [JSON] ?? []).compactMap { option -> ACPPermissionOption? in
       guard let id = option["optionId"] as? String else { return nil }
       return ACPPermissionOption(

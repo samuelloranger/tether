@@ -29,6 +29,8 @@ struct ChatToolCall: Codable, Equatable, Sendable {
   var diff: ACPDiff?
   var text: String?
   var rawOutput: String?
+  /// The pictures the result carried; the files live in the chat's image store.
+  var images: [ChatImageRef] = []
   var parentId: String?
   var subagent: ChatSubagent?
   /// A launch row's own tool calls, in arrival order.
@@ -52,6 +54,7 @@ struct ChatToolCall: Codable, Equatable, Sendable {
     if let value = fields.diff { diff = value }
     if let value = fields.parentId { parentId = value }
     if let value = fields.rawOutput { rawOutput = value }
+    if let value = fields.images, !value.isEmpty { images = value }
     if subagent != nil {
       if let input = fields.input { subagent?.merge(input) }
       if let value = fields.text, value.hasPrefix(ChatSubagent.asyncLaunchPrefix) {
@@ -91,8 +94,10 @@ struct ChatPermission: Codable, Equatable, Sendable {
 
 struct ChatItem: Codable, Equatable, Identifiable, Sendable {
   enum Kind: Codable, Equatable, Sendable {
-    case user(text: String, imageCount: Int = 0, offset: Int)
+    case user(text: String, imageCount: Int = 0, offset: Int, images: [ChatImageRef] = [])
     case assistant(text: String, messageId: String?)
+    /// Pictures the agent sent in its message, in order with the text around them.
+    case images([ChatImageRef], messageId: String?)
     case thought(text: String)
     case tool(ChatToolCall)
     case permission(ChatPermission)
@@ -190,7 +195,7 @@ extension ChatState {
 
 enum ChatEvent: Equatable, Sendable {
   case message(ACPInbound)
-  case userPrompt(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil)
+  case userPrompt(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil, images: [ChatImageRef] = [])
   /// The user pressed Stop: messages still waiting to start are no longer shown as queued.
   case cancelRequested
   /// A request whose error response must not surface as a transcript row.
@@ -205,7 +210,7 @@ enum ChatEvent: Equatable, Sendable {
   /// The answer never reached the agent: the question asks again, unless something else resolved it since.
   case questionAnswerUndelivered(requestId: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue])
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
-  case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil)
+  case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil, images: [ChatImageRef] = [])
   case connectionLost
   case failure(String)
 }
@@ -216,9 +221,9 @@ enum ChatReducer {
     switch event {
     case let .message(message):
       apply(message, to: &next)
-    case let .userPrompt(text, imageCount, offset, requestId):
+    case let .userPrompt(text, imageCount, offset, requestId, images):
       let itemId = next.nextItemId
-      append(.user(text: text, imageCount: imageCount, offset: offset), to: &next)
+      append(.user(text: text, imageCount: imageCount, offset: offset, images: images), to: &next)
       if !next.inFlight.isEmpty { next.queuedItemIds.append(itemId) }
       next.inFlight.append(.init(itemId: itemId, requestId: requestId))
       next.turn = .working
@@ -240,8 +245,10 @@ enum ChatReducer {
       next.hostAnswers[requestId] = optionId
       resolve(requestId, optionId, in: &next)
       resolveQuestion(requestId, hostValue: optionId, in: &next)
-    case let .promptUndelivered(text, imageCount, offset, _):
-      if let index = next.items.lastIndex(where: { $0.kind == .user(text: text, imageCount: imageCount, offset: offset) }) {
+    case let .promptUndelivered(text, imageCount, offset, _, images):
+      if let index = next.items.lastIndex(where: {
+        $0.kind == .user(text: text, imageCount: imageCount, offset: offset, images: images)
+      }) {
         let itemId = next.items[index].id
         next.items.remove(at: index)
         next.inFlight.removeAll { $0.itemId == itemId }
@@ -332,6 +339,15 @@ enum ChatReducer {
       } else {
         append(.assistant(text: text, messageId: messageId), to: &state)
       }
+    case let .agentImage(ref, messageId):
+      startQueued(in: &state)
+      if let last = state.items.indices.last,
+        case let .images(existing, existingId) = state.items[last].kind, existingId == messageId
+      {
+        state.items[last].kind = .images(existing + [ref], messageId: messageId)
+      } else {
+        append(.images([ref], messageId: messageId), to: &state)
+      }
     case let .agentThought(text):
       startQueued(in: &state)
       if let last = state.items.indices.last, case let .thought(existing) = state.items[last].kind {
@@ -344,15 +360,15 @@ enum ChatReducer {
         state.queuedItemIds.removeFirst()
         state.startPending = false
         if let index = state.items.firstIndex(where: { $0.id == first }),
-          case let .user(echoed, _, _) = state.items[index].kind, echoed == text
+          case let .user(echoed, _, _, _) = state.items[index].kind, echoed == text
         {
           return
         }
       }
-      if let last = state.items.indices.last, case let .user(existing, images, offset) = state.items[last].kind,
+      if let last = state.items.indices.last, case let .user(existing, count, offset, refs) = state.items[last].kind,
         messageId == nil || state.lastUserMessageId == nil || messageId == state.lastUserMessageId
       {
-        state.items[last].kind = .user(text: existing + text, imageCount: images, offset: offset)
+        state.items[last].kind = .user(text: existing + text, imageCount: count, offset: offset, images: refs)
       } else {
         append(.user(text: text, offset: 0), to: &state)
       }
@@ -429,7 +445,7 @@ enum ChatReducer {
   /// `/clear` and `/compact` end silently; a rule marks where the agent's context changed.
   private static func markEnd(of prompt: FinishedPrompt, reason: String, in state: inout ChatState) {
     guard reason == "end_turn", let start = state.items.firstIndex(where: { $0.id == prompt.itemId }),
-      case let .user(text, _, _) = state.items[start].kind
+      case let .user(text, _, _, _) = state.items[start].kind
     else { return }
     let label: String
     switch text.trimmingCharacters(in: .whitespacesAndNewlines) {

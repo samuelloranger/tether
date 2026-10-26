@@ -33,20 +33,20 @@ struct ChatLocalFiles: Sendable {
   static let protection: FileProtectionType = .completeUntilFirstUserAuthentication
 
   func write(_ data: Data, _ name: String, _ kind: String) {
-    prepareDirectory()
+    prepare(directory)
     try? data.write(to: url(name, kind), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
   }
 
   /// Chat transcripts are not worth carrying into a backup or onto another device.
-  private func prepareDirectory() {
+  func prepare(_ target: URL) {
     let manager = FileManager.default
     try? manager.createDirectory(
-      at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
-    try? manager.setAttributes([.protectionKey: Self.protection], ofItemAtPath: directory.path)
+      at: target, withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
+    try? manager.setAttributes([.protectionKey: Self.protection], ofItemAtPath: target.path)
     var values = URLResourceValues()
     values.isExcludedFromBackup = true
-    var target = directory
-    try? target.setResourceValues(values)
+    var excluded = target
+    try? excluded.setResourceValues(values)
   }
 
   func remove(_ name: String, _ kind: String) { try? FileManager.default.removeItem(at: url(name, kind)) }
@@ -54,9 +54,17 @@ struct ChatLocalFiles: Sendable {
   func snapshots(_ name: String) -> FileChatSnapshotStore { FileChatSnapshotStore(files: self, name: name) }
   func outbox(_ name: String) -> FileChatOutboxStore { FileChatOutboxStore(files: self, name: name) }
 
+  /// A chat's image files; a folder of its own so deleting the chat removes them in one step.
+  func imagesDirectory(_ name: String) -> URL {
+    directory.appendingPathComponent("\(Self.component(name))\(ChatImageStore.directorySuffix)", isDirectory: true)
+  }
+
+  func images(_ name: String) -> ChatImageStore { ChatImageStore(files: self, chat: name) }
+
   func clear(_ name: String) {
     remove(name, FileChatSnapshotStore.kind)
     remove(name, FileChatOutboxStore.kind)
+    try? FileManager.default.removeItem(at: imagesDirectory(name))
   }
 }
 

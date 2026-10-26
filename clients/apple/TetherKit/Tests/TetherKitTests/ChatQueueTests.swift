@@ -19,7 +19,7 @@ private func reduce(_ state: ChatState, _ message: ACPInbound) -> ChatState {
 
 private func userId(_ text: String, in state: ChatState) -> Int {
   state.items.first {
-    if case let .user(existing, _, _) = $0.kind { return existing == text }
+    if case let .user(existing, _, _, _) = $0.kind { return existing == text }
     return false
   }!.id
 }
@@ -71,7 +71,7 @@ final class ChatQueueTests: XCTestCase {
     state = reduce(state, chunk("two", kind: "user_message_chunk"))
     XCTAssertTrue(state.queuedItemIds.isEmpty)
     let users = state.items.compactMap { item -> String? in
-      if case let .user(text, _, _) = item.kind { return text }
+      if case let .user(text, _, _, _) = item.kind { return text }
       return nil
     }
     XCTAssertEqual(users, ["one", "two"])

@@ -54,7 +54,7 @@ final class ACPLoadSessionTests: XCTestCase {
     XCTAssertEqual(state.turn, .idle)
     XCTAssertFalse(state.configOptions.isEmpty)
     XCTAssertEqual(state.items.count, 3)
-    guard case let .user(text, _, _) = state.items[0].kind else { return XCTFail("first row is the user message") }
+    guard case let .user(text, _, _, _) = state.items[0].kind else { return XCTFail("first row is the user message") }
     XCTAssertTrue(text.contains("cat notes.txt"))
     guard case let .tool(call) = state.items[1].kind else { return XCTFail("second row is the tool call") }
     XCTAssertEqual(call.title, "cat notes.txt")
@@ -158,7 +158,7 @@ final class ACPLoadSessionTests: XCTestCase {
       state = ChatReducer.reduce(state, event)
     }
     let texts = state.items.compactMap { item -> String? in
-      if case let .user(text, _, _) = item.kind { return text }
+      if case let .user(text, _, _, _) = item.kind { return text }
       return nil
     }
     XCTAssertEqual(texts, ["first part", "second"])

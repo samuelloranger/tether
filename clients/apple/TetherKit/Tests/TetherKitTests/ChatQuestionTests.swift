@@ -277,7 +277,7 @@ final class ChatQuestionTests: XCTestCase {
     }
     XCTAssertEqual(ChatSnapshot.digest([entry("a")]), ChatSnapshot.digest([entry("a")]))
     XCTAssertNotEqual(ChatSnapshot.digest([entry("a")]), ChatSnapshot.digest([entry("b")]))
-    XCTAssertEqual(ChatSnapshot.currentVersion, 3)
+    XCTAssertEqual(ChatSnapshot.currentVersion, 4)
   }
 
   func test_an_old_journal_entry_without_content_still_decodes() throws {
