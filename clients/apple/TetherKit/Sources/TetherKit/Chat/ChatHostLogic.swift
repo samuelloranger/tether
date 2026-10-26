@@ -237,6 +237,25 @@ extension ChatPermissionOptions {
   }
 }
 
+extension ChatPermissionOptions {
+  struct Layout: Equatable {
+    var primary: ACPPermissionOption?
+    var reject: ACPPermissionOption?
+    /// Every other option, in the order the card offers them.
+    var more: [ACPPermissionOption]
+    /// More than three options: the primary allow and the reject stay visible, the rest sit behind a disclosure.
+    var collapsed: Bool
+  }
+
+  static func layout(_ options: [ACPPermissionOption]) -> Layout {
+    let ordered = Self.ordered(options)
+    let primary = ordered.first { $0.role == .primary }?.option ?? ordered.first { $0.role == .secondary }?.option
+    let reject = ordered.first { $0.role == .destructive }?.option
+    let rest = ordered.map(\.option).filter { $0.optionId != primary?.optionId && $0.optionId != reject?.optionId }
+    return Layout(primary: primary, reject: reject, more: rest, collapsed: options.count > 3)
+  }
+}
+
 enum ChatFormat {
   static func folderName(_ cwd: String) -> String {
     let trimmed = cwd.trimmingCharacters(in: CharacterSet(charactersIn: "/"))

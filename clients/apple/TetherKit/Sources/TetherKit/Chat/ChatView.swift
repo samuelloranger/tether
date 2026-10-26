@@ -63,6 +63,12 @@ struct ChatView: View {
         try? await Task.sleep(nanoseconds: 900_000_000)
         showingControls = true
       }
+      #if DEBUG
+      if ChatFixture.planMode == "plan-sheet" {
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        reviewing = model.state.pendingPermissions.first
+      }
+      #endif
     }
     .task {
       guard focusComposer else { return }
@@ -379,7 +385,7 @@ struct ChatView: View {
           position: model.state.pendingPermissions.count > 1 ? "1 of \(model.state.pendingPermissions.count)" : nil,
           enabled: model.canInteract,
           approve: { model.approve(permission, option: $0) },
-          review: { reviewing = permission })
+          review: { reviewing = permission }, startOpen: debugOpenMore)
           .transition(.move(edge: .bottom).combined(with: .opacity))
         if model.answerFailures.contains(permission.requestId) {
           Text("Couldn't send your answer. Choose again to retry.")
@@ -485,6 +491,14 @@ struct ChatView: View {
     attachments.add(data: data)
   }
 
+  private var debugOpenMore: Bool {
+    #if DEBUG
+    ChatFixture.planMode == "plan-more"
+    #else
+    false
+    #endif
+  }
+
   private var permissionPending: Bool { !model.state.pendingPermissions.isEmpty }
   private var pendingQuestion: ChatQuestion? { model.state.pendingQuestions.first }
   private var questionPending: Bool { pendingQuestion != nil }
@@ -547,13 +561,19 @@ struct PermissionCard: View {
   let review: () -> Void
 
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @State private var showMore = false
+  var startOpen = false
+
+  private func syncOpen() { if startOpen { showMore = true } }
+
+  private var isPlan: Bool { permission.kind == .switchMode && !(permission.text ?? "").isEmpty && permission.diff == nil }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 8) {
         Image(systemName: permission.kind.symbolName).foregroundStyle(TetherColors.accent)
         VStack(alignment: .leading, spacing: 1) {
-          Text("PERMISSION").font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
+          Text(isPlan ? "PLAN" : "PERMISSION").font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
           Text(permission.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(2)
         }
@@ -570,6 +590,7 @@ struct PermissionCard: View {
     .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(TetherColors.accent.opacity(0.45)))
     .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
     .accessibilityElement(children: .contain)
+    .onAppear(perform: syncOpen)
   }
 
   @State private var previewWidth: CGFloat = 0
@@ -638,6 +659,8 @@ struct PermissionCard: View {
       .background(TetherColors.background.opacity(0.5))
       .clipShape(RoundedRectangle(cornerRadius: 10))
       .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+    } else if isPlan, let text = permission.text {
+      PlanPreview(text: text, review: review)
     } else if let text = permission.text, !text.isEmpty {
       Text(String(text.prefix(300))).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(4)
@@ -679,39 +702,72 @@ struct PermissionCard: View {
     }
   }
 
-  /// Deny and Allow share one row; broader allows are a quiet link below.
+  /// Reject and the primary allow share one row; the rest are links, or behind "More options" past three.
   private var actions: some View {
-    let slots = ChatPermissionOptions.slots(permission.options)
-    let pair = [slots.deny, slots.allow].compactMap { $0 }
-    return VStack(spacing: 2) {
+    let layout = ChatPermissionOptions.layout(permission.options)
+    let pair = [layout.reject, layout.primary].compactMap { $0 }
+    return VStack(spacing: 6) {
       if dynamicTypeSize.isAccessibilitySize {
-        VStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, slots: slots) } }
+        VStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, rejectId: layout.reject?.optionId) } }
       } else {
-        HStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, slots: slots) } }
+        HStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, rejectId: layout.reject?.optionId) } }
       }
-      ForEach(slots.extras, id: \.optionId) { option in
-        Button { approve(option) } label: {
-          Text(option.name).font(.footnote.weight(.medium)).foregroundStyle(TetherColors.accent)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity, minHeight: 24)
-            .hitSlop(vertical: 10)
+      if layout.collapsed, !layout.more.isEmpty {
+        Button { withAnimation(.easeOut(duration: 0.18)) { showMore.toggle() } } label: {
+          HStack(spacing: 4) {
+            Text("More options").font(.footnote.weight(.medium))
+            Image(systemName: showMore ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+          }
+          .foregroundStyle(TetherColors.textSecondary)
+          .frame(maxWidth: .infinity, minHeight: 28)
+          .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.5)
-        .accessibilityLabel(option.name)
+        .accessibilityLabel("More options")
+        .accessibilityValue(showMore ? "Expanded" : "Collapsed")
+        .accessibilityIdentifier("permissionMore")
+        if showMore {
+          VStack(spacing: 6) {
+            ForEach(layout.more, id: \.optionId) { option in
+              Button { approve(option) } label: {
+                Text(option.name).font(.subheadline.weight(.medium)).foregroundStyle(TetherColors.accent)
+                  .multilineTextAlignment(.center)
+                  .frame(maxWidth: .infinity, minHeight: 36)
+                  .padding(.horizontal, 10)
+                  .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
+              }
+              .buttonStyle(TetherPressStyle())
+              .disabled(!enabled)
+              .opacity(enabled ? 1 : 0.5)
+              .accessibilityLabel(option.name)
+            }
+          }
+        }
+      } else {
+        ForEach(layout.more, id: \.optionId) { option in
+          Button { approve(option) } label: {
+            Text(option.name).font(.footnote.weight(.medium)).foregroundStyle(TetherColors.accent)
+              .multilineTextAlignment(.center)
+              .frame(maxWidth: .infinity, minHeight: 24)
+              .hitSlop(vertical: 10)
+          }
+          .buttonStyle(.plain)
+          .disabled(!enabled)
+          .opacity(enabled ? 1 : 0.5)
+          .accessibilityLabel(option.name)
+        }
       }
     }
   }
 
-  private func actionButton(_ option: ACPPermissionOption, slots: (allow: ACPPermissionOption?, deny: ACPPermissionOption?, extras: [ACPPermissionOption])) -> some View {
-    let deny = option.optionId == slots.deny?.optionId
+  private func actionButton(_ option: ACPPermissionOption, rejectId: String?) -> some View {
+    let deny = option.optionId == rejectId
     return Button { approve(option) } label: {
       Text(option.name)
         .font(.subheadline.weight(deny ? .medium : .semibold))
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, minHeight: 34)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 10).padding(.vertical, 6)
         .foregroundStyle(deny ? TetherColors.danger : TetherColors.onAccent)
         .background(deny ? TetherColors.danger.opacity(0.14) : TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
         .hitSlop(vertical: 5)
@@ -720,6 +776,49 @@ struct PermissionCard: View {
     .disabled(!enabled)
     .opacity(enabled ? 1 : 0.5)
     .accessibilityLabel(option.name)
+  }
+}
+
+/// The agent's plan as markdown in a capped, scrollable box; the full text opens in a sheet.
+private struct PlanPreview: View {
+  let text: String
+  let review: () -> Void
+  @State private var blocks: [MarkdownBlock]
+
+  init(text: String, review: @escaping () -> Void) {
+    self.text = text
+    self.review = review
+    _blocks = State(initialValue: MarkdownDocument.parse(text))
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      ScrollView {
+        MarkdownBodyView(blocks: blocks)
+          .padding(10)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxHeight: 150)
+      .scrollBounceBehavior(.basedOnSize)
+      Rectangle().fill(TetherColors.border).frame(height: 0.5)
+      Button(action: review) {
+        HStack(spacing: 6) {
+          Text("Show full plan").font(.footnote.weight(.semibold))
+          Image(systemName: "arrow.up.left.and.arrow.down.right").font(.footnote)
+          Spacer(minLength: 0)
+        }
+        .foregroundStyle(TetherColors.accent)
+        .padding(.horizontal, 10)
+        .frame(minHeight: 36)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("planShowFull")
+    }
+    .background(TetherColors.background.opacity(0.5))
+    .clipShape(RoundedRectangle(cornerRadius: 10))
+    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+    .onChange(of: text) { _, next in blocks = MarkdownDocument.parse(next) }
   }
 }
 
@@ -737,6 +836,9 @@ private struct PermissionReviewSheet: View {
       ScrollView {
         if let diff = permission.diff {
           DiffReviewView(files: [ACPDiffAdapter.file(for: diff, relativeTo: cwd)]).padding(.vertical, 8)
+        } else if let text = permission.text {
+          MarkdownBodyView(blocks: MarkdownDocument.parse(text), reading: true)
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
         }
       }
       .background(TetherColors.background)

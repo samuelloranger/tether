@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -143,6 +143,110 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false,
       store: InMemoryChatJournalStore(journal)
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
+  /// Set by the debug root: `plan-more` opens the disclosure, `plan-sheet` the full plan.
+  nonisolated(unsafe) static var planMode = ""
+
+  static let planMarkdown = """
+  ## Plan: retry with backoff in fetchJSON
+
+  **Context.** `fetchJSON` fails on the first 5xx, which makes the nightly sync flaky.
+
+  1. Add an `attempts` parameter, default 3
+  2. Retry only on `5xx`; keep `4xx` fatal
+  3. Back off `2^attempt * 100` ms between tries
+  4. Cover it in `src/fetch.test.ts`: a 503 then success, and a 404 that does not retry
+
+  ### Files
+
+  - `src/fetch.ts`
+  - `src/fetch.test.ts`
+
+  ### Verification
+
+  Run `bun test src/fetch.test.ts`, then the whole suite.
+  """
+
+  /// The plan-mode approval as the adapter sends it: one `switch_mode` request with five options.
+  @MainActor
+  static func planModel() -> ChatSessionModel {
+    let request = json([
+      "jsonrpc": "2.0", "id": permissionRequestId, "method": "session/request_permission",
+      "params": [
+        "sessionId": "sess-1",
+        "toolCall": [
+          "toolCallId": "toolu_plan", "title": "Approve Plan", "kind": "switch_mode", "status": "pending",
+          "content": [["type": "content", "content": ["type": "text", "text": planMarkdown]]],
+        ],
+        "options": [
+          ["optionId": "default", "name": "Yes, manually approve edits", "kind": "allow_once"],
+          ["optionId": "acceptEdits", "name": "Yes, clear context (31% used) and use auto mode", "kind": "allow_always"],
+          ["optionId": "auto", "name": "Yes, and use auto mode", "kind": "allow_always"],
+          ["optionId": "bypassPermissions", "name": "Yes, and bypass permissions", "kind": "allow_always"],
+          ["optionId": "plan", "name": "No, keep planning", "kind": "reject_once"],
+        ],
+      ],
+    ])
+    let lines = [
+      update(["sessionUpdate": "session_info_update", "title": "Retry for fetchJSON"]),
+      message("I've read the helper and its callers. The plan is ready for your approval."),
+      update(["sessionUpdate": "usage_update", "used": 41_250, "size": 1_000_000]),
+      request,
+    ]
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: promptText)]
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal)
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
+  /// A turn still running with a message typed ahead (`queued`), a finished `/clear`, or a signed-out agent.
+  @MainActor
+  static func contextModel(_ kind: String) -> ChatSessionModel {
+    var lines = [update(["sessionUpdate": "session_info_update", "title": "Retry for fetchJSON"])]
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 6
+    switch kind {
+    case "queue":
+      lines += [
+        message("Working through the helpers. `fetchJSON` is done; moving on to `fetchText`."),
+        update(tool("t1", "Edit src/text.ts", kind: "edit", status: "in_progress")),
+      ]
+      journal.entries = [
+        .init(kind: .prompt, offset: 0, text: promptText, requestId: .int(3)),
+        .init(kind: .prompt, offset: 0, text: "After that, update the README too.", requestId: .int(4)),
+      ]
+    case "clear":
+      lines += [
+        message("Done. `fetchJSON` retries 5xx responses up to three times."),
+        json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]),
+        json(["jsonrpc": "2.0", "id": 4, "result": ["stopReason": "end_turn"]]),
+      ]
+      let first = lines.prefix(2).reduce(0) { $0 + $1.utf8.count + 1 }
+      journal.entries = [
+        .init(kind: .prompt, offset: 0, text: promptText, requestId: .int(3)),
+        .init(kind: .prompt, offset: first + lines[2].utf8.count + 1, text: "/clear", requestId: .int(4)),
+      ]
+    default:
+      lines += [
+        json([
+          "jsonrpc": "2.0", "method": "_auth/status_update",
+          "params": ["authStatus": ["kind": "none", "label": "Not logged in"]],
+        ]),
+        json(["jsonrpc": "2.0", "id": 3, "error": ["code": -32000, "message": "Authentication required"]]),
+      ]
+      journal.entries = [.init(kind: .prompt, offset: 0, text: promptText, requestId: .int(3))]
+    }
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal),
+      hostLabel: "devbox"
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
@@ -615,12 +719,15 @@ public struct ChatFixtureRoot: View {
   public init(mode: String) {
     self.mode = mode
     ChatFixture.openQuestionOther = mode == "question-other"
+    ChatFixture.planMode = mode
     listMode = mode == "list"
     let initial: ChatSessionModel
     switch mode {
     case "question", "question-other": initial = ChatFixture.questionModel(multi: mode == "question-other")
     case "question-multi": initial = ChatFixture.questionModel(multi: true)
     case "question-answered": initial = ChatFixture.questionModel(answered: true)
+    case "plan", "plan-more", "plan-sheet": initial = ChatFixture.planModel()
+    case "queue", "clear", "signedout": initial = ChatFixture.contextModel(mode)
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
     case "send": initial = ChatFixture.sendModel()
