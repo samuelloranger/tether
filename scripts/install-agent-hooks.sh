@@ -1,11 +1,11 @@
 #!/bin/sh
-# Wire Claude Code, Codex, Gemini CLI and Cursor notifications to tether-notify via one hook wrapper.
+# Wire Claude Code, Codex, Gemini CLI and Cursor notifications to tether via one hook wrapper.
 # Usage: install-agent-hooks.sh [host-label]  (label shown in notifications and deep links)
 set -eu
 
 HOST_LABEL="${1:-$(hostname -s 2>/dev/null || hostname)}"
 BIN_DIR="${HOME}/.local/bin"
-WRAPPER="${BIN_DIR}/tether-notify-hook"
+WRAPPER="${BIN_DIR}/tether-hook"
 
 command -v jq >/dev/null 2>&1 || {
   echo "jq is required to merge the agent hook configs. Install jq and re-run." >&2
@@ -13,7 +13,7 @@ command -v jq >/dev/null 2>&1 || {
 }
 mkdir -p "$BIN_DIR"
 
-# --- the wrapper: tether-notify-hook <agent> <waiting|done>, hook JSON on stdin ----------
+# --- the wrapper: tether-hook <agent> <waiting|done>, hook JSON on stdin ----------
 # Host label is baked into the expanded heredoc; the body heredoc is quoted to stay literal.
 cat > "$WRAPPER" <<EOF
 #!/bin/sh
@@ -42,8 +42,8 @@ reply() {
   esac
 }
 
-notify_bin="$(dirname "$0")/tether-notify"
-[ -x "$notify_bin" ] || notify_bin="tether-notify"
+notify_bin="$(dirname "$0")/tether"
+[ -x "$notify_bin" ] || notify_bin="tether"
 
 input="$(cat 2>/dev/null || true)"
 field() { printf '%s' "$input" | jq -r "$1" 2>/dev/null || true; }
@@ -154,7 +154,7 @@ EOF
 chmod +x "$WRAPPER"
 echo "Installed hook wrapper: $WRAPPER"
 
-# `tether-notify hold` builds the phone's link from this; the mod can't learn the label.
+# `tether hold` builds the phone's link from this; the mod can't learn the label.
 NOTIFY_HOME="${TETHER_NOTIFY_HOME:-${HOME}/.tether-notify}"
 mkdir -p "$NOTIFY_HOME"
 printf '%s\n' "$HOST_LABEL" > "${NOTIFY_HOME}/host-label"
@@ -230,7 +230,7 @@ finish_agent() { # <slug> <label> <file>
 # handler index, so deleting the group and appending it would move every later group.
 merge_nested() { # <file> <Event> <command>
   jq_merge "$1" '{}' --arg ev "$2" --arg cmd "$3" '
-    def is_ours: ((.command // "") | tostring | test("tether-notify-hook"));
+    def is_ours: ((.command // "") | tostring | test("tether-(notify-)?hook"));
     def handler: {type: "command", command: $cmd};
     def first_hit:
       [ range(0; length) as $gi
@@ -258,7 +258,7 @@ merge_nested() { # <file> <Event> <command>
 # Gemini CLI: the nested shape plus a matcher (required to match every tool) and a name.
 merge_gemini() { # <file> <Event> <command>
   jq_merge "$1" '{}' --arg ev "$2" --arg cmd "$3" '
-    def is_ours: ((.command // "") | tostring | test("tether-notify-hook"));
+    def is_ours: ((.command // "") | tostring | test("tether-(notify-)?hook"));
     def handler: {type: "command", name: "tether", command: $cmd};
     def first_hit:
       [ range(0; length) as $gi
@@ -286,7 +286,7 @@ merge_gemini() { # <file> <Event> <command>
 # Cursor v1: hooks.<event>[].command (flat), lowercase events.
 merge_cursor() { # <file> <event> <command>
   jq_merge "$1" '{"version":1,"hooks":{}}' --arg ev "$2" --arg cmd "$3" '
-    def is_ours: ((.command // "") | tostring | test("tether-notify-hook"));
+    def is_ours: ((.command // "") | tostring | test("tether-(notify-)?hook"));
     def placed:
       ([ range(0; length) as $i | select(.[$i] | is_ours) | $i ] | first) as $hit
       | if $hit == null then . + [{command: $cmd}]
@@ -347,7 +347,7 @@ codex_untrusted() {
     pos="$(jq -r --arg ev "$event" '
       [ range(0; (.hooks[$ev] // []) | length) as $gi
         | range(0; ((.hooks[$ev][$gi].hooks // []) | length)) as $hi
-        | select(((.hooks[$ev][$gi].hooks[$hi].command // "") | tostring | test("tether-notify-hook")))
+        | select(((.hooks[$ev][$gi].hooks[$hi].command // "") | tostring | test("tether-(notify-)?hook")))
         | "\($gi) \($hi)"
       ] | first // empty' "$hooks" 2>/dev/null || true)"
     [ -n "$pos" ] || continue
@@ -394,5 +394,5 @@ if [ -d "${HOME}/.gemini" ]; then
 fi
 
 echo
-echo "Host label: ${HOST_LABEL}.  Test one with: printf '{}' | tether-notify-hook <agent> done"
+echo "Host label: ${HOST_LABEL}.  Test one with: printf '{}' | tether-hook <agent> done"
 echo "Agents wired: ${REGISTERED}."
