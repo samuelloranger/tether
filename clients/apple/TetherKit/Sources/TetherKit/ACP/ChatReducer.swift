@@ -277,7 +277,7 @@ enum ChatReducer {
       if let id, state.silentRequestIds.contains(id) { return }
       if let id { finishPrompt(id, in: &state) } else { state.turn = state.inFlight.isEmpty ? .idle : .working }
       if ChatAuthError.matches(code: code, message: text) {
-        if case .signedOut? = state.items.last?.kind {} else { append(.signedOut, to: &state) }
+        markSignedOut(in: &state)
       } else {
         append(.error(text.isEmpty ? "Agent error \(code)" : text), to: &state)
       }
@@ -307,6 +307,13 @@ enum ChatReducer {
       if let value = state.hostAnswers[id] { resolveQuestion(id, hostValue: value, in: &state) }
     case let .update(update):
       apply(update, to: &state)
+    case let .authStatus(signedIn):
+      startQueued(in: &state)
+      if signedIn {
+        state.items.removeAll { $0.kind == .signedOut }
+      } else {
+        markSignedOut(in: &state)
+      }
     case .unknown:
       break
     }
@@ -381,6 +388,11 @@ enum ChatReducer {
     case .unknown:
       break
     }
+  }
+
+  private static func markSignedOut(in state: inout ChatState) {
+    if case .signedOut? = state.items.last?.kind { return }
+    append(.signedOut, to: &state)
   }
 
   /// Agent output after a prompt ended is what tells the next waiting message has begun.

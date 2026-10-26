@@ -161,6 +161,40 @@ final class ChatQueueTests: XCTestCase {
     XCTAssertEqual(state.items.filter { $0.kind == .signedOut }.count, 1)
   }
 
+  func test_the_adapters_auth_status_notification_drives_the_sign_in_row() {
+    let none = ACPDecoder.decode(Data(
+      "{\"jsonrpc\":\"2.0\",\"method\":\"_auth/status_update\",\"params\":{\"authStatus\":{\"kind\":\"none\",\"label\":\"Not logged in\"}}}".utf8))
+    XCTAssertEqual(none, .authStatus(signedIn: false))
+    let account = ACPDecoder.decode(Data(
+      "{\"jsonrpc\":\"2.0\",\"method\":\"_auth/status_update\",\"params\":{\"authStatus\":{\"kind\":\"account\",\"label\":\"Team\"}}}".utf8))
+    XCTAssertEqual(account, .authStatus(signedIn: true))
+
+    var state = reduce(ChatState(), none)
+    XCTAssertEqual(state.items.map(\.kind), [.signedOut])
+    state = reduce(state, none)
+    XCTAssertEqual(state.items.count, 1)
+    state = reduce(state, account)
+    XCTAssertTrue(state.items.isEmpty, "a later login makes the old row stale")
+  }
+
+  func test_a_failed_prompt_after_the_status_notice_shows_one_sign_in_row() {
+    var state = prompt("hi", id: 1, ChatState())
+    state = reduce(state, .authStatus(signedIn: false))
+    state = reduce(state, .errorResponse(id: .int(1), code: -32000, message: "Authentication required"))
+    XCTAssertEqual(state.items.filter { $0.kind == .signedOut }.count, 1)
+    XCTAssertEqual(state.turn, .idle)
+  }
+
+  func test_the_status_notice_that_opens_a_turn_starts_the_queued_prompt() {
+    var state = prompt("one", id: 1, ChatState())
+    state = prompt("two", id: 2, state)
+    state = reduce(state, .authStatus(signedIn: true))
+    XCTAssertEqual(state.queuedItemIds.count, 1, "the running prompt's own notice does not start the next")
+    state = reduce(state, done(1))
+    state = reduce(state, .authStatus(signedIn: true))
+    XCTAssertTrue(state.queuedItemIds.isEmpty)
+  }
+
   func test_other_errors_stay_error_rows() {
     let state = reduce(ChatState(), .errorResponse(id: .int(3), code: -32603, message: "Internal error"))
     XCTAssertEqual(state.items.last?.kind, .error("Internal error"))

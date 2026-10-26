@@ -140,6 +140,9 @@ enum ACPInbound: Equatable, Sendable {
   case update(ACPUpdate)
   case permissionRequest(id: ACPID, request: ACPPermissionRequest)
   case elicitation(id: ACPID, request: ACPElicitationRequest)
+  /// The adapter's `_auth/status_update`: whether the host's agent has a login. Sent at session start and
+  /// again when a queued prompt begins.
+  case authStatus(signedIn: Bool)
   case unknown(method: String?)
 }
 
@@ -163,6 +166,9 @@ enum ACPDecoder {
       }
       if method == "session/update", let update = params["update"] as? JSON {
         return .update(decodeUpdate(update))
+      }
+      if method == "_auth/status_update", let status = (params["authStatus"] as? JSON)?["kind"] as? String {
+        return .authStatus(signedIn: status != "none")
       }
       return .unknown(method: method)
     }
