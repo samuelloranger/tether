@@ -36,3 +36,18 @@ extension ChatScrollFollow {
     return old.isNearBottom && new.container != old.container && !new.isNearBottom
   }
 }
+
+extension ChatScrollFollow {
+  /// "Stick to the end": on when a chat opens, so every layout of a transcript that is still arriving
+  /// ends at its last row. Only the user's own upward scroll turns it off; reaching the end turns it on.
+  static func sticks(sticking: Bool, old: ChatScrollMetrics, new: ChatScrollMetrics, userScrolling: Bool) -> Bool {
+    if userScrolling, new.offset < old.offset - 0.5, !new.isNearBottom { return false }
+    if new.isNearBottom { return true }
+    return sticking
+  }
+
+  /// Content that grew, or a viewport that changed, under a view that sticks to the end and is not being dragged.
+  static func shouldFollowEnd(sticking: Bool, userScrolling: Bool, new: ChatScrollMetrics) -> Bool {
+    sticking && !userScrolling && !new.isNearBottom
+  }
+}

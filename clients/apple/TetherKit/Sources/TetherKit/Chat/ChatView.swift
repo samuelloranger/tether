@@ -22,6 +22,7 @@ struct ChatView: View {
   var sendDraft: String?
   var probeLastRow = false
   @State private var lastRowVisible = false
+  @State private var metricsText = ""
   #endif
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
@@ -64,7 +65,7 @@ struct ChatView: View {
     #if DEBUG
     .overlay(alignment: .topTrailing) {
       if probeLastRow {
-        Text("LAST ROW VISIBLE: \(lastRowVisible ? "yes" : "no")")
+        Text("LAST ROW VISIBLE: \(lastRowVisible ? "yes" : "no")\n\(metricsText)")
           .font(.system(size: 13, weight: .bold, design: .monospaced))
           .foregroundStyle(.white).padding(6)
           .background(lastRowVisible ? Color.green : Color.red)
@@ -135,7 +136,13 @@ struct ChatView: View {
 
   @ViewBuilder private var scroller: some View {
     if #available(iOS 18.0, *) {
+      #if DEBUG
+      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, anchorRequest: $windowAnchor, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop, probe: probeLastRow ? { m in
+        metricsText = "off \(Int(m.offset)) content \(Int(m.content)) view \(Int(m.container))"
+      } : nil) { transcript }
+      #else
       FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, anchorRequest: $windowAnchor, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
+      #endif
     } else {
       legacyScroller
     }
@@ -209,13 +216,19 @@ struct ChatView: View {
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: {
               scrolledUnder = $0 < -1
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
+              if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
+            }
           Color.clear.frame(height: 1).id(bottomID)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).maxY } action: { bottomEdge = $0 }
             .onDisappear { bottomEdge = .infinity }
         }
       }
       .coordinateSpace(name: Self.space)
-      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+        viewportHeight = $0
+        if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
+      }
       .defaultScrollAnchor(.bottom)
       .scrollDismissesKeyboard(.interactively)
       .simultaneousGesture(
@@ -979,10 +992,15 @@ private struct FollowingTranscript<Content: View>: View {
   let sendTick: Int
   let reduceMotion: Bool
   var startAtTop = false
+  #if DEBUG
+  var probe: ((ChatScrollMetrics) -> Void)?
+  #endif
   @ViewBuilder var content: () -> Content
 
   @State private var position = ScrollPosition(edge: .bottom)
   @State private var sendPending = false
+  @State private var sticking = true
+  @State private var userScrolling = false
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -990,6 +1008,7 @@ private struct FollowingTranscript<Content: View>: View {
         .onChange(of: anchorRequest) { _, id in
           guard let id else { return }
           anchorRequest = nil
+          sticking = false
           proxy.scrollTo(id, anchor: .top)
         }
     }
@@ -1004,14 +1023,6 @@ private struct FollowingTranscript<Content: View>: View {
     .defaultScrollAnchor(.bottom, for: .sizeChanges)
     .scrollDismissesKeyboard(.interactively)
     .onScrollGeometryChange(for: Bool.self) { geometry in
-      ChatScrollFollow.isNearBottom(
-        offset: geometry.visibleRect.minY,
-        content: geometry.contentSize.height,
-        container: geometry.visibleRect.height)
-    } action: { _, near in
-      atBottom = near
-    }
-    .onScrollGeometryChange(for: Bool.self) { geometry in
       geometry.contentOffset.y + geometry.contentInsets.top > 1
     } action: { _, under in
       scrolledUnder = under
@@ -1020,6 +1031,7 @@ private struct FollowingTranscript<Content: View>: View {
     .overlay(alignment: .bottom) {
       if !atBottom {
         JumpToLatestButton {
+          sticking = true
           withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
             position.scrollTo(edge: .bottom)
           }
@@ -1029,16 +1041,30 @@ private struct FollowingTranscript<Content: View>: View {
     .task {
       guard startAtTop else { return }
       try? await Task.sleep(nanoseconds: 900_000_000)
+      sticking = false
       position.scrollTo(edge: .top)
     }
     .onChange(of: sendTick) { _, _ in sendPending = true }
+    .onScrollPhaseChange { _, phase in
+      userScrolling = phase == .interacting || phase == .decelerating
+    }
     .onScrollGeometryChange(for: ChatScrollMetrics.self) { geometry in
       ChatScrollMetrics(
         offset: geometry.visibleRect.minY, content: geometry.contentSize.height,
         container: geometry.visibleRect.height)
     } action: { old, new in
-      guard ChatScrollFollow.shouldJumpToEnd(old: old, new: new, sendPending: sendPending) else { return }
-      if sendPending { sendPending = false }
+      #if DEBUG
+      probe?(new)
+      #endif
+      var stick = ChatScrollFollow.sticks(sticking: sticking, old: old, new: new, userScrolling: userScrolling)
+      let sent = sendPending && new.content > old.content
+      if sent { sendPending = false; stick = true }
+      if stick != sticking { sticking = stick }
+      let held = new.isNearBottom || stick
+      if atBottom != held { atBottom = held }
+      guard sent || ChatScrollFollow.shouldFollowEnd(sticking: stick, userScrolling: userScrolling, new: new)
+        || ChatScrollFollow.shouldJumpToEnd(old: old, new: new, sendPending: false)
+      else { return }
       position.scrollTo(edge: .bottom)
     }
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: atBottom)
