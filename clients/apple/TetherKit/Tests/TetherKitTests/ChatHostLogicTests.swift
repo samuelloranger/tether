@@ -84,7 +84,7 @@ final class ChatHostLogicTests: XCTestCase {
         in: "tether=found\nversion={\"name\":\"tether\",\"version\":\"v6.2.0\",\"protocol\":2}\nnode=ok\n"))
     XCTAssertFalse(
       ACPHostCheck.multiClient(in: "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n"))
-    let listing = ChatHostStatus.parse(
+    let listing = ACPChatStatusListing.parse(
       "{\"name\":\"a\",\"state\":\"running\",\"cwd\":\"/w\",\"created\":2,\"multiClient\":true}\n"
         + "{\"name\":\"b\",\"state\":\"running\",\"cwd\":\"/w\",\"created\":1}")
     XCTAssertEqual(listing.chats.map(\.multiClient), [true, false])
