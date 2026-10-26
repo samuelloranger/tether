@@ -62,6 +62,8 @@ On first launch: add a machine (host, port, user, and a key from the vault), the
 
 Each host needs `zmx` (the session manager the app attaches to) and — optionally, for push — `tether-notify`.
 
+**Chat (Claude Code over ACP).** The chat screens need, on each host, Node.js (the agent adapter runs through `npx`) and an up-to-date `tether-notify`; update it with `bash install.sh` whenever the app asks. A chat that was started before an update keeps the behaviour of the `tether-notify` it started under until it ends and you start a new one. Claude must be signed in on the host (run `claude` in a terminal there once).
+
 **Push (`tether-notify`).** A phone registers its APNs token and a per-device AES key (generated on the phone, sent over SSH) and `tether-notify` encrypts each notification to that key, posting only ciphertext to a shared relay. The relay and Apple never see the plaintext; the iOS Notification Service Extension decrypts it on arrival.
 
 ```bash
