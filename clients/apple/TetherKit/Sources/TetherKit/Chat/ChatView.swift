@@ -30,6 +30,8 @@ struct ChatView: View {
   @State private var bottomEdge: CGFloat = 0
   @State private var viewportHeight: CGFloat = 0
   @State private var atBottom = true
+  @State private var windowStart: Int?
+  @State private var windowAnchor: Int?
   @State private var sendTick = 0
   @State private var scrolledUnder = false
   @State private var reviewing: ChatPermission?
@@ -47,6 +49,7 @@ struct ChatView: View {
 
   var body: some View {
     scroller
+    .onChange(of: atBottom) { _, near in windowFollowing(near) }
     #if DEBUG
     .coordinateSpace(name: "probe-viewport")
     #endif
@@ -131,16 +134,34 @@ struct ChatView: View {
 
   @ViewBuilder private var scroller: some View {
     if #available(iOS 18.0, *) {
-      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
+      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, anchorRequest: $windowAnchor, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
     } else {
       legacyScroller
     }
   }
 
+  /// The window follows the end while the reader is there, and holds its start once they scroll up.
+  private func windowFollowing(_ atEnd: Bool) {
+    if atEnd { windowStart = nil; return }
+    guard windowStart == nil else { return }
+    let blocks = ChatGrouping.blocks(visibleItems)
+    let range = ChatTranscriptWindow.range(lastIDs: blocks.map(\.lastID), start: nil)
+    if range.lowerBound > 0 { windowStart = blocks[range.lowerBound].lastID }
+  }
+
   private var transcript: some View {
-    LazyVStack(alignment: .leading, spacing: 12) {
+    let blocks = ChatGrouping.blocks(visibleItems)
+    let lastIDs = blocks.map(\.lastID)
+    let range = ChatTranscriptWindow.range(lastIDs: lastIDs, start: windowStart)
+    return VStack(alignment: .leading, spacing: 12) {
       if model.state.items.isEmpty { emptyState }
-      ForEach(ChatGrouping.blocks(visibleItems)) { block in
+      if range.lowerBound > 0 {
+        EarlierMessagesButton {
+          windowStart = ChatTranscriptWindow.earlierStart(lastIDs: lastIDs, range: range)
+          windowAnchor = blocks[range.lowerBound].id
+        }
+      }
+      ForEach(blocks[range]) { block in
         switch block {
         case let .item(item):
           ChatItemRow(
@@ -201,6 +222,12 @@ struct ChatView: View {
           if drag.translation.height > 24, !nearBottom { userScrolledUp = true }
         })
       .onChange(of: bottomEdge) { _, _ in if nearBottom { userScrolledUp = false } }
+      .onChange(of: userScrolledUp) { _, up in windowFollowing(!up) }
+      .onChange(of: windowAnchor) { _, id in
+        guard let id else { return }
+        windowAnchor = nil
+        proxy.scrollTo(id, anchor: .top)
+      }
       .onChange(of: model.state.tailSignature) { _, _ in
         if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
       }
@@ -946,6 +973,7 @@ struct JumpToLatestButton: View {
 private struct FollowingTranscript<Content: View>: View {
   @Binding var atBottom: Bool
   @Binding var scrolledUnder: Bool
+  @Binding var anchorRequest: Int?
   let sendTick: Int
   let reduceMotion: Bool
   var startAtTop = false
@@ -955,6 +983,17 @@ private struct FollowingTranscript<Content: View>: View {
   @State private var sendPending = false
 
   var body: some View {
+    ScrollViewReader { proxy in
+      scroll
+        .onChange(of: anchorRequest) { _, id in
+          guard let id else { return }
+          anchorRequest = nil
+          proxy.scrollTo(id, anchor: .top)
+        }
+    }
+  }
+
+  private var scroll: some View {
     ScrollView {
       content()
     }
@@ -1014,5 +1053,21 @@ extension ToolbarContent {
   /// iOS 26 wraps every toolbar item in a glass bubble; the chat header stays flat.
   @ToolbarContentBuilder fileprivate func withoutGlass() -> some ToolbarContent {
     if #available(iOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
+  }
+}
+
+/// Sits at the top of a transcript that has older blocks than the window shows.
+private struct EarlierMessagesButton: View {
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Text("Earlier messages")
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(TetherColors.textSecondary)
+        .frame(maxWidth: .infinity, minHeight: 36)
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("chatEarlierMessages")
   }
 }

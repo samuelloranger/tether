@@ -28,6 +28,13 @@ enum ChatBlock: Identifiable {
     case let .tools(items): items[0].id
     }
   }
+
+  var lastID: Int {
+    switch self {
+    case let .item(item): item.id
+    case let .tools(items): items[items.count - 1].id
+    }
+  }
 }
 
 enum ChatGrouping {
