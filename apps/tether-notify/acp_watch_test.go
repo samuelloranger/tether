@@ -648,3 +648,31 @@ func TestACPElicitationShapesWithoutPushOptions(t *testing.T) {
 		t.Errorf("fallback title: %+v", c)
 	}
 }
+
+func TestPickPushOptionsKeepsARejection(t *testing.T) {
+	opts := []acpOption{
+		{OptionID: "a", Name: "Yes, manually approve edits", Kind: "allow_once"},
+		{OptionID: "b", Name: "Yes, clear context", Kind: "allow_always"},
+		{OptionID: "c", Name: "Yes, and use auto mode", Kind: "allow_always"},
+		{OptionID: "d", Name: "Yes, and bypass", Kind: "allow_always"},
+		{OptionID: "e", Name: "No, keep planning", Kind: "reject_once"},
+	}
+	got := pickPushOptions(opts)
+	if len(got) != maxPushOptions {
+		t.Fatalf("got %d options", len(got))
+	}
+	ids := ""
+	for _, o := range got {
+		ids += o.OptionID
+	}
+	if ids != "abce" {
+		t.Fatalf("kept %q, want abce (agent order, rejection kept)", ids)
+	}
+	if two := opts[:2]; len(pickPushOptions(two)) != 2 {
+		t.Fatal("short lists pass through")
+	}
+	noReject := opts[:4:4]
+	if len(pickPushOptions(append(noReject, acpOption{OptionID: "f", Kind: "allow_once"}))) != maxPushOptions {
+		t.Fatal("a list with no rejection is still capped")
+	}
+}

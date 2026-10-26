@@ -467,15 +467,16 @@ func (s *acpDaemonState) permissionPush(req *acpRequest) PushContent {
 	if what == "" {
 		what = "a tool"
 	}
+	body := "Allow: " + clip(what, 120) + "?"
+	if req.Kind == "switch_mode" {
+		body = "Approve the plan?"
+	}
 	c := PushContent{
-		Title: clip(chat, 60) + " · needs you", Body: "Allow: " + clip(what, 120) + "?", Link: s.link(),
+		Title: clip(chat, 60) + " · needs you", Body: body, Link: s.link(),
 		Category: acpPermissionCategory, State: "waiting", Version: s.collapseSuffix(string(req.ID)),
 		Session: chat, Level: levelUrgent, ACPSession: s.tr.name, RequestID: string(req.ID),
 	}
-	opts := req.Options
-	if len(opts) > maxPushOptions {
-		opts = opts[:maxPushOptions]
-	}
+	opts := pickPushOptions(req.Options)
 	if len(opts) >= 2 {
 		for _, o := range opts {
 			c.Options = append(c.Options, o.Name)
@@ -484,6 +485,40 @@ func (s *acpDaemonState) permissionPush(req *acpRequest) PushContent {
 		}
 	}
 	return c
+}
+
+// pickPushOptions keeps at most maxPushOptions buttons in the agent's order, and never drops
+// the first rejection: a plan approval offers five options with "no" last, and a lock-screen
+// prompt with only approvals would leave no way to say no.
+func pickPushOptions(opts []acpOption) []acpOption {
+	if len(opts) <= maxPushOptions {
+		return opts
+	}
+	keep := make([]bool, len(opts))
+	left := maxPushOptions
+	for i, o := range opts {
+		if strings.HasPrefix(o.Kind, "reject") {
+			keep[i] = true
+			left--
+			break
+		}
+	}
+	for i := range opts {
+		if left == 0 {
+			break
+		}
+		if !keep[i] {
+			keep[i] = true
+			left--
+		}
+	}
+	var out []acpOption
+	for i, o := range opts {
+		if keep[i] {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 func (s *acpDaemonState) donePush(stop string) PushContent {
