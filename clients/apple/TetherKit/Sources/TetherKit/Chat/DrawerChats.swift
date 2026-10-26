@@ -7,12 +7,15 @@ struct DrawerChatRow: Equatable, Identifiable {
   var subtitle: String
   var state: DrawerChatState
   var cwd: String
+  var multiClient = false
 
   var id: String { name }
   var isRunning: Bool { state != .ended }
   var stateLabel: String { state.label }
 
-  func route(readOnly: Bool) -> ChatRoute { ChatRoute(name: name, cwd: cwd, readOnly: readOnly) }
+  func route(journal: ChatJournal) -> ChatRoute {
+    ChatRoute(existing: name, cwd: cwd, journal: journal, multiClient: multiClient)
+  }
 }
 
 enum DrawerChatRows {
@@ -25,7 +28,8 @@ enum DrawerChatRows {
       let title = chat.hostTitle ?? stored ?? folder
       let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd) ?? chat.cwd) : folder
       return DrawerChatRow(
-        name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd)
+        name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd,
+        multiClient: chat.multiClient)
     }
   }
 }
@@ -56,11 +60,11 @@ struct DrawerContent: Equatable {
 
 extension ChatRoute {
   /// A chat a push or link names. The folder only matters to a chat that has to be spawned,
-  /// which one this phone has no session for never is: that one opens read-only.
+  /// which one this phone has no session for never is: that one is joined or read.
   static func opening(name: String, chats: [ACPChatSummary], journal: ChatJournal) -> ChatRoute {
-    ChatRoute(
-      name: name, cwd: chats.first { $0.name == name }?.cwd ?? "",
-      readOnly: ChatOpenMode.mode(for: journal) == .readOnly)
+    let chat = chats.first { $0.name == name }
+    return ChatRoute(
+      existing: name, cwd: chat?.cwd ?? "", journal: journal, multiClient: chat?.multiClient ?? false)
   }
 
   /// A fresh chat in `cwdText`; `~` needs the host's home, so a host that cannot report it gives nil.

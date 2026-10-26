@@ -323,7 +323,8 @@ enum ChatReducer {
       } else {
         markSignedOut(in: &state)
       }
-    case .unknown:
+    // Translated by the transcript builder, which knows which client this is.
+    case .clientEcho, .unknown:
       break
     }
   }

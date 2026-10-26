@@ -5,6 +5,8 @@ import Foundation
 enum ACPHostCheck {
   /// The lowest `tether version` protocol this app works with; bump with the host tool's `protocol`.
   static let requiredProtocol = 1
+  /// From this protocol a new chat's holder lets several clients attach (`attach --client`).
+  static let multiClientProtocol = 2
 
   enum Problem: Equatable {
     case tetherMissing
@@ -55,6 +57,16 @@ enum ACPHostCheck {
     return found
   }
 
+  /// Whether the host's `tether` starts holders that take several clients.
+  static func multiClient(in output: String) -> Bool {
+    output.split(whereSeparator: \.isNewline)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { $0.hasPrefix("version=") }
+      .compactMap { Data($0.dropFirst("version=".count).utf8) }
+      .compactMap { try? JSONDecoder().decode(Version.self, from: $0) }
+      .contains { $0.name == "tether" && ($0.protocolNumber ?? 0) >= multiClientProtocol }
+  }
+
   static func message(for problems: [Problem], host: String) -> String? {
     guard !problems.isEmpty else { return nil }
     var parts: [String] = []
@@ -72,10 +84,11 @@ enum ACPHostCheck {
     return parts.joined(separator: " ")
   }
 
-  /// nil when the host is ready or cannot be checked: a failed connection is reported by the chat's own dial.
-  static func verify(host: String, exec: (String) async throws -> String) async -> String? {
-    guard let output = try? await exec(command) else { return nil }
-    return message(for: problems(in: output), host: host)
+  /// `problem` is nil when the host is ready or cannot be checked: a failed connection is reported
+  /// by the chat's own dial.
+  static func verify(host: String, exec: (String) async throws -> String) async -> (problem: String?, multiClient: Bool) {
+    guard let output = try? await exec(command) else { return (nil, false) }
+    return (message(for: problems(in: output), host: host), multiClient(in: output))
   }
 }
 
@@ -87,10 +100,12 @@ enum ChatStart: Equatable {
 extension ChatRoute {
   /// A fresh chat, after the host checks. The failure text is for the new-chat UI as it stands.
   static func start(cwdText: String, host: String, exec: (String) async throws -> String) async -> ChatStart {
-    if let message = await ACPHostCheck.verify(host: host, exec: exec) { return .failed(message) }
-    guard let route = await fresh(cwdText: cwdText, exec: exec) else {
+    let check = await ACPHostCheck.verify(host: host, exec: exec)
+    if let message = check.problem { return .failed(message) }
+    guard var route = await fresh(cwdText: cwdText, exec: exec) else {
       return .failed("Couldn't read the host's home folder.")
     }
+    route.multiClient = check.multiClient
     return .ready(route)
   }
 }
