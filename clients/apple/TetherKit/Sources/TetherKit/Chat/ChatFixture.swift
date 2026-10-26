@@ -462,7 +462,7 @@ enum ChatFixture {
     func offset() -> Int { lines.reduce(0) { $0 + $1.utf8.count + 1 } }
     for cycle in 0..<32 {
       let k = "c\(cycle)"
-      entries.append(.init(kind: .prompt, offset: offset(), text: cycle % 3 == 0 ? "Please look into part \(cycle) of the plan,\nthen report back with what you find." : "Continue with part \(cycle)."))
+      entries.append(.init(kind: .prompt, offset: offset(), text: cycle % 3 == 0 ? "Please look into part \(cycle) of the plan,\nthen report back with what you find." : "Continue with part \(cycle).", requestId: .int(100 + cycle)))
       lines.append(message(id: "\(k)a", prose(1 + (cycle * 5) % 13)))
       lines.append(message(id: "\(k)b", "## Findings for part \(cycle)\n\n1. **First point.** \(prose(2))\n   - nested detail one\n   - nested detail two with a longer explanation that wraps onto a second line on a phone screen\n     - a third level that is deeper still\n2. **Second point.** \(prose(1))\n   - another nested detail\n\nIf you want, I can fix both in a small change."))
       lines.append(update(tool("\(k)t1", "Read src/part\(cycle).ts", kind: "read", status: "completed", text: "export const part = \(cycle)")))
@@ -475,17 +475,17 @@ enum ChatFixture {
         lines.append(update(tool("\(k)s1", "Read src/audit.ts", kind: "read", status: "completed", text: "x", parent: "\(k)a1")))
       }
       lines.append(message(id: "\(k)d", cycle % 2 == 0 ? "Done." : prose(5 + cycle % 7) + "\n\n- one\n- two\n- three"))
+      lines.append(json(["jsonrpc": "2.0", "id": 100 + cycle, "result": ["stopReason": "end_turn"]]))
     }
     lines.append(update(["sessionUpdate": "usage_update", "used": 41_250, "size": 1_000_000]))
-    lines.append(json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]))
     let log = Data((lines.joined(separator: "\n") + "\n").utf8)
     var journal = ChatJournal()
     journal.sessionId = "sess-1"
-    journal.nextRequestId = 4
+    journal.nextRequestId = 200
     journal.entries = entries
     let reply = [
       update(["sessionUpdate": "agent_message_chunk", "messageId": "msg_reply", "content": ["type": "text", "text": "Understood. I'll start with the first helper now."]]),
-      json(["jsonrpc": "2.0", "id": 4, "result": ["stopReason": "end_turn"]]),
+      json(["jsonrpc": "2.0", "id": 200, "result": ["stopReason": "end_turn"]]),
     ]
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/tether", readOnly: false,
