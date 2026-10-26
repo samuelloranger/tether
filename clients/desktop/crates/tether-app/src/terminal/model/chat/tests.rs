@@ -1004,3 +1004,46 @@ fn picking_one_answer_of_a_longer_question_keeps_the_keyboard_on_the_card() {
     h.msg(ChatMsg::QuestionSubmit);
     assert!(h.screen().focus_seq > before);
 }
+
+#[test]
+fn a_queued_message_waits_above_the_composer_until_the_agent_starts_it() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    for text in ["one", "two"] {
+        h.msg(ChatMsg::DraftEdited {
+            text: text.into(),
+            cursor_byte: text.len(),
+        });
+        h.msg(ChatMsg::Send);
+    }
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Working on one"}}}}"#,
+    );
+    let s = h.screen();
+    assert_eq!(s.queued, ["two"]);
+    assert!(
+        !rows(&s)
+            .iter()
+            .any(|r| matches!(r, RowBody::User { text, .. } if text == "two")),
+        "not in the transcript while it waits"
+    );
+
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
+    );
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m2","content":{"type":"text","text":"Working on two"}}}}"#,
+    );
+    let s = h.screen();
+    assert!(s.queued.is_empty());
+    let rows = rows(&s);
+    assert!(matches!(rows[1], RowBody::Markdown(md) if md.text == "Working on one"));
+    assert!(matches!(rows[2], RowBody::User { text, .. } if text == "two"));
+}

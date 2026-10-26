@@ -461,7 +461,9 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
             state.turn = Turn::Working;
         }
         ChatEvent::CancelRequested => {
-            state.queued_item_ids.clear();
+            for id in std::mem::take(&mut state.queued_item_ids) {
+                move_to_end(id, state);
+            }
             state.start_pending = false;
             if state.turn == Turn::Working {
                 append(ItemKind::Notice("Stopped".into()), state);
@@ -730,6 +732,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         Update::UserMessage { text, message_id } => {
             if let Some(&first) = state.queued_item_ids.first() {
                 state.queued_item_ids.remove(0);
+                move_to_end(first, state);
                 state.start_pending = false;
                 if let Some(item) = state.items.iter().find(|i| i.id == first)
                     && let ItemKind::User { text: echoed, .. } = &item.kind
@@ -830,8 +833,17 @@ fn start_queued(state: &mut ChatState) {
     if !state.start_pending || state.queued_item_ids.is_empty() {
         return;
     }
-    state.queued_item_ids.remove(0);
+    let first = state.queued_item_ids.remove(0);
+    move_to_end(first, state);
     state.start_pending = false;
+}
+
+/// A queued message is shown apart until it starts; then it moves below what came before it.
+fn move_to_end(item_id: i64, state: &mut ChatState) {
+    if let Some(index) = state.items.iter().position(|i| i.id == item_id) {
+        let item = state.items.remove(index);
+        state.items.push(item);
+    }
 }
 
 /// Takes the prompt a response answers out of the in-flight list; the turn stays working until
@@ -845,7 +857,10 @@ fn finish_prompt(id: &AcpId, state: &mut ChatState) -> Option<i64> {
     let mut finished = None;
     if let Some(index) = index {
         let prompt = state.in_flight.remove(index);
-        state.queued_item_ids.retain(|q| *q != prompt.item_id);
+        if state.queued_item_ids.contains(&prompt.item_id) {
+            state.queued_item_ids.retain(|q| *q != prompt.item_id);
+            move_to_end(prompt.item_id, state);
+        }
         finished = Some(prompt.item_id);
         state.start_pending = !state.queued_item_ids.is_empty();
     }
@@ -1119,6 +1134,25 @@ mod tests {
         assert!(!s.is_queued(two));
         msg(&mut s, done(2, "end_turn"));
         assert_eq!(s.turn, Turn::Idle);
+    }
+
+    #[test]
+    fn a_queued_prompt_moves_below_the_turn_it_waited_on_when_it_starts() {
+        let mut s = ChatState::default();
+        prompt(&mut s, "one", 1);
+        prompt(&mut s, "two", 2);
+        msg(&mut s, chunk("working on one", "m1"));
+        msg(&mut s, done(1, "end_turn"));
+        msg(&mut s, chunk("working on two", "m2"));
+        let order: Vec<_> = s
+            .items
+            .iter()
+            .map(|i| match &i.kind {
+                ItemKind::User { text, .. } | ItemKind::Assistant { text, .. } => text.as_str(),
+                _ => "",
+            })
+            .collect();
+        assert_eq!(order, ["one", "working on one", "two", "working on two"]);
     }
 
     #[test]

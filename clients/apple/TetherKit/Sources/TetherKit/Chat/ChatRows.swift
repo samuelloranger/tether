@@ -180,6 +180,7 @@ struct UserMessageRow: View {
           .padding(.trailing, 4)
       }
     }
+    .frame(maxWidth: .infinity, alignment: .trailing)
     .accessibilityElement(children: .combine)
     .accessibilityLabel("You: \(imageCount > 0 ? ChatComposerRule.imageLabel(imageCount) + ". " : "")\(text)\(queued ? ". Queued" : "")")
   }
@@ -200,7 +201,6 @@ struct UserMessageRow: View {
       }
     }
       .padding(.horizontal, 14).padding(.vertical, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
       .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
       .opacity(queued ? 0.72 : 1)
       .padding(.leading, 28)

@@ -212,13 +212,11 @@ fn row_vm(r: &Row) -> ChatRowVm {
             text,
             images,
             image_label,
-            queued,
         } => {
             vm.kind = 0;
             vm.text = text.as_str().into();
             vm.images = pictures(images);
             vm.meta = image_label.as_str().into();
-            vm.flag = *queued;
         }
         RowBody::Markdown(md) => {
             vm.kind = 1;
@@ -452,6 +450,11 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_rows(fresh);
         }
     });
+
+    let queued: Vec<SharedString> = s.queued.iter().map(|q| q.as_str().into()).collect();
+    if vm.get_queued().iter().ne(queued.iter().cloned()) {
+        vm.set_queued(model(queued));
+    }
 
     let c = &s.composer;
     vm.set_composer_shown(c.shown);

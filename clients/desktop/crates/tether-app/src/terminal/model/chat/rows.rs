@@ -11,7 +11,7 @@ use tether_core::acp::grouping::{self, Block};
 use tether_core::acp::images::ImageRef;
 use tether_core::acp::message::{ToolKind, ToolStatus};
 use tether_core::acp::question::QuestionState;
-use tether_core::acp::reducer::{Item, ItemKind, ToolCall, Turn};
+use tether_core::acp::reducer::{ChatState, Item, ItemKind, ToolCall, Turn};
 use tether_core::acp::tooldetail;
 
 use super::session::{Session, SignIn};
@@ -59,12 +59,16 @@ fn number(n: Option<usize>) -> String {
 }
 
 /// Items that stay in the scroll: an unanswered permission or question lives in its card.
-pub fn visible(items: &[Item]) -> Vec<Item> {
-    items
+/// The transcript's items: pending asks live in their cards and queued messages above the
+/// composer until they start.
+pub fn visible(state: &ChatState) -> Vec<Item> {
+    state
+        .items
         .iter()
         .filter(|i| match &i.kind {
             ItemKind::Permission(p) => p.resolved_option_id.is_some(),
             ItemKind::Question(q) => !q.is_pending(),
+            ItemKind::User { .. } => !state.is_queued(i.id),
             _ => true,
         })
         .cloned()
@@ -73,14 +77,14 @@ pub fn visible(items: &[Item]) -> Vec<Item> {
 
 /// The block the laid-out window begins at now, when it does not begin at the first one.
 pub fn current_start(s: &Session) -> Option<i64> {
-    let blocks = grouping::blocks(&visible(&s.state().items));
+    let blocks = grouping::blocks(&visible(s.state()));
     let last: Vec<i64> = blocks.iter().map(Block::last_id).collect();
     let range = grouping::window_range(&last, s.window_start);
     (range.start > 0).then(|| last[range.start])
 }
 
 pub fn earlier_start(s: &Session) -> Option<i64> {
-    let blocks = grouping::blocks(&visible(&s.state().items));
+    let blocks = grouping::blocks(&visible(s.state()));
     let last: Vec<i64> = blocks.iter().map(Block::last_id).collect();
     let range = grouping::window_range(&last, s.window_start);
     grouping::earlier_start(&last, range)
@@ -106,6 +110,26 @@ fn pictures(s: &Session, refs: &[ImageRef], ctx: &mut RowCtx<'_>) -> Vec<Picture
         .collect()
 }
 
+/// Messages waiting for the running turn, oldest first, as one line each.
+pub fn queued(s: &Session) -> Vec<String> {
+    let state = s.state();
+    state
+        .queued_item_ids
+        .iter()
+        .filter_map(|id| state.items.iter().find(|i| i.id == *id))
+        .filter_map(|item| match &item.kind {
+            ItemKind::User {
+                text, image_count, ..
+            } => Some(match (text.trim(), *image_count) {
+                ("", n) => format::image_label(n),
+                (t, 0) => t.to_string(),
+                (t, n) => format!("{} \u{00B7} {t}", format::image_label(n)),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
     let state = s.state();
     let mut rows = Vec::new();
@@ -122,7 +146,7 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
             },
         });
     }
-    let blocks = grouping::blocks(&visible(&state.items));
+    let blocks = grouping::blocks(&visible(state));
     let last: Vec<i64> = blocks.iter().map(Block::last_id).collect();
     let range = grouping::window_range(&last, s.window_start);
     if range.start > 0 {
@@ -193,7 +217,6 @@ fn item_rows(
             } else {
                 String::new()
             },
-            queued: s.state().is_queued(item.id),
         },
         ItemKind::Assistant { text, .. } => {
             for (n, md) in tether_core::markdown::items(text).into_iter().enumerate() {
@@ -328,6 +351,14 @@ fn tool_entries(s: &Session, items: &[Item], ctx: &mut RowCtx<'_>) -> Vec<Entry>
     out
 }
 
+/// A closed tool row shows at most two lines of its title (a heredoc command can run to hundreds).
+fn two_lines(title: &str) -> Option<String> {
+    let mut lines = title.trim_end().lines();
+    let kept: Vec<&str> = lines.by_ref().take(2).collect();
+    lines.next()?;
+    Some(kept.join("\n") + " \u{2026}")
+}
+
 fn tool(
     s: &Session,
     call: &ToolCall,
@@ -338,8 +369,10 @@ fn tool(
     out: &mut Vec<Entry>,
 ) {
     let file = call.diff.as_ref().map(|d| diff::file_for(d, &s.cwd));
+    let short = two_lines(&call.title);
     let expandable = call.diff.is_some()
         || !call.images.is_empty()
+        || short.is_some()
         || tooldetail::has_content(call.text.as_deref(), call.raw_output.as_deref());
     let open = expandable && s.expanded.contains(key);
     out.push(Entry {
@@ -352,7 +385,9 @@ fn tool(
             } else {
                 Icon::Image
             },
-            title: call.title.clone(),
+            title: short
+                .filter(|_| !open)
+                .unwrap_or_else(|| call.title.clone()),
             subtitle: String::new(),
             state: status(call, call.is_running()),
             added: file.as_ref().map_or(0, |f| f.added),
@@ -494,5 +529,20 @@ fn subagent(
                 body: EntryBody::Markdown(md),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::two_lines;
+
+    #[test]
+    fn a_long_title_keeps_two_lines_and_a_short_one_is_left_alone() {
+        assert_eq!(
+            two_lines("cat <<EOF\na\nb\nEOF"),
+            Some("cat <<EOF\na \u{2026}".into())
+        );
+        assert_eq!(two_lines("git status\nls\n"), None);
+        assert_eq!(two_lines("Read file"), None);
     }
 }

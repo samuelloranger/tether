@@ -161,6 +161,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         need: Vec::new(),
     };
     screen.rows = rows::build(s, &mut ctx);
+    screen.queued = rows::queued(s);
     let need = std::mem::take(&mut ctx.need);
 
     composer(s, &mut screen);
