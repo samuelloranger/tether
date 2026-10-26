@@ -60,7 +60,7 @@ struct ChatView: View {
     .coordinateSpace(name: "probe-viewport")
     #endif
     .background(TetherColors.background.ignoresSafeArea())
-    .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+    .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar.overlay(alignment: .top) { queuedChips } }
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(TetherColors.background, for: .navigationBar)
     .toolbarBackground(.visible, for: .navigationBar)
@@ -201,7 +201,9 @@ struct ChatView: View {
           message: message, canRetry: model.canSend,
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
-      if model.state.turn == .working && !answerPending { WorkingIndicator(activity: model.state.subagentActivity) }
+      if model.state.turn == .working && !answerPending {
+        WorkingIndicator(activity: model.state.subagentActivity ?? ChatVerbs.pick(model.verbs, seed: turnSeed))
+      }
       #if DEBUG
       if probeLastRow {
         Color.clear.frame(height: 1)
@@ -213,7 +215,7 @@ struct ChatView: View {
       }
       #endif
     }
-    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
+    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16 + CGFloat(queuedTexts.count) * 40)
   }
 
   /// iOS 17: the transcript follows by scrolling to a sentinel when the tail changes.
@@ -269,11 +271,54 @@ struct ChatView: View {
   }
 
   /// An unanswered permission or question lives in the card, not in the scroll.
+  /// Pending asks live in their cards, and queued messages above the composer until they start.
   private var visibleItems: [ChatItem] {
     model.state.items.filter {
       if case let .permission(permission) = $0.kind { return permission.resolvedOptionId != nil }
       if case let .question(question) = $0.kind { return !question.isPending }
+      if case .user = $0.kind { return !model.state.isQueued($0.id) }
       return true
+    }
+  }
+
+  /// Changes when a new prompt starts a turn, so a turn keeps one word.
+  private var turnSeed: Int {
+    model.state.items.last { item in
+      if case .user = item.kind { return !model.state.isQueued(item.id) }
+      return false
+    }?.id ?? 0
+  }
+
+  private var queuedTexts: [(id: Int, text: String)] {
+    model.state.items.compactMap { item in
+      guard model.state.isQueued(item.id), case let .user(text, count, _, _) = item.kind else { return nil }
+      if text.isEmpty { return (item.id, ChatComposerRule.imageLabel(count)) }
+      return (item.id, count > 0 ? "\(ChatComposerRule.imageLabel(count)) · \(text)" : text)
+    }
+  }
+
+  /// Floats on the bar's top edge, over the end of the transcript, which keeps room for it.
+  @ViewBuilder private var queuedChips: some View {
+    let queued = queuedTexts
+    if !queued.isEmpty {
+      VStack(alignment: .trailing, spacing: 6) {
+        ForEach(queued, id: \.id) { entry in
+          HStack(spacing: 6) {
+            Text(entry.text).font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+              .lineLimit(1).truncationMode(.tail)
+            Image(systemName: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
+          }
+          .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 7)
+          .background(TetherColors.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 14))
+          .overlay(RoundedRectangle(cornerRadius: 14).stroke(TetherColors.border, lineWidth: 1))
+          .shadow(color: .black.opacity(0.35), radius: 9, y: 6)
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel("Queued: \(entry.text)")
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .trailing)
+      .padding(.leading, 44).padding(.trailing, 16)
+      .alignmentGuide(.top) { $0[.bottom] + 8 }
     }
   }
 
