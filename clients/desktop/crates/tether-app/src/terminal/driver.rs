@@ -632,7 +632,7 @@ mod tests {
         let remote = Arc::new(FakeRemote::default());
         *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
         remote.exec_replies.lock().unwrap().push((
-            "tether-notify status".into(),
+            "tether status".into(),
             Ok(r#"[{"session":"default","state":"working","since":1}]"#.into()),
         ));
         let (ui, _send, _h) = start(remote.clone()).await;
@@ -641,7 +641,7 @@ mod tests {
             remote
                 .log()
                 .iter()
-                .any(|l| l.starts_with("exec if [ -x ~/.local/bin/tether-notify ]"))
+                .any(|l| l.starts_with("exec if [ -x ~/.local/bin/tether ]"))
         );
         let tab = ui.last_view().tabs[0].agent.clone().expect("a badge");
         assert_eq!(tab.label, "working");
@@ -652,7 +652,7 @@ mod tests {
         let remote = Arc::new(FakeRemote::default());
         *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
         remote.exec_replies.lock().unwrap().push((
-            "tether-notify status".into(),
+            "tether status".into(),
             Err(tether_core::connect::ConnectError::Timeout),
         ));
         let (ui, _send, _h) = start(remote.clone()).await;
@@ -667,7 +667,7 @@ mod tests {
         let remote = Arc::new(FakeRemote::default());
         *remote.sessions.lock().unwrap() = Ok(vec![session("default", 1)]);
         remote.exec_replies.lock().unwrap().push((
-            "tether-notify status".into(),
+            "tether status".into(),
             Ok(
                 r#"[{"session":"default","state":"waiting","since":1,"version":"v1","pending":{"kind":"permission"}}]"#
                     .into(),
@@ -679,7 +679,7 @@ mod tests {
         send(Msg::AgentApprove);
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(remote.log().iter().any(|l| {
-            l.starts_with("exec ~/.local/bin/tether-notify answer --session 'default' --state 'waiting' --version 'v1' --input")
+            l.starts_with("exec ~/.local/bin/tether answer --session 'default' --state 'waiting' --version 'v1' --input")
         }));
         assert!(ui.last_view().agent.sheet.is_none());
     }

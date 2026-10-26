@@ -601,7 +601,7 @@ mod tests {
         m.handle(Msg::Tick, t(100));
         m.handle(
             Msg::AgentStatusOut {
-                result: Ok("usage: tether-notify <command>".into()),
+                result: Ok("usage: tether <command>".into()),
                 now_unix: 1,
             },
             t(200),

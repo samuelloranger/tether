@@ -1,5 +1,5 @@
-//! Agent state per zmx session, as `tether-notify status` reports it, and the answers for
-//! what the Claude Code mod holds (`tether-notify pending` / `answer`). Pure: no network.
+//! Agent state per zmx session, as `tether status` reports it, and the answers for
+//! what the Claude Code mod holds (`tether pending` / `answer`). Pure: no network.
 
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::zmx::{shell_quote, valid_session_name};
 
-pub const NOTIFY: &str = "~/.local/bin/tether-notify";
+pub const NOTIFY: &str = "~/.local/bin/tether";
 pub const MISSING: &str = "__tether_notify_missing";
 /// A status read older than this is no longer shown.
 pub const STALE_AFTER: Duration = Duration::from_secs(30);
@@ -67,13 +67,13 @@ pub struct AgentStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StatusRead {
     Rows(Vec<AgentStatus>),
-    /// No `tether-notify` on the host.
+    /// No `tether` on the host.
     Missing,
     /// Output that is not a status array: an older binary without `status`.
     Unusable,
 }
 
-/// Runs `tether-notify status`, or prints a marker when the binary is not there.
+/// Runs `tether status`, or prints a marker when the binary is not there.
 pub fn status_command() -> String {
     format!("if [ -x {NOTIFY} ]; then {NOTIFY} status 2>/dev/null; else echo {MISSING}; fi")
 }
@@ -175,7 +175,7 @@ impl AgentBoard {
         *self = Self::default();
     }
 
-    /// False once the host has no usable `tether-notify`: polling stops until a reconnect.
+    /// False once the host has no usable `tether`: polling stops until a reconnect.
     pub fn available(&self) -> bool {
         !self.unavailable
     }
@@ -282,7 +282,7 @@ pub enum Answer {
     Reply(String),
 }
 
-/// `tether-notify answer` checks the agent is still in `state`/`version` before it acts, so
+/// `tether answer` checks the agent is still in `state`/`version` before it acts, so
 /// an old click cannot answer a newer prompt. Nothing typed is parsed by the remote shell.
 pub fn answer_command(
     session: &str,
@@ -500,7 +500,7 @@ mod tests {
     fn missing_and_unusable_outputs_are_told_apart() {
         assert_eq!(parse_status(&format!("{MISSING}\n")), StatusRead::Missing);
         assert_eq!(parse_status(""), StatusRead::Unusable);
-        assert_eq!(parse_status("usage: tether-notify"), StatusRead::Unusable);
+        assert_eq!(parse_status("usage: tether"), StatusRead::Unusable);
         assert_eq!(parse_status("[not json"), StatusRead::Unusable);
         assert_eq!(parse_status("{\"session\":\"a\"}"), StatusRead::Unusable);
     }
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn the_status_command_checks_the_binary_first() {
         let c = status_command();
-        assert!(c.starts_with("if [ -x ~/.local/bin/tether-notify ]"));
+        assert!(c.starts_with("if [ -x ~/.local/bin/tether ]"));
         assert!(c.contains(MISSING));
     }
 
@@ -655,7 +655,7 @@ mod tests {
     fn pending_quotes_the_session_and_refuses_a_bad_name() {
         assert_eq!(
             pending_command("it's").unwrap(),
-            "~/.local/bin/tether-notify pending --session 'it'\"'\"'s'"
+            "~/.local/bin/tether pending --session 'it'\"'\"'s'"
         );
         assert!(pending_command("-x").is_none());
         assert!(pending_command("a\nb").is_none());
@@ -670,7 +670,7 @@ mod tests {
         assert_eq!(
             c,
             format!(
-                "~/.local/bin/tether-notify answer --session 's' --state 'waiting' --version 'v1' --answers '{b64}'"
+                "~/.local/bin/tether answer --session 's' --state 'waiting' --version 'v1' --answers '{b64}'"
             )
         );
         let approve = answer_command("s", AgentState::Waiting, "v1", &Answer::Approve).unwrap();

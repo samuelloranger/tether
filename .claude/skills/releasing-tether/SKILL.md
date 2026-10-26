@@ -61,7 +61,7 @@ gh release edit vX.Y.Z --notes-file notes.md   # on the draft, or after publish 
 - A short symptom, only for real, reproduced problems that shipped.
 
 ### Under the hood
-- Host steps first (e.g. "Hosts need the updated `tether-notify` (`bash install.sh`) for …", and what happens with an older one). Then build-requirement changes and third-party sources with their license.
+- Host steps first (e.g. "Hosts need the updated `tether` (`bash install.sh`) for …", and what happens with an older one). Then build-requirement changes and third-party sources with their license.
 
 Pull requests: #A, #B, #C
 

@@ -12,7 +12,7 @@
 
 A native terminal for your own machines, on iOS, Windows and Linux. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone or PC. Tether is a pure client: **no server to run, nothing exposed but SSH.**
 
-> **v5 rewrite.** Earlier Tether ran a Bun server with a custom Noise transport plus desktop and web clients. v5 drops all of it for native apps over SSH: iOS, and a desktop client for Windows and Linux. The only host-side piece is `tether-notify`, a tiny tool for push.
+> **v5 rewrite.** Earlier Tether ran a Bun server with a custom Noise transport plus desktop and web clients. v5 drops all of it for native apps over SSH: iOS, and a desktop client for Windows and Linux. The only host-side piece is `tether`, a tiny tool for push.
 
 ## What you get
 
@@ -60,26 +60,26 @@ On first launch: add a machine (host, port, user, and a key from the vault), the
 
 ## The host side
 
-Each host needs `zmx` (the session manager the app attaches to) and — optionally, for push — `tether-notify`.
+Each host needs `zmx` (the session manager the app attaches to) and — optionally, for push — `tether`.
 
-**Chat (Claude Code over ACP).** The chat screens need, on each host, Node.js (the agent adapter runs through `npx`) and an up-to-date `tether-notify`; update it with `bash install.sh` whenever the app asks. A chat that was started before an update keeps the behaviour of the `tether-notify` it started under until it ends and you start a new one. Claude must be signed in on the host (run `claude` in a terminal there once).
+**Chat (Claude Code over ACP).** The chat screens need, on each host, Node.js (the agent adapter runs through `npx`) and an up-to-date `tether`; update it with `bash install.sh` whenever the app asks. A chat that was started before an update keeps the behaviour of the `tether` it started under until it ends and you start a new one. Claude must be signed in on the host (run `claude` in a terminal there once).
 
-**Push (`tether-notify`).** A phone registers its APNs token and a per-device AES key (generated on the phone, sent over SSH) and `tether-notify` encrypts each notification to that key, posting only ciphertext to a shared relay. The relay and Apple never see the plaintext; the iOS Notification Service Extension decrypts it on arrival.
+**Push (`tether`).** A phone registers its APNs token and a per-device AES key (generated on the phone, sent over SSH) and `tether` encrypts each notification to that key, posting only ciphertext to a shared relay. The relay and Apple never see the plaintext; the iOS Notification Service Extension decrypts it on arrival.
 
 ```bash
-bash install.sh                    # build + install tether-notify to ~/.local/bin (needs Go)
+bash install.sh                    # build + install tether to ~/.local/bin (needs Go); a legacy v4 `tether` is moved to tether.v4
 bash scripts/install-agent-hooks.sh homelab   # notify from agent hooks (waiting / done)
 ```
 
 The app registers your phone automatically the next time it connects. Then any tool — a coding agent's hooks, a long job — can raise a notification:
 
 ```bash
-tether-notify notify --title "homelab · agent" --body "Waiting for input" \
+tether notify --title "homelab · agent" --body "Waiting for input" \
   --link "tether://session/default?host=homelab"
 ```
 
 Agent hooks also record each session's state (`working`, `waiting`, `done`) with
-`tether-notify state`; the app reads it with `tether-notify status` to badge sessions.
+`tether state`; the app reads it with `tether status` to badge sessions.
 A `waiting`/`done` push is skipped while any zmx client is attached to that session —
 including a desktop terminal. The app detaches 15 s after it goes to the background, so
 a locked phone gets its pushes. As a backstop for an app killed while attached, set
@@ -90,8 +90,8 @@ a locked phone gets its pushes. As a backstop for an app killed while attached, 
 ```
 clients/apple/        native iOS app (TetherKit package + TetherIOS + NSE)
 clients/desktop/      native Windows and Linux app (Rust + Slint workspace)
-apps/tether-notify/   Go host CLI for encrypted push
-install.sh            build + install tether-notify
+apps/tether/   Go host CLI for encrypted push
+install.sh            build + install tether
 scripts/              install-agent-hooks.sh, release.sh
 ```
 
@@ -100,6 +100,15 @@ Architecture, data flow, and conventions: [`CLAUDE.md`](CLAUDE.md).
 ## Security
 
 Transport is SSH — there is no shared password and no setup flow that skips host-key verification. Keys live in the iOS Keychain (DPAPI-protected storage on Windows, the Secret Service keyring on Linux) and reach the SSH library in memory only. A host-key mismatch fails loudly. The push relay only ever routes ciphertext it cannot read. Keep hosts reachable over your LAN, a tunnel, or plain SSH as you already do.
+
+## Migration
+
+`tether-notify` is now `tether`, with no alias: update the app and every host together.
+
+1. Re-run `bash install.sh` on every host. A `tether` there that is not this tool (the retired v4 server) is moved to `tether.v4` (or `tether.v4.<unix time>`), never overwritten.
+2. Re-run `bash scripts/install-agent-hooks.sh` so agent hooks call `tether` / `tether-hook`; entries for `tether-notify-hook` are replaced in place.
+3. `~/.local/bin/tether-notify` and `~/.local/bin/tether-notify-hook` are unused now and can be deleted.
+4. State stays in `~/.tether-notify` (and `TETHER_NOTIFY_HOME`), so registered phones carry over.
 
 ## License
 
