@@ -486,6 +486,7 @@ impl Session {
         };
         let out = client.initialize();
         self.handshake = Handshake::Initializing;
+        self.persist_journal(ctx);
         self.write(out.line.clone(), Some(WriteTag::Request(out)), ctx);
     }
 
@@ -816,10 +817,13 @@ impl Session {
         // After a redial the new client was built from the journal that holds the entry, so it
         // takes it back; with no client yet, the stored journal is corrected instead.
         let undo = |s: &mut Self, out: &Outbound, ctx: &mut Ctx<'_>| -> Option<Completion> {
+            let current = generation == s.generation;
             match s.client.as_mut() {
+                // A request id belongs to its own connection: a newer client may reuse it.
+                Some(_) if !current && matches!(out.undo, Undo::Request | Undo::None) => None,
                 Some(c) => {
                     let done = c.undelivered(out);
-                    (generation == s.generation).then_some(done).flatten()
+                    current.then_some(done).flatten()
                 }
                 None => {
                     s.undo_stored(out, ctx);
