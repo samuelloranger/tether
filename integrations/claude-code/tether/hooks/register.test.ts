@@ -60,10 +60,10 @@ describe('tool.check', () => {
     const r = await $.tool.check(BASH)
     expect(r.decision).toBe('allow')
     expect(w.runs).toEqual([[
-      '/home/u/.local/bin/tether-notify', 'hold', '--session', 'work', '--kind', 'permission',
+      '/home/u/.local/bin/tether', 'hold', '--session', 'work', '--kind', 'permission',
       '--tool', 'Bash', '--body', 'Allow Bash: npm test?',
     ]])
-    expect(w.spawns).toEqual([['/home/u/.local/bin/tether-notify', 'wait', '--session', 'work', '--version', 'v1']])
+    expect(w.spawns).toEqual([['/home/u/.local/bin/tether', 'wait', '--session', 'work', '--version', 'v1']])
   })
 
   test('a deny from the phone refuses it', async ($, on) => {
@@ -89,7 +89,7 @@ describe('tool.check', () => {
     expect(w.spawns.length).toBe(1)
   })
 
-  test('an old tether-notify leaves the dialog', async ($, on) => {
+  test('an old tether leaves the dialog', async ($, on) => {
     const w = world(on, { holdExit: 2 })
     await start($)
     const r = await $.tool.check(BASH)
@@ -217,7 +217,7 @@ describe('AskUserQuestion', () => {
     expect(r).toEqual({ result: { questions: QUESTIONS, answers: ANSWERS } })
     expect(w.calls.length).toBe(1)
     expect(w.runs).toEqual([[
-      '/home/u/.local/bin/tether-notify', 'hold', '--session', 'work', '--kind', 'question',
+      '/home/u/.local/bin/tether', 'hold', '--session', 'work', '--kind', 'question',
       '--tool', 'AskUserQuestion', '--body', '2 questions: Fruit, Color', '--questions-stdin',
     ]])
     expect(JSON.parse(w.stdins[0] ?? '')).toEqual([
