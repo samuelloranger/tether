@@ -1100,3 +1100,77 @@ fn a_chat_started_elsewhere_on_a_shared_holder_is_joined_live() {
     );
     assert!(writes[0].contains("\"sessionId\":\"s1\""), "{writes:?}");
 }
+
+#[test]
+fn stop_sends_the_queued_messages_as_the_next_prompt() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    for text in ["one", "two", "three"] {
+        h.msg(ChatMsg::DraftEdited {
+            text: text.into(),
+            cursor_byte: text.len(),
+        });
+        h.msg(ChatMsg::Send);
+    }
+    h.writes();
+    assert_eq!(h.screen().queued, ["two", "three"]);
+    h.msg(ChatMsg::Stop);
+    let tag = h
+        .take()
+        .into_iter()
+        .find_map(|j| match j {
+            ChatJob::Write {
+                tag: Some(tag),
+                ack: true,
+                ..
+            } => Some(tag),
+            _ => None,
+        })
+        .expect("an acknowledged cancel");
+    h.msg(ChatMsg::Written {
+        name: name.clone(),
+        generation,
+        tag,
+    });
+    let writes = h.writes();
+    let resent: Vec<&String> = writes
+        .iter()
+        .filter(|w| w.contains("session/prompt"))
+        .collect();
+    assert_eq!(resent.len(), 1, "{writes:?}");
+    assert!(resent[0].contains(r#""text":"two\n\nthree""#), "{writes:?}");
+    let users = |s: &ChatScreen| -> Vec<String> {
+        rows(s)
+            .iter()
+            .filter_map(|r| match r {
+                RowBody::User { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let s = h.screen();
+    assert_eq!(
+        s.queued,
+        ["two\n\nthree"],
+        "waits for the stopped turn to end"
+    );
+    assert_eq!(
+        users(&s),
+        ["one"],
+        "the dropped messages left the transcript"
+    );
+
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled"}}"#,
+    );
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m2","content":{"type":"text","text":"On it"}}}}"#,
+    );
+    let s = h.screen();
+    assert!(s.queued.is_empty());
+    assert_eq!(users(&s), ["one", "two\n\nthree"]);
+}

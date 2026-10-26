@@ -55,6 +55,8 @@ pub enum ExecTag {
         request: u64,
         step: newchat::Step,
     },
+    /// The words a running turn shows (see `acp::verbs`).
+    Verbs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,6 +270,9 @@ pub struct Chats {
     sessions: HashMap<String, Session>,
     active: Option<String>,
     new_chat: Option<NewChat>,
+    /// Asked of the host the first time a chat opens; empty until then, and then Tether's own.
+    verbs: Vec<String>,
+    verbs_asked: bool,
     delete_prompt: Option<String>,
     controls_open: bool,
     bypass: Option<(String, String)>,
@@ -303,6 +308,8 @@ impl Chats {
             sessions: HashMap::new(),
             active: None,
             new_chat: None,
+            verbs: Vec::new(),
+            verbs_asked: false,
             delete_prompt: None,
             controls_open: false,
             bypass: None,
@@ -486,6 +493,13 @@ impl Chats {
         if self.active.as_deref() == Some(name) {
             return;
         }
+        if !self.verbs_asked {
+            self.verbs_asked = true;
+            out.jobs.push(ChatJob::Exec {
+                tag: ExecTag::Verbs,
+                command: tether_core::acp::verbs::command(),
+            });
+        }
         if let Some(previous) = self.active.take() {
             self.with_session(&previous, now, out, |s, ctx| s.background(ctx));
         }
@@ -635,6 +649,13 @@ impl Chats {
                         self.open_route(host::new_chat_name(), cwd, load, multi, now, out);
                     }
                 }
+            }
+            ChatMsg::ExecDone {
+                tag: ExecTag::Verbs,
+                result,
+            } => {
+                self.verbs = tether_core::acp::verbs::parse(&result.unwrap_or_default());
+                self.dirty = true;
             }
             ChatMsg::ExecDone {
                 tag: ExecTag::Status,

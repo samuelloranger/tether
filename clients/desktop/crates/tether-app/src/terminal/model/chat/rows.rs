@@ -13,6 +13,7 @@ use tether_core::acp::message::{ToolKind, ToolStatus};
 use tether_core::acp::question::QuestionState;
 use tether_core::acp::reducer::{ChatState, Item, ItemKind, ToolCall, Turn};
 use tether_core::acp::tooldetail;
+use tether_core::acp::verbs;
 
 use super::session::{Session, SignIn};
 use super::view::{DiffKind, Entry, EntryBody, Icon, Picture, Pixels, Row, RowBody, ToolState};
@@ -21,6 +22,8 @@ pub struct RowCtx<'a> {
     pub host: &'a str,
     pub files: Option<&'a ChatFiles>,
     pub thumbs: &'a HashMap<String, Arc<Pixels>>,
+    /// What a running turn may show instead of "Working…".
+    pub verbs: &'a [String],
     /// Pictures the rows show that have no thumbnail yet, with the file to make one from.
     pub need: Vec<(String, std::path::PathBuf)>,
 }
@@ -130,6 +133,16 @@ pub fn queued(s: &Session) -> Vec<String> {
         .collect()
 }
 
+/// Changes when a new prompt starts a turn, so a turn keeps one word.
+fn turn_seed(state: &ChatState) -> i64 {
+    state
+        .items
+        .iter()
+        .rev()
+        .find(|i| matches!(i.kind, ItemKind::User { .. }) && !state.is_queued(i.id))
+        .map_or(0, |i| i.id)
+}
+
 pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
     let state = s.state();
     let mut rows = Vec::new();
@@ -188,7 +201,7 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
             body: RowBody::Working(
                 state
                     .subagent_activity()
-                    .unwrap_or_else(|| "Working\u{2026}".into()),
+                    .unwrap_or_else(|| verbs::pick(ctx.verbs, turn_seed(state))),
             ),
         });
     }
