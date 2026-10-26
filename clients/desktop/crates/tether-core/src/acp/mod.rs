@@ -4,6 +4,7 @@
 pub mod auth;
 pub mod client;
 pub mod diff;
+pub mod echo;
 pub mod files;
 pub mod format;
 pub mod grouping;

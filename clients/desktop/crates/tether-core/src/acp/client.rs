@@ -163,8 +163,14 @@ impl ChatClient {
         self.journal_changed = true;
     }
 
+    /// A client named to a holder that takes several prefixes its ids with its name, so two
+    /// clients writing to one agent never send the same id.
     fn allocate_id(&mut self) -> AcpId {
-        let id = AcpId::Int(self.journal.next_request_id);
+        let n = self.journal.next_request_id;
+        let id = match &self.journal.client_id {
+            Some(client) => AcpId::Str(format!("{client}-{n}")),
+            None => AcpId::Int(n),
+        };
         self.journal.next_request_id += 1;
         self.save();
         id
@@ -642,6 +648,7 @@ impl ChatClient {
                         self.journal.next_request_id = n + 1;
                         self.save();
                     }
+                    self.adopt_session(result.session_id.as_deref());
                     let Some(pending) = self.pending.remove(&id) else {
                         continue;
                     };
@@ -651,6 +658,15 @@ impl ChatClient {
                         kind: pending.kind,
                         outcome,
                     });
+                }
+                Inbound::ClientEcho { message, .. } => {
+                    if message.get("method").and_then(Value::as_str) == Some("session/prompt") {
+                        let session = message
+                            .get("params")
+                            .and_then(|p| p.get("sessionId"))
+                            .and_then(Value::as_str);
+                        self.adopt_session(session);
+                    }
                 }
                 Inbound::ErrorResponse {
                     id: Some(id),
@@ -669,6 +685,23 @@ impl ChatClient {
             }
         }
         done
+    }
+
+    /// A client that joined a chat another one started learns the session from the log: the
+    /// answer to the other client's `session/new` or `session/load` names it, and so does every
+    /// prompt another client sent.
+    fn adopt_session(&mut self, session_id: Option<&str>) {
+        let asking = self
+            .pending
+            .values()
+            .any(|p| matches!(p.kind, RequestKind::NewSession | RequestKind::LoadSession));
+        if self.journal.client_id.is_none() || self.journal.session_id.is_some() || asking {
+            return;
+        }
+        if let Some(id) = session_id {
+            self.journal.session_id = Some(id.to_string());
+            self.save();
+        }
     }
 
     fn complete(&mut self, pending: &Pending, result: AcpResult) -> Result<AcpResult, ClientError> {
@@ -744,6 +777,92 @@ mod tests {
 
     fn method(v: &Value) -> &str {
         v["method"].as_str().unwrap_or("")
+    }
+
+    /// What a holder that takes several clients writes for a named client's line.
+    fn echoed(client: &str, line: &[u8]) -> Vec<u8> {
+        let message: Value = serde_json::from_slice(line).unwrap();
+        encode(json!({"jsonrpc": "2.0", "method": "_tether/client",
+            "params": {"client": client, "message": message}}))
+    }
+
+    fn user_texts(state: &ChatState) -> Vec<String> {
+        state
+            .items
+            .iter()
+            .filter_map(|i| match &i.kind {
+                super::super::reducer::ItemKind::User { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_second_client_joins_from_the_log_and_both_see_each_others_prompts() {
+        let named = |id: &str| Journal {
+            client_id: Some(id.into()),
+            ..Journal::default()
+        };
+        let mut a = client(named("aa"));
+        let mut log = Vec::new();
+        let init = a.initialize();
+        assert_eq!(init.id, Some(AcpId::Str("aa-1".into())));
+        log.extend(br#"{"jsonrpc":"2.0","id":"aa-1","result":{"protocolVersion":1}}"#);
+        log.push(b'\n');
+        a.feed(&log);
+        a.new_session("/work");
+        let start = log.len();
+        log.extend(b"{\"jsonrpc\":\"2.0\",\"id\":\"aa-2\",\"result\":{\"sessionId\":\"s1\"}}\n");
+        a.feed(&log[start..]);
+        let start = log.len();
+        let prompt = a.prompt("from a", &[], None).unwrap();
+        log.extend(echoed("aa", &prompt.line));
+        log.extend(
+            b"{\"jsonrpc\":\"2.0\",\"id\":\"aa-3\",\"result\":{\"stopReason\":\"end_turn\"}}\n",
+        );
+        a.feed(&log[start..]);
+        assert_eq!(
+            user_texts(a.state()),
+            ["from a"],
+            "its own echo is not a second row"
+        );
+
+        let mut b = client(named("bb"));
+        b.feed(&log);
+        assert_eq!(b.session_id(), Some("s1"), "learned from the log");
+        assert_eq!(user_texts(b.state()), ["from a"]);
+        assert_eq!(b.state().turn, Turn::Idle);
+        let reply = b.prompt("from b", &[], None).unwrap();
+        let v = parse(&reply.line);
+        assert_eq!(v["id"], json!("bb-1"));
+        assert_eq!(v["params"]["sessionId"], json!("s1"));
+
+        let more = echoed("bb", &reply.line);
+        a.feed(&more);
+        b.feed(&more);
+        assert_eq!(user_texts(a.state()), ["from a", "from b"]);
+        assert_eq!(
+            a.state().turn,
+            Turn::Working,
+            "b's turn runs on a's screen too"
+        );
+        assert_eq!(user_texts(b.state()), ["from a", "from b"]);
+        let mut whole = log.clone();
+        whole.extend(&more);
+        assert_eq!(
+            replay(&whole, b.journal()).items,
+            b.state().items,
+            "replay equals live"
+        );
+    }
+
+    #[test]
+    fn an_unnamed_client_keeps_number_ids_and_reads_others_as_before() {
+        let mut c = client(Journal::default());
+        assert_eq!(c.initialize().id, Some(AcpId::Int(1)));
+        c.feed(&echoed("zz", br#"{"jsonrpc":"2.0","id":"zz-3","method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hi"}]}}"#));
+        assert_eq!(c.session_id(), None, "only a named client joins");
+        assert_eq!(user_texts(c.state()), ["hi"]);
     }
 
     #[test]

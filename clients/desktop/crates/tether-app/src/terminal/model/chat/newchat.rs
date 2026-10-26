@@ -29,7 +29,12 @@ pub enum Listing {
 pub enum Next {
     Nothing,
     Job(ChatJob),
-    Open { cwd: String, load: Option<String> },
+    /// `multi`: the host's holders take several clients, so this one names itself.
+    Open {
+        cwd: String,
+        load: Option<String>,
+        multi: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +48,7 @@ pub struct NewChat {
     request: u64,
     list_request: u64,
     reload_at: Option<Duration>,
+    multi: bool,
 }
 
 fn exec(request: u64, step: Step, command: String) -> ChatJob {
@@ -71,6 +77,7 @@ impl NewChat {
             request: 0,
             list_request: 0,
             reload_at: None,
+            multi: false,
         }
     }
 
@@ -159,18 +166,21 @@ impl NewChat {
                 {
                     return self.stop(message);
                 }
+                self.multi = result.as_ref().is_ok_and(|o| host::host_multi_client(o));
                 if host::needs_home(&self.folder) {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
                 }
                 Next::Open {
                     cwd: host::expand_cwd(&self.folder, ""),
                     load: self.continuing.clone(),
+                    multi: self.multi,
                 }
             }
             Step::Home => match result {
                 Ok(home) if home.trim().starts_with('/') => Next::Open {
                     cwd: host::expand_cwd(&self.folder, home.trim()),
                     load: self.continuing.clone(),
+                    multi: self.multi,
                 },
                 _ => self.stop("Couldn't read the host's home folder.".into()),
             },

@@ -646,7 +646,8 @@ fn apply(message: &Inbound, state: &mut ChatState) {
                 mark_signed_out(state);
             }
         }
-        Inbound::Unknown { .. } => {}
+        // Translated by the transcript builder, which knows which client this is.
+        Inbound::ClientEcho { .. } | Inbound::Unknown { .. } => {}
     }
 }
 
