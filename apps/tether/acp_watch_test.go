@@ -676,3 +676,116 @@ func TestPickPushOptionsKeepsARejection(t *testing.T) {
 		t.Fatal("a list with no rejection is still capped")
 	}
 }
+
+const promptLine = `{"jsonrpc":"2.0","id":"dev-a-3","method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hi"}]}}`
+
+func echoOf(client, line string) string {
+	return `{"jsonrpc":"2.0","method":"_tether/client","params":{"client":"` + client + `","message":` + line + `}}` + "\n"
+}
+
+func TestACPNamedClientsSeeEachOthersPromptsInTheLog(t *testing.T) {
+	dir := acpEnv(t)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "m")
+	p := startAttach(t, "m", "--spawn", script, "--cwd", t.TempDir(), "--client", "dev-a")
+	waitFor(t, "the session", func() bool { m, _ := readACPMeta("m"); return m != nil && m.Attached })
+	q := startAttach(t, "m", "--client", "dev-b")
+	time.Sleep(200 * time.Millisecond)
+	fmt.Fprint(p.stdin, promptLine+"\n")
+	if got := q.readLine(t); got != echoOf("dev-a", promptLine) {
+		t.Fatalf("other client got %q", got)
+	}
+	if got := p.readLine(t); got != echoOf("dev-a", promptLine) {
+		t.Fatalf("sender sees its own echo too: %q", got)
+	}
+	waitFor(t, "agent got the prompt", func() bool { return a.stdin() == promptLine+"\n" })
+
+	a.emit(t, `{"jsonrpc":"2.0","id":"dev-a-3","result":{"stopReason":"end_turn"}}`)
+	q.readLine(t)
+	p.readLine(t)
+	fmt.Fprint(q.stdin, `{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"s"}}`+"\n")
+	if got := p.readLine(t); !strings.Contains(got, `"client":"dev-b"`) || !strings.Contains(got, "session/cancel") {
+		t.Fatalf("cancel echo %q", got)
+	}
+	log, _ := os.ReadFile(filepath.Join(dir, "acp", "m", "out.log"))
+	for _, l := range strings.Split(strings.TrimSuffix(string(log), "\n"), "\n") {
+		if !json.Valid([]byte(l)) {
+			t.Fatalf("log line is not whole JSON: %q", l)
+		}
+	}
+}
+
+func TestACPUnnamedClientIsNotEchoed(t *testing.T) {
+	dir := acpEnv(t)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "u")
+	p := startAttach(t, "u", "--spawn", script, "--cwd", t.TempDir())
+	fmt.Fprint(p.stdin, promptLine+"\n")
+	waitFor(t, "agent got the prompt", func() bool { return a.stdin() == promptLine+"\n" })
+	if log, _ := os.ReadFile(filepath.Join(dir, "acp", "u", "out.log")); len(log) != 0 {
+		t.Fatalf("log %q", log)
+	}
+}
+
+func TestACPSecondAnswerToOneRequestIsDropped(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "d")
+	p := startAttach(t, "d", "--spawn", script, "--cwd", t.TempDir(), "--client", "dev-a")
+	waitFor(t, "the session", func() bool { m, _ := readACPMeta("d"); return m != nil && m.Attached })
+	q := startAttach(t, "d", "--client", "dev-b")
+	a.emit(t, permReq)
+	p.readLine(t)
+	q.readLine(t)
+	waitFor(t, "pending", func() bool { return pendingCount("d") == 1 })
+	allow := `{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}`
+	reject := `{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"reject"}}}`
+	fmt.Fprint(p.stdin, allow+"\n")
+	if got := q.readLine(t); got != echoOf("dev-a", allow) {
+		t.Fatalf("other client got %q", got)
+	}
+	fmt.Fprint(q.stdin, reject+"\n")
+	fmt.Fprint(q.stdin, promptLine+"\n")
+	waitFor(t, "the prompt after it", func() bool { return strings.Contains(a.stdin(), "session/prompt") })
+	if got := a.stdin(); got != allow+"\n"+promptLine+"\n" {
+		t.Fatalf("agent saw %q", got)
+	}
+}
+
+func TestACPPushAnswerIsEchoedToAttachedClients(t *testing.T) {
+	acpEnv(t)
+	newFakeRelay(t, 200)
+	a, script := newScriptedAgent(t)
+	cleanupSession(t, "h")
+	p := startAttach(t, "h", "--spawn", script, "--cwd", t.TempDir(), "--client", "dev-a")
+	a.emit(t, permReq)
+	p.readLine(t)
+	waitFor(t, "pending", func() bool { return pendingCount("h") == 1 })
+	if _, errs, code := runAcp(t, "answer", "h", "--request", "7", "--option", "always"); code != 0 {
+		t.Fatalf("answer exit %d %q", code, errs)
+	}
+	if got := p.readLine(t); !strings.Contains(got, `"client":"host"`) || !strings.Contains(got, `"optionId":"always"`) {
+		t.Fatalf("echo %q", got)
+	}
+}
+
+func TestACPAgentLineSplitAcrossWritesStaysWholeAroundAnEcho(t *testing.T) {
+	dir := acpEnv(t)
+	cleanupSession(t, "w")
+	// Prints half a line, waits for one stdin line, then finishes the line.
+	agent := `printf '{"a":'; read -r l; sleep 0.2; printf '1}\n'; cat >/dev/null`
+	p := startAttach(t, "w", "--spawn", agent, "--cwd", t.TempDir(), "--client", "dev-a")
+	time.Sleep(200 * time.Millisecond)
+	fmt.Fprint(p.stdin, promptLine+"\n")
+	if got := p.readLine(t); got != echoOf("dev-a", promptLine) {
+		t.Fatalf("first line %q", got)
+	}
+	if got := p.readLine(t); got != `{"a":1}`+"\n" {
+		t.Fatalf("agent line %q", got)
+	}
+	log, _ := os.ReadFile(filepath.Join(dir, "acp", "w", "out.log"))
+	if string(log) != echoOf("dev-a", promptLine)+`{"a":1}`+"\n" {
+		t.Fatalf("log %q", log)
+	}
+}

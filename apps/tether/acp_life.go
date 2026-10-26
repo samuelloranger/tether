@@ -71,7 +71,7 @@ func (s *acpDaemonState) touch() {
 
 func (s *acpDaemonState) busy() bool {
 	s.mu.Lock()
-	b := s.cur != nil || s.clients > 0 || s.handshaking > 0
+	b := len(s.live) > 0 || s.clients > 0 || s.handshaking > 0
 	s.mu.Unlock()
 	return b || s.tr.working()
 }

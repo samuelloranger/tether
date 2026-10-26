@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,7 +25,8 @@ import (
 // errNoSession maps to exit 3: no live holder and nothing to replay.
 var errNoSession = errors.New("no such acp session")
 
-// errReplaced maps to exit 5: another attach took this session over.
+// errReplaced maps to exit 5: the connection ended without the session ending (a daemon from
+// before several clients could attach closes the older one when another arrives).
 var errReplaced = errors.New("replaced by another client")
 
 // Unix socket paths top out near 104 bytes on macOS and 108 on Linux.
@@ -136,7 +138,7 @@ func runACP(args []string) error {
 
 func acpAttach(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: acp attach <name> [--spawn CMD] [--cwd DIR] [--from N] [--linger D]")
+		return fmt.Errorf("usage: acp attach <name> [--spawn CMD] [--cwd DIR] [--from N] [--linger D] [--client ID]")
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("acp attach", flag.ContinueOnError)
@@ -144,8 +146,12 @@ func acpAttach(args []string) error {
 	cwd := fs.String("cwd", "", "working directory for --spawn (default $HOME)")
 	from := fs.Int64("from", 0, "byte offset in out.log to resume from")
 	linger := fs.Duration("linger", 0, "after stdin EOF, keep following output until idle this long")
+	client := fs.String("client", "", "names this client in the log so the other attached clients see what it sends")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if *client != "" && !validSessionName(*client) {
+		return fmt.Errorf("invalid client id")
 	}
 	if !validSessionName(name) {
 		return fmt.Errorf("invalid session name")
@@ -170,7 +176,7 @@ func acpAttach(args []string) error {
 			return err
 		}
 	}
-	return attachConn(m.Sock, *from, *linger, name)
+	return attachConn(m.Sock, *from, *linger, name, *client)
 }
 
 // replayEnded serves a session whose agent has exited: the log from `from`, then, when the agent
@@ -218,7 +224,7 @@ func replayLog(name string, from int64, w io.Writer) error {
 	return err
 }
 
-func attachConn(sock string, from int64, linger time.Duration, name string) error {
+func attachConn(sock string, from int64, linger time.Duration, name, client string) error {
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		// The daemon may have finished and closed its socket since we last looked.
@@ -228,7 +234,7 @@ func attachConn(sock string, from int64, linger time.Duration, name string) erro
 		return err
 	}
 	defer conn.Close()
-	if _, err := fmt.Fprintf(conn, "%d %d\n", from, linger.Milliseconds()); err != nil {
+	if _, err := fmt.Fprintln(conn, strings.TrimSpace(fmt.Sprintf("%d %d %s", from, linger.Milliseconds(), client))); err != nil {
 		return err
 	}
 	var stdinDone sync.WaitGroup
@@ -310,6 +316,8 @@ func spawnACPDaemon(name, spawn, cwd string) (*acpMeta, error) {
 
 type acpClient struct {
 	conn net.Conn
+	// id is the client's --client, empty for a client that predates echoes.
+	id string
 }
 
 type acpDaemonState struct {
@@ -317,7 +325,7 @@ type acpDaemonState struct {
 	size    int64
 	ended   bool
 	notify  chan struct{}
-	cur     *acpClient
+	live    map[*acpClient]struct{}
 	clients int
 	stdin   io.WriteCloser
 	log     *os.File
@@ -327,6 +335,9 @@ type acpDaemonState struct {
 	pushes  sync.WaitGroup
 	partial []byte
 	skip    bool
+	// tail is agent output after its last newline, held back so the log only ever grows by
+	// whole lines and an echo never lands inside a line the agent is still writing.
+	tail []byte
 
 	agentPid  int       // guarded by mu
 	endReason string    // why the daemon ended the agent itself, guarded by mu
@@ -432,7 +443,7 @@ func acpDaemon(name string) error {
 	cmd.Stdout = pw
 
 	s := &acpDaemonState{
-		notify: make(chan struct{}), stdin: stdin, log: logf, errf: errf,
+		notify: make(chan struct{}), live: map[*acpClient]struct{}{}, stdin: stdin, log: logf, errf: errf,
 		tr: loadACPTracker(name), meta: m, activity: time.Now(),
 		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
 	}
@@ -461,20 +472,22 @@ func acpDaemon(name string) error {
 		for {
 			n, err := pr.Read(buf)
 			if n > 0 {
-				if _, werr := logf.Write(buf[:n]); werr == nil {
-					s.mu.Lock()
-					s.size += int64(n)
-					s.activity = time.Now()
-					over := logMax > 0 && s.size > logMax
-					s.broadcast()
-					s.mu.Unlock()
-					if over {
-						go s.endAgent("log-limit")
-					}
+				s.mu.Lock()
+				s.activity = time.Now()
+				over := s.agentOutputLocked(buf[:n], err != nil, logMax)
+				s.mu.Unlock()
+				if over {
+					go s.endAgent("log-limit")
 				}
 				s.scanAgent(buf[:n])
 			}
 			if err != nil {
+				s.mu.Lock()
+				over := s.agentOutputLocked(nil, true, logMax)
+				s.mu.Unlock()
+				if over {
+					go s.endAgent("log-limit")
+				}
 				return
 			}
 		}
@@ -537,7 +550,6 @@ func acpDaemon(name string) error {
 }
 
 func (s *acpDaemonState) serve(conn net.Conn) {
-	me := &acpClient{conn: conn}
 	r := bufio.NewReader(conn)
 	s.mu.Lock()
 	s.handshaking++
@@ -555,9 +567,18 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 		return
 	}
 	var from, lingerMs int64
-	if _, err := fmt.Sscanf(strings.TrimSpace(line), "%d %d", &from, &lingerMs); err != nil || from < 0 {
+	fields := strings.Fields(line)
+	if len(fields) < 2 || len(fields) > 3 {
 		conn.Close()
 		return
+	}
+	if _, err := fmt.Sscanf(fields[0]+" "+fields[1], "%d %d", &from, &lingerMs); err != nil || from < 0 {
+		conn.Close()
+		return
+	}
+	me := &acpClient{conn: conn}
+	if len(fields) == 3 {
+		me.id = fields[2]
 	}
 	s.mu.Lock()
 	if from > s.size {
@@ -565,10 +586,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 		conn.Close()
 		return
 	}
-	if s.cur != nil {
-		s.cur.conn.Close()
-	}
-	s.cur = me
+	s.live[me] = struct{}{}
 	s.clients++
 	s.mu.Unlock()
 	s.syncAttached()
@@ -576,9 +594,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 		conn.Close()
 		s.mu.Lock()
 		s.clients--
-		if s.cur == me {
-			s.cur = nil
-		}
+		delete(s.live, me)
 		s.mu.Unlock()
 		s.syncAttached()
 	}()
@@ -596,12 +612,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 				lines, pend = splitLines(pend, buf[:n])
 				for _, l := range lines {
 					s.mu.Lock()
-					if s.cur != me {
-						s.mu.Unlock()
-						return
-					}
-					s.tr.clientLine(l)
-					_, _ = s.stdin.Write(l)
+					s.clientLineLocked(me, l)
 					s.mu.Unlock()
 					s.syncStream()
 				}
@@ -611,10 +622,8 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 			}
 			if err != nil {
 				s.mu.Lock()
-				if s.cur == me {
-					stdinClosed = true
-					s.broadcast()
-				}
+				stdinClosed = true
+				s.broadcast()
 				s.mu.Unlock()
 				return
 			}
@@ -631,11 +640,8 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 	linger := time.Duration(lingerMs) * time.Millisecond
 	for {
 		s.mu.Lock()
-		size, ended, wake, closed, kicked := s.size, s.ended, s.notify, stdinClosed, s.cur != me
+		size, ended, wake, closed := s.size, s.ended, s.notify, stdinClosed
 		s.mu.Unlock()
-		if kicked {
-			return
-		}
 		if offset < size {
 			n := int64(len(buf))
 			if size-offset < n {
@@ -676,6 +682,64 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 			}
 		}
 	}
+}
+
+// clientLineLocked hands one whole line from a client to the agent. A client that named itself
+// gets its prompts, stops and answers echoed into the log first, so every other client, live or
+// replaying later, sees them in order. An answer to a request someone already answered is dropped.
+func (s *acpDaemonState) clientLineLocked(from *acpClient, line []byte) {
+	forward, echo := s.tr.clientLine(line)
+	if !forward {
+		return
+	}
+	if echo && from.id != "" {
+		s.echoLocked(from.id, line)
+	}
+	_, _ = s.stdin.Write(line)
+}
+
+// echoLocked appends `_tether/client` (an ACP extension notification) carrying a client's line.
+func (s *acpDaemonState) echoLocked(client string, line []byte) {
+	msg := bytes.TrimSpace(line)
+	if !json.Valid(msg) {
+		return
+	}
+	out, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "_tether/client",
+		"params":  map[string]any{"client": client, "message": json.RawMessage(msg)},
+	})
+	if err != nil {
+		return
+	}
+	s.appendLogLocked(append(out, '\n'))
+}
+
+func (s *acpDaemonState) appendLogLocked(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	if _, err := s.log.Write(b); err != nil {
+		return false
+	}
+	s.size += int64(len(b))
+	s.broadcast()
+	return true
+}
+
+// agentOutputLocked logs the agent's output up to its last newline and holds the rest; at EOF,
+// or when a line outgrows maxACPLine, what is held goes out as is. It reports passing logMax.
+func (s *acpDaemonState) agentOutputLocked(chunk []byte, eof bool, logMax int64) bool {
+	s.tail = append(s.tail, chunk...)
+	cut := bytes.LastIndexByte(s.tail, '\n') + 1
+	if eof || len(s.tail) > maxACPLine {
+		cut = len(s.tail)
+	}
+	if cut > 0 {
+		s.appendLogLocked(s.tail[:cut])
+		s.tail = append([]byte(nil), s.tail[cut:]...)
+	}
+	return logMax > 0 && s.size > logMax
 }
 
 func acpLs(w io.Writer) error {

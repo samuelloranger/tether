@@ -84,6 +84,7 @@ newline-delimited JSON-RPC; nothing is injected into it.
     # run as a non-PTY ssh exec; stdin/stdout are the agent's, byte for byte
     tether acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
     tether acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
+    tether acp attach chat1 --client a1b2c3   # name this client so the others see what it sends
     tether acp ls                         # name, running|ended, log bytes, cwd, created, command
     tether acp status [chat1 ...]         # one JSON object per session (see below)
     tether acp sessions ~/src/app --limit 20   # the agent's saved conversations for a folder
@@ -92,11 +93,27 @@ newline-delimited JSON-RPC; nothing is injected into it.
 The first `attach --spawn` starts a detached daemon that owns the agent and appends
 everything it prints to `acp/<name>/out.log`; an `attach` replays that log from `--from`
 and then follows it live, so a client that tracks `from + bytesReceived` sees no gap and
-no duplicate. A new `attach` replaces the previous one (that one exits 5). Without
-`--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
+no duplicate. Any number of clients can be attached at once; each one follows the log and
+writes to the agent (a holder started by a tether older than protocol 2 still closes the
+previous client, which exits 5). Without `--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
 exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `attach`
 sends what is already logged and exits; `--linger 30s` keeps following until output has
 been idle that long.
+
+### Several clients
+
+The log only ever grows by whole lines: agent output after its last newline is held until the
+line ends. A client attached with `--client <id>` (letters, digits, `-`, `_`) gets what it sends
+written into the log, just before the line goes to the agent, as an ACP extension notification:
+
+    {"jsonrpc":"2.0","method":"_tether/client","params":{"client":"a1b2c3","message":{…the line…}}}
+
+This covers `session/prompt`, `session/cancel` and responses to the agent's requests, so every
+client, live or replaying later, sees the others' prompts, stops and answers in order. An answer
+`tether acp answer` writes is echoed with `"client":"host"`. Clients use their own request ids
+(for example strings prefixed with their id) so two clients never send the same id. An answer to
+a request that was already answered, from any client or from `acp answer`, is not sent to the
+agent. A client without `--client` is never echoed.
 
 ### Status and saved conversations
 
