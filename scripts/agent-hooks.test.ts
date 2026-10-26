@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 // Installs the hooks into a throwaway $HOME and drives the real wrapper with recorded hook
-// JSON; a stub tether-notify records each call so the mapping itself is what gets tested.
+// JSON; a stub tether records each call so the mapping itself is what gets tested.
 function install(setup?: (home: string) => void): { home: string; log: string } {
   const home = mkdtempSync(path.join(tmpdir(), 'agent-hooks-'));
   for (const dir of ['.codex', '.cursor', '.gemini']) mkdirSync(path.join(home, dir));
@@ -24,7 +24,7 @@ function install(setup?: (home: string) => void): { home: string; log: string } 
   });
   if (run.exitCode !== 0) throw new Error(run.stderr.toString());
   const log = path.join(home, 'calls.log');
-  const stub = path.join(home, '.local/bin/tether-notify');
+  const stub = path.join(home, '.local/bin/tether');
   writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n`);
   chmodSync(stub, 0o755);
   return { home, log };
@@ -45,7 +45,7 @@ function hook(
   session: string | null = 'work',
   extraEnv: Record<string, string> = {},
 ) {
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   const vars: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: env.home, ...extraEnv };
   if (session) vars.ZMX_SESSION = session;
   const run = Bun.spawnSync(['sh', wrapper, agent, state], { env: vars, stdin: Buffer.from(JSON.stringify(input)) });
@@ -324,12 +324,12 @@ test('installer wires gemini beside foreign hooks and settings, once', () => {
     );
   });
   expect(reinstall(env).exitCode).toBe(0);
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   const gemini = JSON.parse(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8'));
   expect(gemini.model).toEqual({ name: 'm' });
   for (const [event, state] of Object.entries(geminiEvents)) {
     const ours = gemini.hooks[event].filter((g: { hooks: { command: string }[] }) =>
-      g.hooks.some((h) => h.command.includes('tether-notify-hook')),
+      g.hooks.some((h) => h.command.includes('tether-hook')),
     );
     expect(ours).toEqual([
       { matcher: '*', hooks: [{ type: 'command', name: 'tether', command: `'${wrapper}' gemini ${state}` }] },
@@ -397,7 +397,7 @@ test('reinstall keeps a codex hook in place ahead of a foreign one', () => {
   });
   reinstall(env);
   const stop = JSON.parse(readFileSync(path.join(env.home, '.codex/hooks.json'), 'utf8')).hooks.Stop;
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   expect(stop).toHaveLength(2);
   expect(stop[0].hooks[0].command).toBe(`'${wrapper}' codex done`);
   expect(stop[1].hooks[0].command).toBe('foreign-hook');
@@ -417,7 +417,7 @@ test('reinstall keeps a cursor hook in place ahead of a foreign one', () => {
   });
   reinstall(env);
   const stop = JSON.parse(readFileSync(path.join(env.home, '.cursor/hooks.json'), 'utf8')).hooks.stop;
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   expect(stop).toHaveLength(2);
   expect(stop[0].command).toBe(`'${wrapper}' cursor done`);
   expect(stop[1].command).toBe('foreign-hook');
@@ -441,7 +441,7 @@ test('reinstall collapses duplicate tether groups onto the first one', () => {
   });
   reinstall(env);
   const stop = JSON.parse(readFileSync(path.join(env.home, '.codex/hooks.json'), 'utf8')).hooks.Stop;
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   expect(stop.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([
     'before',
     `'${wrapper}' codex done`,
@@ -470,7 +470,7 @@ test('reinstall keeps a foreign handler that shares a claude group with ours', (
   });
   reinstall(env);
   const stop = JSON.parse(readFileSync(path.join(env.home, '.claude/settings.json'), 'utf8')).hooks.Stop;
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   expect(stop).toHaveLength(1);
   expect(stop[0].hooks.map((h: { command: string }) => h.command)).toEqual([`'${wrapper}' claude done`, 'other-hook']);
 });
@@ -496,7 +496,7 @@ test('reinstall updates a gemini hook in place, including matcher and name', () 
   });
   reinstall(env);
   const groups = JSON.parse(readFileSync(path.join(env.home, '.gemini/settings.json'), 'utf8')).hooks.AfterAgent;
-  const wrapper = path.join(env.home, '.local/bin/tether-notify-hook');
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
   expect(groups).toHaveLength(1);
   expect(groups[0].matcher).toBe('*');
   expect(groups[0].hooks.map((h: { command: string; name?: string }) => h.command)).toEqual([
@@ -558,7 +558,7 @@ test('a claude prompt hook is kept and every tether event is registered', () => 
     'SessionEnd',
   ]) {
     const ours = settings.hooks[event].filter((g: { hooks: { command?: string }[] }) =>
-      g.hooks.some((h) => (h.command ?? '').includes('tether-notify-hook')),
+      g.hooks.some((h) => (h.command ?? '').includes('tether-hook')),
     );
     expect(ours).toHaveLength(1);
   }
@@ -623,4 +623,54 @@ test('codex trust is checked at our position, after a foreign hook group', () =>
   expect(out).toMatch(/\(stop\)/);
   trustAll(env.home, (e) => (e === 'stop' ? 1 : 0));
   expect(reinstall(env).stdout).not.toContain('Codex skips untrusted hooks');
+});
+
+test('entries pointing at the old tether-notify-hook are replaced in all four tools, foreign ones untouched', () => {
+  const old = '/home/me/.local/bin/tether-notify-hook';
+  const env = install((home) => {
+    mkdirSync(path.join(home, '.claude'));
+    mkdirSync(path.join(home, '.local/bin'), { recursive: true });
+    writeFileSync(path.join(home, '.local/bin/tether-notify-hook'), '#!/bin/sh\n');
+    const nested = (cmd: string) => ({
+      Stop: [{ hooks: [{ type: 'command', command: cmd }] }, { hooks: [{ type: 'command', command: 'foreign-hook' }] }],
+    });
+    writeFileSync(path.join(home, '.claude/settings.json'), JSON.stringify({ hooks: nested(`'${old}' claude done`) }));
+    writeFileSync(path.join(home, '.codex/hooks.json'), JSON.stringify({ hooks: nested(`'${old}' codex done`) }));
+    writeFileSync(
+      path.join(home, '.gemini/settings.json'),
+      JSON.stringify({ hooks: { AfterAgent: nested(`'${old}' gemini done`).Stop } }),
+    );
+    writeFileSync(
+      path.join(home, '.cursor/hooks.json'),
+      JSON.stringify({
+        version: 1,
+        hooks: { stop: [{ command: `'${old}' cursor done` }, { command: 'foreign-hook' }] },
+      }),
+    );
+  });
+  const wrapper = path.join(env.home, '.local/bin/tether-hook');
+  const read = (p: string) => readFileSync(path.join(env.home, p), 'utf8');
+  for (const [file, agent] of [
+    ['.claude/settings.json', 'claude'],
+    ['.codex/hooks.json', 'codex'],
+  ] as const) {
+    const stop = JSON.parse(read(file)).hooks.Stop;
+    expect(stop.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([
+      `'${wrapper}' ${agent} done`,
+      'foreign-hook',
+    ]);
+  }
+  const gem = JSON.parse(read('.gemini/settings.json')).hooks.AfterAgent;
+  expect(gem.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([
+    `'${wrapper}' gemini done`,
+    'foreign-hook',
+  ]);
+  const cur = JSON.parse(read('.cursor/hooks.json')).hooks.stop;
+  expect(cur.map((h: { command: string }) => h.command)).toEqual([`'${wrapper}' cursor done`, 'foreign-hook']);
+  expect(read('.claude/settings.json')).not.toContain('tether-notify-hook');
+  // idempotent, and the old wrapper file is left for the user to delete
+  const before = read('.codex/hooks.json');
+  reinstall(env);
+  expect(read('.codex/hooks.json')).toBe(before);
+  expect(readFileSync(path.join(env.home, '.local/bin/tether-notify-hook'), 'utf8')).toBe('#!/bin/sh\n');
 });

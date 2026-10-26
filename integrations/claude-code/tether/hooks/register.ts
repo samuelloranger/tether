@@ -108,7 +108,7 @@ async function phoneTarget($: EngineInterface): Promise<Target | null> {
   // A multiplexer started inside the zmx session can show this agent while zmx
   // itself reads as detached.
   if ((await $.env.get('TMUX')) || (await $.env.get('STY'))) return null
-  const notify = (await $.env.get('TETHER_NOTIFY_BIN')) ?? `${home}/.local/bin/tether-notify`
+  const notify = (await $.env.get('TETHER_NOTIFY_BIN')) ?? `${home}/.local/bin/tether`
   return { session, notify }
 }
 

@@ -102,6 +102,16 @@ final class LibSSH2Ops: SSHConnectionOps, @unchecked Sendable {
     return pump
   }
 
+  func openExecChannel(command: String) throws -> any TerminalByteStream {
+    guard let session else { throw LibSSH2OpsError.sessionInit }
+    guard let channel = LibSSH2TransportProbe.openExecChannel(session: session, command: command) else {
+      throw LibSSH2OpsError.execFailed(0)
+    }
+    let pump = SSHSessionPump(session: session, channel: channel, socket: socket, socketGuard: socketGuard)
+    transferred = true
+    return pump
+  }
+
   func exec(_ command: String) throws -> String {
     var output = Data()
     try runCommand(command, deadline: commandDeadline) { chunk in

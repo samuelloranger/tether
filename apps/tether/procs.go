@@ -71,7 +71,7 @@ var passThroughComms = map[string]bool{"sh": true, "dash": true, "bash": true, "
 
 func passThrough(comm string) bool {
 	base := strings.TrimPrefix(filepath.Base(comm), "-")
-	return passThroughComms[base] || strings.HasPrefix(base, "tether-notify")
+	return passThroughComms[base] || strings.HasPrefix(base, "tether")
 }
 
 // agentPid walks up from start past shells and the hook wrapper to the agent

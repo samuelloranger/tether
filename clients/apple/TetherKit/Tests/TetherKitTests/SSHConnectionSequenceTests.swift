@@ -18,6 +18,33 @@ final class SSHConnectionSequenceTests: XCTestCase {
     XCTAssertEqual(store.pinnedFingerprint(host: "h", port: 22), "FP:NEW")
   }
 
+  func test_exec_path_runs_the_same_trust_and_auth_gate_then_opens_the_exec_channel() throws {
+    let ops = FakeOps()
+    let store = InMemoryHostKeyStore()
+    _ = try SSHConnectionSequence.runExec(config: config([pw]), ops: ops, store: store, command: "agent attach")
+    XCTAssertEqual(ops.calls, [.connect, .fingerprint, .auth(pw), .openExec("agent attach")])
+    XCTAssertEqual(store.pinnedFingerprint(host: "h", port: 22), "FP:NEW")
+  }
+
+  func test_exec_path_refuses_a_changed_host_key_before_auth() {
+    let ops = FakeOps()
+    ops.fingerprint = "FP:EVIL"
+    let store = InMemoryHostKeyStore()
+    store.pin("FP:GOOD", host: "h", port: 22)
+    XCTAssertThrowsError(try SSHConnectionSequence.runExec(config: config([pw]), ops: ops, store: store, command: "x"))
+    XCTAssertEqual(ops.calls, [.connect, .fingerprint, .teardown])
+  }
+
+  func test_exec_channel_open_failure_tears_down_and_reports_transport() {
+    struct Boom: Error {}
+    let ops = FakeOps()
+    ops.openError = Boom()
+    XCTAssertThrowsError(try SSHConnectionSequence.runExec(config: config([pw]), ops: ops, store: InMemoryHostKeyStore(), command: "x")) { error in
+      guard case .transport = (error as? SSHConnectError) else { return XCTFail("expected .transport, got \(error)") }
+    }
+    XCTAssertEqual(ops.calls.last, .teardown)
+  }
+
   func test_host_key_mismatch_aborts_before_auth_and_tears_down() {
     let ops = FakeOps()
     ops.fingerprint = "FP:EVIL"

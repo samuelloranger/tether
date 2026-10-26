@@ -54,13 +54,40 @@ class NotificationService: UNNotificationServiceExtension {
     content.categoryIdentifier = category
     content.userInfo["agentState"] = state
     content.userInfo["agentVersion"] = version
+    if category == Self.acpPermissionCategory {
+      guard let options = payload.options, (2...4).contains(options.count),
+            let ids = payload.optionIds, ids.count == options.count,
+            let acp = payload.acp, let requestId = payload.requestId
+      else {
+        contentHandler(content)
+        return
+      }
+      content.userInfo["acpName"] = acp
+      content.userInfo["acpRequestId"] = requestId
+      content.userInfo["acpOptions"] = options
+      content.userInfo["acpOptionIds"] = ids
+      content.userInfo["acpOptionKinds"] = payload.optionKinds ?? []
+      Task {
+        let actions = Self.acpPermissionActions(options: options, kinds: payload.optionKinds ?? [])
+        if let perPush = await Self.registerPerPushCategory(
+          prefix: Self.acpPermissionCategoryPrefix, version: version, actions: actions, recentKey: Self.recentACPKey)
+        {
+          content.categoryIdentifier = perPush
+        }
+        deliver(content)
+      }
+      return
+    }
     guard category == Self.questionCategory, let options = payload.options, (2...4).contains(options.count) else {
       contentHandler(content)
       return
     }
     Task {
       // Without the per-push category the push still offers Answer… from the static one.
-      if let perPush = await Self.registerQuestionCategory(version: version, options: options) {
+      if let perPush = await Self.registerPerPushCategory(
+        prefix: Self.questionCategoryPrefix, version: version, actions: Self.questionActions(options: options),
+        recentKey: Self.recentKey)
+      {
         content.categoryIdentifier = perPush
       }
       deliver(content)
@@ -95,12 +122,9 @@ class NotificationService: UNNotificationServiceExtension {
     handler?(content)
   }
 
-  /// A question's one-tap options can only be buttons through a category made for this
-  /// push. Mirrors `NotificationActions.questionCategory(version:options:)`; the extension
-  /// doesn't link TetherKit.
-  private static func registerQuestionCategory(version: String, options: [String]) async -> String? {
-    let center = UNUserNotificationCenter.current()
-    let identifier = questionCategoryPrefix + version
+  /// A question's buttons: its options, then Answer…. Mirrors
+  /// `NotificationActions.questionCategory(version:options:)`; the extension doesn't link TetherKit.
+  private static func questionActions(options: [String]) -> [UNNotificationAction] {
     let picks = options.enumerated().map { index, label in
       UNNotificationAction(identifier: "tether.action.option.\(index + 1)", title: label, options: [.authenticationRequired])
     }
@@ -108,9 +132,28 @@ class NotificationService: UNNotificationServiceExtension {
       identifier: "tether.action.answer", title: "Answer…", options: [.authenticationRequired, .foreground],
       icon: UNNotificationActionIcon(systemImageName: "list.bullet")
     )
-    let category = UNNotificationCategory(identifier: identifier, actions: picks + [answer], intentIdentifiers: [])
+    return picks + [answer]
+  }
 
-    // Keep the newest few per-push categories: an older question may still be on screen.
+  /// One button per option of a held ACP permission, destructive for a reject. Mirrors
+  /// `ACPPermissionPush.notificationCategory(version:labels:kinds:)`.
+  private static func acpPermissionActions(options: [String], kinds: [String]) -> [UNNotificationAction] {
+    options.enumerated().map { index, label in
+      var flags: UNNotificationActionOptions = [.authenticationRequired]
+      if index < kinds.count, kinds[index].hasPrefix("reject") { flags.insert(.destructive) }
+      return UNNotificationAction(identifier: "tether.action.option.\(index + 1)", title: label, options: flags)
+    }
+  }
+
+  /// A push's one-tap options can only be buttons through a category made for this push.
+  private static func registerPerPushCategory(
+    prefix: String, version: String, actions: [UNNotificationAction], recentKey: String
+  ) async -> String? {
+    let center = UNUserNotificationCenter.current()
+    let identifier = prefix + version
+    let category = UNNotificationCategory(identifier: identifier, actions: actions, intentIdentifiers: [])
+
+    // Keep the newest few per-push categories: an older push may still be on screen.
     let defaults = UserDefaults.standard
     var recent = (defaults.stringArray(forKey: recentKey) ?? []).filter { $0 != identifier }
     recent.append(identifier)
@@ -118,7 +161,7 @@ class NotificationService: UNNotificationServiceExtension {
     defaults.set(recent, forKey: recentKey)
 
     let existing = await center.notificationCategories()
-    let kept = existing.filter { !$0.identifier.hasPrefix(questionCategoryPrefix) || recent.contains($0.identifier) }
+    let kept = existing.filter { !$0.identifier.hasPrefix(prefix) || recent.contains($0.identifier) }
     center.setNotificationCategories(kept.union([category]))
     // The set lands asynchronously; reading it back waits for it before delivery.
     let registered = await center.notificationCategories()
@@ -140,13 +183,22 @@ class NotificationService: UNNotificationServiceExtension {
     let options: [String]?
     let session: String?
     let level: String?
+    let acp: String?
+    let requestId: String?
+    let optionIds: [String]?
+    let optionKinds: [String]?
   }
 
   // Mirrors NotificationActions.categoryIdentifiers; the extension doesn't link TetherKit.
   private static let questionCategory = "tether.agent.question"
   private static let questionCategoryPrefix = "tether.agent.question."
-  private static let categories: Set<String> = ["tether.agent.waiting", "tether.agent.done", questionCategory]
+  private static let acpPermissionCategory = "tether.acp.permission"
+  private static let acpPermissionCategoryPrefix = "tether.acp.permission."
+  private static let categories: Set<String> = [
+    "tether.agent.waiting", "tether.agent.done", questionCategory, acpPermissionCategory, "tether.acp.done",
+  ]
   private static let recentKey = "tether.recentQuestionCategories"
+  private static let recentACPKey = "tether.recentACPCategories"
   private static let keptQuestionCategories = 8
 
   // Reads the AES key PushRegistrar wrote, via the shared keychain group. The

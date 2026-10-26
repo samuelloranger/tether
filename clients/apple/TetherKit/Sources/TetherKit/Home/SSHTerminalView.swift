@@ -28,6 +28,11 @@ public struct SSHTerminalView: View {
   /// The one destructive route: every "kill" entry point sets this, and the
   /// single confirmation dialog is the only thing that acts on it.
   @State private var pendingKill: String?
+  @State private var pendingChatKill: DrawerChatRow?
+  /// The main area: the terminal, or a chat swapped in over it. The terminal stays attached under a chat.
+  @State private var content = DrawerContent()
+  @State private var showNewChat = false
+  @State private var newChatMode: NewChatSheet.Mode = .new
   @State private var showFileImporter = false
   @State private var showHistory = false
   @State private var showPhotoPicker = false
@@ -44,6 +49,7 @@ public struct SSHTerminalView: View {
   @ScaledMetric(relativeTo: .body) private var drawerWidth: CGFloat = 280
   @ScaledMetric(relativeTo: .title3) private var tapTarget: CGFloat = 40
   @ScaledMetric(relativeTo: .caption2) private var lampSize: CGFloat = 9
+  @ScaledMetric(relativeTo: .caption2) private var glyphSlot: CGFloat = 14
 
   public init(
     controller: SSHTerminalController, preferences: AppPreferences,
@@ -59,6 +65,14 @@ public struct SSHTerminalView: View {
   public var body: some View {
     ZStack(alignment: .leading) {
       terminalStack
+        .opacity(content.showsChat ? 0 : 1)
+        .allowsHitTesting(!content.showsChat)
+        .accessibilityHidden(content.showsChat)
+        .ignoresSafeArea(.keyboard, edges: content.showsChat ? .bottom : [])
+      if let route = content.chat {
+        EmbeddedChat(route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) })
+          .id(route.name)
+      }
       if drawerProgress > 0 {
         Color.black.opacity(0.5 * min(drawerProgress, 1)).ignoresSafeArea()
           .onTapGesture { setDrawer(open: false) }
@@ -130,6 +144,7 @@ public struct SSHTerminalView: View {
       }
       #if DEBUG
       if ProcessInfo.processInfo.environment["TETHER_SSH_DRAWER"] != nil { drawerOpen = true }
+      await applyDebugDrawerMode()
       if ProcessInfo.processInfo.environment["TETHER_SSH_GIT"] != nil { showGit = true }
       if let name = ProcessInfo.processInfo.environment["TETHER_SSH_SENDFILE"] {
         await controller.sendFile(data: Data("tether upload test\n".utf8), filename: name)
@@ -139,6 +154,7 @@ public struct SSHTerminalView: View {
     .task(id: "\(ObjectIdentifier(controller).hashValue)-\(scenePhase == .active && controller.status == .connected)") {
       while !Task.isCancelled, scenePhase == .active, controller.status == .connected {
         await controller.refreshAgentStatus()
+        if !controller.chats.isEmpty { await controller.refreshChats() }
         try? await Task.sleep(nanoseconds: 5_000_000_000)
       }
     }
@@ -176,9 +192,18 @@ public struct SSHTerminalView: View {
       if !has && !TetherPlatform.isMac { focused = false }
     }
     .onChange(of: drawerOpen) { _, open in
-      if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer { focused = true }
+      if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer, !content.showsChat { focused = true }
     }
-    .onChange(of: drawerProgress > 0, initial: true) { _, showing in accessory.visible = !showing }
+    .onChange(of: controller.requestedChat, initial: true) { _, name in
+      guard let name else { return }
+      controller.requestedChat = nil
+      openChat(ChatRoute.opening(
+        name: name, chats: controller.chats, journal: UserDefaultsChatJournalStore(name: name).load()))
+    }
+    .onChange(of: controller.attach) { _, _ in
+      if content.showsChat { showTerminal() }
+    }
+    .onChange(of: drawerProgress > 0 || content.showsChat, initial: true) { _, hidden in accessory.visible = !hidden }
     .onChange(of: modalOpen) { _, open in
       guard tabs != nil else { return }
       if open { focused = false } else { refocusOnMac() }
@@ -194,6 +219,32 @@ public struct SSHTerminalView: View {
     .sheet(isPresented: $showSettings) {
       TerminalSettingsSheet(preferences: preferences) { showSettings = false }
         .macSheetSize(width: 560, height: 680)
+    }
+    .sheet(isPresented: $showNewChat) {
+      NewChatSheet(
+        initialFolder: controller.activeSessionCwd ?? "~",
+        initialMode: newChatMode,
+        onStart: { folder in
+          switch await controller.newChat(cwdText: folder) {
+          case let .failed(message): return message
+          case let .ready(route):
+            showNewChat = false
+            openChat(route)
+            return nil
+          }
+        },
+        loadSessions: { await controller.savedSessions(folderText: $0) },
+        onContinue: { folder, session in
+          switch await controller.continueChat(session: session, folderText: folder) {
+          case let .failed(message): return message
+          case let .ready(route):
+            showNewChat = false
+            openChat(route)
+            return nil
+          }
+        },
+        onCancel: { showNewChat = false }
+      )
     }
     .sheet(isPresented: $showGit) {
       GitDiffView(controller: controller) { showGit = false }
@@ -211,6 +262,27 @@ public struct SSHTerminalView: View {
     ) { name in
       if let tabs { tabs.kill(name) } else { Task { await controller.killSession(name) } }
     }
+    .destructiveConfirmation(
+      $pendingChatKill,
+      title: { "Delete \($0.title)?" },
+      actionLabel: "Delete chat",
+      message: "The agent stops and the conversation is removed from the host."
+    ) { row in
+      content.chatKilled(row.name)
+      Task { await controller.killChat(row.name) }
+    }
+  }
+
+  private func openChat(_ route: ChatRoute) {
+    focused = false
+    focusedBeforeDrawer = false
+    content.open(route)
+    setDrawer(open: false)
+  }
+
+  private func showTerminal() {
+    guard content.showsChat else { return }
+    content.showTerminal()
   }
 
   private var terminalStack: some View {
@@ -245,7 +317,7 @@ public struct SSHTerminalView: View {
           onMouseBytes: { controller.sendInput($0) },
           mouseMode: controller.mouseMode,
           mouseSgr: controller.mouseSgr,
-          freezesGrid: drawerOpen || modalOpen
+          freezesGrid: drawerOpen || modalOpen || content.showsChat
         )
         .accessibilityIdentifier("sshTerminalSurface")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -291,15 +363,20 @@ public struct SSHTerminalView: View {
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.heldQuestion?.version)
   }
 
+  /// A session or a chat other than the one on screen is waiting on an answer.
+  private var drawerNeedsYou: Bool {
+    controller.othersWaiting || DrawerChatRows.othersWaiting(chats: controller.chats, open: content.chat?.name)
+  }
+
   private var header: some View {
     HStack(spacing: 4) {
       if tabs == nil {
         headerButton("line.3.horizontal", id: "sshTerminalDrawer",
-                     label: controller.othersWaiting ? "Open session list, a session needs you" : "Open session list") {
+                     label: drawerNeedsYou ? "Open session list, a session needs you" : "Open session list") {
           setDrawer(open: true)
         }
         .overlay(alignment: .topTrailing) {
-          if controller.othersWaiting {
+          if drawerNeedsYou {
             Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: -8, y: 8)
               .accessibilityHidden(true)
           }
@@ -410,6 +487,16 @@ public struct SSHTerminalView: View {
               .font(.caption.monospaced()).multilineTextAlignment(.leading)
               .foregroundStyle(TetherColors.textFaint).padding(.top, 12)
           }
+          let chatRows = DrawerChatRows.rows(
+            chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)))
+          if !chatRows.isEmpty {
+            Text("Chats").font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
+              .foregroundStyle(TetherColors.textFaint)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.horizontal, 2).padding(.top, 8)
+              .accessibilityAddTraits(.isHeader)
+            ForEach(chatRows) { chatRow($0) }
+          }
           newSessionRow
         }
         .padding(.horizontal, 12)
@@ -438,9 +525,12 @@ public struct SSHTerminalView: View {
 
   private func sessionRow(_ session: ZmxSession) -> some View {
     let isCurrent = session.name == controller.attach
+    let isSelected = isCurrent && !content.showsChat
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return HStack(spacing: 6) {
       Button {
+        showTerminal()
+        focusedBeforeDrawer = true
         Task { await controller.switchSession(to: session.name) }
         setDrawer(open: false)
       } label: {
@@ -449,6 +539,7 @@ public struct SSHTerminalView: View {
           // needs the room; "attached" is never carried by colour alone.
           Circle().fill(isCurrent ? TetherColors.success : TetherColors.textFaint)
             .frame(width: lampSize, height: lampSize)
+            .frame(width: glyphSlot)
           VStack(alignment: .leading, spacing: 2) {
             Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             if showsDetail {
@@ -485,16 +576,74 @@ public struct SSHTerminalView: View {
     }
     .padding(.horizontal, 12).padding(.vertical, 10)
     .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isCurrent ? TetherColors.accent.opacity(0.4) : TetherColors.border))
-    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isCurrent)
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? TetherColors.accent.opacity(0.4) : TetherColors.border))
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isSelected)
     .contextMenu {
       Button {
+        showTerminal()
         Task { await controller.switchSession(to: session.name) }
         setDrawer(open: false)
       } label: { Label("Open", systemImage: "terminal") }
       Button(role: .destructive) { pendingKill = session.name } label: {
         Label("Kill", systemImage: "xmark.circle")
       }
+    }
+  }
+
+  private func chatRow(_ row: DrawerChatRow) -> some View {
+    let isSelected = content.isSelected(chat: row.name)
+    let tint = row.state.tint
+    let needsYou = row.state == .waiting
+    return HStack(spacing: 6) {
+      Button {
+        openChat(controller.chatRoute(for: row))
+      } label: {
+        HStack(spacing: 10) {
+          Image(systemName: "bubble.left").font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: glyphSlot)
+            .accessibilityHidden(true)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(row.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+              .lineLimit(1)
+            HStack(spacing: 4) {
+              if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
+                Text(row.subtitle).foregroundStyle(TetherColors.textFaint)
+                  .lineLimit(1).truncationMode(.head)
+                Text("·").foregroundStyle(TetherColors.textFaint)
+              }
+              ChatStateTag(state: row.state)
+            }
+            .font(.caption2.monospaced())
+            .accessibilityHidden(true)
+          }
+          Spacer(minLength: 4)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(TetherPressStyle())
+      .accessibilityIdentifier("chatRow_\(row.name)")
+      .accessibilityLabel("Chat \(row.title), \(row.stateLabel), \(row.subtitle)")
+      .accessibilityHint(isSelected ? "Already open" : "Opens this chat")
+      Button { pendingChatKill = row } label: {
+        Image(systemName: "xmark.circle.fill").font(.body)
+          .foregroundStyle(TetherColors.textFaint)
+          .frame(width: tapTarget * 0.8, height: tapTarget * 0.8).contentShape(Rectangle())
+      }
+      .buttonStyle(TetherPressStyle())
+      .accessibilityIdentifier("chatKill_\(row.name)")
+      .accessibilityLabel("Delete chat \(row.title)")
+      .accessibilityHint("Asks to confirm first")
+    }
+    .padding(.horizontal, 12).padding(.vertical, 10)
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
+      needsYou ? TetherColors.warning.opacity(0.7) : isSelected ? TetherColors.accent.opacity(0.4) : TetherColors.border,
+      lineWidth: needsYou ? 1.5 : 1))
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isSelected)
+    .contextMenu {
+      Button { openChat(controller.chatRoute(for: row)) } label: { Label("Open", systemImage: "bubble.left") }
+      Button(role: .destructive) { pendingChatKill = row } label: { Label("Delete", systemImage: "trash") }
     }
   }
 
@@ -520,16 +669,18 @@ public struct SSHTerminalView: View {
         .accessibilityIdentifier("sshNewSessionField")
         .accessibilityLabel("New session name")
         .onSubmit(startNewSession)
-      Button(action: startNewSession) {
+      Menu {
+        Button(action: startNewSession) { Label("Terminal session", systemImage: "terminal") }
+        Button { newChatMode = .new; showNewChat = true } label: { Label("Chat…", systemImage: "bubble.left") }
+          .accessibilityIdentifier("sshNewChat")
+      } label: {
         Image(systemName: "plus").font(.subheadline.weight(.semibold))
           .frame(width: tapTarget * 0.85, height: tapTarget * 0.85)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
           .foregroundStyle(TetherColors.onAccent)
       }
-      .buttonStyle(TetherPressStyle())
-      .disabled(newSessionName.trimmingCharacters(in: .whitespaces).isEmpty)
       .accessibilityIdentifier("sshNewSessionAdd")
-      .accessibilityLabel("Start session")
+      .accessibilityLabel("New session or chat")
     }
     .padding(.top, 4)
   }
@@ -540,9 +691,11 @@ public struct SSHTerminalView: View {
   }
 
   private func startNewSession() {
-    let name = newSessionName.trimmingCharacters(in: .whitespaces)
-    guard !name.isEmpty else { return }
+    var name = newSessionName.trimmingCharacters(in: .whitespaces)
+    if name.isEmpty { name = nextSessionName() }
     newSessionName = ""
+    showTerminal()
+    focusedBeforeDrawer = true
     Task { await controller.switchSession(to: name) }
     setDrawer(open: false)
   }
@@ -574,7 +727,7 @@ public struct SSHTerminalView: View {
 
   private var modalOpen: Bool {
     showSettings || showGit || showHistory || showFileImporter || showPhotoPicker
-      || pendingKill != nil || answering != nil || tabs?.draftName != nil
+      || pendingKill != nil || pendingChatKill != nil || showNewChat || answering != nil || tabs?.draftName != nil
   }
 
   /// A desktop terminal takes typing without a click. Flipped off and on because the
@@ -603,6 +756,27 @@ public struct SSHTerminalView: View {
     actions.sessionCount = tabs.state.names.count
     return actions
   }
+
+  #if DEBUG
+  /// `TETHER_DEBUG_DRAWER`: `open` the drawer over the terminal, `chat` a chat swapped in,
+  /// `chat-open` the drawer over that chat, `newchat` the folder sheet.
+  private func applyDebugDrawerMode() async {
+    guard let mode = ProcessInfo.processInfo.environment["TETHER_DEBUG_DRAWER"] else { return }
+    try? await Task.sleep(nanoseconds: 600_000_000)
+    await controller.refreshSessions()
+    let row = DrawerChatRows.rows(chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name))).first
+    switch mode {
+    case "chat", "chat-open":
+      if let row { content.open(controller.chatRoute(for: row)) }
+      if mode == "chat-open" { try? await Task.sleep(nanoseconds: 700_000_000); drawerOpen = true }
+    case "newchat": showNewChat = true
+    case "newchat-continue", "newchat-continue-empty", "newchat-continue-error", "newchat-continue-recent":
+      newChatMode = .resume
+      showNewChat = true
+    default: drawerOpen = true
+    }
+  }
+  #endif
 
   private func nextSessionName() -> String {
     var n = controller.sessions.count + 1

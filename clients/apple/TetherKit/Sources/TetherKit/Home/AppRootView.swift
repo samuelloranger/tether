@@ -10,6 +10,7 @@ public struct AppRootView: View {
   @State private var tabs: MacSessionTabs?
   @State private var didAutoConnect = false
   @State private var openProfileID: String?
+  @State private var chat: ChatTarget?
   @State private var question: AgentQuestionTarget?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private let autoOpenFirst: Bool
@@ -43,12 +44,16 @@ public struct AppRootView: View {
       if let active = tabs?.activeController ?? controller {
         SSHTerminalView(controller: active, preferences: preferences, questionRunner: questionRunner, tabs: tabs, onHome: leaveTerminal)
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
+      } else if let chat {
+        ChatFlowView(
+          list: chat.list, config: chat.config, hostKeyStore: model.hostKeyStore, opening: chat.opening, onClose: leaveChat)
+          .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       } else {
-        HomeView(model: model, onOpen: { open($0) })
+        HomeView(model: model, onOpen: { open($0) }, onChat: { openChat($0) })
           .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
       }
     }
-    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen)
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen || chat != nil)
     .preferredColorScheme(preferences.colorScheme)
     // Here, not on the app's root: a theme change then redraws this view, not the scene.
     .tint(TetherColors.accent)
@@ -89,6 +94,7 @@ public struct AppRootView: View {
   }
 
   private func handle(_ url: URL) {
+    if let chatLink = DeepLinkCoordinator.parseChat(url.absoluteString) { return handle(chatLink) }
     guard let link = DeepLinkCoordinator.parse(url.absoluteString) else { return }
     didAutoConnect = true
     let labels: Set<String> = activeController?.answers(toHostLabel: link.identityName) == true ? [link.identityName] : []
@@ -99,6 +105,31 @@ public struct AppRootView: View {
       guard let profile = model.profiles.first(where: { $0.id == profileID }) else { return }
       if terminalOpen { leaveTerminal() }
       open(profile, attach: session)
+    case .none:
+      break
+    }
+  }
+
+  /// A chat push or link: the terminal screen on that host swaps the chat in. Only a chat list
+  /// shown without a terminal takes it in place.
+  private func handle(_ link: ChatDeepLink) {
+    didAutoConnect = true
+    if !terminalOpen, let shown = chat,
+       NotificationActionRunner.candidates(for: link.identityName, in: model.profiles.filter { $0.id == shown.profileID }).count == 1
+    {
+      chat = ChatTarget(list: shown.list, config: shown.config, profileID: shown.profileID, opening: link.chatName)
+      return
+    }
+    let labels: Set<String> = activeController?.answers(toHostLabel: link.identityName) == true ? [link.identityName] : []
+    switch link.route(profiles: model.profiles, currentProfileID: openProfileID, currentHostLabels: labels) {
+    case let .openHere(name):
+      activeController?.requestedChat = name
+    case let .open(profileID, name):
+      guard let profile = model.profiles.first(where: { $0.id == profileID }) else { return }
+      if terminalOpen { leaveTerminal() }
+      chat = nil
+      open(profile)
+      activeController?.requestedChat = name
     case .none:
       break
     }
@@ -138,6 +169,32 @@ public struct AppRootView: View {
       if let opened { return await opened.activeController?.coversPush(link) ?? false }
       return await single?.coversPush(link) ?? false
     }
+  }
+
+  private struct ChatTarget {
+    let list: ChatListModel
+    let config: SSHConnectionConfig
+    let profileID: String
+    var opening: String?
+  }
+
+  private func openChat(_ profile: SSHHostProfile) {
+    guard let config = model.connectionConfig(for: profile) else {
+      model.errorMessage = SSHConnectError.missingCredential(name: profile.name).errorDescription
+      return
+    }
+    chat = ChatTarget(
+      list: .live(hostName: profile.name, config: config, hostKeyStore: model.hostKeyStore), config: config,
+      profileID: profile.id)
+    // No terminal connection here to register from, and the chat's pushes need the host to know this phone.
+    if let identity = pushIdentityProvider() {
+      let store = model.hostKeyStore
+      Task { await PushRegistrar.registerOverSSH(identity: identity, config: config, store: store) }
+    }
+  }
+
+  private func leaveChat() {
+    chat = nil
   }
 
   private func leaveTerminal() {

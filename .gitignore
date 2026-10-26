@@ -40,7 +40,7 @@ Thumbs.db
 # SwiftPM build output
 clients/apple/TetherKit/.build/
 
-# tether-notify host CLI local state
+# tether host CLI local state (the state folder keeps its old name)
 .tether-notify/
 
 # Local design-critique artifacts (impeccable skill)
@@ -48,7 +48,7 @@ clients/apple/TetherKit/.build/
 .worktrees/
 
 # Go build output
-apps/tether-notify/tether-notify
+apps/tether/tether
 
 # build-ssh-xcframeworks.sh staging, present only while an install runs or after it fails
 .tether-install-stage/

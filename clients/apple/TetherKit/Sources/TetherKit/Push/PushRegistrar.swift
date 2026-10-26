@@ -5,7 +5,7 @@ import Security
 import UIKit
 import UserNotifications
 
-/// Holds the device push identity handed to the host's `tether-notify`. Failures are logged
+/// Holds the device push identity handed to the host's `tether`. Failures are logged
 /// and swallowed: push must never block or throw into UI.
 @MainActor
 public final class PushRegistrar {
@@ -29,11 +29,35 @@ public final class PushRegistrar {
   }
 
   /// The device's push identity for the v5 SSH path: the app hands this to the
-  /// host's `tether-notify register` over SSH. `nil` until APNs has issued a token.
+  /// host's `tether register` over SSH. `nil` until APNs has issued a token.
   public struct PushIdentity: Sendable {
     public let token: String
     public let secretKey: String
     public let label: String
+  }
+
+  /// What the host's `tether` runs to learn this device; every value is quoted.
+  nonisolated static func registerCommand(notify: String, identity: PushIdentity) -> String {
+    "\(notify) register \(shellQuote(identity.token)) \(shellQuote(identity.secretKey)) \(shellQuote(identity.label))"
+  }
+
+  /// Hosts already told this launch, by address: the chat-only flow has no terminal
+  /// connection to register from.
+  private nonisolated static let registeredHosts = LockedBox(Set<String>())
+
+  /// One-off registration for a host opened without a terminal. Best-effort, once per host
+  /// per launch.
+  nonisolated static func registerOverSSH(
+    identity: PushIdentity, config: SSHConnectionConfig, store: HostKeyStore
+  ) async {
+    let key = "\(config.username)@\(config.host):\(config.port)"
+    guard registeredHosts.update({ $0.insert(key).inserted }) else { return }
+    let command = registerCommand(notify: "~/.local/bin/tether", identity: identity) + " >/dev/null 2>&1"
+    do {
+      try await SSHConnector.execStream(config: config, store: store, command: command) { _ in true }
+    } catch {
+      registeredHosts.update { $0.remove(key) }
+    }
   }
 
   public func pushIdentity() -> PushIdentity? {

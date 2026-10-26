@@ -117,6 +117,15 @@ public final class SSHTerminalController {
   public let title: String
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
+  /// The host's chats from `tether acp ls`; empty when the host has none or lacks the command.
+  var chats: [ACPChatSummary] = []
+  /// False once the host answered `acp status` as an unknown command.
+  @ObservationIgnored var chatStatusSupported = true
+  /// A chat a notification tap asked for; the terminal screen swaps it in and clears this.
+  var requestedChat: String?
+  #if DEBUG
+  @ObservationIgnored var debugChatModel: ((ChatRoute) -> ChatSessionModel)?
+  #endif
   public private(set) var attach: String
   /// False on a host with no zmx sessions: the PTY is a bare login shell until one is created.
   public private(set) var hasSession = true
@@ -170,19 +179,19 @@ public final class SSHTerminalController {
 
   private let pathObserver = NetworkPathObserver()
   /// Opened lazily on first use, which is always after the terminal connects.
-  private let control: ControlConnection
+  let control: ControlConnection
   /// `gh` talks to GitHub and can take seconds; on its own connection it never holds
   /// the session list or the diff behind it.
   private let ghControl: ControlConnection
   static let zmx = "~/.local/bin/zmx"
-  private static let notify = "~/.local/bin/tether-notify"
+  private static let notify = "~/.local/bin/tether"
   static let agentStatusCommand =
     "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"
   private static let agentStatusStaleAfter: TimeInterval = 30
   private let pipeline: TerminalPipeline
   private var themeSequence: UInt64 = 0
-  private let config: SSHConnectionConfig
-  private let hostKeyStore: HostKeyStore
+  let config: SSHConnectionConfig
+  let hostKeyStore: HostKeyStore
   private let pushIdentity: PushRegistrar.PushIdentity?
   private var didRegisterPush = false
   private var connectInFlight = false
@@ -321,7 +330,7 @@ public final class SSHTerminalController {
   private func schedulePushRegister() {
     guard !didRegisterPush, let id = pushIdentity else { return }
     didRegisterPush = true
-    let command = "\(Self.notify) register \(shellQuote(id.token)) \(shellQuote(id.secretKey)) \(shellQuote(id.label))"
+    let command = PushRegistrar.registerCommand(notify: Self.notify, identity: id)
     Task {
       try? await Task.sleep(nanoseconds: 2_000_000_000)
       _ = try? await control.exec(command)
@@ -338,6 +347,7 @@ public final class SSHTerminalController {
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
+    await refreshChats()
     await refreshAgentStatus()
   }
 
@@ -847,9 +857,9 @@ public final class SSHTerminalController {
     await suspendNow(flushingPush: true)
   }
 
-  /// Starts `tether-notify flush` detached on the host and returns at once: it waits there for
+  /// Starts `tether flush` detached on the host and returns at once: it waits there for
   /// the attach client to be gone, then sends the push the host skipped while this phone was
-  /// attached. A missing `tether-notify` is not an error.
+  /// attached. A missing `tether` is not an error.
   nonisolated static func flushPushCommand(session: String) -> String {
     "command -v \(notify) >/dev/null && { nohup \(notify) flush --session \(shellQuote(session)) >/dev/null 2>&1 </dev/null & }"
   }

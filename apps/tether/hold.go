@@ -130,7 +130,7 @@ func runHold(args []string, d holdDeps) error {
 		})
 	})
 	if err != nil {
-		fmt.Fprintf(d.stderr, "tether-notify: hold for %s not saved: %v\n", *session, err)
+		fmt.Fprintf(d.stderr, "tether: hold for %s not saved: %v\n", *session, err)
 		return errNotHeld
 	}
 
@@ -148,7 +148,7 @@ func runHold(args []string, d holdDeps) error {
 		content.Options = optionButtons(questions)
 	}
 	if err := d.push(content, agentCollapseID(*session)); err != nil {
-		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
+		fmt.Fprintf(d.stderr, "tether: push for %s failed: %v\n", *session, err)
 		if question {
 			fmt.Fprintln(d.stdout, stored.Version)
 			return nil

@@ -3,7 +3,7 @@ import XCTest
 @testable import TetherKit
 
 /// Skipped unless TETHER_SSH_HOST, TETHER_SSH_USER and TETHER_SSH_PASSWORD or _KEY_PEM are set.
-/// Optional: TETHER_SSH_PORT, TETHER_SSH_ATTACH (zmx session to attach).
+/// Optional: TETHER_SSH_PORT, TETHER_SSH_ATTACH (zmx session to attach, PTY tests only).
 final class SSHLiveConnectTests: XCTestCase {
   func test_live_connector_reaches_a_shell_and_runs_a_command() async throws {
     let stream = try await connectLive()
@@ -34,7 +34,38 @@ final class SSHLiveConnectTests: XCTestCase {
     XCTAssertLessThan(worst, 0.4, "worst idle round trip \(worst)s")
   }
 
+  /// The chat client talks to the host over a non-PTY exec channel, so the channel has to carry
+  /// bytes both ways: this writes through `cat` and reads every byte back, binary included.
+  func test_live_exec_channel_is_bidirectional() async throws {
+    let (config, store) = try Self.liveConfig()
+    let stream = try await SSHConnector.connectExec(config: config, store: store, command: "cat")
+    var payload = Data("TETHER_EXEC_LIVE_\(Int.random(in: 1000...9999))\n".utf8)
+    payload.append(Data((0...255).map { UInt8($0) }))
+    payload.append(Data("\nsecond line\n".utf8))
+
+    let watchdog = Task {
+      try await Task.sleep(nanoseconds: 15_000_000_000)
+      await stream.close()
+    }
+    defer { watchdog.cancel() }
+    try await stream.write(payload.prefix(40))
+    try await stream.write(payload.dropFirst(40))
+    var received = Data()
+    while received.count < payload.count, let chunk = try await stream.read() { received.append(chunk) }
+    await stream.close()
+    XCTAssertEqual(received, payload, "cat must hand back exactly what was written")
+  }
+
   private func connectLive() async throws -> any TerminalByteStream {
+    let (config, store) = try Self.liveConfig()
+    let stream = try await SSHConnector.connect(config: config, store: store)
+    if let attach = ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] {
+      try await stream.write(Data("~/.local/bin/zmx attach \(attach)\n".utf8))
+    }
+    return stream
+  }
+
+  static func liveConfig() throws -> (SSHConnectionConfig, UserDefaultsHostKeyStore) {
     let env = ProcessInfo.processInfo.environment
     guard let host = env["TETHER_SSH_HOST"], let user = env["TETHER_SSH_USER"] else {
       throw XCTSkip("Set TETHER_SSH_HOST/USER (+ password or key) to run the live SSH proof.")
@@ -58,11 +89,7 @@ final class SSHLiveConnectTests: XCTestCase {
     )
     // A throwaway store so the first-connect TOFU pin never touches real defaults.
     let store = UserDefaultsHostKeyStore(defaults: UserDefaults(suiteName: "ssh.live.\(UUID().uuidString)")!)
-    let stream = try await SSHConnector.connect(config: config, store: store)
-    if let attach = env["TETHER_SSH_ATTACH"] {
-      try await stream.write(Data("~/.local/bin/zmx attach \(attach)\n".utf8))
-    }
-    return stream
+    return (config, store)
   }
 
   private func drain(_ stream: any TerminalByteStream, until needle: String, timeout: TimeInterval) async throws {

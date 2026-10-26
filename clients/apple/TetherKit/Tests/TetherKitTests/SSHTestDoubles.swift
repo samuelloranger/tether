@@ -30,7 +30,7 @@ private struct NullByteStream: TerminalByteStream {
 }
 
 final class FakeOps: SSHConnectionOps, @unchecked Sendable {
-  enum Step: Equatable { case connect, fingerprint, auth(SSHCredential), openPTY, teardown }
+  enum Step: Equatable { case connect, fingerprint, auth(SSHCredential), openPTY, openExec(String), teardown }
 
   var calls: [Step] = []
   var handshakes = 0
@@ -93,6 +93,12 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
     return NullByteStream()
   }
 
+  func openExecChannel(command: String) throws -> any TerminalByteStream {
+    calls.append(.openExec(command))
+    if let openError { throw openError }
+    return NullByteStream()
+  }
+
   func exec(_ command: String) throws -> String {
     // A session whose socket was cut fails every later command, as a real one does.
     lock.lock(); let cut = interruptCount > 0; lock.unlock()
@@ -111,7 +117,9 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
 }
 
 /// Polls `condition` until it holds or `timeout` passes.
-func eventually(timeout: TimeInterval = 2, _ condition: @escaping () -> Bool) async -> Bool {
+/// Polls on the main actor, where the models under test keep their state.
+@MainActor
+func eventually(timeout: TimeInterval = 2, _ condition: @MainActor () -> Bool) async -> Bool {
   let end = Date().addingTimeInterval(timeout)
   while Date() < end {
     if condition() { return true }

@@ -45,7 +45,9 @@ func pushLevel(category string) string {
 	switch category {
 	case "tether.agent.waiting", questionCategory:
 		return levelUrgent
-	case "tether.agent.done":
+	case acpPermissionCategory:
+		return levelUrgent
+	case "tether.agent.done", acpDoneCategory:
 		return levelQuiet
 	}
 	return levelNormal
@@ -74,6 +76,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "version":
+		err = runVersion(os.Args[2:], os.Stdout)
 	case "register":
 		err = cmdRegister(os.Args[2:])
 	case "notify":
@@ -91,11 +95,11 @@ func main() {
 	case "answer":
 		err = runAnswer(os.Args[2:], defaultAnswerDeps())
 		if errors.Is(err, errStale) {
-			fmt.Fprintln(os.Stderr, "tether-notify: the agent has moved on; nothing was sent")
+			fmt.Fprintln(os.Stderr, "tether: the agent has moved on; nothing was sent")
 			os.Exit(3)
 		}
 		if errors.Is(err, errNotSubmitted) {
-			fmt.Fprintln(os.Stderr, "tether-notify: typed, but the agent moved on before Return")
+			fmt.Fprintln(os.Stderr, "tether: typed, but the agent moved on before Return")
 			os.Exit(4)
 		}
 	case "hold":
@@ -108,22 +112,39 @@ func main() {
 	case "pending":
 		err = runPending(os.Args[2:], defaultPendingDeps())
 		if errors.Is(err, errStale) {
-			fmt.Fprintln(os.Stderr, "tether-notify: nothing is waiting for an answer")
+			fmt.Fprintln(os.Stderr, "tether: nothing is waiting for an answer")
 			os.Exit(3)
+		}
+	case "acp":
+		err = runACP(os.Args[2:])
+		switch {
+		case errors.Is(err, errNoSession):
+			fmt.Fprintln(os.Stderr, "tether: no such acp session")
+			os.Exit(3)
+		case errors.Is(err, errNotOutstanding):
+			fmt.Fprintln(os.Stderr, "tether: that request is not outstanding (already answered, or the agent moved on)")
+			os.Exit(3)
+		case errors.Is(err, errBadOption):
+			fmt.Fprintln(os.Stderr, "tether: that option is not one of the choices the request offered")
+			os.Exit(3)
+		case errors.Is(err, errReplaced):
+			fmt.Fprintln(os.Stderr, "tether: replaced by another client")
+			os.Exit(5)
 		}
 	default:
 		usage()
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "tether-notify:", err)
+		fmt.Fprintln(os.Stderr, "tether:", err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `tether-notify — encrypted push for the SSH host
+	fmt.Fprint(os.Stderr, `tether — the Tether host tool: encrypted push, agent state, chats
 
+  version [--json]                           print the version and the protocol number the app checks
   register <token> <secretKeyB64> [label]   register/replace a phone
   notify --title T --body B [--link L] [--category C] [--collapse ID] [--dry-run]
   state --session S --agent A --state working|waiting|done|clear
@@ -147,6 +168,21 @@ func usage() {
                                              {"release":"attached|stale"}
   pending --session S                        print the held question for the phone's answer sheet
                                              (exit 3 if none)
+  acp attach NAME [--spawn CMD] [--cwd DIR] [--from N] [--linger D]
+                                             hold an ACP agent that outlives ssh: raw JSON-RPC on
+                                             stdin/stdout, replayed from byte N of its log (exit 3
+                                             if no session and no --spawn; 5 if replaced)
+  acp answer NAME --request ID (--option VALUE | --cancel | --decline)
+                                             answer a held session/request_permission or elicitation/create
+                                             request through the daemon (exit 3 if it is not outstanding, or
+                                             the elicitation did not offer that option; --decline is
+                                             for elicitations)
+  acp answers NAME                           print the answers made this way as JSON {"<id>":"<optionId>|cancelled"}
+  acp ls | acp kill NAME                     list or stop held agents
+  acp status [NAME...]                       one JSON line per session: state, turn (idle|working|waiting),
+                                             title, cwd, created, logBytes, endedReason (exit 3 if unknown)
+  acp sessions CWD [--limit N] [--agent-cmd CMD]
+                                             the agent's saved conversations for CWD as JSON lines, newest first
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
@@ -201,7 +237,7 @@ func cmdNotify(args []string) error {
 	link := fs.String("link", "", "tether:// deep link (optional)")
 	category := fs.String("category", "", "iOS notification category (optional)")
 	session := fs.String("session", "", "zmx session name, shown as the subtitle and used to group pushes (optional)")
-	collapse := fs.String("collapse", "tether-notify", "APNs collapse id")
+	collapse := fs.String("collapse", "tether", "APNs collapse id")
 	dryRun := fs.Bool("dry-run", false, "print requests instead of sending")
 	if err := fs.Parse(args); err != nil {
 		return err

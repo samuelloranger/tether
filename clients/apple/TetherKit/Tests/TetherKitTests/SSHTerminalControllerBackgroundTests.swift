@@ -36,7 +36,7 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
     await controller.connect()
     await controller.detachAfterGrace(0.05)
     XCTAssertTrue(stream.closed)
-    XCTAssertTrue(ops.commands.contains { $0.contains("tether-notify flush --session 'work'") })
+    XCTAssertTrue(ops.commands.contains { $0.contains("tether flush --session 'work'") })
     await controller.leave()
   }
 
@@ -151,7 +151,7 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
 final class FlushPushCommandTests: XCTestCase {
   func test_the_command_runs_detached_quotes_the_session_and_tolerates_a_missing_tool() {
     let command = SSHTerminalController.flushPushCommand(session: "it's work")
-    let tool = "~/.local/bin/tether-notify"
+    let tool = "~/.local/bin/tether"
     XCTAssertEqual(
       command,
       "command -v \(tool) >/dev/null && { nohup \(tool) flush --session \(shellQuote("it's work")) >/dev/null 2>&1 </dev/null & }"

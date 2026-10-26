@@ -196,7 +196,7 @@ final class NotificationActionsTests: XCTestCase {
     let failure = await runner.run(approve)
     XCTAssertNil(failure)
     XCTAssertEqual(hosts.value, ["10.0.0.2"])
-    XCTAssertTrue(commands.value.first?.hasPrefix("~/.local/bin/tether-notify answer --session 'work' ") == true)
+    XCTAssertTrue(commands.value.first?.hasPrefix("~/.local/bin/tether answer --session 'work' ") == true)
   }
 
   func test_a_label_two_machines_answer_to_is_refused_without_dialing() async {
@@ -224,13 +224,13 @@ final class NotificationActionsTests: XCTestCase {
   func test_host_answers_map_to_clear_messages() {
     let failure = { NotificationActionRunner.failure(output: $0, session: "work", machine: "devbox") }
     XCTAssertNil(failure("__tether_sent=0\n"))
-    XCTAssertEqual(failure("tether-notify: the agent has moved on\n__tether_sent=3\n"),
+    XCTAssertEqual(failure("tether: the agent has moved on\n__tether_sent=3\n"),
                    "The agent in “work” has moved on; nothing was sent.")
     XCTAssertEqual(failure("typed\n__tether_sent=4\n"),
                    "The reply was typed in “work”, but the agent moved on before it was submitted.")
-    XCTAssertEqual(failure("zsh: no such file\n__tether_sent=127\n"), "Update tether-notify on devbox to answer notifications.")
-    XCTAssertEqual(failure("usage…\n__tether_sent=2\n"), "Update tether-notify on devbox to answer notifications.")
-    XCTAssertEqual(failure("tether-notify: zmx send: exit status 1\n__tether_sent=1\n"), "tether-notify: zmx send: exit status 1")
+    XCTAssertEqual(failure("zsh: no such file\n__tether_sent=127\n"), "Update tether on devbox to answer notifications.")
+    XCTAssertEqual(failure("usage…\n__tether_sent=2\n"), "Update tether on devbox to answer notifications.")
+    XCTAssertEqual(failure("tether: zmx send: exit status 1\n__tether_sent=1\n"), "tether: zmx send: exit status 1")
     XCTAssertEqual(failure(""), "No answer from devbox.")
   }
 
@@ -295,7 +295,7 @@ final class NotificationActionsTests: XCTestCase {
     XCTAssertEqual(pending.version, "v7")
     XCTAssertEqual(pending.questions.first?.options.map(\.label), ["Postgres", "SQLite"])
     XCTAssertEqual(pending.questions.first?.options.first?.description, "server")
-    XCTAssertTrue(commands.value.first?.hasPrefix("~/.local/bin/tether-notify pending --session 'work'") == true)
+    XCTAssertTrue(commands.value.first?.hasPrefix("~/.local/bin/tether pending --session 'work'") == true)
   }
 
   func test_a_question_that_moved_on_says_so() async {

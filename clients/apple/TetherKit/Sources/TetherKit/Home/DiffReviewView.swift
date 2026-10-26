@@ -246,25 +246,43 @@ private struct DiffRowView: View {
 
 struct MarkdownBodyView: View {
   let blocks: [MarkdownBlock]
+  /// Chat prose: body-sized, full contrast, a little more air between blocks.
+  var reading = false
+
+  private var proseFont: Font { reading ? .subheadline : .footnote }
+  private var proseColor: Color { reading ? TetherColors.textPrimary : TetherColors.textSecondary }
+
+  /// Chat prose sets inline code a notch under the text with a faint tint.
+  private func styled(_ text: AttributedString) -> AttributedString {
+    guard reading else { return text }
+    var out = text
+    for run in out.runs where run.inlinePresentationIntent?.contains(.code) == true {
+      out[run.range].font = .system(.footnote, design: .monospaced)
+      out[run.range].backgroundColor = TetherColors.surfaceRaised
+    }
+    return out
+  }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: reading ? 9 : 10) {
       ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
         switch block {
         case let .heading(level, text):
           Text(text)
-            .font(level == 1 ? .headline : level == 2 ? .subheadline.weight(.semibold) : .footnote.weight(.semibold))
+            .font(reading
+              ? (level == 1 ? .headline : .subheadline.weight(.semibold))
+              : (level == 1 ? .headline : level == 2 ? .subheadline.weight(.semibold) : .footnote.weight(.semibold)))
             .foregroundStyle(TetherColors.textPrimary)
             .padding(.top, 2)
         case let .paragraph(text):
-          Text(text).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          Text(styled(text)).font(proseFont).foregroundStyle(proseColor).lineSpacing(reading ? 2 : 0)
         case let .list(items):
           listRows(items)
         case let .code(lines):
           ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 1) {
               ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line.isEmpty ? " " : line).font(.caption2.monospaced())
+                Text(line.isEmpty ? " " : line).font(reading ? .footnote.monospaced() : .caption2.monospaced())
                   .foregroundStyle(TetherColors.textPrimary)
               }
             }
@@ -272,7 +290,7 @@ struct MarkdownBodyView: View {
           }
           .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
         case let .quote(text):
-          Text(text).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
+          Text(text).font(proseFont.italic()).foregroundStyle(TetherColors.textFaint)
             .quoteBar()
         case let .table(header, rows):
           table(header: header, rows: rows)
@@ -284,12 +302,12 @@ struct MarkdownBodyView: View {
   }
 
   private func listRows(_ items: [MarkdownListItem]) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: reading ? 4 : 5) {
       ForEach(Array(items.enumerated()), id: \.offset) { _, item in
         let row = HStack(alignment: .firstTextBaseline, spacing: 7) {
           marker(item.marker).frame(minWidth: 12, alignment: .leading)
-          Text(item.text).font(item.quoted ? .footnote.italic() : .footnote)
-            .foregroundStyle(item.quoted ? TetherColors.textFaint : TetherColors.textSecondary)
+          Text(styled(item.text)).font(item.quoted ? proseFont.italic() : proseFont)
+            .foregroundStyle(item.quoted ? TetherColors.textFaint : proseColor)
         }
         .padding(.leading, CGFloat(item.depth) * 16)
         if item.quoted { row.quoteBar() } else { row }
@@ -326,7 +344,7 @@ struct MarkdownBodyView: View {
         ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
           GridRow {
             ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-              Text(cell).font(.caption).foregroundStyle(TetherColors.textSecondary)
+              Text(cell).font(reading ? .footnote : .caption).foregroundStyle(proseColor)
             }
           }
         }

@@ -8,6 +8,24 @@ enum SSHConnector {
     }
   }
 
+  /// A bidirectional, non-PTY exec channel: what the host command reads and writes is plain bytes.
+  static func connectExec(
+    config: SSHConnectionConfig, store: HostKeyStore, command: String
+  ) async throws -> any TerminalByteStream {
+    try await connectExec(config: config, store: store, command: command, ops: LibSSH2Ops(config: config))
+  }
+
+  static func connectExec(
+    config: SSHConnectionConfig,
+    store: HostKeyStore,
+    command: String,
+    ops: any SSHConnectionOps & Sendable
+  ) async throws -> any TerminalByteStream {
+    try await onThread(named: "tether.ssh.connectExec") {
+      try SSHConnectionSequence.runExec(config: config, ops: ops, store: store, command: command)
+    }
+  }
+
   /// `onChunk` runs on the worker thread. Cancelling the task shuts the socket, so a quiet
   /// command stops too.
   static func execStream(

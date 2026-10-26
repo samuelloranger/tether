@@ -1,6 +1,6 @@
 import Foundation
 
-/// One zmx session's agent state, as `tether-notify status` reports it.
+/// One zmx session's agent state, as `tether status` reports it.
 public struct AgentStatus: Equatable, Sendable, Identifiable {
   public enum State: String, Sendable { case working, waiting, done }
 
