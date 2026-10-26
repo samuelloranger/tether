@@ -71,6 +71,14 @@ pub fn visible(items: &[Item]) -> Vec<Item> {
         .collect()
 }
 
+/// The block the laid-out window begins at now, when it does not begin at the first one.
+pub fn current_start(s: &Session) -> Option<i64> {
+    let blocks = grouping::blocks(&visible(&s.state().items));
+    let last: Vec<i64> = blocks.iter().map(Block::last_id).collect();
+    let range = grouping::window_range(&last, s.window_start);
+    (range.start > 0).then(|| last[range.start])
+}
+
 pub fn earlier_start(s: &Session) -> Option<i64> {
     let blocks = grouping::blocks(&visible(&s.state().items));
     let last: Vec<i64> = blocks.iter().map(Block::last_id).collect();

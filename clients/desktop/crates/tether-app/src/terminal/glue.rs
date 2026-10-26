@@ -144,6 +144,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(target_os = "linux")]
     crate::platform::linux::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    dev_chat();
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
         wire_callbacks(&app.ui);
@@ -154,6 +155,30 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         .ui
         .window()
         .with_winit_window(|w| w.set_ime_allowed(true));
+}
+
+/// Debug builds only: `TETHER_DEV_CHAT` starts a chat in that folder once the machine is open,
+/// and `TETHER_DEV_CHAT_SEND` sends its `|`-separated prompts a few seconds apart.
+fn dev_chat() {
+    use crate::terminal::model::chat::ChatMsg;
+    let Some(folder) = crate::app::dev_env("TETHER_DEV_CHAT") else {
+        return;
+    };
+    slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
+        send(Msg::Chat(ChatMsg::NewChat(0)));
+        send(Msg::Chat(ChatMsg::NewChatFolder(folder)));
+        send(Msg::Chat(ChatMsg::NewChatStart));
+    });
+    let prompts = crate::app::dev_env("TETHER_DEV_CHAT_SEND").unwrap_or_default();
+    for (i, text) in prompts.split('|').filter(|p| !p.is_empty()).enumerate() {
+        let text = text.to_string();
+        let at = std::time::Duration::from_secs(7 + 6 * i as u64);
+        slint::Timer::single_shot(at, move || {
+            let cursor_byte = text.len();
+            send(Msg::Chat(ChatMsg::DraftEdited { text, cursor_byte }));
+            send(Msg::Chat(ChatMsg::Send));
+        });
+    }
 }
 
 /// Callbacks route through `current()`, so wiring them once per window is enough:

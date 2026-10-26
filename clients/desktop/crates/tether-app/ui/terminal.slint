@@ -285,7 +285,7 @@ component SessionTab inherits Rectangle {
 component AddTab inherits Rectangle {
     width: 28px;
     border-radius: 7px;
-    background: touch.has-hover ? Tokens.accent.with-alpha(0.12) : transparent;
+    background: touch.has-hover || ChatVm.add-menu ? Tokens.accent.with-alpha(0.12) : transparent;
     Image {
         source: @image-url("icons/plus.svg");
         colorize: Tokens.accent;
@@ -294,27 +294,12 @@ component AddTab inherits Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
     }
-    touch := TouchArea { mouse-cursor: pointer; clicked => { menu.show(); } }
-    menu := PopupWindow {
-        x: 0;
-        y: root.height + 4px;
-        close-policy: PopupClosePolicy.close-on-click-outside;
-        Rectangle {
-            width: 190px;
-            height: items.preferred-height;
-            background: Tokens.surface;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: Tokens.border;
-            drop-shadow-blur: 16px;
-            drop-shadow-color: #00000080;
-            drop-shadow-offset-y: 4px;
-            items := VerticalLayout {
-                padding: 4px;
-                MenuItem { text: "New session"; clicked => { menu.close(); TerminalVm.new-session(); } }
-                MenuItem { text: "New chat\u{2026}"; clicked => { menu.close(); ChatVm.new-chat(0); } }
-                MenuItem { text: "Continue a chat\u{2026}"; clicked => { menu.close(); ChatVm.new-chat(1); } }
-            }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            ChatVm.add-menu-x = self.absolute-position.x;
+            ChatVm.add-menu-y = self.absolute-position.y + self.height + 4px;
+            ChatVm.add-menu = true;
         }
     }
 }
@@ -456,6 +441,23 @@ export component TerminalPage inherits Rectangle {
                 if TerminalVm.menu-tab != "": MenuItem { text: "Kill session"; danger: true; clicked => { TerminalVm.kill-from-menu(); } }
                 if TerminalVm.menu-link != "": MenuItem { text: "Copy link"; clicked => { TerminalVm.copy-link(); } }
                 if TerminalVm.menu-link != "": MenuItem { text: TerminalVm.menu-copy ? "Copy" : "Paste"; clicked => { TerminalVm.menu-primary(); } }
+            }
+        }
+    }
+    if ChatVm.add-menu: TouchArea {
+        clicked => { ChatVm.add-menu = false; }
+        Rectangle {
+            x: min(ChatVm.add-menu-x, root.width - self.width - 8px);
+            y: ChatVm.add-menu-y;
+            width: 190px;
+            height: add-items.preferred-height;
+            background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
+            drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
+            add-items := VerticalLayout {
+                padding: 4px;
+                MenuItem { text: "New session"; clicked => { ChatVm.add-menu = false; TerminalVm.new-session(); } }
+                MenuItem { text: "New chat\u{2026}"; clicked => { ChatVm.add-menu = false; ChatVm.new-chat(0); } }
+                MenuItem { text: "Continue a chat\u{2026}"; clicked => { ChatVm.add-menu = false; ChatVm.new-chat(1); } }
             }
         }
     }

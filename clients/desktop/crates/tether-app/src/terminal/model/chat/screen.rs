@@ -375,7 +375,7 @@ fn composer(s: &Session, screen: &mut ChatScreen) {
         c.banner = "This chat has ended. You can still read it.".into();
         c.banner_icon = Some(Icon::Moon);
     }
-    c.shown = !(s.question_typing && question);
+    c.shown = true;
     c.placeholder = if permission {
         "Answer the permission above"
     } else if question {

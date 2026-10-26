@@ -21,6 +21,7 @@ thread_local! {
     static ROWS: RefCell<Vec<Row>> = const { RefCell::new(Vec::new()) };
     static FIELDS: RefCell<Vec<FieldView>> = const { RefCell::new(Vec::new()) };
     static DRAFT_SEQ: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static DIALOG_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
@@ -388,10 +389,10 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     match &s.new_chat {
         Some(nc) => {
             vm.set_nc_open(true);
-            if vm.get_nc_mode() != i32::from(nc.mode) {
+            // The field is the user's once the dialog is up: an echo of an older keystroke
+            // arriving late would undo the newer ones.
+            if !DIALOG_SHOWN.replace(true) {
                 vm.set_nc_mode(i32::from(nc.mode));
-            }
-            if vm.get_nc_folder().as_str() != nc.folder {
                 vm.set_nc_folder(nc.folder.as_str().into());
             }
             vm.set_nc_busy(nc.busy);
@@ -417,7 +418,10 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                     .collect(),
             ));
         }
-        None => vm.set_nc_open(false),
+        None => {
+            DIALOG_SHOWN.set(false);
+            vm.set_nc_open(false);
+        }
     }
     if !s.active {
         vm.set_ctl_open(false);
@@ -669,6 +673,7 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_close_viewer(|| send(ChatMsg::CloseViewer));
     vm.on_copy_folder(|| send(ChatMsg::CopyFolder));
     vm.on_earlier(|| send(ChatMsg::Earlier));
+    vm.on_following(|at_end| send(ChatMsg::Following(at_end)));
     vm.on_retry(|k| send(ChatMsg::Retry(k.into())));
     vm.on_discard(|k| send(ChatMsg::Discard(k.into())));
     vm.on_sign_in_retry(|| send(ChatMsg::SignInRetry));
@@ -732,7 +737,6 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_q_open_custom(|n| send(ChatMsg::QuestionOpenCustom(n.into())));
     vm.on_q_submit(|| send(ChatMsg::QuestionSubmit));
     vm.on_q_decline(|| send(ChatMsg::QuestionDecline));
-    vm.on_q_typing(|t| send(ChatMsg::QuestionTyping(t)));
     vm.on_controls(|| send(ChatMsg::Controls));
     vm.on_ctl_close(|| send(ChatMsg::ControlsClose));
     vm.on_ctl_choose(|id, value| {
@@ -758,6 +762,7 @@ pub fn reset(ui: &crate::AppWindow) {
     ROWS.with(|r| r.borrow_mut().clear());
     FIELDS.with(|f| f.borrow_mut().clear());
     DRAFT_SEQ.with(|d| *d.borrow_mut() = None);
+    DIALOG_SHOWN.set(false);
     IMAGES.with(|i| i.borrow_mut().clear());
     let vm = ui.global::<ChatVm>();
     vm.set_rows(model(Vec::new()));
@@ -768,5 +773,17 @@ pub fn reset(ui: &crate::AppWindow) {
 /// Something of the chat's sits in front of the terminal: keys belong to it, not the PTY.
 pub fn takes_keys(ui: &crate::AppWindow) -> bool {
     let vm = ui.global::<ChatVm>();
-    vm.get_active() || vm.get_nc_open() || !vm.get_delete_title().is_empty() || vm.get_viewer_open()
+    vm.get_active()
+        || vm.get_add_menu()
+        || vm.get_nc_open()
+        || !vm.get_delete_title().is_empty()
+        || vm.get_viewer_open()
+}
+
+/// Esc on the "+" menu only closes it; the model never knew it was open.
+pub fn close_add_menu(ui: &crate::AppWindow) -> bool {
+    let vm = ui.global::<ChatVm>();
+    let open = vm.get_add_menu();
+    vm.set_add_menu(false);
+    open
 }

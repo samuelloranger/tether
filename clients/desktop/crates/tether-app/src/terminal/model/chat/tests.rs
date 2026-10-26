@@ -656,3 +656,141 @@ fn an_exec_failure_never_breaks_the_list() {
     });
     assert!(h.screen().tabs.is_empty());
 }
+
+#[test]
+fn a_new_chat_asked_from_home_waits_for_the_machine() {
+    use crate::terminal::model::{Msg, TerminalModel};
+    use crate::terminal::testkit::*;
+    let (mut m, _) = TerminalModel::new(
+        machine(),
+        crate::terminal::geometry::TermStyle::default(),
+        grid(),
+    );
+    m.handle(Msg::Chat(ChatMsg::NewChatWhenReady), t(0));
+    m.handle(Msg::Opened, t(1));
+    let fx = m.handle(
+        Msg::Ls {
+            id: 1,
+            result: Ok(vec![session("default", 1)]),
+        },
+        t(2),
+    );
+    let screen = fx.iter().find_map(|e| match e {
+        crate::terminal::model::Effect::Ui(crate::terminal::model::UiEffect::Chat(s)) => {
+            Some(s.clone())
+        }
+        _ => None,
+    });
+    assert!(screen.expect("a chat screen").new_chat.is_some());
+}
+
+#[test]
+fn a_signed_out_agent_offers_another_try_after_signing_in() {
+    let mut h = Harness::new();
+    let name = h.new_chat();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"Authentication required"}}"#,
+    );
+    h.settle();
+    let s = h.screen();
+    assert!(matches!(
+        rows(&s).last(),
+        Some(RowBody::SignedOut { retry: Some(0), message }) if message.contains("isn't signed in on devbox.local")
+    ));
+    assert!(!s.composer.can_send);
+    h.msg(ChatMsg::SignInRetry);
+    let writes = h.writes();
+    assert!(
+        writes[0].contains("\"method\":\"initialize\""),
+        "{writes:?}"
+    );
+    assert!(matches!(
+        rows(&h.screen()).last(),
+        Some(RowBody::SignedOut { retry: Some(1), .. })
+    ));
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":"Authentication required"}}"#,
+    );
+    assert!(matches!(
+        rows(&h.screen()).last(),
+        Some(RowBody::SignedOut { retry: Some(2), .. })
+    ));
+}
+
+#[test]
+fn a_long_transcript_lays_out_its_end_and_earlier_messages_grows_it() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    for n in 0..80 {
+        h.feed(
+            &name,
+            generation,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s1","update":{{"sessionUpdate":"agent_message_chunk","messageId":"m{n}","content":{{"type":"text","text":"reply {n}"}}}}}}}}"#
+            ),
+        );
+    }
+    let s = h.screen();
+    assert!(matches!(rows(&s)[0], RowBody::Earlier));
+    let shown = rows(&s)
+        .iter()
+        .filter(|r| matches!(r, RowBody::Markdown(_)))
+        .count();
+    assert_eq!(shown, 60);
+    h.msg(ChatMsg::Earlier);
+    let s = h.screen();
+    assert!(!matches!(rows(&s)[0], RowBody::Earlier));
+    assert!(matches!(rows(&s)[0], RowBody::Markdown(md) if md.text == "reply 0"));
+}
+
+#[test]
+fn scrolled_up_the_window_holds_its_start_and_back_at_the_end_it_follows_again() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    let reply = |n: usize| {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s1","update":{{"sessionUpdate":"agent_message_chunk","messageId":"m{n}","content":{{"type":"text","text":"reply {n}"}}}}}}}}"#
+        )
+    };
+    for n in 0..70 {
+        h.feed(&name, generation, &reply(n));
+    }
+    let first = |s: &ChatScreen| {
+        s.rows
+            .iter()
+            .find_map(|r| match &r.body {
+                RowBody::Markdown(md) => Some(md.text.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let before = first(&h.screen());
+    h.msg(ChatMsg::Following(false));
+    for n in 70..75 {
+        h.feed(&name, generation, &reply(n));
+    }
+    assert_eq!(
+        first(&h.screen()),
+        before,
+        "rows stay put while the reader is up there"
+    );
+    h.msg(ChatMsg::Following(true));
+    assert_ne!(first(&h.screen()), before);
+}

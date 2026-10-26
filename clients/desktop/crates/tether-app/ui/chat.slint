@@ -135,6 +135,10 @@ export struct SavedSessionVm {
 export global ChatVm {
     in property <bool> active;
     in property <[ChatTabVm]> tabs;
+    // The tab strip's "+" menu: a new session, a new chat, or an earlier conversation.
+    in-out property <bool> add-menu;
+    in-out property <length> add-menu-x;
+    in-out property <length> add-menu-y;
     in property <bool> has-chats;
     // The header line: the chat's title and how its link stands.
     in property <string> title;
@@ -242,6 +246,8 @@ export global ChatVm {
     callback close-viewer();
     callback copy-folder();
     callback earlier();
+    // The reader left the end of the transcript (false) or came back to it (true).
+    callback following(bool);
     callback retry(string);
     callback discard(string);
     callback sign-in-retry();
@@ -265,7 +271,6 @@ export global ChatVm {
     callback q-open-custom(string);
     callback q-submit();
     callback q-decline();
-    callback q-typing(bool);
     callback controls();
     callback ctl-close();
     callback ctl-choose(string, string);
@@ -471,8 +476,8 @@ component DiffRow inherits Rectangle {
     in property <string> new-no;
     in property <string> text;
     in property <bool> numbers: true;
-    height: max(18px, body.preferred-height + 2px);
-    background: root.kind == 1 ? Tokens.accent.with-alpha(0.08) : root.kind == 2 ? Tokens.success.with-alpha(0.12) : root.kind == 3 ? Tokens.danger.with-alpha(0.12) : transparent;
+    height: max(root.kind == 0 ? 28px : 18px, body.preferred-height + 2px);
+    background: root.kind == 0 ? Tokens.raised : root.kind == 1 ? Tokens.accent.with-alpha(0.08) : root.kind == 2 ? Tokens.success.with-alpha(0.12) : root.kind == 3 ? Tokens.danger.with-alpha(0.12) : transparent;
     if root.kind == 2 || root.kind == 3: Rectangle {
         x: 0;
         width: 2px;
@@ -495,8 +500,10 @@ component DiffRow inherits Rectangle {
             horizontal-stretch: 1;
             text: root.kind == 1 ? "\u{22EF}" : root.text;
             wrap: char-wrap;
+            vertical-alignment: center;
             font-family: Tokens.mono-font;
             font-size: 11.5px;
+            font-weight: root.kind == 0 ? 700 : 400;
             color: root.kind == 1 ? Tokens.text-faint : root.kind == 5 ? Tokens.text-secondary : Tokens.text;
         }
     }
@@ -890,6 +897,7 @@ component ChatHeader inherits Rectangle {
             }
         }
         if ChatVm.has-status: VerticalLayout {
+            horizontal-stretch: 0;
             alignment: center;
             status := Pressable {
                 height: 28px;
@@ -910,10 +918,12 @@ component ChatHeader inherits Rectangle {
             }
         }
         if ChatVm.phase == 3: VerticalLayout {
+            horizontal-stretch: 0;
             alignment: center;
             SmallAction { text: "Reconnect"; style: 3; clicked => { ChatVm.reconnect(); } }
         }
         if ChatVm.phase != 3: HorizontalLayout {
+            horizontal-stretch: 0;
             spacing: 6px;
             TextDot { ink: ChatStyle.phase-ink(ChatVm.phase); line-height: word.preferred-height; }
             word := Text { text: ChatVm.phase-word; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
@@ -1170,7 +1180,6 @@ component QField inherits Rectangle {
         enabled: ChatVm.q-enabled;
         selection-background-color: Tokens.accent.with-alpha(0.35);
         edited => { ChatVm.q-text(root.name, self.text); }
-        changed has-focus => { ChatVm.q-typing(self.has-focus); }
         key-pressed(e) => {
             if (e.text == Key.Return && !e.modifiers.shift) { self.clear-focus(); return accept; }
             reject
@@ -1292,6 +1301,7 @@ component QuestionCard inherits Card {
 
 component Composer inherits VerticalLayout {
     spacing: 6px;
+    init => { input.focus(); }
     property <int> focus-seq: ChatVm.focus-seq;
     property <int> caret-seq: ChatVm.caret-seq;
     changed focus-seq => { input.focus(); }
@@ -1483,6 +1493,7 @@ export component ChatPane inherits Rectangle {
                 changed follow => { self.sticking = true; self.content-y = self.end; }
                 changed content-height => { if (self.sticking) { self.content-y = self.end; } }
                 changed visible-height => { if (self.sticking) { self.content-y = self.end; } }
+                changed sticking => { ChatVm.following(self.sticking); }
                 scrolled => { self.sticking = self.content-y - self.end <= 48px; }
                 VerticalLayout {
                     padding-left: max(20px, (scroll.visible-width - ChatStyle.column) / 2);
@@ -1759,13 +1770,14 @@ export component ChatReview inherits Rectangle {
 export component ChatViewer inherits Rectangle {
     background: #000000e0;
     TouchArea { clicked => { ChatVm.close-viewer(); } }
+    // At most the picture's own size: a small screenshot is not blown up to the window.
     if !ChatVm.viewer-missing: Image {
-        x: 24px;
-        y: 24px;
-        width: parent.width - 48px;
-        height: parent.height - 48px;
+        property <float> fit: min(1, min((parent.width - 48px) / max(1px, self.source.width * 1px), (parent.height - 48px) / max(1px, self.source.height * 1px)));
+        width: self.source.width * 1px * self.fit;
+        height: self.source.height * 1px * self.fit;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
         source: ChatVm.viewer-image;
-        image-fit: contain;
     }
     if ChatVm.viewer-missing: Text { text: "Image not on this computer"; color: #ffffffcc; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
     IconButton {

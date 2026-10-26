@@ -673,6 +673,9 @@ impl TerminalModel {
             if let Some(name) = first {
                 self.activate(&name, fx);
             }
+            if self.chats.take_new_chat_when_ready() {
+                self.on_chat(chat::ChatMsg::NewChat(0), now, fx);
+            }
             fx.push(Effect::Redraw);
             return;
         }

@@ -115,7 +115,6 @@ pub struct Session {
     pub attachments: Vec<Attachment>,
     pub attach_error: Option<String>,
     pub question_drafts: HashMap<String, QuestionDraft>,
-    pub question_typing: bool,
     rev: u64,
     shown_rev: u64,
 }
@@ -191,7 +190,6 @@ impl Session {
             attachments: Vec::new(),
             attach_error: None,
             question_drafts: HashMap::new(),
-            question_typing: false,
             rev: 1,
             shown_rev: 0,
         }
@@ -1105,6 +1103,14 @@ impl Session {
             ChatMsg::Earlier => {
                 self.window_start = super::rows::earlier_start(self);
             }
+            // The window follows the end while the reader is there, and holds its start once
+            // they scroll up, so rows never leave from under them.
+            ChatMsg::Following(true) => self.window_start = None,
+            ChatMsg::Following(false) => {
+                if self.window_start.is_none() {
+                    self.window_start = super::rows::current_start(self);
+                }
+            }
             ChatMsg::Retry(key) => self.retry(&key, ctx),
             ChatMsg::Discard(key) => {
                 if let Ok(id) = uuid::Uuid::parse_str(&key) {
@@ -1160,7 +1166,6 @@ impl Session {
             }
             ChatMsg::QuestionSubmit => self.answer_question(QuestionAction::Accept, ctx),
             ChatMsg::QuestionDecline => self.answer_question(QuestionAction::Decline, ctx),
-            ChatMsg::QuestionTyping(typing) => self.question_typing = typing,
             ChatMsg::ControlsDismiss(id) => {
                 if matches!(self.option_changes.get(&id), Some(OptionChange::Failed(..))) {
                     self.option_changes.remove(&id);
@@ -1296,7 +1301,6 @@ impl Session {
             Default::default()
         };
         self.answer_failures.remove(&question.request_id);
-        self.question_typing = false;
         let Some(client) = self.client.as_mut() else {
             return;
         };

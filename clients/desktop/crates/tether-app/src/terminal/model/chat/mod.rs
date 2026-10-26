@@ -136,6 +136,8 @@ pub enum ChatMsg {
     // From the window.
     Select(String),
     Delete(String),
+    /// Home's Chat on a machine card: the dialog opens once the session list is in.
+    NewChatWhenReady,
     DeleteConfirmed,
     DeleteCancelled,
     NewChat(u8),
@@ -145,6 +147,7 @@ pub enum ChatMsg {
     CloseViewer,
     CopyFolder,
     Earlier,
+    Following(bool),
     Retry(String),
     Discard(String),
     SignInRetry,
@@ -180,7 +183,6 @@ pub enum ChatMsg {
     QuestionOpenCustom(String),
     QuestionSubmit,
     QuestionDecline,
-    QuestionTyping(bool),
     Controls,
     ControlsClose,
     ControlsChoose {
@@ -273,6 +275,7 @@ pub struct Chats {
     waiting_seen: HashSet<String>,
     /// The first listing after a connect only learns what is already waiting: nothing toasts.
     baseline: bool,
+    new_chat_when_ready: bool,
     dirty: bool,
     shown_at: Option<Duration>,
     last_screen: Option<ChatScreen>,
@@ -306,6 +309,7 @@ impl Chats {
             folder_copied_at: None,
             waiting_seen: HashSet::new(),
             baseline: true,
+            new_chat_when_ready: false,
             dirty: false,
             shown_at: None,
             last_screen: None,
@@ -527,6 +531,10 @@ impl Chats {
         self.select(&name, now, out);
     }
 
+    pub fn take_new_chat_when_ready(&mut self) -> bool {
+        std::mem::take(&mut self.new_chat_when_ready)
+    }
+
     /// `folder` is where the dialog starts: the active session's directory when it has one.
     pub fn open_new_chat(&mut self, mode: u8, folder: String, now: Duration, out: &mut Out) {
         self.dirty = true;
@@ -552,10 +560,17 @@ impl Chats {
         match msg {
             ChatMsg::Select(name) => self.select(&name, now, out),
             ChatMsg::Delete(name) => self.delete_prompt = Some(name),
-            ChatMsg::DeleteCancelled => self.delete_prompt = None,
+            ChatMsg::NewChatWhenReady => self.new_chat_when_ready = true,
+            ChatMsg::DeleteCancelled => {
+                self.delete_prompt = None;
+                self.focus_seq += 1;
+            }
             ChatMsg::DeleteConfirmed => self.delete_confirmed(now, out),
             ChatMsg::NewChat(mode) => self.open_new_chat(mode, "~".into(), now, out),
-            ChatMsg::NewChatCancel => self.new_chat = None,
+            ChatMsg::NewChatCancel => {
+                self.new_chat = None;
+                self.focus_seq += 1;
+            }
             ChatMsg::NewChatMode(mode) => {
                 if let Some(job) = self.new_chat.as_mut().and_then(|n| n.set_mode(mode, now)) {
                     out.jobs.push(job);
@@ -637,6 +652,7 @@ impl Chats {
             ChatMsg::ControlsClose => {
                 self.controls_open = false;
                 self.bypass = None;
+                self.focus_seq += 1;
             }
             ChatMsg::ControlsChoose { id, value } => {
                 let bypass = id == "mode" && value == "bypassPermissions";
@@ -654,7 +670,10 @@ impl Chats {
                     self.with_session(&name, now, out, |s, ctx| s.set_option(&id, &value, ctx));
                 }
             }
-            ChatMsg::BypassCancelled => self.bypass = None,
+            ChatMsg::BypassCancelled => {
+                self.bypass = None;
+                self.focus_seq += 1;
+            }
             ChatMsg::ControlsCommand(text) => {
                 if let Some(name) = self.active.clone() {
                     let sent = self
@@ -673,9 +692,15 @@ impl Chats {
                 }
             }
             ChatMsg::Review => self.review = true,
-            ChatMsg::CloseReview => self.review = false,
+            ChatMsg::CloseReview => {
+                self.review = false;
+                self.focus_seq += 1;
+            }
             ChatMsg::OpenImage(id) => self.viewer = Some(id),
-            ChatMsg::CloseViewer => self.viewer = None,
+            ChatMsg::CloseViewer => {
+                self.viewer = None;
+                self.focus_seq += 1;
+            }
             ChatMsg::CopyFolder => {
                 if let Some(s) = self.active_session() {
                     out.clipboard = Some(s.cwd.clone());
@@ -800,6 +825,8 @@ impl Chats {
     }
 
     fn escape(&mut self, now: Duration, out: &mut Out) {
+        // Whatever closes, the keyboard goes back to the composer.
+        self.focus_seq += 1;
         if self.delete_prompt.take().is_some() {
             return;
         }
