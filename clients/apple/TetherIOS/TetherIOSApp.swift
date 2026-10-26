@@ -46,7 +46,7 @@ struct TetherIOSApp: App {
         AppRootView(demoModel: .preview())
       } else if ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] != nil {
         HomeView(
-          model: .preview(),
+          model: ProcessInfo.processInfo.environment["TETHER_HOME_PREVIEW"] == "neutral" ? .neutralPreview() : .preview(),
           initialTab: ProcessInfo.processInfo.environment["TETHER_HOME_TAB"] == "keys" ? .keys : .machines,
           onOpen: { _ in },
           onChat: { _ in }

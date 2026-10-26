@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform: iOS | Windows | Linux" />
 </p>
 
-A native terminal for your own machines, on iOS, Windows and Linux. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone or PC. Tether is a pure client: **no server to run, nothing exposed but SSH.**
+A native terminal for your own machines, on iOS, Windows and Linux, plus a Claude Code chat client on iPhone. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone or PC. Tether is a pure client: **no server to run, nothing exposed but SSH.**
 
 > **v5 rewrite.** Earlier Tether ran a Bun server with a custom Noise transport plus desktop and web clients. v5 drops all of it for native apps over SSH: iOS, and a desktop client for Windows and Linux. The only host-side piece is `tether`, a tiny tool for push.
 
@@ -20,7 +20,22 @@ A native terminal for your own machines, on iOS, Windows and Linux. Tether conne
 - **A real terminal** — full VT emulator (TUIs, box drawing, CJK / emoji) on SwiftTerm, rendered natively. Live session switching, per-session working directory, scrollback history you can select and copy.
 - **On-device key vault** — generate ed25519 keys in the Keychain, import or paste existing ones, see each key's SSH randomart and fingerprint. Private halves never leave the device except in memory, to libssh2.
 - **Trust on first use** — an unknown host key is pinned on first connect; a later change is refused.
+- **Chat (iPhone)** — talk to Claude Code on a host from a native chat screen, over the Agent Client Protocol (ACP) through the same SSH connection. Tool calls group into rows with diffs, permission and plan requests become approval cards, the agent's questions become choice cards, and you pick mode, model and effort, run subagents, or continue an earlier chat. The host needs Node.js and the `tether` tool.
 - **Built in** — git diff of the session's working directory, send a file or photo (SCP), kill a session, and encrypted push when an agent needs you.
+
+## Screenshots
+
+The iOS app on synthetic data (a made-up host and project).
+
+| <img src="docs/screenshots/01-home-machines.png" width="240" alt="Home with machines"> | <img src="docs/screenshots/02-terminal-sessions-drawer.png" width="240" alt="Sessions drawer"> | <img src="docs/screenshots/03-chat-finished-turn.png" width="240" alt="A finished chat turn"> |
+| --- | --- | --- |
+| Home: your machines, with Chat and Open | Terminal sessions and chats, with working and needs-you states | A chat turn with grouped tool rows |
+
+| <img src="docs/screenshots/04-chat-permission-diff.png" width="240" alt="Permission card with a diff"> | <img src="docs/screenshots/05-chat-plan-approval.png" width="240" alt="Plan approval"> | <img src="docs/screenshots/06-chat-question.png" width="240" alt="Multiple-choice question"> |
+| Approve an edit from its diff | Approve or refuse the agent's plan | The agent asks, you choose |
+
+| <img src="docs/screenshots/07-chat-controls.png" width="240" alt="Chat controls"> | <img src="docs/screenshots/08-chat-subagent.png" width="240" alt="Subagent expanded"> | <img src="docs/screenshots/09-chat-continue.png" width="240" alt="Continue picker"> |
+| Mode, model and effort | A subagent's work, nested | Continue an earlier chat |
 
 ## Install (iOS)
 

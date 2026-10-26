@@ -13,8 +13,9 @@ clients/desktop/dist/
 # Local runtime state (leftover from old server dev-runs; never commit a db)
 /config/
 
-# Generated docs site (VitePress build output — not tracked)
-docs/
+# Generated docs site (VitePress build output — not tracked); README screenshots are
+/docs/*
+!/docs/screenshots/
 
 # OS & Editor files
 .DS_Store
