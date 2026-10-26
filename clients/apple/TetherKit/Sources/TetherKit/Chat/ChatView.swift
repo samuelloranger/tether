@@ -47,6 +47,9 @@ struct ChatView: View {
 
   var body: some View {
     scroller
+    #if DEBUG
+    .coordinateSpace(name: "probe-viewport")
+    #endif
     .background(TetherColors.background.ignoresSafeArea())
     .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     .navigationBarTitleDisplayMode(.inline)
@@ -165,8 +168,8 @@ struct ChatView: View {
       if probeLastRow {
         Color.clear.frame(height: 1)
           .onGeometryChange(for: Bool.self) { proxy in
-            guard let viewport = proxy.bounds(of: .scrollView) else { return false }
-            let frame = proxy.frame(in: .scrollView)
+            guard let viewport = proxy.bounds(of: .named("probe-viewport")) else { return false }
+            let frame = proxy.frame(in: .named("probe-viewport"))
             return frame.maxY > viewport.minY && frame.minY < viewport.maxY
           } action: { lastRowVisible = $0 }
           .onDisappear { lastRowVisible = false }
