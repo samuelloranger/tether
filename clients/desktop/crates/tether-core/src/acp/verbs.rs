@@ -8,7 +8,6 @@ use crate::zmx::shell_quote;
 
 /// Shown when the host's Claude Code cannot be read.
 pub const FALLBACK: &[&str] = &[
-    "Working",
     "Thinking",
     "Pondering",
     "Tinkering",

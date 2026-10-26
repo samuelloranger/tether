@@ -6,7 +6,7 @@ import Foundation
 enum ChatVerbs {
   /// Shown when the host's Claude Code cannot be read.
   static let fallback = [
-    "Working", "Thinking", "Pondering", "Tinkering", "Puzzling", "Mulling", "Sketching", "Untangling",
+    "Thinking", "Pondering", "Tinkering", "Puzzling", "Mulling", "Sketching", "Untangling",
     "Wrangling", "Brewing", "Noodling", "Assembling", "Weaving", "Polishing", "Sifting", "Juggling",
   ]
 

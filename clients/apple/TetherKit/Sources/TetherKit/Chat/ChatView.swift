@@ -46,6 +46,7 @@ struct ChatView: View {
   @State private var pickedPhotos: [PhotosPickerItem] = []
   @State private var copiedFolder = false
   @State private var confirmingTerminal = false
+  @State private var chipsHeight: CGFloat = 0
   @State private var cursor: Int?
   @State private var caretRequest: Int?
 
@@ -318,7 +319,8 @@ struct ChatView: View {
       }
       .frame(maxWidth: .infinity, alignment: .trailing)
       .padding(.leading, 44).padding(.trailing, 16)
-      .alignmentGuide(.top) { $0[.bottom] + 8 }
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chipsHeight = $0 }
+      .offset(y: -chipsHeight - 8)
     }
   }
 
