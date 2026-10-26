@@ -117,7 +117,9 @@ final class FakeOps: SSHConnectionOps, @unchecked Sendable {
 }
 
 /// Polls `condition` until it holds or `timeout` passes.
-func eventually(timeout: TimeInterval = 2, _ condition: @escaping () -> Bool) async -> Bool {
+/// Polls on the main actor, where the models under test keep their state.
+@MainActor
+func eventually(timeout: TimeInterval = 2, _ condition: @MainActor () -> Bool) async -> Bool {
   let end = Date().addingTimeInterval(timeout)
   while Date() < end {
     if condition() { return true }
