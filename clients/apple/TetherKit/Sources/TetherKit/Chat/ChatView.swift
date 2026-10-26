@@ -20,6 +20,8 @@ struct ChatView: View {
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
+  var probeLastRow = false
+  @State private var lastRowVisible = false
   #endif
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
@@ -28,6 +30,8 @@ struct ChatView: View {
   @State private var bottomEdge: CGFloat = 0
   @State private var viewportHeight: CGFloat = 0
   @State private var atBottom = true
+  @State private var windowStart: Int?
+  @State private var windowAnchor: Int?
   @State private var sendTick = 0
   @State private var scrolledUnder = false
   @State private var reviewing: ChatPermission?
@@ -45,6 +49,10 @@ struct ChatView: View {
 
   var body: some View {
     scroller
+    .onChange(of: atBottom) { _, near in windowFollowing(near) }
+    #if DEBUG
+    .coordinateSpace(name: "probe-viewport")
+    #endif
     .background(TetherColors.background.ignoresSafeArea())
     .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     .navigationBarTitleDisplayMode(.inline)
@@ -52,6 +60,17 @@ struct ChatView: View {
     .toolbarBackground(.visible, for: .navigationBar)
     .navigationBarBackButtonHidden(true)
     .overlay(alignment: .top) { headerRule }
+    #if DEBUG
+    .overlay(alignment: .topTrailing) {
+      if probeLastRow {
+        Text("LAST ROW VISIBLE: \(lastRowVisible ? "yes" : "no")")
+          .font(.system(size: 13, weight: .bold, design: .monospaced))
+          .foregroundStyle(.white).padding(6)
+          .background(lastRowVisible ? Color.green : Color.red)
+          .padding(.top, 4)
+      }
+    }
+    #endif
     .toolbar {
       ToolbarItem(placement: .topBarLeading) { backButton }.withoutGlass()
       ToolbarItem(placement: .principal) { titleBlock }.withoutGlass()
@@ -115,16 +134,34 @@ struct ChatView: View {
 
   @ViewBuilder private var scroller: some View {
     if #available(iOS 18.0, *) {
-      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
+      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, anchorRequest: $windowAnchor, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
     } else {
       legacyScroller
     }
   }
 
+  /// The window follows the end while the reader is there, and holds its start once they scroll up.
+  private func windowFollowing(_ atEnd: Bool) {
+    if atEnd { windowStart = nil; return }
+    guard windowStart == nil else { return }
+    let blocks = ChatGrouping.blocks(visibleItems)
+    let range = ChatTranscriptWindow.range(lastIDs: blocks.map(\.lastID), start: nil)
+    if range.lowerBound > 0 { windowStart = blocks[range.lowerBound].lastID }
+  }
+
   private var transcript: some View {
-    LazyVStack(alignment: .leading, spacing: 12) {
+    let blocks = ChatGrouping.blocks(visibleItems)
+    let lastIDs = blocks.map(\.lastID)
+    let range = ChatTranscriptWindow.range(lastIDs: lastIDs, start: windowStart)
+    return VStack(alignment: .leading, spacing: 12) {
       if model.state.items.isEmpty { emptyState }
-      ForEach(ChatGrouping.blocks(visibleItems)) { block in
+      if range.lowerBound > 0 {
+        EarlierMessagesButton {
+          windowStart = ChatTranscriptWindow.earlierStart(lastIDs: lastIDs, range: range)
+          windowAnchor = blocks[range.lowerBound].id
+        }
+      }
+      ForEach(blocks[range]) { block in
         switch block {
         case let .item(item):
           ChatItemRow(
@@ -148,6 +185,16 @@ struct ChatView: View {
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
       if model.state.turn == .working && !answerPending { WorkingIndicator(activity: model.state.subagentActivity) }
+      #if DEBUG
+      if probeLastRow {
+        Color.clear.frame(height: 1)
+          .onGeometryChange(for: Bool.self) { proxy in
+            guard let viewport = proxy.bounds(of: .named("probe-viewport")) else { return false }
+            return viewport.maxY > 0 && viewport.minY < 1
+          } action: { lastRowVisible = $0 }
+          .onDisappear { lastRowVisible = false }
+      }
+      #endif
     }
     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
   }
@@ -175,6 +222,12 @@ struct ChatView: View {
           if drag.translation.height > 24, !nearBottom { userScrolledUp = true }
         })
       .onChange(of: bottomEdge) { _, _ in if nearBottom { userScrolledUp = false } }
+      .onChange(of: userScrolledUp) { _, up in windowFollowing(!up) }
+      .onChange(of: windowAnchor) { _, id in
+        guard let id else { return }
+        windowAnchor = nil
+        proxy.scrollTo(id, anchor: .top)
+      }
       .onChange(of: model.state.tailSignature) { _, _ in
         if !userScrolledUp { proxy.scrollTo(bottomID, anchor: .bottom) }
       }
@@ -920,6 +973,7 @@ struct JumpToLatestButton: View {
 private struct FollowingTranscript<Content: View>: View {
   @Binding var atBottom: Bool
   @Binding var scrolledUnder: Bool
+  @Binding var anchorRequest: Int?
   let sendTick: Int
   let reduceMotion: Bool
   var startAtTop = false
@@ -929,6 +983,17 @@ private struct FollowingTranscript<Content: View>: View {
   @State private var sendPending = false
 
   var body: some View {
+    ScrollViewReader { proxy in
+      scroll
+        .onChange(of: anchorRequest) { _, id in
+          guard let id else { return }
+          anchorRequest = nil
+          proxy.scrollTo(id, anchor: .top)
+        }
+    }
+  }
+
+  private var scroll: some View {
     ScrollView {
       content()
     }
@@ -988,5 +1053,28 @@ extension ToolbarContent {
   /// iOS 26 wraps every toolbar item in a glass bubble; the chat header stays flat.
   @ToolbarContentBuilder fileprivate func withoutGlass() -> some ToolbarContent {
     if #available(iOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
+  }
+}
+
+/// Sits at the top of a transcript that has older blocks than the window shows.
+private struct EarlierMessagesButton: View {
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Text("Earlier messages")
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(TetherColors.textSecondary)
+        .frame(maxWidth: .infinity, minHeight: 36)
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("chatEarlierMessages")
+    #if DEBUG
+    .task {
+      guard ChatFixture.autoEarlier else { return }
+      try? await Task.sleep(nanoseconds: 2_500_000_000)
+      action()
+    }
+    #endif
   }
 }

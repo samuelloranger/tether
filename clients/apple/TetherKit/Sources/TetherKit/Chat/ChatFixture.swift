@@ -6,6 +6,7 @@ import SwiftUI
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
 /// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`.
 enum ChatFixture {
+  static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
   static let sendDraft = "Thanks. Now do the same for the other helpers,\nthen run the whole suite\nand summarise anything that fails."
@@ -449,6 +450,58 @@ enum ChatFixture {
     return longModel(steps: 14, replyAfter: after)
   }
 
+
+  /// 250+ items with strongly varying heights: prose of every length, nested lists, headings, code,
+  /// tool groups, a subagent and the user's own messages. The agent answers a prompt with a short reply.
+  @MainActor
+  static func sendLongModel() -> ChatSessionModel {
+    let after = Double(ProcessInfo.processInfo.environment["TETHER_DEBUG_REPLY_AFTER"] ?? "") ?? 4
+    let sentence = "The helper keeps its state small, retries only on server errors and waits a little longer each time, so a flaky upstream never hammers the host. "
+    let scale = Int(ProcessInfo.processInfo.environment["TETHER_DEBUG_LONG_SCALE"] ?? "") ?? 1
+    func prose(_ n: Int) -> String { String(repeating: sentence, count: n * scale) }
+    var lines: [String] = [update(["sessionUpdate": "session_info_update", "title": "Long chat"])]
+    var entries: [ChatJournal.Entry] = []
+    func offset() -> Int { lines.reduce(0) { $0 + $1.utf8.count + 1 } }
+    for cycle in 0..<(32 * scale) {
+      let k = "c\(cycle)"
+      entries.append(.init(kind: .prompt, offset: offset(), text: cycle % 3 == 0 ? "Please look into part \(cycle) of the plan,\nthen report back with what you find." : "Continue with part \(cycle).", requestId: .int(100 + cycle)))
+      lines.append(message(id: "\(k)a", prose(1 + (cycle * 5) % 13)))
+      lines.append(message(id: "\(k)b", "## Findings for part \(cycle)\n\n1. **First point.** \(prose(2))\n   - nested detail one\n   - nested detail two with a longer explanation that wraps onto a second line on a phone screen\n     - a third level that is deeper still\n2. **Second point.** \(prose(1))\n   - another nested detail\n\nIf you want, I can fix both in a small change."))
+      lines.append(update(tool("\(k)t1", "Read src/part\(cycle).ts", kind: "read", status: "completed", text: "export const part = \(cycle)")))
+      lines.append(update(tool("\(k)t2", "bun test part\(cycle)", kind: "execute", status: "completed", text: "```console\n 3 pass, 0 fail\n```")))
+      lines.append(update(tool("\(k)t3", "Edit src/part\(cycle).ts", kind: "edit", status: "completed", diff: editDiff)))
+      lines.append(message(id: "\(k)c", "```ts\n" + (1...(3 + cycle % 9)).map { "const line\($0) = await retry(() => fetchJSON(url\($0)))" }.joined(separator: "\n") + "\n```"))
+      if cycle % 4 == 1 {
+        lines.append(update(tool("\(k)a1", "Task", kind: "think", status: "pending", toolName: "Agent", input: [:])))
+        lines.append(update(tool("\(k)a1", "audit part \(cycle)", kind: "think", status: "completed", text: "Audit done: nothing else to change.", update: true, toolName: "Agent", input: ["description": "audit part \(cycle)", "model": "sonnet", "prompt": prose(2)])))
+        lines.append(update(tool("\(k)s1", "Read src/audit.ts", kind: "read", status: "completed", text: "x", parent: "\(k)a1")))
+      }
+      lines.append(message(id: "\(k)d", cycle % 2 == 0 ? "Done." : prose(5 + cycle % 7) + "\n\n- one\n- two\n- three"))
+      lines.append(json(["jsonrpc": "2.0", "id": 100 + cycle, "result": ["stopReason": "end_turn"]]))
+    }
+    lines.append(update(["sessionUpdate": "usage_update", "used": 41_250, "size": 1_000_000]))
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 200
+    journal.entries = entries
+    let reply = [
+      update(["sessionUpdate": "agent_message_chunk", "messageId": "msg_reply", "content": ["type": "text", "text": "Understood. I'll start with the first helper now."]]),
+      json(["jsonrpc": "2.0", "id": 200, "result": ["stopReason": "end_turn"]]),
+    ]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/tether", readOnly: false,
+      store: InMemoryChatJournalStore(journal)
+    ) { _, _ in AnswerOnPromptStream(log: log, chunks: reply, after: after) }
+  }
+
+  private static func message(id: String, _ text: String) -> String {
+    update([
+      "sessionUpdate": "agent_message_chunk", "messageId": id,
+      "content": ["type": "text", "text": text],
+    ])
+  }
+
   private static func option(
     _ id: String, _ name: String, _ description: String, current: String, _ choices: [(String, String, String)]
   ) -> [String: Any] {
@@ -737,6 +790,7 @@ public struct ChatFixtureRoot: View {
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
     case "send": initial = ChatFixture.sendModel()
+    case "send-long", "send-long-top": initial = ChatFixture.sendLongModel()
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
@@ -753,10 +807,11 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "send-long-top" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
           openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
-          sendDraft: mode == "send" ? ChatFixture.sendDraft : nil)
+          sendDraft: mode == "send" || mode == "send-long" ? ChatFixture.sendDraft : nil,
+          probeLastRow: mode == "send-long" || mode == "send-long-top")
       }
     }
       .tint(TetherColors.accent)
