@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
 enum ChatFixture {
   static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
@@ -248,6 +248,89 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal),
       hostLabel: "devbox"
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
+  /// Set by the debug root so the Read of an image opens already expanded.
+  nonisolated(unsafe) static var openImages = false
+
+  /// A bitmap drawn in code: a diagonal gradient with a few shapes, so no asset or real data is involved.
+  static func syntheticImage(width: Int, height: Int, hue: CGFloat) -> UIImage {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    return UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+      let cg = context.cgContext
+      let colors = [
+        UIColor(hue: hue, saturation: 0.55, brightness: 0.95, alpha: 1).cgColor,
+        UIColor(hue: (hue + 0.12).truncatingRemainder(dividingBy: 1), saturation: 0.7, brightness: 0.55, alpha: 1).cgColor,
+      ]
+      if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]) {
+        cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: width, y: height), options: [])
+      }
+      let unit = CGFloat(min(width, height))
+      UIColor.white.withAlphaComponent(0.85).setFill()
+      cg.fillEllipse(in: CGRect(x: unit * 0.18, y: unit * 0.18, width: unit * 0.28, height: unit * 0.28))
+      UIColor.black.withAlphaComponent(0.35).setFill()
+      cg.fill(CGRect(x: CGFloat(width) * 0.45, y: CGFloat(height) * 0.5, width: unit * 0.4, height: unit * 0.22))
+      UIColor.white.setStroke()
+      cg.setLineWidth(unit * 0.012)
+      cg.stroke(CGRect(x: unit * 0.06, y: unit * 0.06, width: CGFloat(width) - unit * 0.12, height: CGFloat(height) - unit * 0.12))
+    }
+  }
+
+  /// The images fixture: a Read of a large JPEG with the adapter's real result shape (content, raw output and
+  /// metadata all carrying the picture), an agent message with an inline PNG, and a user message with two attachments.
+  @MainActor
+  static func imagesModel() -> ChatSessionModel {
+    openImages = true
+    let files = ChatLocalFiles(
+      directory: FileManager.default.temporaryDirectory.appendingPathComponent("chat-images-fixture-\(UUID().uuidString)"))
+    let store = files.images("fixture")
+    let large = syntheticImage(width: 4000, height: 3000, hue: 0.58).jpegData(compressionQuality: 0.7)!.base64EncodedString()
+    let inline = syntheticImage(width: 1200, height: 800, hue: 0.08).pngData()!.base64EncodedString()
+    let first = ChatImageAttachment(
+      mimeType: "image/jpeg",
+      data: syntheticImage(width: 900, height: 1600, hue: 0.33).jpegData(compressionQuality: 0.8)!.base64EncodedString())
+    let second = ChatImageAttachment(
+      mimeType: "image/png", data: syntheticImage(width: 1200, height: 800, hue: 0.85).pngData()!.base64EncodedString())
+    let sent = [first, second].compactMap { store.put($0) }
+    let call = tool("t1", "Read assets/hero.jpg", kind: "read", status: "pending")
+    var done = tool("t1", "Read assets/hero.jpg", kind: "read", status: "completed", update: true)
+    done["content"] = [["type": "content", "content": ["type": "image", "data": large, "mimeType": "image/jpeg"]]]
+    done["rawOutput"] = [["type": "image", "source": ["type": "base64", "data": large, "media_type": "image/jpeg"]]]
+    var meta = done["_meta"] as? [String: Any] ?? [:]
+    meta["claudeCode"] = [
+      "toolName": "Read",
+      "toolResponse": ["type": "image", "file": ["base64": large, "type": "image/jpeg", "originalSize": 400_000]],
+    ]
+    done["_meta"] = meta
+    let head = [
+      update(["sessionUpdate": "session_info_update", "title": "Hero image"]),
+    ]
+    let body = [
+      message("I opened the hero image. The gradient is smooth and the circle sits top left."),
+      update(call), update(done),
+      message("Here is the same scene as a flat PNG for comparison:"),
+      update([
+        "sessionUpdate": "agent_message_chunk", "messageId": "msg_1",
+        "content": ["type": "image", "data": inline, "mimeType": "image/png"],
+      ]),
+      message("Both render at the same size."),
+      json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]),
+    ]
+    let log = Data(((head + body).joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [
+      .init(
+        kind: .prompt, offset: head.reduce(0) { $0 + $1.utf8.count + 1 }, text: "Open the hero image and compare it with these two.",
+        requestId: .int(3), imageCount: 2, images: sent)
+    ]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal),
+      images: store
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
@@ -774,6 +857,7 @@ public struct ChatFixtureRoot: View {
   })
 
   private let mode: String
+  @State private var viewing: ChatImageRef?
 
   public init(mode: String) {
     self.mode = mode
@@ -794,6 +878,7 @@ public struct ChatFixtureRoot: View {
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
+    case "images", "images-top", "image-viewer": initial = ChatFixture.imagesModel()
     case "controls", "controls-sheet", "slash", "attach", "mention", "mention-all": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
     }
@@ -807,7 +892,7 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "send-long-top" || mode == "subagents-open-top",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "images-top" || mode == "send-long-top" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
           openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
           sendDraft: mode == "send" || mode == "send-long" ? ChatFixture.sendDraft : nil,
@@ -816,6 +901,14 @@ public struct ChatFixtureRoot: View {
     }
       .tint(TetherColors.accent)
       .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
+      .fullScreenCover(item: $viewing) { ChatImageViewer(ref: $0, library: model.imageLibrary) }
+      .task {
+        guard mode == "image-viewer" else { return }
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        for item in model.state.items {
+          if case let .tool(call) = item.kind, let ref = call.images.first { viewing = ref }
+        }
+      }
   }
 }
 #endif

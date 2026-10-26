@@ -259,6 +259,7 @@ struct ChatView: View {
     #if DEBUG
     if ProcessInfo.processInfo.environment["TETHER_DEBUG_TOOLS_OPEN"] != nil { return true }
     if ChatFixture.openSubagents, case let .tool(call) = item.kind, call.subagent != nil { return true }
+    if ChatFixture.openImages, case let .tool(call) = item.kind, !call.images.isEmpty { return true }
     #endif
     return expanded.contains(item.id)
   }
