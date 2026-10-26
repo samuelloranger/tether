@@ -631,23 +631,40 @@ test('entries pointing at the old tether-notify-hook are replaced in all four to
     mkdirSync(path.join(home, '.claude'));
     mkdirSync(path.join(home, '.local/bin'), { recursive: true });
     writeFileSync(path.join(home, '.local/bin/tether-notify-hook'), '#!/bin/sh\n');
-    const nested = (cmd: string) => ({ Stop: [{ hooks: [{ type: 'command', command: cmd }] }, { hooks: [{ type: 'command', command: 'foreign-hook' }] }] });
+    const nested = (cmd: string) => ({
+      Stop: [{ hooks: [{ type: 'command', command: cmd }] }, { hooks: [{ type: 'command', command: 'foreign-hook' }] }],
+    });
     writeFileSync(path.join(home, '.claude/settings.json'), JSON.stringify({ hooks: nested(`'${old}' claude done`) }));
     writeFileSync(path.join(home, '.codex/hooks.json'), JSON.stringify({ hooks: nested(`'${old}' codex done`) }));
-    writeFileSync(path.join(home, '.gemini/settings.json'), JSON.stringify({ hooks: { AfterAgent: nested(`'${old}' gemini done`).Stop } }));
+    writeFileSync(
+      path.join(home, '.gemini/settings.json'),
+      JSON.stringify({ hooks: { AfterAgent: nested(`'${old}' gemini done`).Stop } }),
+    );
     writeFileSync(
       path.join(home, '.cursor/hooks.json'),
-      JSON.stringify({ version: 1, hooks: { stop: [{ command: `'${old}' cursor done` }, { command: 'foreign-hook' }] } }),
+      JSON.stringify({
+        version: 1,
+        hooks: { stop: [{ command: `'${old}' cursor done` }, { command: 'foreign-hook' }] },
+      }),
     );
   });
   const wrapper = path.join(env.home, '.local/bin/tether-hook');
   const read = (p: string) => readFileSync(path.join(env.home, p), 'utf8');
-  for (const [file, agent] of [['.claude/settings.json', 'claude'], ['.codex/hooks.json', 'codex']] as const) {
+  for (const [file, agent] of [
+    ['.claude/settings.json', 'claude'],
+    ['.codex/hooks.json', 'codex'],
+  ] as const) {
     const stop = JSON.parse(read(file)).hooks.Stop;
-    expect(stop.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([`'${wrapper}' ${agent} done`, 'foreign-hook']);
+    expect(stop.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([
+      `'${wrapper}' ${agent} done`,
+      'foreign-hook',
+    ]);
   }
   const gem = JSON.parse(read('.gemini/settings.json')).hooks.AfterAgent;
-  expect(gem.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([`'${wrapper}' gemini done`, 'foreign-hook']);
+  expect(gem.map((g: { hooks: { command: string }[] }) => g.hooks[0].command)).toEqual([
+    `'${wrapper}' gemini done`,
+    'foreign-hook',
+  ]);
   const cur = JSON.parse(read('.cursor/hooks.json')).hooks.stop;
   expect(cur.map((h: { command: string }) => h.command)).toEqual([`'${wrapper}' cursor done`, 'foreign-hook']);
   expect(read('.claude/settings.json')).not.toContain('tether-notify-hook');
