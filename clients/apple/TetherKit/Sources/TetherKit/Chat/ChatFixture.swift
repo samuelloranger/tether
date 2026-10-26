@@ -456,11 +456,12 @@ enum ChatFixture {
   static func sendLongModel() -> ChatSessionModel {
     let after = Double(ProcessInfo.processInfo.environment["TETHER_DEBUG_REPLY_AFTER"] ?? "") ?? 4
     let sentence = "The helper keeps its state small, retries only on server errors and waits a little longer each time, so a flaky upstream never hammers the host. "
-    func prose(_ n: Int) -> String { String(repeating: sentence, count: n) }
+    let scale = Int(ProcessInfo.processInfo.environment["TETHER_DEBUG_LONG_SCALE"] ?? "") ?? 1
+    func prose(_ n: Int) -> String { String(repeating: sentence, count: n * scale) }
     var lines: [String] = [update(["sessionUpdate": "session_info_update", "title": "Long chat"])]
     var entries: [ChatJournal.Entry] = []
     func offset() -> Int { lines.reduce(0) { $0 + $1.utf8.count + 1 } }
-    for cycle in 0..<32 {
+    for cycle in 0..<(32 * scale) {
       let k = "c\(cycle)"
       entries.append(.init(kind: .prompt, offset: offset(), text: cycle % 3 == 0 ? "Please look into part \(cycle) of the plan,\nthen report back with what you find." : "Continue with part \(cycle).", requestId: .int(100 + cycle)))
       lines.append(message(id: "\(k)a", prose(1 + (cycle * 5) % 13)))
