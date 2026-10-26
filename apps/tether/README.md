@@ -120,12 +120,13 @@ agent. A client without `--client` is never echoed.
 `acp status` reads `meta.json` only, so it works without talking to the daemon. It prints one
 JSON line per named session, or per session when no name is given (exit 3 for an unknown name):
 
-    {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":""}
+    {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":"","multiClient":true}
 
 `state` is `running` or `ended`. `turn` is `working` between a client's `session/prompt` and
 its response, `waiting` while a permission or elicitation request is outstanding (this wins
 over `working`), else `idle`; an ended session is always `idle`. `title` is the latest
-`session_info_update` title. The daemon refreshes `title` and `turn` in `meta.json` as the
+`session_info_update` title. `multiClient` is true when the session's holder lets several clients
+attach (see below); a holder started by an older tether leaves it out. The daemon refreshes `title` and `turn` in `meta.json` as the
 stream moves, writing only when one of them changes. `acp ls` is unchanged.
 
 `acp sessions <cwd> [--limit N]` starts the agent itself for a moment (not a holder session):

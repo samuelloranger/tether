@@ -50,6 +50,8 @@ type acpMeta struct {
 	// Title and Turn mirror the stream tracker so `acp status` can answer without the daemon.
 	Title string `json:"title,omitempty"`
 	Turn  string `json:"turn,omitempty"`
+	// MultiClient is set by a daemon that lets several clients attach and echoes named ones.
+	MultiClient bool `json:"multiClient,omitempty"`
 }
 
 func acpDir(name string) string { return filepath.Join(home(), "acp", name) }
@@ -450,6 +452,7 @@ func acpDaemon(name string) error {
 	startErr := cmd.Start()
 	pw.Close()
 	m.Pid = os.Getpid()
+	m.MultiClient = true
 	if startErr == nil {
 		m.AgentPid = cmd.Process.Pid
 		s.agentPid = m.AgentPid
