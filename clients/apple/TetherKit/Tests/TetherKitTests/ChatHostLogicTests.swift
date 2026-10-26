@@ -160,6 +160,8 @@ final class ChatHostLogicTests: XCTestCase {
     state = ChatReducer.reduce(state, .userPrompt(text: "again", atOffset: 0))
     state = ChatReducer.reduce(state, .promptUndelivered(text: "hi", atOffset: 0))
     XCTAssertEqual(state.items.map(\.kind), [.user(text: "again", offset: 0)])
+    XCTAssertEqual(state.turn, .working, "the other prompt is still in flight")
+    state = ChatReducer.reduce(state, .promptUndelivered(text: "again", atOffset: 0))
     XCTAssertEqual(state.turn, .idle)
   }
 

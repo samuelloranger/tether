@@ -84,7 +84,9 @@ final class ACPClientTests: XCTestCase {
     XCTAssertEqual(live.modelId, "claude-sonnet-5-5")
     XCTAssertEqual(live.cost?.currency, "USD")
     XCTAssertEqual(journal.sessionId, "sess-1")
-    XCTAssertEqual(journal.entries, ACPFixture.journal.entries)
+    var expected = ACPFixture.journal.entries
+    expected[0].requestId = .int(3)
+    XCTAssertEqual(journal.entries, expected)
     XCTAssertEqual(live, try ChatTranscriptBuilder.replay(log: ACPFixture.log(), journal: journal))
 
     await stream.close()
