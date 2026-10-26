@@ -28,6 +28,11 @@ enum ChatToolDetail {
 
   /// True for an image result dumped as JSON text, or any text carrying a long base64 run.
   static func looksLikeBlob(_ text: String) -> Bool {
+    if let first = text.utf8.first, first == 0x5B || first == 0x7B,
+      text.contains("\"type\":\"image\"") || text.contains("\"type\": \"image\"")
+    {
+      return true
+    }
     var run = 0
     for byte in text.utf8 {
       switch byte {
