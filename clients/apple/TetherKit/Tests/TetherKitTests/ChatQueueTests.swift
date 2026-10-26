@@ -77,11 +77,32 @@ final class ChatQueueTests: XCTestCase {
     XCTAssertEqual(users, ["one", "two"])
   }
 
-  func test_stop_clears_queued_labels_and_notes_it_once() {
+  private func users(_ state: ChatState) -> [String] {
+    state.items.compactMap { if case let .user(text, _, _, _) = $0.kind { text } else { nil } }
+  }
+
+  func test_the_running_answer_keeps_streaming_into_one_row_past_a_queued_message() {
+    var state = prompt("one", id: 1, ChatState())
+    state = reduce(state, chunk("Hel"))
+    state = prompt("two", id: 2, state)
+    state = prompt("three", id: 3, state)
+    state = reduce(state, chunk("lo"))
+    XCTAssertEqual(state.items[1].kind, .assistant(text: "Hello", messageId: "m1"))
+    XCTAssertEqual(users(state), ["one", "two", "three"], "queued ones wait at the end, in order")
+    XCTAssertEqual(state.queuedTexts, ["two", "three"])
+    state = reduce(state, done(1))
+    state = reduce(state, chunk("on two", id: "m2"))
+    XCTAssertEqual(state.queuedTexts, ["three"])
+    XCTAssertEqual(state.items.last.map { if case let .user(text, _, _, _) = $0.kind { text } else { "" } }, "three")
+    XCTAssertEqual(state.items[state.items.count - 2].kind, .assistant(text: "on two", messageId: "m2"))
+  }
+
+  func test_stop_withdraws_the_queued_prompts_and_notes_it_once() {
     var state = prompt("one", id: 1, ChatState())
     state = prompt("two", id: 2, state)
     state = ChatReducer.reduce(state, .cancelRequested)
     XCTAssertTrue(state.queuedItemIds.isEmpty)
+    XCTAssertEqual(users(state), ["one"], "the agent never ran it")
     XCTAssertEqual(state.items.last?.kind, .notice("Stopped"))
     XCTAssertEqual(state.turn, .working, "only the agent's responses end the turn")
     state = reduce(state, done(1, "cancelled"))
