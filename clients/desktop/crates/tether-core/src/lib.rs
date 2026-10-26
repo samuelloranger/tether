@@ -1,5 +1,6 @@
 //! Tether's rules, with no UI and no network.
 
+pub mod acp;
 pub mod agents;
 pub mod chrome;
 pub mod connect;
