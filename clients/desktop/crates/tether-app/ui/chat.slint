@@ -409,6 +409,43 @@ component Prose inherits TextInput {
     selection-background-color: Tokens.accent.with-alpha(0.35);
 }
 
+// Wrapped text inside a layout. A layout adding up its own height counts a bare wrapping text
+// as one line, so the transcript measured shorter than it drew and its end sat out of reach;
+// this takes the height from the text measured at the width it is drawn at.
+component Para inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size: 14px;
+    in property <color> ink: Tokens.text;
+    in property <int> font-weight;
+    in property <bool> font-italic;
+    height: body.preferred-height;
+    body := Prose {
+        width: parent.width;
+        text: root.text;
+        font-size: root.font-size;
+        color: root.ink;
+        font-weight: root.font-weight;
+        font-italic: root.font-italic;
+    }
+}
+
+// `Para` for text that is not selectable, so a row around it still takes the click.
+component Wrapped inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size: 13px;
+    in property <color> ink: Tokens.text;
+    in property <int> font-weight;
+    height: body.preferred-height;
+    body := Text {
+        width: parent.width;
+        text: root.text;
+        font-size: root.font-size;
+        color: root.ink;
+        font-weight: root.font-weight;
+        wrap: word-wrap;
+    }
+}
+
 component Md inherits VerticalLayout {
     in property <int> kind;
     in property <int> level;
@@ -438,16 +475,16 @@ component Md inherits VerticalLayout {
     if root.kind == 5: HorizontalLayout {
         spacing: 10px;
         Rectangle { width: 3px; background: Tokens.accent.with-alpha(0.6); border-radius: 2px; }
-        Prose { text: root.text; font-size: root.font; color: Tokens.text-secondary; }
+        Para { text: root.text; font-size: root.font; ink: Tokens.text-secondary; }
     }
-    if root.kind == 0: Prose {
+    if root.kind == 0: Para {
         text: root.text;
         font-weight: 700;
         font-size: root.level == 1 ? 20px : root.level == 2 ? 17px : 15px;
     }
     if root.kind == 1 || root.kind == 2 || root.kind == 3: HorizontalLayout {
         padding-left: root.kind == 1 ? 0px : root.level * 18px;
-        Prose { text: root.text; font-size: root.font; color: root.ink; }
+        Para { text: root.text; font-size: root.font; ink: root.ink; }
     }
     if root.links.length > 0: HorizontalLayout {
         spacing: 6px;
@@ -670,13 +707,12 @@ component Entry inherits Rectangle {
                 background: root.e.state == 2 ? Tokens.success : root.e.state == 1 ? Tokens.accent : transparent;
                 if root.e.state == 2: Glyph { which: 23; size: 10px; ink: Tokens.on-accent; x: 2px; y: 2px; }
             }
-            Text {
+            Para {
                 horizontal-stretch: 1;
                 text: root.e.text;
-                wrap: word-wrap;
                 font-size: 13px;
                 font-weight: root.e.state == 1 ? 600 : 400;
-                color: root.e.state == 2 ? Tokens.text-secondary : Tokens.text;
+                ink: root.e.state == 2 ? Tokens.text-secondary : Tokens.text;
             }
         }
     }
@@ -689,7 +725,7 @@ component QuietRow inherits HorizontalLayout {
     in property <color> text-ink: Tokens.text-secondary;
     spacing: 8px;
     VerticalLayout { padding-top: 2px; Glyph { which: root.icon; ink: root.ink; size: 13px; } }
-    Prose { text: root.text; font-size: 12.5px; color: root.text-ink; }
+    Para { text: root.text; font-size: 12.5px; ink: root.text-ink; }
 }
 
 component Row inherits VerticalLayout {
@@ -717,7 +753,7 @@ component Row inherits VerticalLayout {
                         Glyph { which: 11; size: 13px; }
                         Text { text: root.r.meta; font-size: 12px; color: Tokens.text-secondary; }
                     }
-                    if root.r.text != "": Prose { text: root.r.text; }
+                    if root.r.text != "": Para { text: root.r.text; }
                 }
             }
         }
@@ -746,7 +782,7 @@ component Row inherits VerticalLayout {
         if root.r.open: HorizontalLayout {
             spacing: 10px;
             Rectangle { width: 2px; background: Tokens.border; }
-            Prose { text: root.r.text; font-size: 12.5px; font-italic: true; color: Tokens.text-faint; }
+            Para { text: root.r.text; font-size: 12.5px; font-italic: true; ink: Tokens.text-faint; }
         }
     }
     if root.r.kind == 4 || root.r.kind == 5: Rectangle {
@@ -811,7 +847,7 @@ component Row inherits VerticalLayout {
     if root.r.kind == 10: HorizontalLayout {
         spacing: 8px;
         VerticalLayout { padding-top: 2px; Glyph { which: root.r.flag ? 23 : 18; size: 13px; } }
-        Prose { text: root.r.text + "  \u{2192}  " + root.r.detail; font-size: 12.5px; color: Tokens.text-secondary; }
+        Para { text: root.r.text + "  \u{2192}  " + root.r.detail; font-size: 12.5px; ink: Tokens.text-secondary; }
     }
     if root.r.kind == 11: HorizontalLayout {
         padding-left: 48px;
@@ -824,7 +860,7 @@ component Row inherits VerticalLayout {
             failed-col := VerticalLayout {
                 padding: 12px;
                 spacing: 8px;
-                if root.r.text != "": Prose { text: root.r.text; color: Tokens.text-secondary; }
+                if root.r.text != "": Para { text: root.r.text; ink: Tokens.text-secondary; }
                 if root.r.meta != "": Text { text: root.r.meta; font-size: 11.5px; color: Tokens.text-faint; }
                 HorizontalLayout {
                     spacing: 8px;
@@ -1007,7 +1043,7 @@ component CardHeader inherits HorizontalLayout {
         horizontal-stretch: 1;
         spacing: 1px;
         Text { text: root.eyebrow; font-size: 11px; font-weight: 600; color: Tokens.text-faint; }
-        Text { text: root.title; font-size: 13.5px; font-weight: 650; color: Tokens.text; wrap: word-wrap; }
+        Wrapped { text: root.title; font-size: 13.5px; font-weight: 650; ink: Tokens.text; }
     }
     if root.position != "": Text { text: root.position; font-size: 11px; font-family: Tokens.mono-font; color: Tokens.text-faint; }
 }
@@ -1238,8 +1274,8 @@ component QuestionCard inherits Card {
                                 VerticalLayout {
                                     horizontal-stretch: 1;
                                     alignment: center;
-                                    Text { text: choice.title; font-size: 13px; color: Tokens.text; wrap: word-wrap; }
-                                    if choice.description != "": Text { text: choice.description; font-size: 11.5px; color: Tokens.text-secondary; wrap: word-wrap; }
+                                    Wrapped { text: choice.title; font-size: 13px; ink: Tokens.text; }
+                                    if choice.description != "": Wrapped { text: choice.description; font-size: 11.5px; ink: Tokens.text-secondary; }
                                 }
                             }
                         }
@@ -1265,7 +1301,7 @@ component QuestionCard inherits Card {
                     if field.kind == 2: QField { name: field.name; text: field.text; placeholder: field.placeholder; }
                     if field.kind == 3: HorizontalLayout {
                         spacing: 10px;
-                        Text { horizontal-stretch: 1; text: field.placeholder; font-size: 13px; color: Tokens.text; wrap: word-wrap; vertical-alignment: center; }
+                        VerticalLayout { horizontal-stretch: 1; alignment: center; Wrapped { text: field.placeholder; font-size: 13px; ink: Tokens.text; } }
                         flag-switch := Rectangle {
                             width: 40px;
                             height: 22px;
@@ -1481,7 +1517,7 @@ component BottomBar inherits Rectangle {
                 padding: 10px;
                 spacing: 8px;
                 VerticalLayout { padding-top: 1px; Glyph { which: 16; size: 13px; ink: Tokens.warning; } }
-                Text { horizontal-stretch: 1; text: ChatVm.notice; font-size: 12.5px; color: Tokens.text-secondary; wrap: word-wrap; }
+                Wrapped { horizontal-stretch: 1; text: ChatVm.notice; font-size: 12.5px; ink: Tokens.text-secondary; }
                 IconButton { flat: true; size: 22px; icon: @image-url("icons/close.svg"); tooltip: "Dismiss"; clicked => { ChatVm.dismiss-notice(); } }
             }
         }
@@ -1668,7 +1704,7 @@ export component ChatControls inherits Rectangle {
                         }
                         if option.failure != "": HorizontalLayout {
                             spacing: 6px;
-                            Text { horizontal-stretch: 1; text: option.failure; font-size: 11.5px; color: Tokens.danger; wrap: word-wrap; }
+                            Wrapped { horizontal-stretch: 1; text: option.failure; font-size: 11.5px; ink: Tokens.danger; }
                             IconButton { flat: true; size: 20px; icon: @image-url("icons/close.svg"); tooltip: "Dismiss"; clicked => { ChatVm.ctl-dismiss(option.id); } }
                         }
                     }
@@ -1865,7 +1901,7 @@ export component NewChatDialog inherits Rectangle {
                         }
                     }
                 }
-                if ChatVm.nc-error != "": Text { text: ChatVm.nc-error; font-size: 12px; color: Tokens.warning; wrap: word-wrap; }
+                if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
             }
             if ChatVm.nc-mode == 0: HorizontalLayout {
                 alignment: end;
@@ -1881,7 +1917,7 @@ export component NewChatDialog inherits Rectangle {
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 1: HorizontalLayout {
                 spacing: 8px;
-                Text { horizontal-stretch: 1; text: ChatVm.nc-listing-error; font-size: 12px; color: Tokens.warning; wrap: word-wrap; vertical-alignment: center; }
+                VerticalLayout { horizontal-stretch: 1; alignment: center; Wrapped { text: ChatVm.nc-listing-error; font-size: 12px; ink: Tokens.warning; } }
                 SmallAction { text: "Retry"; style: 3; clicked => { ChatVm.nc-retry(); } }
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 2 && ChatVm.nc-sessions.length == 0: Text {
@@ -1912,7 +1948,7 @@ export component NewChatDialog inherits Rectangle {
                                     Text { horizontal-stretch: 1; text: s.title; font-size: 13px; color: Tokens.text; overflow: elide; }
                                     Text { text: s.busy ? "Opening\u{2026}" : s.when; font-size: 11.5px; color: Tokens.text-faint; }
                                 }
-                                if s.recent: Text { text: "Updated minutes ago: it may still be open in a terminal"; font-size: 11px; color: Tokens.warning; wrap: word-wrap; }
+                                if s.recent: Wrapped { text: "Updated minutes ago: it may still be open in a terminal"; font-size: 11px; ink: Tokens.warning; }
                             }
                         }
                     }
