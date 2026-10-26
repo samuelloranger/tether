@@ -37,7 +37,7 @@ final class SSHLiveConnectTests: XCTestCase {
   /// The chat client talks to the host over a non-PTY exec channel, so the channel has to carry
   /// bytes both ways: this writes through `cat` and reads every byte back, binary included.
   func test_live_exec_channel_is_bidirectional() async throws {
-    let (config, store) = try liveConfig()
+    let (config, store) = try Self.liveConfig()
     let stream = try await SSHConnector.connectExec(config: config, store: store, command: "cat")
     var payload = Data("TETHER_EXEC_LIVE_\(Int.random(in: 1000...9999))\n".utf8)
     payload.append(Data((0...255).map { UInt8($0) }))
@@ -57,7 +57,7 @@ final class SSHLiveConnectTests: XCTestCase {
   }
 
   private func connectLive() async throws -> any TerminalByteStream {
-    let (config, store) = try liveConfig()
+    let (config, store) = try Self.liveConfig()
     let stream = try await SSHConnector.connect(config: config, store: store)
     if let attach = ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] {
       try await stream.write(Data("~/.local/bin/zmx attach \(attach)\n".utf8))
@@ -65,7 +65,7 @@ final class SSHLiveConnectTests: XCTestCase {
     return stream
   }
 
-  private func liveConfig() throws -> (SSHConnectionConfig, UserDefaultsHostKeyStore) {
+  static func liveConfig() throws -> (SSHConnectionConfig, UserDefaultsHostKeyStore) {
     let env = ProcessInfo.processInfo.environment
     guard let host = env["TETHER_SSH_HOST"], let user = env["TETHER_SSH_USER"] else {
       throw XCTSkip("Set TETHER_SSH_HOST/USER (+ password or key) to run the live SSH proof.")

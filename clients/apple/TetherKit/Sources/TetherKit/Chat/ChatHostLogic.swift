@@ -11,7 +11,9 @@ enum ACPHostCommand {
 
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
   /// a lost holder never starts a fresh agent under a journal that names the old session.
-  static func attach(name: String, cwd: String, spawn: Bool, from offset: Int = 0) -> String {
+  static func attach(
+    name: String, cwd: String, spawn: Bool, from offset: Int = 0, spawnCommand: String = ACPHostCommand.spawnCommand
+  ) -> String {
     var command = "\(prefix) attach \(shellQuote(name)) --from \(offset)"
     if spawn { command += " --spawn \(shellQuote(spawnCommand)) --cwd \(shellQuote(cwd))" }
     return command
