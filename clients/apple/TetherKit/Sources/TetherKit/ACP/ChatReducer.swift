@@ -140,6 +140,8 @@ struct ChatState: Codable, Equatable, Sendable {
   fileprivate var hostAnswers: [ACPID: String] = [:]
   /// The question tool's own calls: the question row stands for them.
   fileprivate var questionToolIds: Set<String> = []
+  /// The id of the replayed user message the last user row came from, so two messages in a row stay two rows.
+  fileprivate var lastUserMessageId: String?
 
   struct InFlightPrompt: Codable, Equatable, Sendable {
     var itemId: Int
@@ -337,7 +339,7 @@ enum ChatReducer {
       } else {
         append(.thought(text: text), to: &state)
       }
-    case let .userMessage(text):
+    case let .userMessage(text, messageId):
       if let first = state.queuedItemIds.first {
         state.queuedItemIds.removeFirst()
         state.startPending = false
@@ -347,11 +349,14 @@ enum ChatReducer {
           return
         }
       }
-      if let last = state.items.indices.last, case let .user(existing, images, offset) = state.items[last].kind {
+      if let last = state.items.indices.last, case let .user(existing, images, offset) = state.items[last].kind,
+        messageId == nil || state.lastUserMessageId == nil || messageId == state.lastUserMessageId
+      {
         state.items[last].kind = .user(text: existing + text, imageCount: images, offset: offset)
       } else {
         append(.user(text: text, offset: 0), to: &state)
       }
+      state.lastUserMessageId = messageId
     case let .toolCall(fields), let .toolCallUpdate(fields):
       startQueued(in: &state)
       if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }

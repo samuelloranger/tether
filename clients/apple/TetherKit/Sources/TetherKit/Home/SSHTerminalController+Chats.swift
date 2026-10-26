@@ -3,9 +3,19 @@ import Foundation
 extension SSHTerminalController {
   var chatTitles: ChatTitleStore { ChatTitleStore(config: config) }
 
-  /// One extra exec per session refresh. A host without the command, or a failed read, shows no
-  /// chats and never an error: chats are an extra on top of the terminal.
+  /// One extra exec per refresh. A host without `acp status` falls back to `acp ls` (running or
+  /// ended only); a failed read or a host without chats shows no chats and never an error: chats are
+  /// an extra on top of the terminal.
   func refreshChats() async {
+    if chatStatusSupported {
+      guard let output = try? await control.exec(ACPHostCommand.status) else { return }
+      let listing = ACPChatStatusListing.parse(output)
+      if !listing.unsupported {
+        if listing.chats != chats { chats = listing.chats }
+        return
+      }
+      chatStatusSupported = false
+    }
     guard let output = try? await control.exec(ACPHostCommand.list) else { return }
     let parsed = ACPChatListing.parse(output).chats
     if parsed != chats { chats = parsed }
@@ -27,6 +37,17 @@ extension SSHTerminalController {
 
   func newChat(cwdText: String) async -> ChatStart {
     await ChatRoute.start(cwdText: cwdText, host: config.host) { try await self.control.exec($0) }
+  }
+
+  func savedSessions(folderText: String) async -> ChatContinueLoader.Result {
+    let control = control
+    return await ChatContinueLoader.load(folderText: folderText) { try await control.exec($0) }
+  }
+
+  func continueChat(session: ACPSavedSession, folderText: String) async -> ChatStart {
+    await ChatRoute.startContinuing(session: session, cwdText: folderText, host: config.host) {
+      try await self.control.exec($0)
+    }
   }
 
   /// The attached session's folder, the default for a new chat.

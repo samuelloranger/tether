@@ -15,6 +15,8 @@ struct ChatView: View {
   var openControls = false
   /// Set when the chat sits inside the terminal screen: the header button then opens its drawer.
   var onSessions: (() -> Void)?
+  /// Another session or chat is waiting on an answer; the drawer button carries a dot.
+  var sessionsNeedYou = false
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
@@ -35,6 +37,8 @@ struct ChatView: View {
   @State private var pickingPhotos = false
   @State private var pickedPhotos: [PhotosPickerItem] = []
   @State private var copiedFolder = false
+  @State private var cursor: Int?
+  @State private var caretRequest: Int?
 
   private let bottomID = "chat-bottom"
   private static let space = "chat-scroll"
@@ -233,10 +237,16 @@ struct ChatView: View {
       Image(systemName: onSessions == nil ? "chevron.backward" : "line.3.horizontal")
         .font(.system(size: onSessions == nil ? 18 : 17, weight: .semibold))
         .foregroundStyle(TetherColors.accent)
+        .overlay(alignment: .topTrailing) {
+          if onSessions != nil, sessionsNeedYou {
+            Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: 4, y: -3)
+              .accessibilityHidden(true)
+          }
+        }
         .frame(width: 44, height: 44, alignment: .leading)
         .contentShape(Rectangle())
     }
-    .accessibilityLabel(onSessions == nil ? "Chats" : "Open session list")
+    .accessibilityLabel(onSessions == nil ? "Chats" : sessionsNeedYou ? "Open session list, a session needs you" : "Open session list")
     .accessibilityIdentifier(onSessions == nil ? "chatBack" : "chatSessions")
   }
 
@@ -423,6 +433,15 @@ struct ChatView: View {
           composerFocused = true
         }
       }
+      if let mention = mentionToken {
+        MentionPalette(matches: ChatMention.matches(query: mention.query, files: model.fileIndex.files)) { match in
+          let result = ChatMention.insertion(in: draft, token: mention, path: match.path)
+          draft = result.text
+          cursor = result.cursor
+          caretRequest = result.cursor
+          composerFocused = true
+        }
+      }
       if model.link.phase == .catchingUp || model.link.phase == .connecting {
         HStack(spacing: 6) {
           ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
@@ -436,15 +455,9 @@ struct ChatView: View {
       if !attachments.items.isEmpty { AttachmentStrip(attachments: attachments) }
       HStack(alignment: .bottom, spacing: 4) {
         attachButton
-        TextField(
-          "", text: $draft,
-          prompt: Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : "Message the agent")
-            .foregroundStyle(TetherColors.placeholder),
-          axis: .vertical
-        )
+        composerField
           .lineLimit(1...6)
           .font(.subheadline)
-          .focused($composerFocused)
           .padding(.horizontal, 14).padding(.vertical, 8)
           .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
           .opacity(answerPending ? 0.55 : 1)
@@ -454,6 +467,36 @@ struct ChatView: View {
         actionButton.padding(.leading, 4)
       }
     }
+    .onChange(of: mentionCandidate != nil) { _, open in
+      if open { Task { await model.loadMentionFiles() } }
+    }
+  }
+
+  private var composerPrompt: Text {
+    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : "Message the agent")
+      .foregroundStyle(TetherColors.placeholder)
+  }
+
+  @ViewBuilder private var composerField: some View {
+    if #available(iOS 18.0, *) {
+      CaretComposerField(
+        text: $draft, cursor: $cursor, caretRequest: $caretRequest, prompt: composerPrompt, focus: $composerFocused)
+    } else {
+      TextField("", text: $draft, prompt: composerPrompt, axis: .vertical).focused($composerFocused)
+    }
+  }
+
+  /// The `@word` being typed, while the host's folder listing is usable and nothing else owns the draft.
+  private var mentionCandidate: ChatMention.Token? {
+    guard !answerPending, !model.readOnly, !model.hasEnded, slashQuery == nil else { return nil }
+    return ChatMention.token(in: draft, cursor: cursor)
+  }
+
+  private var mentionToken: ChatMention.Token? {
+    guard let token = mentionCandidate,
+      !ChatMention.matches(query: token.query, files: model.fileIndex.files, limit: 1).isEmpty
+    else { return nil }
+    return token
   }
 
   private var slashQuery: String? {

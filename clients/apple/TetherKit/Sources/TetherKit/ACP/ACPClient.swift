@@ -71,12 +71,16 @@ actor ACPClient {
   private func removeSubscriber(_ id: UUID) { subscribers[id] = nil }
 
   /// Starts reading. With a persisted session id the handshake is skipped entirely; otherwise
-  /// runs `initialize` and `session/new`.
-  func start(cwd: String) async throws {
+  /// runs `initialize` and `session/new`, or `session/load` when continuing an earlier conversation.
+  func start(cwd: String, loadSessionId: String? = nil) async throws {
     startReading()
     if journal.sessionId == nil {
       _ = try await initialize()
-      _ = try await newSession(cwd: cwd)
+      if let id = loadSessionId ?? journal.loadedSessionId {
+        _ = try await loadSession(id, cwd: cwd)
+      } else {
+        _ = try await newSession(cwd: cwd)
+      }
     }
   }
 
@@ -105,6 +109,19 @@ actor ACPClient {
     journal.sessionId = id
     store.save(journal)
     return id
+  }
+
+  /// The agent replays the conversation as `session/update` notifications before it answers, so
+  /// the history arrives through the same read loop as live output.
+  @discardableResult
+  func loadSession(_ id: String, cwd: String) async throws -> String {
+    journal.loadedSessionId = id
+    store.save(journal)
+    let result = try await request("session/load", ["sessionId": id, "cwd": cwd, "mcpServers": [Any]()])
+    let loaded = result.sessionId ?? id
+    journal.sessionId = loaded
+    store.save(journal)
+    return loaded
   }
 
   func prompt(text: String, images: [ChatImageAttachment] = []) async throws {

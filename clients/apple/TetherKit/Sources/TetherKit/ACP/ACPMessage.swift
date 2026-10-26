@@ -114,7 +114,7 @@ struct ChatCost: Codable, Equatable, Sendable {
 enum ACPUpdate: Equatable, Sendable {
   case agentMessage(text: String, messageId: String?)
   case agentThought(text: String)
-  case userMessage(text: String)
+  case userMessage(text: String, messageId: String? = nil)
   case toolCall(ACPToolFields)
   case toolCallUpdate(ACPToolFields)
   case plan([ACPPlanEntry])
@@ -208,7 +208,7 @@ enum ACPDecoder {
       return .agentThought(text: text)
     case "user_message_chunk":
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
-      return .userMessage(text: text)
+      return .userMessage(text: text, messageId: update["messageId"] as? String)
     case "tool_call", "tool_call_update":
       guard let fields = toolFields(update) else { return .unknown(kind: kind) }
       return kind == "tool_call" ? .toolCall(fields) : .toolCallUpdate(fields)

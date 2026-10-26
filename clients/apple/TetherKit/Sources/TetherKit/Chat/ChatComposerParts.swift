@@ -194,6 +194,51 @@ struct SlashPalette: View {
   }
 }
 
+/// Files of the chat's folder matching the `@word` being typed; a tap writes the path into the draft.
+struct MentionPalette: View {
+  let matches: [ChatMention.Match]
+  let pick: (ChatMention.Match) -> Void
+
+  private static let rowHeight: CGFloat = 36
+
+  var body: some View {
+    if !matches.isEmpty {
+      ScrollView {
+        LazyVStack(spacing: 0) {
+          ForEach(Array(matches.enumerated()), id: \.element.id) { index, match in
+            if index > 0 { Rectangle().fill(TetherColors.border.opacity(0.6)).frame(height: 0.5).padding(.leading, 12) }
+            Button { pick(match) } label: { row(match) }
+              .buttonStyle(PaletteRowStyle())
+          }
+        }
+      }
+      .frame(height: min(CGFloat(matches.count), 6) * Self.rowHeight)
+      .scrollBounceBehavior(.basedOnSize)
+      .card
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("Files")
+      .accessibilityIdentifier("chatMentionPalette")
+    }
+  }
+
+  private func row(_ match: ChatMention.Match) -> some View {
+    HStack(spacing: 0) {
+      Text(match.name).font(.system(size: 14, weight: .semibold, design: .monospaced))
+        .foregroundStyle(TetherColors.textPrimary).lineLimit(1).layoutPriority(1)
+      if !match.folder.isEmpty {
+        Text("  " + match.folder).font(.system(size: 12, design: .monospaced))
+          .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 12)
+    .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight, alignment: .leading)
+    .contentShape(Rectangle())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(match.path)
+  }
+}
+
 private struct PaletteRowStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label.background(configuration.isPressed ? TetherColors.surfaceHover : .clear)
@@ -205,6 +250,37 @@ extension View {
     background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(TetherColors.border, lineWidth: 0.5))
       .clipShape(RoundedRectangle(cornerRadius: 12))
+  }
+}
+
+/// The composer's text field. From iOS 18 it reports where the caret is, so an `@` mention is only
+/// offered while the caret is in it; before that the caret is taken to be at the end of the draft.
+@available(iOS 18.0, *)
+struct CaretComposerField: View {
+  @Binding var text: String
+  @Binding var cursor: Int?
+  @Binding var caretRequest: Int?
+  let prompt: Text
+  var focus: FocusState<Bool>.Binding
+  @State private var selection: TextSelection?
+
+  var body: some View {
+    TextField(text: $text, selection: $selection, prompt: prompt, axis: .vertical) { EmptyView() }
+      .focused(focus)
+      .onChange(of: selection) { _, next in cursor = offset(of: next) }
+      .onChange(of: caretRequest) { _, request in
+        guard let request else { return }
+        let index = text.index(text.startIndex, offsetBy: min(request, text.count))
+        selection = TextSelection(insertionPoint: index)
+        caretRequest = nil
+      }
+  }
+
+  private func offset(of selection: TextSelection?) -> Int? {
+    guard let selection, case let .selection(range) = selection.indices, range.isEmpty,
+      range.lowerBound <= text.endIndex
+    else { return nil }
+    return text.distance(from: text.startIndex, to: range.lowerBound)
   }
 }
 

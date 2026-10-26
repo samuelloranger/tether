@@ -32,6 +32,7 @@ public struct SSHTerminalView: View {
   /// The main area: the terminal, or a chat swapped in over it. The terminal stays attached under a chat.
   @State private var content = DrawerContent()
   @State private var showNewChat = false
+  @State private var newChatMode: NewChatSheet.Mode = .new
   @State private var showFileImporter = false
   @State private var showHistory = false
   @State private var showPhotoPicker = false
@@ -69,7 +70,7 @@ public struct SSHTerminalView: View {
         .accessibilityHidden(content.showsChat)
         .ignoresSafeArea(.keyboard, edges: content.showsChat ? .bottom : [])
       if let route = content.chat {
-        EmbeddedChat(route: route, controller: controller, onSessions: { setDrawer(open: true) })
+        EmbeddedChat(route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) })
           .id(route.name)
       }
       if drawerProgress > 0 {
@@ -153,6 +154,7 @@ public struct SSHTerminalView: View {
     .task(id: "\(ObjectIdentifier(controller).hashValue)-\(scenePhase == .active && controller.status == .connected)") {
       while !Task.isCancelled, scenePhase == .active, controller.status == .connected {
         await controller.refreshAgentStatus()
+        if !controller.chats.isEmpty { await controller.refreshChats() }
         try? await Task.sleep(nanoseconds: 5_000_000_000)
       }
     }
@@ -221,8 +223,19 @@ public struct SSHTerminalView: View {
     .sheet(isPresented: $showNewChat) {
       NewChatSheet(
         initialFolder: controller.activeSessionCwd ?? "~",
+        initialMode: newChatMode,
         onStart: { folder in
           switch await controller.newChat(cwdText: folder) {
+          case let .failed(message): return message
+          case let .ready(route):
+            showNewChat = false
+            openChat(route)
+            return nil
+          }
+        },
+        loadSessions: { await controller.savedSessions(folderText: $0) },
+        onContinue: { folder, session in
+          switch await controller.continueChat(session: session, folderText: folder) {
           case let .failed(message): return message
           case let .ready(route):
             showNewChat = false
@@ -350,15 +363,20 @@ public struct SSHTerminalView: View {
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: controller.heldQuestion?.version)
   }
 
+  /// A session or a chat other than the one on screen is waiting on an answer.
+  private var drawerNeedsYou: Bool {
+    controller.othersWaiting || DrawerChatRows.othersWaiting(chats: controller.chats, open: content.chat?.name)
+  }
+
   private var header: some View {
     HStack(spacing: 4) {
       if tabs == nil {
         headerButton("line.3.horizontal", id: "sshTerminalDrawer",
-                     label: controller.othersWaiting ? "Open session list, a session needs you" : "Open session list") {
+                     label: drawerNeedsYou ? "Open session list, a session needs you" : "Open session list") {
           setDrawer(open: true)
         }
         .overlay(alignment: .topTrailing) {
-          if controller.othersWaiting {
+          if drawerNeedsYou {
             Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: -8, y: 8)
               .accessibilityHidden(true)
           }
@@ -574,7 +592,8 @@ public struct SSHTerminalView: View {
 
   private func chatRow(_ row: DrawerChatRow) -> some View {
     let isSelected = content.isSelected(chat: row.name)
-    let tint = row.isRunning ? TetherColors.success : TetherColors.textFaint
+    let tint = row.state.tint
+    let needsYou = row.state == .waiting
     return HStack(spacing: 6) {
       Button {
         openChat(controller.chatRoute(for: row))
@@ -593,7 +612,7 @@ public struct SSHTerminalView: View {
                   .lineLimit(1).truncationMode(.head)
                 Text("·").foregroundStyle(TetherColors.textFaint)
               }
-              Text(row.stateLabel).foregroundStyle(tint).fixedSize()
+              ChatStateTag(state: row.state)
             }
             .font(.caption2.monospaced())
             .accessibilityHidden(true)
@@ -618,7 +637,9 @@ public struct SSHTerminalView: View {
     }
     .padding(.horizontal, 12).padding(.vertical, 10)
     .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? TetherColors.accent.opacity(0.4) : TetherColors.border))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
+      needsYou ? TetherColors.warning.opacity(0.7) : isSelected ? TetherColors.accent.opacity(0.4) : TetherColors.border,
+      lineWidth: needsYou ? 1.5 : 1))
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isSelected)
     .contextMenu {
       Button { openChat(controller.chatRoute(for: row)) } label: { Label("Open", systemImage: "bubble.left") }
@@ -650,7 +671,7 @@ public struct SSHTerminalView: View {
         .onSubmit(startNewSession)
       Menu {
         Button(action: startNewSession) { Label("Terminal session", systemImage: "terminal") }
-        Button { showNewChat = true } label: { Label("Chat…", systemImage: "bubble.left") }
+        Button { newChatMode = .new; showNewChat = true } label: { Label("Chat…", systemImage: "bubble.left") }
           .accessibilityIdentifier("sshNewChat")
       } label: {
         Image(systemName: "plus").font(.subheadline.weight(.semibold))
@@ -749,6 +770,9 @@ public struct SSHTerminalView: View {
       if let row { content.open(controller.chatRoute(for: row)) }
       if mode == "chat-open" { try? await Task.sleep(nanoseconds: 700_000_000); drawerOpen = true }
     case "newchat": showNewChat = true
+    case "newchat-continue", "newchat-continue-empty", "newchat-continue-error", "newchat-continue-recent":
+      newChatMode = .resume
+      showNewChat = true
     default: drawerOpen = true
     }
   }

@@ -11,10 +11,14 @@ final class ChatSessionModel {
   typealias Inspect = @Sendable () async -> ACPChatSummary?
   /// The output of `tether-notify acp answers <name>`, or nil when the host can't say.
   typealias HostAnswers = @Sendable () async -> String?
+  /// The output of the file listing in the chat's folder, or nil when the host can't say.
+  typealias ListFiles = @Sendable () async -> String?
 
   let chatName: String
   let cwd: String
   let readOnly: Bool
+  /// The earlier conversation this chat loads instead of starting a session.
+  let loadSessionId: String?
   /// What the host is called in messages about it; the connection's host name.
   let hostLabel: String
 
@@ -26,6 +30,9 @@ final class ChatSessionModel {
   var notice: String?
   /// Option changes in flight or refused, by option id; the shown value only changes once the agent confirms.
   private(set) var optionChanges: [String: OptionChange] = [:]
+  /// The folder's files for `@` mentions; loaded when the palette first opens.
+  private(set) var fileIndex = ChatFileIndex()
+  private var loadingFiles = false
 
   enum SignInRetry: Equatable { case idle, checking, stillSignedOut }
 
@@ -46,6 +53,7 @@ final class ChatSessionModel {
   private let snapshots: (any ChatSnapshotStore)?
   private let outboxStore: (any ChatOutboxStore)?
   private let inspect: Inspect?
+  private let listFiles: ListFiles?
   private var client: ACPClient?
   private var forwardTask: Task<Void, Never>?
   private var settleTask: Task<Void, Never>?
@@ -62,8 +70,11 @@ final class ChatSessionModel {
   init(
     chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
-    outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", dial: @escaping Dial
+    outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
+    listFiles: ListFiles? = nil, dial: @escaping Dial
   ) {
+    self.loadSessionId = loadSessionId
+    self.listFiles = listFiles
     self.hostLabel = hostLabel
     self.outboxStore = outboxStore
     self.outbox = ChatOutbox(restoring: outboxStore?.load() ?? [])
@@ -87,7 +98,11 @@ final class ChatSessionModel {
       hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) },
       snapshots: files.snapshots(route.name),
       inspect: { await ACPHostInspect.summary(name: route.name, config: config, store: hostKeyStore) },
-      outbox: files.outbox(route.name), hostLabel: config.host
+      outbox: files.outbox(route.name), hostLabel: config.host, loadSessionId: route.loadSessionId,
+      listFiles: {
+        await ACPHostExec.run(
+          command: ChatFileList.command(cwd: route.cwd), config: config, store: hostKeyStore, deadline: 15)
+      }
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -174,9 +189,13 @@ final class ChatSessionModel {
     }
     scheduleSettle()
     do {
-      if readOnly { await fresh.startReading() } else { try await fresh.start(cwd: cwd) }
+      if readOnly { await fresh.startReading() } else { try await fresh.start(cwd: cwd, loadSessionId: loadSessionId) }
     } catch {
       guard mine == generation else { return }
+      if case let .agent(_, message)? = error as? ACPClientError, loadSessionId != nil, !ChatAuthError.matches(error) {
+        notice = "Couldn't load that conversation" + (message.isEmpty ? "." : ": \(message)")
+        return
+      }
       // The transcript already carries the sign-in row; the link itself is fine.
       if !ChatAuthError.matches(error) { fail(error) }
     }
@@ -189,7 +208,7 @@ final class ChatSessionModel {
     let mine = generation
     Task {
       do {
-        try await client.start(cwd: cwd)
+        try await client.start(cwd: cwd, loadSessionId: loadSessionId)
         guard mine == generation else { return }
         signInRetry = .idle
       } catch {
@@ -279,6 +298,16 @@ final class ChatSessionModel {
         optionChanges[id] = .failed(value: value, message: Self.describe(error))
       }
     }
+  }
+
+  /// Called when the `@` palette opens: lists the folder again when the cached list is over a minute old.
+  /// A failed listing keeps what was there and is retried the next time the palette opens.
+  func loadMentionFiles(now: Date = .now) async {
+    guard let listFiles, !loadingFiles, fileIndex.isStale(at: now) else { return }
+    loadingFiles = true
+    defer { loadingFiles = false }
+    guard let output = await listFiles() else { return }
+    fileIndex.store(ChatFileList.parse(output), at: .now)
   }
 
   func dismissOptionFailure(id: String) {

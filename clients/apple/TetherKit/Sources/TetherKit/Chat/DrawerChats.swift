@@ -5,27 +5,36 @@ struct DrawerChatRow: Equatable, Identifiable {
   var name: String
   var title: String
   var subtitle: String
-  var isRunning: Bool
+  var state: DrawerChatState
   var cwd: String
 
   var id: String { name }
-  var stateLabel: String { isRunning ? "running" : "ended" }
+  var isRunning: Bool { state != .ended }
+  var stateLabel: String { state.label }
 
   func route(readOnly: Bool) -> ChatRoute { ChatRoute(name: name, cwd: cwd, readOnly: readOnly) }
 }
 
 enum DrawerChatRows {
-  /// The stored agent title, else the folder name. The subtitle is the folder, or the path above
-  /// it when the folder is already the title.
+  /// The host's title, else the stored agent title, else the folder name. The subtitle is the folder,
+  /// or the path above it when the folder is already the title.
   static func rows(chats: [ACPChatSummary], titles: [String: String]) -> [DrawerChatRow] {
     chats.map { chat in
       let folder = ChatFormat.folderName(chat.cwd)
       let stored = titles[chat.name].flatMap { $0.isEmpty ? nil : $0 }
-      let title = stored ?? folder
+      let title = chat.hostTitle ?? stored ?? folder
       let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd) ?? chat.cwd) : folder
       return DrawerChatRow(
-        name: chat.name, title: title, subtitle: subtitle, isRunning: chat.isRunning, cwd: chat.cwd)
+        name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd)
     }
+  }
+}
+
+extension DrawerChatRows {
+  /// A chat other than the open one is waiting on an answer; the drawer button says so because its
+  /// banner would sit in the terminal stack, out of sight behind the open chat.
+  static func othersWaiting(chats: [ACPChatSummary], open: String?) -> Bool {
+    chats.contains { $0.isRunning && $0.hasStatus && $0.turn == .waiting && $0.name != open }
   }
 }
 

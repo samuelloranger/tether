@@ -18,9 +18,17 @@ enum ACPHostCommand {
   }
 
   static let list = "\(prefix) ls"
+  /// One JSON line per chat with what is happening in it. A host that predates it prints an
+  /// "unknown command" line, which the listing reads as unsupported (stderr is folded in for that).
+  static let status = "\(prefix) status 2>&1"
   /// For the chat list screen, which has to show why a host that cannot list says nothing.
   static let listWithErrors = "\(list) 2>&1"
   static let home = "printf %s \"$HOME\""
+
+  /// Earlier conversations in `cwd`, newest first, as JSON lines. Runs the adapter briefly on the host.
+  static func sessions(cwd: String, limit: Int) -> String {
+    "\(prefix) sessions \(shellQuote(cwd)) --limit \(limit) 2>&1"
+  }
 
   static func kill(name: String) -> String { "\(prefix) kill \(shellQuote(name))" }
 }
@@ -32,6 +40,10 @@ struct ACPChatSummary: Equatable, Identifiable, Sendable {
   var cwd: String
   var created: Date
   var spawn: String
+  /// From `acp status`; a host without it leaves these at their defaults.
+  var turn: ChatHostTurn = .idle
+  var hostTitle: String?
+  var hasStatus = false
 
   var id: String { name }
 
@@ -100,6 +112,8 @@ struct ChatRoute: Hashable, Identifiable {
   var name: String
   var cwd: String
   var readOnly: Bool
+  /// An earlier conversation to load instead of starting a new session.
+  var loadSessionId: String?
   var id: String { name }
 
   static func newName() -> String {

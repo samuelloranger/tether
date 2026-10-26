@@ -119,6 +119,8 @@ public final class SSHTerminalController {
   public private(set) var sessions: [ZmxSession] = []
   /// The host's chats from `tether-notify acp ls`; empty when the host has none or lacks the command.
   var chats: [ACPChatSummary] = []
+  /// False once the host answered `acp status` as an unknown command.
+  @ObservationIgnored var chatStatusSupported = true
   /// A chat a notification tap asked for; the terminal screen swaps it in and clears this.
   var requestedChat: String?
   #if DEBUG

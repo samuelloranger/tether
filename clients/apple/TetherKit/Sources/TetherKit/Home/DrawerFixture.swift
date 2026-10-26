@@ -66,6 +66,37 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
   func teardown() {}
 
   func exec(_ command: String) throws -> String {
+    let env = ProcessInfo.processInfo.environment
+    if command.contains("acp status") {
+      if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether-notify: unknown acp command \"status\"" }
+      func line(_ name: String, _ state: String, _ turn: String, _ title: String, _ cwd: String, _ age: Int) -> String {
+        "{\"name\":\"\(name)\",\"state\":\"\(state)\",\"turn\":\"\(turn)\",\"title\":\"\(title)\",\"cwd\":\"\(cwd)\",\"created\":\(now - age),\"logBytes\":48213,\"endedReason\":\"\"}"
+      }
+      return [
+        line("chat-a1b2c3", "running", "working", "", "/home/dev/projects/api-server", 600),
+        line("chat-g7h8i9", "running", "waiting", "Migrate the docs site to the new theme", "/home/dev/projects/docs-site", 1800),
+        line("chat-j0k1l2", "running", "idle", "Review the release checklist", "/home/dev/projects/tether", 3600),
+        line("chat-d4e5f6", "ended", "idle", "", "/home/dev/projects/mobile-app", 86400),
+      ].joined(separator: "\n")
+    }
+    if command.contains("acp sessions") {
+      switch env["TETHER_DEBUG_DRAWER"] {
+      case "newchat-continue-empty": return ""
+      case "newchat-continue-error": return "tether-notify: agent exited before listing sessions"
+      default:
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func entry(_ id: String, _ title: String, _ ago: Int) -> String {
+          "{\"sessionId\":\"\(id)\",\"title\":\"\(title)\",\"updatedAt\":\"\(iso.string(from: Date(timeIntervalSince1970: TimeInterval(now - ago))))\",\"cwd\":\"/home/dev/projects/api-server\"}"
+        }
+        return [
+          entry("s-1", "Add retry with backoff to fetchJSON", env["TETHER_DEBUG_DRAWER"] == "newchat-continue-recent" ? 240 : 7200),
+          entry("s-2", "Fix flaky pagination test", 86400 * 2),
+          entry("s-3", "", 86400 * 9),
+          entry("s-4", "Explain the cache invalidation path", 86400 * 30),
+        ].joined(separator: "\n")
+      }
+    }
     if command.contains("acp ls") {
       return [
         "chat-a1b2c3\trunning\t48213\t/home/dev/projects/api-server\t\(now - 600)\tclaude",

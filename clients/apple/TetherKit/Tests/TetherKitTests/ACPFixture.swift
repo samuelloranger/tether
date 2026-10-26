@@ -26,6 +26,28 @@ enum ACPFixture {
     }
   }
 
+  /// A recorded `session/load` of a finished conversation (one prompt, a shell tool call, a one-word reply),
+  /// with names and the account replaced. The agent replays the history before it answers the load.
+  enum Load {
+    static let agentLines: [String] = ACPFixture.lines(prefix: "< ", file: "acp-load.log")
+
+    static func index(containing needle: String) -> Int {
+      agentLines.firstIndex { $0.contains(needle) } ?? -1
+    }
+
+    static func log(_ range: Range<Int>) -> Data {
+      Data((agentLines[range].joined(separator: "\n") + "\n").utf8)
+    }
+
+    static var full: Data { log(0..<agentLines.count) }
+    /// The agent line answering `session/load`.
+    static var responseLine: Int { index(containing: "\"sessionId\":\"sess-4\",\"modes\"") }
+
+    static func offset(after count: Int) -> Int {
+      agentLines.prefix(count).reduce(0) { $0 + $1.utf8.count + 1 }
+    }
+  }
+
   /// The recorded AskUserQuestion turn: the client advertised `elicitation`, the adapter asked one single-select question.
   enum Elicitation {
     static let agentLines: [String] = ACPFixture.lines(prefix: "< ", file: "acp-elicitation.log")

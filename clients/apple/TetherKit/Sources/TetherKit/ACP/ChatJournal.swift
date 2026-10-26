@@ -68,6 +68,9 @@ struct ChatJournal: Codable, Equatable, Sendable {
   }
 
   var sessionId: String?
+  /// Set when the chat continues an earlier conversation: the agent is asked to `session/load` this id
+  /// instead of `session/new`, and a redial before the load answered must ask for the same one.
+  var loadedSessionId: String?
   /// Persisted so a resumed client never reuses an id the agent already answered.
   var nextRequestId = 1
   var entries: [Entry] = []

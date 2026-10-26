@@ -5,7 +5,9 @@ import Foundation
 enum ACPHostExec {
   static let deadline: TimeInterval = 8
 
-  static func run(command: String, config: SSHConnectionConfig, store: HostKeyStore) async -> String? {
+  static func run(
+    command: String, config: SSHConnectionConfig, store: HostKeyStore, deadline: TimeInterval = ACPHostExec.deadline
+  ) async -> String? {
     let output = LockedBox("")
     return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
       let gate = LockedBox(false)

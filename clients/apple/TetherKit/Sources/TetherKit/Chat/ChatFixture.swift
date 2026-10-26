@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`.
 enum ChatFixture {
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -537,7 +537,13 @@ enum ChatFixture {
     ]
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false,
-      store: InMemoryChatJournalStore(journal)
+      store: InMemoryChatJournalStore(journal),
+      listFiles: {
+        [
+          "README.md", "Package.swift", "src/fetch.ts", "src/fetch.test.ts", "src/main.ts", "src/retry/backoff.ts",
+          "src/retry/policy.ts", "docs/guide/main-loop.md", "scripts/make-release.sh", "assets/images/logo-main.png",
+        ].joined(separator: "\n")
+      }
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
@@ -734,7 +740,7 @@ public struct ChatFixtureRoot: View {
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
-    case "controls", "controls-sheet", "slash", "attach": initial = ChatFixture.controlsModel()
+    case "controls", "controls-sheet", "slash", "attach", "mention", "mention-all": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
     }
     _model = State(initialValue: initial)
@@ -747,8 +753,8 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send", startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
-          initialDraft: mode == "slash" ? "/co" : mode == "attach" ? "Compare these two screenshots" : "",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
+          initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
           openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
           sendDraft: mode == "send" ? ChatFixture.sendDraft : nil)
       }
