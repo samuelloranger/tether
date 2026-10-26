@@ -6,6 +6,7 @@ import SwiftUI
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
 /// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`.
 enum ChatFixture {
+  static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
   static let sendDraft = "Thanks. Now do the same for the other helpers,\nthen run the whole suite\nand summarise anything that fails."
@@ -789,7 +790,7 @@ public struct ChatFixtureRoot: View {
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
     case "send": initial = ChatFixture.sendModel()
-    case "send-long": initial = ChatFixture.sendLongModel()
+    case "send-long", "send-long-top": initial = ChatFixture.sendLongModel()
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
@@ -806,11 +807,11 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "subagents-open-top",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "send-long-top" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
           openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
           sendDraft: mode == "send" || mode == "send-long" ? ChatFixture.sendDraft : nil,
-          probeLastRow: mode == "send-long")
+          probeLastRow: mode == "send-long" || mode == "send-long-top")
       }
     }
       .tint(TetherColors.accent)

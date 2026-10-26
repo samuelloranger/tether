@@ -1069,5 +1069,12 @@ private struct EarlierMessagesButton: View {
     }
     .buttonStyle(.plain)
     .accessibilityIdentifier("chatEarlierMessages")
+    #if DEBUG
+    .task {
+      guard ChatFixture.autoEarlier else { return }
+      try? await Task.sleep(nanoseconds: 2_500_000_000)
+      action()
+    }
+    #endif
   }
 }
