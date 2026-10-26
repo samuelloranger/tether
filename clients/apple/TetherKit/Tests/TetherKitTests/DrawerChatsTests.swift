@@ -101,7 +101,7 @@ final class ControllerChatsTests: XCTestCase {
     XCTAssertEqual(controller.chats.first?.turn, .waiting)
     XCTAssertFalse(ops.commands.contains { $0.contains("acp ls") })
 
-    ops.execResult = { _ in "tether-notify: unknown command acp" }
+    ops.execResult = { _ in "tether: unknown command acp" }
     await controller.refreshChats()
     XCTAssertTrue(controller.chats.isEmpty)
   }
@@ -109,7 +109,7 @@ final class ControllerChatsTests: XCTestCase {
   func test_a_host_without_acp_status_falls_back_to_ls_once_and_stays_there() async {
     let ops = FakeOps()
     ops.execResult = {
-      $0.contains("acp status") ? "tether-notify: unknown acp command \"status\"" : "chat-a\trunning\t10\t/srv/x\t100\tclaude"
+      $0.contains("acp status") ? "tether: unknown acp command \"status\"" : "chat-a\trunning\t10\t/srv/x\t100\tclaude"
     }
     let controller = controller(ops)
     await controller.refreshChats()

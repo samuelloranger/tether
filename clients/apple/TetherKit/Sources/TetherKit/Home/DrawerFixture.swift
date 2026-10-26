@@ -68,7 +68,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
   func exec(_ command: String) throws -> String {
     let env = ProcessInfo.processInfo.environment
     if command.contains("acp status") {
-      if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether-notify: unknown acp command \"status\"" }
+      if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether: unknown acp command \"status\"" }
       func line(_ name: String, _ state: String, _ turn: String, _ title: String, _ cwd: String, _ age: Int) -> String {
         "{\"name\":\"\(name)\",\"state\":\"\(state)\",\"turn\":\"\(turn)\",\"title\":\"\(title)\",\"cwd\":\"\(cwd)\",\"created\":\(now - age),\"logBytes\":48213,\"endedReason\":\"\"}"
       }
@@ -82,7 +82,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
     if command.contains("acp sessions") {
       switch env["TETHER_DEBUG_DRAWER"] {
       case "newchat-continue-empty": return ""
-      case "newchat-continue-error": return "tether-notify: agent exited before listing sessions"
+      case "newchat-continue-error": return "tether: agent exited before listing sessions"
       default:
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

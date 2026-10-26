@@ -5,7 +5,7 @@ enum ChatHostTurn: String, Equatable, Sendable {
   case idle, working, waiting
 }
 
-/// `acp status`: one JSON object per chat. A host whose tether-notify predates the command prints an
+/// `acp status`: one JSON object per chat. A host whose tether predates the command prints an
 /// error line instead, which reads as `unsupported` so the caller falls back to `acp ls`.
 enum ACPChatStatusListing {
   struct Result: Equatable {

@@ -415,12 +415,12 @@ enum ChatFixture {
   static func longModel(steps: Int = 6, replyAfter: Double? = nil) -> ChatSessionModel {
     var lines: [String] = [
       update(["sessionUpdate": "session_info_update", "title": "Chat feature"]),
-      update(tool("t1", "Edit apps/tether-notify/README.md", kind: "edit", status: "completed")),
+      update(tool("t1", "Edit apps/tether/README.md", kind: "edit", status: "completed")),
       update(tool("t2", "ls -la /work/project/.codegraph", kind: "execute", status: "completed", text: "total 8")),
       update(tool("t3", "Read src/fetch.ts", kind: "read", status: "completed", text: "export async function fetchJSON")),
       update(["sessionUpdate": "usage_update", "used": 41_250, "size": 1_000_000]),
-      message("Edited `apps/tether-notify/README.md` line 3: \"the v5 SSH host\" is now \"the SSH host\". It's uncommitted. Revert with `git checkout apps/tether-notify/README.md`.\n\nThe `ship:scout` subagent is exploring the repo in the background. I'll relay its report when it finishes."),
-      message("\n\n## Entry points\n\n- iOS and Mac Catalyst: `clients/apple/TetherIOS` is the app target, with `TetherKit` holding the SSH transport and every screen\n- Windows and Linux: `clients/desktop/` is one Rust workspace with a Slint UI\n- Host side: `apps/tether-notify/` is a small Go tool for encrypted push\n\n"),
+      message("Edited `apps/tether/README.md` line 3: \"the v5 SSH host\" is now \"the SSH host\". It's uncommitted. Revert with `git checkout apps/tether/README.md`.\n\nThe `ship:scout` subagent is exploring the repo in the background. I'll relay its report when it finishes."),
+      message("\n\n## Entry points\n\n- iOS and Mac Catalyst: `clients/apple/TetherIOS` is the app target, with `TetherKit` holding the SSH transport and every screen\n- Windows and Linux: `clients/desktop/` is one Rust workspace with a Slint UI\n- Host side: `apps/tether/` is a small Go tool for encrypted push\n\n"),
     ]
     for step in 1...steps {
       lines.append(message("Step \(step): the helper keeps its state small, retries only on `5xx` server errors and waits a little longer each time, so a flaky upstream does not hammer the host.\n\n"))

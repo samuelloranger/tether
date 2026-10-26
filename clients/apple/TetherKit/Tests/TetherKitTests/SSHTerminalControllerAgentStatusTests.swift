@@ -10,12 +10,12 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
     #"{"session":"\#(session)","agent":"claude","state":"\#(state)","since":\#(since),"updated":\#(since),"message":"m","link":"tether://session/\#(session)?host=devbox"}"#
   }
 
-  /// Answers `zmx ls` at once and `tether-notify` with `status()`, read on every call so a
+  /// Answers `zmx ls` at once and `tether` with `status()`, read on every call so a
   /// test can change the host's answer between reads.
   private func makeOps(_ status: @escaping () throws -> String) -> FakeOps {
     let ops = FakeOps()
     let zmxLs = "name=work\tpid=1\tclients=1\tcreated=0\tcwd=x\n"
-    ops.execResult = { command in command.contains("tether-notify") ? try status() : zmxLs }
+    ops.execResult = { command in command.contains("tether") ? try status() : zmxLs }
     return ops
   }
 
@@ -31,12 +31,12 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
   /// before the test's own reads, or it races them.
   private func connectSettled(_ controller: SSHTerminalController, _ ops: FakeOps) async {
     await controller.connect()
-    _ = await eventually { ops.commands.contains { $0.contains("tether-notify") } }
+    _ = await eventually { ops.commands.contains { $0.contains("tether") } }
     try? await Task.sleep(nanoseconds: 50_000_000)
   }
 
   private func statusExecs(_ ops: FakeOps) -> Int {
-    ops.commands.filter { $0.contains("tether-notify") && !$0.contains(" acp ") }.count
+    ops.commands.filter { $0.contains("tether") && !$0.contains(" acp ") }.count
   }
 
   func test_first_read_fills_statuses_without_an_alert() async {

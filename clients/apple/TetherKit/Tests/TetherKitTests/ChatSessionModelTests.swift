@@ -292,11 +292,11 @@ final class ChatSessionModelTests: XCTestCase {
   }
 
   func test_a_missing_tether_notify_is_explained() async {
-    let listModel = ChatListModel(hostName: "h") { _ in "zsh: command not found: tether-notify\n" }
+    let listModel = ChatListModel(hostName: "h") { _ in "zsh: command not found: tether\n" }
     await listModel.refresh()
     guard case let .failed(message) = listModel.load else { return XCTFail() }
     XCTAssertTrue(message.contains("missing or too old"))
-    XCTAssertTrue(message.contains("Update tether-notify on h"))
+    XCTAssertTrue(message.contains("Update tether on h"))
   }
 
   func test_a_failed_image_prompt_keeps_its_attachments_and_retries_with_them() async throws {

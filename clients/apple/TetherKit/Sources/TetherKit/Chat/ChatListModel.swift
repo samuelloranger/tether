@@ -88,8 +88,8 @@ final class ChatListModel {
   static func explain(_ line: String, host: String? = nil) -> String {
     let lower = line.lowercased()
     if lower.contains("not found") || lower.contains("unknown command") || lower.contains("usage") {
-      let update = host.map { "Update tether-notify on \($0). " } ?? ""
-      return update + "This host's tether-notify is missing or too old for chat. Reinstall it, then pull to refresh."
+      let update = host.map { "Update tether on \($0). " } ?? ""
+      return update + "This host's tether is missing or too old for chat. Reinstall it, then pull to refresh."
     }
     return line
   }

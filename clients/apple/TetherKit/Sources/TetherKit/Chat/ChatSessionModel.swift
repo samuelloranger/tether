@@ -9,7 +9,7 @@ final class ChatSessionModel {
   typealias Dial = (_ spawn: Bool, _ from: Int) async throws -> any TerminalByteStream
   /// The host's `acp ls` row for this chat, or nil when it can't say.
   typealias Inspect = @Sendable () async -> ACPChatSummary?
-  /// The output of `tether-notify acp answers <name>`, or nil when the host can't say.
+  /// The output of `tether acp answers <name>`, or nil when the host can't say.
   typealias HostAnswers = @Sendable () async -> String?
   /// The output of the file listing in the chat's folder, or nil when the host can't say.
   typealias ListFiles = @Sendable () async -> String?

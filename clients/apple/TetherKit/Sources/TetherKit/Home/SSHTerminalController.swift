@@ -117,7 +117,7 @@ public final class SSHTerminalController {
   public let title: String
   public private(set) var sessionKey: String
   public private(set) var sessions: [ZmxSession] = []
-  /// The host's chats from `tether-notify acp ls`; empty when the host has none or lacks the command.
+  /// The host's chats from `tether acp ls`; empty when the host has none or lacks the command.
   var chats: [ACPChatSummary] = []
   /// False once the host answered `acp status` as an unknown command.
   @ObservationIgnored var chatStatusSupported = true
@@ -184,7 +184,7 @@ public final class SSHTerminalController {
   /// the session list or the diff behind it.
   private let ghControl: ControlConnection
   static let zmx = "~/.local/bin/zmx"
-  private static let notify = "~/.local/bin/tether-notify"
+  private static let notify = "~/.local/bin/tether"
   static let agentStatusCommand =
     "if [ -x \(notify) ]; then \(notify) status 2>/dev/null; else echo __tether_notify_missing; fi"
   private static let agentStatusStaleAfter: TimeInterval = 30
@@ -857,9 +857,9 @@ public final class SSHTerminalController {
     await suspendNow(flushingPush: true)
   }
 
-  /// Starts `tether-notify flush` detached on the host and returns at once: it waits there for
+  /// Starts `tether flush` detached on the host and returns at once: it waits there for
   /// the attach client to be gone, then sends the push the host skipped while this phone was
-  /// attached. A missing `tether-notify` is not an error.
+  /// attached. A missing `tether` is not an error.
   nonisolated static func flushPushCommand(session: String) -> String {
     "command -v \(notify) >/dev/null && { nohup \(notify) flush --session \(shellQuote(session)) >/dev/null 2>&1 </dev/null & }"
   }

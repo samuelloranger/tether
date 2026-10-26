@@ -1,6 +1,6 @@
 import Foundation
 
-/// One of Claude's AskUserQuestion questions, as `tether-notify pending` serves it.
+/// One of Claude's AskUserQuestion questions, as `tether pending` serves it.
 public struct AgentQuestion: Decodable, Equatable, Sendable {
   public var question: String
   public var header: String

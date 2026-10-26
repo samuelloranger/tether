@@ -23,11 +23,11 @@ final class ChatContinueTests: XCTestCase {
 
   func test_no_output_is_an_empty_list_and_a_failure_line_is_the_reason() {
     XCTAssertEqual(ACPSavedSessionListing.parse(""), .init(sessions: [], failure: nil))
-    let failed = ACPSavedSessionListing.parse("tether-notify: agent exited before listing sessions")
+    let failed = ACPSavedSessionListing.parse("tether: agent exited before listing sessions")
     XCTAssertEqual(failed.failure, "agent exited before listing sessions")
     XCTAssertTrue(failed.sessions.isEmpty)
     XCTAssertTrue(
-      ACPSavedSessionListing.parse("tether-notify: unknown acp command \"sessions\"").failure?.contains("Update it") == true)
+      ACPSavedSessionListing.parse("tether: unknown acp command \"sessions\"").failure?.contains("Update it") == true)
   }
 
   func test_a_stray_line_beside_sessions_is_not_a_failure() {
@@ -76,7 +76,7 @@ final class ChatContinueTests: XCTestCase {
   }
 
   func test_loading_reports_the_host_error_and_a_dead_connection() async {
-    let refused = await ChatContinueLoader.load(folderText: "/srv/x") { _ in "tether-notify: agent exited before listing sessions" }
+    let refused = await ChatContinueLoader.load(folderText: "/srv/x") { _ in "tether: agent exited before listing sessions" }
     XCTAssertEqual(refused, .failed("agent exited before listing sessions"))
     let down = await ChatContinueLoader.load(folderText: "/srv/x") { _ in throw SSHConnectError.transport("down") }
     guard case let .failed(message) = down else { return XCTFail("expected a failure") }

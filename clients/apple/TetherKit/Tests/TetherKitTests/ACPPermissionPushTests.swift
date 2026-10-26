@@ -86,13 +86,13 @@ final class ACPPermissionPushTests: XCTestCase {
       optionId: "allow-once", optionLabel: "Yes")
     XCTAssertEqual(
       ACPAnswerCommand.command(notify: notify, request: plain),
-      "~/.local/bin/tether-notify acp answer 'chat-ab12' --request '0' --option 'allow-once'")
+      "~/.local/bin/tether acp answer 'chat-ab12' --request '0' --option 'allow-once'")
     let hostile = ACPAnswerRequest(
       chat: ChatDeepLink(chatName: "c", identityName: "h"), acp: "it's; rm -rf /", requestId: "\"a b\"; id",
       optionId: "x' y;$(id)", optionLabel: "Yes")
     XCTAssertEqual(
       ACPAnswerCommand.command(notify: notify, request: hostile),
-      "~/.local/bin/tether-notify acp answer 'it'\"'\"'s; rm -rf /' --request '\"a b\"; id' --option 'x'\"'\"' y;$(id)'")
+      "~/.local/bin/tether acp answer 'it'\"'\"'s; rm -rf /' --request '\"a b\"; id' --option 'x'\"'\"' y;$(id)'")
   }
 
   private let questionInfo: [AnyHashable: Any] = [
@@ -144,7 +144,7 @@ final class ACPPermissionPushTests: XCTestCase {
     func outcome(_ text: String) -> ACPAnswerOutcome { ACPAnswerOutcome.interpret(output: text, machine: "box") }
     XCTAssertEqual(outcome("__tether_sent=0\n"), .answered)
     XCTAssertEqual(outcome("not outstanding\n__tether_sent=3\n"), .alreadyAnswered)
-    XCTAssertEqual(outcome("sh: tether-notify: not found\n__tether_sent=127\n"), .failed("Update tether-notify on box to answer chats."))
+    XCTAssertEqual(outcome("sh: tether: not found\n__tether_sent=127\n"), .failed("Update tether on box to answer chats."))
     XCTAssertEqual(outcome("boom\n__tether_sent=1\n"), .failed("boom"))
     XCTAssertEqual(outcome(""), .failed("No answer from box."))
   }

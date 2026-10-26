@@ -5,7 +5,7 @@ import Security
 import UIKit
 import UserNotifications
 
-/// Holds the device push identity handed to the host's `tether-notify`. Failures are logged
+/// Holds the device push identity handed to the host's `tether`. Failures are logged
 /// and swallowed: push must never block or throw into UI.
 @MainActor
 public final class PushRegistrar {
@@ -29,14 +29,14 @@ public final class PushRegistrar {
   }
 
   /// The device's push identity for the v5 SSH path: the app hands this to the
-  /// host's `tether-notify register` over SSH. `nil` until APNs has issued a token.
+  /// host's `tether register` over SSH. `nil` until APNs has issued a token.
   public struct PushIdentity: Sendable {
     public let token: String
     public let secretKey: String
     public let label: String
   }
 
-  /// What the host's `tether-notify` runs to learn this device; every value is quoted.
+  /// What the host's `tether` runs to learn this device; every value is quoted.
   nonisolated static func registerCommand(notify: String, identity: PushIdentity) -> String {
     "\(notify) register \(shellQuote(identity.token)) \(shellQuote(identity.secretKey)) \(shellQuote(identity.label))"
   }
@@ -52,7 +52,7 @@ public final class PushRegistrar {
   ) async {
     let key = "\(config.username)@\(config.host):\(config.port)"
     guard registeredHosts.update({ $0.insert(key).inserted }) else { return }
-    let command = registerCommand(notify: "~/.local/bin/tether-notify", identity: identity) + " >/dev/null 2>&1"
+    let command = registerCommand(notify: "~/.local/bin/tether", identity: identity) + " >/dev/null 2>&1"
     do {
       try await SSHConnector.execStream(config: config, store: store, command: command) { _ in true }
     } catch {

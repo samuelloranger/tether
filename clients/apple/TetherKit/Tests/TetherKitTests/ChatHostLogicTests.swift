@@ -5,11 +5,11 @@ final class ChatHostLogicTests: XCTestCase {
   func test_attach_command_spawns_only_for_a_new_chat() {
     XCTAssertEqual(
       ACPHostCommand.attach(name: "chat-ab12", cwd: "/home/sam/my app", spawn: true),
-      "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp attach 'chat-ab12' --from 0 "
+      "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 "
         + "--spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0' --cwd '/home/sam/my app'")
     XCTAssertEqual(
       ACPHostCommand.attach(name: "chat-ab12", cwd: "/x", spawn: false),
-      "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp attach 'chat-ab12' --from 0")
+      "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0")
   }
 
   func test_the_spawn_command_is_pinned_to_an_explicit_adapter_version() {
@@ -24,7 +24,7 @@ final class ChatHostLogicTests: XCTestCase {
     let command = ACPHostCommand.attach(name: "a'b", cwd: "/x; rm -rf /", spawn: true)
     XCTAssertTrue(command.contains("'a'\"'\"'b'"))
     XCTAssertTrue(command.contains("'/x; rm -rf /'"))
-    XCTAssertEqual(ACPHostCommand.kill(name: "chat-1"), "PATH=\"$HOME/.local/bin:$PATH\" tether-notify acp kill 'chat-1'")
+    XCTAssertEqual(ACPHostCommand.kill(name: "chat-1"), "PATH=\"$HOME/.local/bin:$PATH\" tether acp kill 'chat-1'")
   }
 
   func test_listing_parses_tab_separated_lines_newest_first() {
@@ -44,7 +44,7 @@ final class ChatHostLogicTests: XCTestCase {
   }
 
   func test_listing_keeps_a_chat_with_no_spawn_field_and_skips_garbage() {
-    let listing = ACPChatListing.parse("c\trunning\t1\t/x\t5\nzsh: command not found: tether-notify\nc2\tpaused\t1\t/x\t5\n")
+    let listing = ACPChatListing.parse("c\trunning\t1\t/x\t5\nzsh: command not found: tether\nc2\tpaused\t1\t/x\t5\n")
     XCTAssertEqual(listing.chats.map(\.name), ["c"])
     XCTAssertEqual(listing.chats[0].spawn, "")
     XCTAssertEqual(listing.skipped.count, 2)

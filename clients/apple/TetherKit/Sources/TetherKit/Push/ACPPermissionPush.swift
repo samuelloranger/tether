@@ -10,7 +10,7 @@ public struct ACPPermissionPush: Equatable, Sendable {
   static let maxOptions = 4
 
   public var chat: ChatDeepLink
-  /// The holder session name `tether-notify acp answer` takes.
+  /// The holder session name `tether acp answer` takes.
   public var acp: String
   /// The raw JSON-RPC id as JSON text.
   public var requestId: String
@@ -93,7 +93,7 @@ enum ACPAnswerCommand {
     "\(notify) acp answers \(shellQuote(acp))"
   }
 
-  /// `tether-notify acp answers` output: `{requestId: optionId | "cancelled"}`. Anything that
+  /// `tether acp answers` output: `{requestId: optionId | "cancelled"}`. Anything that
   /// isn't that object gives nothing.
   static func parseAnswers(_ output: String) -> [ACPID: String] {
     guard let line = output.split(separator: "\n").last(where: { $0.hasPrefix("{") }),

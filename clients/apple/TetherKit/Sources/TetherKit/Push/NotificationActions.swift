@@ -43,7 +43,7 @@ public struct QuestionLoadError: Error, Equatable, Sendable {
   init(_ message: String) { self.message = message }
 }
 
-/// Approve / Deny / Reply on agent pushes. `tether-notify` stamps the category and the
+/// Approve / Deny / Reply on agent pushes. `tether` stamps the category and the
 /// agent state inside the encrypted payload; the NSE copies them onto the notification.
 public enum NotificationActions {
   public static let waitingCategory = "tether.agent.waiting"
@@ -179,7 +179,7 @@ public enum NotificationActions {
     return AgentExpectation(state: state, version: version)
   }
 
-  /// `tether-notify answer` checks the agent state and runs `zmx send` itself, passing the
+  /// `tether answer` checks the agent state and runs `zmx send` itself, passing the
   /// input as an argument: nothing the user typed is ever parsed by a shell.
   static func command(notify: String, request: NotificationActionRequest) -> String {
     var parts = [
@@ -206,12 +206,12 @@ public enum NotificationActions {
 }
 
 /// Runs an action off a push: finds the one saved machine the push's link names, then asks
-/// its `tether-notify` to type the input over a one-off SSH connection.
+/// its `tether` to type the input over a one-off SSH connection.
 @MainActor
 public final class NotificationActionRunner {
   typealias Exec = @Sendable (SSHConnectionConfig, HostKeyStore, String) async throws -> String
 
-  static let notify = "~/.local/bin/tether-notify"
+  static let notify = "~/.local/bin/tether"
   private static let exitMarker = "__tether_sent="
 
   private let model: HomeModel
@@ -290,7 +290,7 @@ public final class NotificationActionRunner {
       case 3:
         return .failure(QuestionLoadError("The question in “\(link.sessionId)” was already answered or has moved on."))
       default:
-        return .failure(QuestionLoadError("Update tether-notify on \(sent.machine) to answer questions."))
+        return .failure(QuestionLoadError("Update tether on \(sent.machine) to answer questions."))
       }
     }
   }
@@ -355,8 +355,8 @@ public final class NotificationActionRunner {
     case 3: return "The agent in “\(session)” has moved on; nothing was sent."
     case 4: return "The reply was typed in “\(session)”, but the agent moved on before it was submitted."
     // 127: not installed; 2: an older build without `answer` prints its usage.
-    case 127, 2: return "Update tether-notify on \(machine) to answer notifications."
-    default: return detail.isEmpty ? "tether-notify couldn’t answer on \(machine)." : detail
+    case 127, 2: return "Update tether on \(machine) to answer notifications."
+    default: return detail.isEmpty ? "tether couldn’t answer on \(machine)." : detail
     }
   }
 
@@ -464,7 +464,7 @@ private final class ResumeOnce<Value: Sendable>: @unchecked Sendable {
   }
 }
 
-/// What `tether-notify acp answer` reported.
+/// What `tether acp answer` reported.
 public enum ACPAnswerOutcome: Equatable, Sendable {
   case answered
   /// Exit 3: no longer outstanding.
@@ -480,8 +480,8 @@ public enum ACPAnswerOutcome: Equatable, Sendable {
     switch code {
     case 0: return .answered
     case 3: return .alreadyAnswered
-    case 127, 2: return .failed("Update tether-notify on \(machine) to answer chats.")
-    default: return .failed(detail.isEmpty ? "tether-notify couldn’t answer on \(machine)." : detail)
+    case 127, 2: return .failed("Update tether on \(machine) to answer chats.")
+    default: return .failed(detail.isEmpty ? "tether couldn’t answer on \(machine)." : detail)
     }
   }
 }

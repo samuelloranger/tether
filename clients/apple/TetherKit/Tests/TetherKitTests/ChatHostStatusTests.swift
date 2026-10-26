@@ -20,8 +20,8 @@ final class ChatHostStatusTests: XCTestCase {
   }
 
   func test_an_old_host_reads_as_unsupported_but_a_host_with_no_chats_does_not() {
-    XCTAssertTrue(ACPChatStatusListing.parse("tether-notify: unknown acp command \"status\"").unsupported)
-    XCTAssertTrue(ACPChatStatusListing.parse("sh: tether-notify: command not found").unsupported)
+    XCTAssertTrue(ACPChatStatusListing.parse("tether: unknown acp command \"status\"").unsupported)
+    XCTAssertTrue(ACPChatStatusListing.parse("sh: tether: command not found").unsupported)
     XCTAssertFalse(ACPChatStatusListing.parse("").unsupported)
     XCTAssertFalse(ACPChatStatusListing.parse("\n").unsupported)
     XCTAssertTrue(ACPChatStatusListing.parse("").chats.isEmpty)

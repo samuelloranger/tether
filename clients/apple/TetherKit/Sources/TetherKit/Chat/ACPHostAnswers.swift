@@ -44,7 +44,7 @@ enum ACPHostAnswers {
   /// A host without the command, a failed connection and a slow one all give nil: the replay
   /// then simply shows the permission as the log left it.
   static func read(name: String, config: SSHConnectionConfig, store: HostKeyStore) async -> String? {
-    let command = ACPAnswerCommand.answersCommand(notify: "PATH=\"$HOME/.local/bin:$PATH\" tether-notify", acp: name)
+    let command = ACPAnswerCommand.answersCommand(notify: "PATH=\"$HOME/.local/bin:$PATH\" tether", acp: name)
       + " 2>/dev/null"
     return await ACPHostExec.run(command: command, config: config, store: store)
   }

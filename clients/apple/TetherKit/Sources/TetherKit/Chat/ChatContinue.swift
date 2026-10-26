@@ -43,9 +43,9 @@ enum ACPSavedSessionListing {
   static func explain(_ line: String) -> String {
     let lower = line.lowercased()
     if lower.contains("unknown acp command") || lower.contains("not found") || lower.contains("usage") {
-      return "This host's tether-notify is too old to list earlier conversations. Update it."
+      return "This host's tether is too old to list earlier conversations. Update it."
     }
-    let trimmed = line.replacingOccurrences(of: "tether-notify: ", with: "")
+    let trimmed = line.replacingOccurrences(of: "tether: ", with: "")
     return trimmed.count > 160 ? String(trimmed.prefix(160)) + "…" : trimmed
   }
 

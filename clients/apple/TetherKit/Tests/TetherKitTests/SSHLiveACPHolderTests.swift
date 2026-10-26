@@ -3,7 +3,7 @@ import XCTest
 @testable import TetherKit
 
 /// Skipped unless the live SSH variables of `SSHLiveConnectTests` are set. The host also needs a
-/// `tether-notify` with `acp` on its PATH or in ~/.local/bin; no real agent is started.
+/// `tether` with `acp` on its PATH or in ~/.local/bin; no real agent is started.
 final class SSHLiveACPHolderTests: XCTestCase {
   /// A stand-in agent: answers each stdin line with one JSON line.
   private static let fakeAgent = #"sh -c 'while IFS= read -r line; do printf "{\"echo\":\"%s\"}\n" "$line"; done'"#
