@@ -667,14 +667,29 @@ impl Session {
     /// Only once the host log's identity is known, and never for a state that lost its link.
     fn save_snapshot(&mut self, ctx: &mut Ctx<'_>) {
         self.snapshot_at = ctx.now;
-        self.snapshot_rev = self.rev;
         let (Some(files), Some(client), Some(identity)) = (ctx.files, &self.client, self.identity)
         else {
             return;
         };
         if let Some(snapshot) = client.snapshot(identity) {
             saved(files.save_snapshot(&self.name, &snapshot));
+            self.snapshot_rev = self.rev;
         }
+    }
+
+    /// The request the card in front answers, for telling when it was answered.
+    pub fn first_pending(&self) -> Option<AcpId> {
+        let state = self.state();
+        state
+            .pending_questions()
+            .first()
+            .map(|q| q.request_id.clone())
+            .or_else(|| {
+                state
+                    .pending_permissions()
+                    .first()
+                    .map(|p| p.request_id.clone())
+            })
     }
 
     fn persist_journal(&mut self, ctx: &mut Ctx<'_>) {
@@ -779,9 +794,6 @@ impl Session {
         let (Some(files), Some(id)) = (ctx.files, out.id.as_ref()) else {
             return;
         };
-        if self.client.is_some() {
-            return;
-        }
         let kinds: &[EntryKind] = match out.undo {
             Undo::Prompt => &[EntryKind::Prompt],
             Undo::Permission { .. } | Undo::Question { .. } => {
@@ -801,13 +813,18 @@ impl Session {
     }
 
     pub fn on_write_failed(&mut self, generation: u64, tag: WriteTag, ctx: &mut Ctx<'_>) {
-        let current = generation == self.generation && self.client.is_some();
+        // After a redial the new client was built from the journal that holds the entry, so it
+        // takes it back; with no client yet, the stored journal is corrected instead.
         let undo = |s: &mut Self, out: &Outbound, ctx: &mut Ctx<'_>| -> Option<Completion> {
-            if current {
-                s.client.as_mut().and_then(|c| c.undelivered(out))
-            } else {
-                s.undo_stored(out, ctx);
-                None
+            match s.client.as_mut() {
+                Some(c) => {
+                    let done = c.undelivered(out);
+                    (generation == s.generation).then_some(done).flatten()
+                }
+                None => {
+                    s.undo_stored(out, ctx);
+                    None
+                }
             }
         };
         match tag {

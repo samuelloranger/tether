@@ -985,3 +985,22 @@ fn answering_a_card_hands_the_keyboard_back_to_the_composer() {
     h.msg(ChatMsg::Approve("allow".into()));
     assert!(h.screen().focus_seq > before);
 }
+
+#[test]
+fn picking_one_answer_of_a_longer_question_keeps_the_keyboard_on_the_card() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":"q1","method":"elicitation/create","params":{"sessionId":"s1","message":"Setup?","requestedSchema":{"type":"object","properties":{"a":{"type":"string","oneOf":[{"const":"x","title":"X"}]},"b":{"type":"string","title":"Notes"}}}}}"#,
+    );
+    let before = h.screen().focus_seq;
+    h.msg(ChatMsg::QuestionChoose {
+        field: "a".into(),
+        value: "x".into(),
+    });
+    assert_eq!(h.screen().focus_seq, before);
+    h.msg(ChatMsg::QuestionSubmit);
+    assert!(h.screen().focus_seq > before);
+}

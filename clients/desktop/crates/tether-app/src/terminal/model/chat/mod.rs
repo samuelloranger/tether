@@ -831,18 +831,18 @@ impl Chats {
             }
             // The rest act on the chat in front.
             other => {
-                // An answered card leaves; the keyboard goes back to the composer.
-                if matches!(
-                    other,
-                    ChatMsg::QuestionSubmit
-                        | ChatMsg::QuestionDecline
-                        | ChatMsg::QuestionChoose { .. }
-                        | ChatMsg::Approve(_)
-                ) {
-                    self.focus_seq += 1;
-                }
                 if let Some(name) = self.active.clone() {
-                    self.with_session(&name, now, out, |s, ctx| s.handle_ui(other, ctx));
+                    // An answered card leaves; the keyboard goes back to the composer.
+                    let answered = self
+                        .with_session(&name, now, out, |s, ctx| {
+                            let before = s.first_pending();
+                            s.handle_ui(other, ctx);
+                            before.is_some() && s.first_pending() != before
+                        })
+                        .unwrap_or(false);
+                    if answered {
+                        self.focus_seq += 1;
+                    }
                 }
             }
         }
