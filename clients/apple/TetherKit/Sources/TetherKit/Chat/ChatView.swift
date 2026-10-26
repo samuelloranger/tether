@@ -22,6 +22,7 @@ struct ChatView: View {
   var sendDraft: String?
   var probeLastRow = false
   @State private var lastRowVisible = false
+  @State private var metricsText = ""
   #endif
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
@@ -63,7 +64,7 @@ struct ChatView: View {
     #if DEBUG
     .overlay(alignment: .topTrailing) {
       if probeLastRow {
-        Text("LAST ROW VISIBLE: \(lastRowVisible ? "yes" : "no")")
+        Text("LAST ROW VISIBLE: \(lastRowVisible ? "yes" : "no")\n\(metricsText)")
           .font(.system(size: 13, weight: .bold, design: .monospaced))
           .foregroundStyle(.white).padding(6)
           .background(lastRowVisible ? Color.green : Color.red)
@@ -134,7 +135,13 @@ struct ChatView: View {
 
   @ViewBuilder private var scroller: some View {
     if #available(iOS 18.0, *) {
+      #if DEBUG
+      FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, anchorRequest: $windowAnchor, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop, probe: probeLastRow ? { m in
+        metricsText = "off \(Int(m.offset)) content \(Int(m.content)) view \(Int(m.container))"
+      } : nil) { transcript }
+      #else
       FollowingTranscript(atBottom: $atBottom, scrolledUnder: $scrolledUnder, anchorRequest: $windowAnchor, sendTick: sendTick, reduceMotion: reduceMotion, startAtTop: startAtTop) { transcript }
+      #endif
     } else {
       legacyScroller
     }
@@ -977,6 +984,9 @@ private struct FollowingTranscript<Content: View>: View {
   let sendTick: Int
   let reduceMotion: Bool
   var startAtTop = false
+  #if DEBUG
+  var probe: ((ChatScrollMetrics) -> Void)?
+  #endif
   @ViewBuilder var content: () -> Content
 
   @State private var position = ScrollPosition(edge: .bottom)
@@ -1035,6 +1045,9 @@ private struct FollowingTranscript<Content: View>: View {
         offset: geometry.visibleRect.minY, content: geometry.contentSize.height,
         container: geometry.visibleRect.height)
     } action: { old, new in
+      #if DEBUG
+      probe?(new)
+      #endif
       guard ChatScrollFollow.shouldJumpToEnd(old: old, new: new, sendPending: sendPending) else { return }
       if sendPending { sendPending = false }
       position.scrollTo(edge: .bottom)

@@ -454,7 +454,7 @@ enum ChatFixture {
   /// 250+ items with strongly varying heights: prose of every length, nested lists, headings, code,
   /// tool groups, a subagent and the user's own messages. The agent answers a prompt with a short reply.
   @MainActor
-  static func sendLongModel() -> ChatSessionModel {
+  static func sendLongModel(replayOver: Double? = nil) -> ChatSessionModel {
     let after = Double(ProcessInfo.processInfo.environment["TETHER_DEBUG_REPLY_AFTER"] ?? "") ?? 4
     let sentence = "The helper keeps its state small, retries only on server errors and waits a little longer each time, so a flaky upstream never hammers the host. "
     let scale = Int(ProcessInfo.processInfo.environment["TETHER_DEBUG_LONG_SCALE"] ?? "") ?? 1
@@ -492,7 +492,10 @@ enum ChatFixture {
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/tether", readOnly: false,
       store: InMemoryChatJournalStore(journal)
-    ) { _, _ in AnswerOnPromptStream(log: log, chunks: reply, after: after) }
+    ) { _, _ in
+      guard let replayOver else { return AnswerOnPromptStream(log: log, chunks: reply, after: after) }
+      return ChunkedLogStream(log: log, chunks: 40, over: replayOver)
+    }
   }
 
   private static func message(id: String, _ text: String) -> String {
@@ -673,6 +676,43 @@ final class FixtureByteStream: TerminalByteStream, @unchecked Sendable {
   }
 }
 
+/// Hands over its log in `chunks` pieces spread over `over` seconds, like a replay from byte zero, then stays silent.
+final class ChunkedLogStream: TerminalByteStream, @unchecked Sendable {
+  private let lock = NSLock()
+  private var pieces: [Data]
+  private var closed = false
+  private let gap: UInt64
+
+  init(log: Data, chunks: Int, over: Double) {
+    let size = max(1, log.count / chunks + 1)
+    pieces = stride(from: 0, to: log.count, by: size).map { log.subdata(in: $0..<min(log.count, $0 + size)) }
+    gap = UInt64(over / Double(chunks) * 1_000_000_000)
+  }
+
+  func read() async throws -> Data? {
+    while true {
+      lock.lock()
+      if closed { lock.unlock(); return nil }
+      if !pieces.isEmpty {
+        let next = pieces.removeFirst()
+        lock.unlock()
+        try await Task.sleep(nanoseconds: gap)
+        return next
+      }
+      lock.unlock()
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+  }
+
+  func write(_ bytes: Data) async throws {}
+
+  func close() async {
+    lock.lock()
+    closed = true
+    lock.unlock()
+  }
+}
+
 /// Hands over one line per tick, like a streaming agent, then stays open and silent.
 final class DripByteStream: TerminalByteStream, @unchecked Sendable {
   private let lock = NSLock()
@@ -790,7 +830,8 @@ public struct ChatFixtureRoot: View {
     case "stream": initial = ChatFixture.streamModel()
     case "keyboard", "scrolledup": initial = ChatFixture.longModel()
     case "send": initial = ChatFixture.sendModel()
-    case "send-long", "send-long-top": initial = ChatFixture.sendLongModel()
+    case "send-long", "send-long-top", "open-long", "open-long-kb": initial = ChatFixture.sendLongModel()
+    case "open-replay", "open-replay-kb": initial = ChatFixture.sendLongModel(replayOver: 1.5)
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
@@ -807,11 +848,11 @@ public struct ChatFixtureRoot: View {
           .task { await listModel.refresh() }
       } else {
         ChatView(
-          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "send-long-top" || mode == "subagents-open-top",
+          model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasSuffix("-kb") || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "send-long-top" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
           openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
           sendDraft: mode == "send" || mode == "send-long" ? ChatFixture.sendDraft : nil,
-          probeLastRow: mode == "send-long" || mode == "send-long-top")
+          probeLastRow: mode == "send-long" || mode == "send-long-top" || mode.hasPrefix("open-"))
       }
     }
       .tint(TetherColors.accent)
