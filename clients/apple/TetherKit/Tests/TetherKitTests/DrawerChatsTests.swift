@@ -90,21 +90,39 @@ final class ControllerChatsTests: XCTestCase {
       control: ControlConnection(config: config, store: store) { ops })
   }
 
-  func test_refresh_lists_chats_and_a_host_without_the_command_shows_none() async {
+  private let statusLine = #"{"name":"chat-a","state":"running","turn":"waiting","title":"T","cwd":"/srv/x","created":100,"logBytes":10,"endedReason":""}"#
+
+  func test_refresh_reads_status_and_a_host_without_the_commands_shows_none() async {
     let ops = FakeOps()
-    ops.execResult = { $0.contains("acp ls") ? "chat-a\trunning\t10\t/srv/x\t100\tclaude" : "" }
+    ops.execResult = { $0.contains("acp status") ? self.statusLine : "" }
     let controller = controller(ops)
     await controller.refreshChats()
     XCTAssertEqual(controller.chats.map(\.name), ["chat-a"])
+    XCTAssertEqual(controller.chats.first?.turn, .waiting)
+    XCTAssertFalse(ops.commands.contains { $0.contains("acp ls") })
 
-    ops.execResult = { $0.contains("acp ls") ? "tether-notify: unknown command acp" : "" }
+    ops.execResult = { _ in "tether-notify: unknown command acp" }
     await controller.refreshChats()
     XCTAssertTrue(controller.chats.isEmpty)
   }
 
+  func test_a_host_without_acp_status_falls_back_to_ls_once_and_stays_there() async {
+    let ops = FakeOps()
+    ops.execResult = {
+      $0.contains("acp status") ? "tether-notify: unknown acp command \"status\"" : "chat-a\trunning\t10\t/srv/x\t100\tclaude"
+    }
+    let controller = controller(ops)
+    await controller.refreshChats()
+    XCTAssertEqual(controller.chats.map(\.name), ["chat-a"])
+    XCTAssertEqual(DrawerChatState(controller.chats[0]), .running)
+    await controller.refreshChats()
+    XCTAssertEqual(ops.commands.filter { $0.contains("acp status") }.count, 1)
+    XCTAssertEqual(ops.commands.filter { $0.contains("acp ls") }.count, 2)
+  }
+
   func test_a_failed_read_keeps_the_rows_and_raises_nothing() async {
     let ops = FakeOps()
-    ops.execResult = { _ in "chat-a\trunning\t10\t/srv/x\t100\tclaude" }
+    ops.execResult = { _ in self.statusLine }
     let controller = controller(ops)
     await controller.refreshChats()
     ops.execResult = { _ in throw SSHConnectError.transport("down") }
