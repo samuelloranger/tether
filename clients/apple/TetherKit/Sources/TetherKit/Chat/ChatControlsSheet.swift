@@ -5,6 +5,12 @@ struct ChatControlsSheet: View {
   @Bindable var model: ChatSessionModel
   @Environment(\.dismiss) private var dismiss
   @State private var confirmingBypass: (option: String, value: String)?
+  #if DEBUG
+  @State private var detent: PresentationDetent =
+    ProcessInfo.processInfo.environment["TETHER_DEBUG_CONTROLS_LARGE"] != nil ? .large : .medium
+  #else
+  @State private var detent: PresentationDetent = .medium
+  #endif
 
   private static let bypass = "bypassPermissions"
 
@@ -23,7 +29,7 @@ struct ChatControlsSheet: View {
       .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 24)
     }
     .background(TetherColors.background)
-    .presentationDetents([.medium, .large])
+    .presentationDetents([.medium, .large], selection: $detent)
     .presentationDragIndicator(.visible)
     .presentationBackground(TetherColors.background)
     .confirmationDialog("Bypass permissions", isPresented: Binding(
