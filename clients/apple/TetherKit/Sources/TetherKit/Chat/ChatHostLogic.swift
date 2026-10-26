@@ -11,10 +11,13 @@ enum ACPHostCommand {
 
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
   /// a lost holder never starts a fresh agent under a journal that names the old session.
+  /// `client` names this client to a holder that takes several, so the others see what it sends.
   static func attach(
-    name: String, cwd: String, spawn: Bool, from offset: Int = 0, spawnCommand: String = ACPHostCommand.spawnCommand
+    name: String, cwd: String, spawn: Bool, from offset: Int = 0, client: String? = nil,
+    spawnCommand: String = ACPHostCommand.spawnCommand
   ) -> String {
     var command = "\(prefix) attach \(shellQuote(name)) --from \(offset)"
+    if let client { command += " --client \(shellQuote(client))" }
     if spawn { command += " --spawn \(shellQuote(spawnCommand)) --cwd \(shellQuote(cwd))" }
     return command
   }
@@ -46,6 +49,8 @@ struct ACPChatSummary: Equatable, Identifiable, Sendable {
   var turn: ChatHostTurn = .idle
   var hostTitle: String?
   var hasStatus = false
+  /// The chat's holder lets several clients attach at once.
+  var multiClient = false
 
   var id: String { name }
 
@@ -99,14 +104,16 @@ enum ACPCwd {
   }
 }
 
-/// A chat this phone has a session id for resumes; any other can only be read.
+/// A chat this phone has a session id for resumes. Any other joins the session another client
+/// started when its holder takes several clients, and can only be read when it does not.
 enum ChatOpenMode: Equatable {
-  case resume, readOnly
+  case resume, join, readOnly
 
   /// A chat this phone began but never got a session for (a signed-out agent) has sent requests,
-  /// so it reopens as live and asks again; a chat it never touched stays read only.
-  static func mode(for journal: ChatJournal) -> ChatOpenMode {
-    journal.sessionId == nil && journal.nextRequestId <= 1 ? .readOnly : .resume
+  /// so it reopens as live and asks again.
+  static func mode(for journal: ChatJournal, multiClient: Bool) -> ChatOpenMode {
+    guard journal.sessionId == nil, journal.nextRequestId <= 1 else { return .resume }
+    return multiClient ? .join : .readOnly
   }
 }
 
@@ -116,11 +123,38 @@ struct ChatRoute: Hashable, Identifiable {
   var readOnly: Bool
   /// An earlier conversation to load instead of starting a new session.
   var loadSessionId: String?
+  /// The chat's holder takes several clients: this phone names itself to it.
+  var multiClient = false
+  /// Another client started the chat: no spawn and no handshake, the session comes from the log.
+  var join = false
   var id: String { name }
 
-  static func newName() -> String {
+  /// A listed chat, opened the way its journal and holder allow.
+  init(existing name: String, cwd: String, journal: ChatJournal, multiClient: Bool) {
+    let mode = ChatOpenMode.mode(for: journal, multiClient: multiClient)
+    self.init(name: name, cwd: cwd, readOnly: mode == .readOnly, multiClient: multiClient, join: mode == .join)
+  }
+
+  init(
+    name: String, cwd: String, readOnly: Bool, loadSessionId: String? = nil, multiClient: Bool = false,
+    join: Bool = false
+  ) {
+    self.name = name
+    self.cwd = cwd
+    self.readOnly = readOnly
+    self.loadSessionId = loadSessionId
+    self.multiClient = multiClient
+    self.join = join
+  }
+
+  static func newName() -> String { "chat-" + randomName(6) }
+
+  /// Names this phone in the log of a holder that takes several clients.
+  static func newClientId() -> String { randomName(10) }
+
+  private static func randomName(_ length: Int) -> String {
     let letters = Array("abcdefghijklmnopqrstuvwxyz0123456789")
-    return "chat-" + String((0..<6).map { _ in letters.randomElement()! })
+    return String((0..<length).map { _ in letters.randomElement()! })
   }
 }
 

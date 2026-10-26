@@ -76,6 +76,11 @@ pub struct Session {
     pub name: String,
     pub cwd: String,
     pub read_only: bool,
+    /// Opened on a chat another client started: no spawn and no handshake, the session comes from the log.
+    joined: bool,
+    multi: bool,
+    /// What this client is called to a holder that takes several (`attach --client`).
+    client_id: Option<String>,
     load: Option<String>,
     client: Option<ChatClient>,
     /// What the screen shows without a client, and while a reconnect replays under it.
@@ -140,10 +145,13 @@ fn is_auth(error: &ClientError) -> bool {
 }
 
 impl Session {
+    /// `multi`: the chat's holder takes several clients, so this one names itself to it and a
+    /// chat started elsewhere (`OpenMode::Join`) is joined instead of read.
     pub fn new(
         name: &str,
         cwd: &str,
-        read_only: bool,
+        mode: host::OpenMode,
+        multi: bool,
         load: Option<String>,
         files: Option<&ChatFiles>,
     ) -> Self {
@@ -153,7 +161,10 @@ impl Session {
         Self {
             name: name.to_string(),
             cwd: cwd.to_string(),
-            read_only,
+            read_only: mode == host::OpenMode::ReadOnly,
+            joined: mode == host::OpenMode::Join,
+            multi,
+            client_id: None,
             load,
             client: None,
             frozen: ChatState::default(),
@@ -268,8 +279,17 @@ impl Session {
         self.detach(ctx);
         self.link.dial_started();
         self.notice = None;
-        let journal = ctx.files.map(|f| f.journal(&self.name)).unwrap_or_default();
-        let spawn = !self.read_only && journal.session_id.is_none();
+        let mut journal = ctx.files.map(|f| f.journal(&self.name)).unwrap_or_default();
+        if self.multi
+            && !self.read_only
+            && journal.client_id.is_none()
+            && let Some(files) = ctx.files
+        {
+            journal.client_id = Some(host::new_client_id());
+            saved(files.save_journal(&self.name, &journal));
+        }
+        self.client_id = journal.client_id.clone().filter(|_| self.multi);
+        let spawn = !self.read_only && !self.joined && journal.session_id.is_none();
         self.spawned = spawn;
         self.answers = None;
         self.early.clear();
@@ -317,7 +337,13 @@ impl Session {
         self.holding = !self.frozen.items.is_empty() && resume.is_none();
         let offset = resume.as_ref().map_or(0, |r| r.offset);
         self.resume = resume;
-        let command = host::attach_command(&self.name, &self.cwd, spawn, offset);
+        let command = host::attach_command(
+            &self.name,
+            &self.cwd,
+            spawn,
+            offset,
+            self.client_id.as_deref(),
+        );
         self.chan = Chan::Opening(self.generation);
         ctx.out.jobs.push(ChatJob::Dial {
             name: self.name.clone(),
@@ -454,6 +480,9 @@ impl Session {
             .files
             .map(|f| Arc::new(f.images(&self.name)) as Arc<dyn ImageSink>);
         let mut client = ChatClient::new(journal, self.resume.take(), images);
+        if self.joined {
+            client.join();
+        }
         if let Some(Some(answers)) = self.answers.take() {
             client.adopt_host_answers(&answers);
         }
@@ -468,7 +497,7 @@ impl Session {
         for bytes in std::mem::take(&mut self.early) {
             self.feed(&bytes, ctx);
         }
-        if !self.read_only && self.needs_handshake() {
+        if !self.read_only && !self.joined && self.needs_handshake() {
             self.begin_handshake(ctx);
         }
         self.receive(ctx);

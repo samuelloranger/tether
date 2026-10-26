@@ -1004,3 +1004,99 @@ fn picking_one_answer_of_a_longer_question_keeps_the_keyboard_on_the_card() {
     h.msg(ChatMsg::QuestionSubmit);
     assert!(h.screen().focus_seq > before);
 }
+
+#[test]
+fn a_queued_message_waits_above_the_composer_until_the_agent_starts_it() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    for text in ["one", "two"] {
+        h.msg(ChatMsg::DraftEdited {
+            text: text.into(),
+            cursor_byte: text.len(),
+        });
+        h.msg(ChatMsg::Send);
+    }
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Working on one"}}}}"#,
+    );
+    let s = h.screen();
+    assert_eq!(s.queued, ["two"]);
+    assert!(
+        !rows(&s)
+            .iter()
+            .any(|r| matches!(r, RowBody::User { text, .. } if text == "two")),
+        "not in the transcript while it waits"
+    );
+
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
+    );
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m2","content":{"type":"text","text":"Working on two"}}}}"#,
+    );
+    let s = h.screen();
+    assert!(s.queued.is_empty());
+    let rows = rows(&s);
+    assert!(matches!(rows[1], RowBody::Markdown(md) if md.text == "Working on one"));
+    assert!(matches!(rows[2], RowBody::User { text, .. } if text == "two"));
+}
+
+#[test]
+fn a_chat_started_elsewhere_on_a_shared_holder_is_joined_live() {
+    let mut h = Harness::new();
+    h.exec(
+        |t| *t == ExecTag::Status,
+        r#"{"name":"chat-a","state":"running","logBytes":10,"cwd":"/home/sam/web","created":100,"turn":"idle","multiClient":true}"#,
+    );
+    h.msg(ChatMsg::Select("chat-a".into()));
+    let jobs = h.take();
+    let (_, _, command) = h.dial_of(&jobs).unwrap();
+    assert!(!command.contains("--spawn"), "{command}");
+    let client = command
+        .split("--client '")
+        .nth(1)
+        .and_then(|rest| rest.split('\'').next())
+        .expect("names itself")
+        .to_string();
+    h.jobs = jobs;
+    let (name, generation, writes) = h.open_stream();
+    assert!(writes.is_empty(), "no handshake of its own: {writes:?}");
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":"other-2","result":{"sessionId":"s1"}}"#,
+    );
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"_tether/client","params":{"client":"other","message":{"jsonrpc":"2.0","id":"other-3","method":"session/prompt","params":{"sessionId":"s1","prompt":[{"type":"text","text":"Started on the phone"}]}}}}"#,
+    );
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":"other-3","result":{"stopReason":"end_turn"}}"#,
+    );
+    h.settle();
+    let s = h.screen();
+    assert_eq!(s.composer.banner, "");
+    assert!(matches!(rows(&s)[0], RowBody::User { text, .. } if text == "Started on the phone"));
+
+    h.msg(ChatMsg::DraftEdited {
+        text: "And from the desktop".into(),
+        cursor_byte: 20,
+    });
+    h.msg(ChatMsg::Send);
+    let writes = h.writes();
+    assert!(
+        writes[0].contains(&format!("\"id\":\"{client}-1\"")),
+        "{writes:?}"
+    );
+    assert!(writes[0].contains("\"sessionId\":\"s1\""), "{writes:?}");
+}

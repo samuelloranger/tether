@@ -79,8 +79,9 @@ final class ChatListModel {
   }
 
   func route(for chat: ACPChatSummary) -> ChatRoute {
-    let mode = ChatOpenMode.mode(for: UserDefaultsChatJournalStore(name: chat.name).load())
-    return ChatRoute(name: chat.name, cwd: chat.cwd, readOnly: mode == .readOnly)
+    ChatRoute(
+      existing: chat.name, cwd: chat.cwd, journal: UserDefaultsChatJournalStore(name: chat.name).load(),
+      multiClient: chat.multiClient)
   }
 
   func close() async { await closeConnection() }

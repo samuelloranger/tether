@@ -17,6 +17,8 @@ final class ChatSessionModel {
   let chatName: String
   let cwd: String
   let readOnly: Bool
+  /// Another client started the chat on a holder that takes several: no spawn and no handshake.
+  let join: Bool
   /// The earlier conversation this chat loads instead of starting a session.
   let loadSessionId: String?
   /// What the host is called in messages about it; the connection's host name.
@@ -70,7 +72,8 @@ final class ChatSessionModel {
   private var stopping: Task<Void, Never>?
 
   init(
-    chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil,
+    chatName: String, cwd: String, readOnly: Bool, join: Bool = false, store: any ChatJournalStore,
+    titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
     listFiles: ListFiles? = nil, images: ChatImageStore? = nil, dial: @escaping Dial
@@ -88,6 +91,7 @@ final class ChatSessionModel {
     self.chatName = chatName
     self.cwd = cwd
     self.readOnly = readOnly
+    self.join = join
     self.store = store
     self.dial = dial
   }
@@ -96,7 +100,17 @@ final class ChatSessionModel {
     let store: any ChatJournalStore =
       route.readOnly ? InMemoryChatJournalStore() : UserDefaultsChatJournalStore(name: route.name)
     let files = ChatLocalFiles(scope: ChatTitleStore.scope(for: config))
-    return ChatSessionModel(chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, store: store,
+    var clientId: String?
+    if route.multiClient, !route.readOnly {
+      var journal = store.load()
+      if journal.clientId == nil {
+        journal.clientId = ChatRoute.newClientId()
+        store.save(journal)
+      }
+      clientId = journal.clientId
+    }
+    return ChatSessionModel(
+      chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, join: route.join, store: store,
       titleStore: ChatTitleStore(config: config),
       hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) },
       snapshots: files.snapshots(route.name),
@@ -110,7 +124,7 @@ final class ChatSessionModel {
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
-        command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from))
+        command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from, client: clientId))
     }
   }
 
@@ -141,7 +155,7 @@ final class ChatSessionModel {
     notice = nil
     held = nil
     let journal = store.load()
-    let spawn = !readOnly && journal.sessionId == nil
+    let spawn = !readOnly && !join && journal.sessionId == nil
     // Asked alongside the dial; the replay can't start before the answers are in the journal.
     let answersRead = Task { await self.hostAnswers?() }
     let inspectRead = Task { await self.inspect?() }
@@ -194,7 +208,13 @@ final class ChatSessionModel {
     }
     scheduleSettle()
     do {
-      if readOnly { await fresh.startReading() } else { try await fresh.start(cwd: cwd, loadSessionId: loadSessionId) }
+      if readOnly {
+        await fresh.startReading()
+      } else if join {
+        await fresh.startJoining()
+      } else {
+        try await fresh.start(cwd: cwd, loadSessionId: loadSessionId)
+      }
     } catch {
       guard mine == generation else { return }
       if case let .agent(_, message)? = error as? ACPClientError, loadSessionId != nil, !ChatAuthError.matches(error) {

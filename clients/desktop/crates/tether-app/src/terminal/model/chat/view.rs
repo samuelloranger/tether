@@ -125,7 +125,6 @@ pub enum RowBody {
         text: String,
         images: Vec<Picture>,
         image_label: String,
-        queued: bool,
     },
     Markdown(MdItem),
     Pictures(Vec<Picture>),
@@ -364,6 +363,8 @@ pub struct ChatScreen {
     pub tabs: Vec<TabView>,
     pub header: HeaderView,
     pub rows: Vec<Row>,
+    /// Sent while a turn runs and not started yet; shown above the composer, not in the transcript.
+    pub queued: Vec<String>,
     pub follow_seq: u64,
     pub notice: String,
     pub draft: Option<String>,

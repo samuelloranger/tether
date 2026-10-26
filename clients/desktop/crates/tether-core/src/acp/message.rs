@@ -247,6 +247,11 @@ pub enum Inbound {
     AuthStatus {
         signed_in: bool,
     },
+    /// A line another client attached to the same holder sent (`_tether/client`).
+    ClientEcho {
+        client: String,
+        message: Value,
+    },
     Unknown {
         method: Option<String>,
     },
@@ -324,6 +329,15 @@ pub fn decode(line: &[u8], images: Option<&dyn ImageSink>) -> Inbound {
         {
             return Inbound::Update(decode_update(update, images));
         }
+        if method == super::echo::METHOD
+            && let Some(client) = params.get("client").and_then(Value::as_str)
+            && let Some(message) = params.get("message")
+        {
+            return Inbound::ClientEcho {
+                client: client.to_string(),
+                message: message.clone(),
+            };
+        }
         if method == "_auth/status_update"
             && let Some(kind) = object(params.get("authStatus"))
                 .and_then(|s| s.get("kind"))
@@ -356,7 +370,7 @@ pub fn decode(line: &[u8], images: Option<&dyn ImageSink>) -> Inbound {
     Inbound::Unknown { method: None }
 }
 
-fn parse_id(value: Option<&Value>) -> Option<AcpId> {
+pub(crate) fn parse_id(value: Option<&Value>) -> Option<AcpId> {
     match value? {
         Value::String(s) => Some(AcpId::Str(s.clone())),
         Value::Number(_) => int(value).map(AcpId::Int),

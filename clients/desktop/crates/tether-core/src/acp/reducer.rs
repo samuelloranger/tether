@@ -453,6 +453,7 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
             );
             if !state.in_flight.is_empty() {
                 state.queued_item_ids.push(item_id);
+                move_to_end(item_id, state);
             }
             state.in_flight.push(InFlightPrompt {
                 item_id,
@@ -461,6 +462,7 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
             state.turn = Turn::Working;
         }
         ChatEvent::CancelRequested => {
+            // Already in the order they were sent, at the end.
             state.queued_item_ids.clear();
             state.start_pending = false;
             if state.turn == Turn::Working {
@@ -553,11 +555,30 @@ fn turn_for(state: &ChatState) -> Turn {
     }
 }
 
+/// Queued messages wait at the end of `items` in the order they were sent; everything else goes
+/// in before them, so the running turn keeps streaming into its own rows.
+fn open_end(state: &ChatState) -> usize {
+    let mut end = state.items.len();
+    while end > 0 && state.queued_item_ids.contains(&state.items[end - 1].id) {
+        end -= 1;
+    }
+    end
+}
+
+fn last_open(state: &mut ChatState) -> Option<&mut Item> {
+    let end = open_end(state);
+    state.items[..end].last_mut()
+}
+
 fn append(kind: ItemKind, state: &mut ChatState) {
-    state.items.push(Item {
-        id: state.next_item_id,
-        kind,
-    });
+    let at = open_end(state);
+    state.items.insert(
+        at,
+        Item {
+            id: state.next_item_id,
+            kind,
+        },
+    );
     state.next_item_id += 1;
 }
 
@@ -644,7 +665,8 @@ fn apply(message: &Inbound, state: &mut ChatState) {
                 mark_signed_out(state);
             }
         }
-        Inbound::Unknown { .. } => {}
+        // Translated by the transcript builder, which knows which client this is.
+        Inbound::ClientEcho { .. } | Inbound::Unknown { .. } => {}
     }
 }
 
@@ -679,7 +701,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
     match update {
         Update::AgentMessage { text, message_id } => {
             start_queued(state);
-            if let Some(last) = state.items.last_mut()
+            if let Some(last) = last_open(state)
                 && let ItemKind::Assistant {
                     text: existing,
                     message_id: existing_id,
@@ -699,7 +721,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         }
         Update::AgentImage { image, message_id } => {
             start_queued(state);
-            if let Some(last) = state.items.last_mut()
+            if let Some(last) = last_open(state)
                 && let ItemKind::Images {
                     refs,
                     message_id: existing_id,
@@ -719,7 +741,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         }
         Update::AgentThought { text } => {
             start_queued(state);
-            if let Some(last) = state.items.last_mut()
+            if let Some(last) = last_open(state)
                 && let ItemKind::Thought { text: existing } = &mut last.kind
             {
                 existing.push_str(text);
@@ -729,7 +751,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         }
         Update::UserMessage { text, message_id } => {
             if let Some(&first) = state.queued_item_ids.first() {
-                state.queued_item_ids.remove(0);
+                unqueue(first, state);
                 state.start_pending = false;
                 if let Some(item) = state.items.iter().find(|i| i.id == first)
                     && let ItemKind::User { text: echoed, .. } = &item.kind
@@ -741,7 +763,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
             let same_message = message_id.is_none()
                 || state.last_user_message_id.is_none()
                 || *message_id == state.last_user_message_id;
-            let merged = match state.items.last_mut() {
+            let merged = match last_open(state) {
                 Some(Item {
                     kind: ItemKind::User { text: existing, .. },
                     ..
@@ -769,7 +791,8 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         Update::Plan(entries) => {
             start_queued(state);
             let mut replaced = false;
-            for item in state.items.iter_mut().rev() {
+            let end = open_end(state);
+            for item in state.items[..end].iter_mut().rev() {
                 if matches!(item.kind, ItemKind::User { .. }) {
                     break;
                 }
@@ -817,7 +840,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
 
 fn mark_signed_out(state: &mut ChatState) {
     if matches!(
-        state.items.last().map(|i| &i.kind),
+        state.items[..open_end(state)].last().map(|i| &i.kind),
         Some(ItemKind::SignedOut)
     ) {
         return;
@@ -830,8 +853,26 @@ fn start_queued(state: &mut ChatState) {
     if !state.start_pending || state.queued_item_ids.is_empty() {
         return;
     }
-    state.queued_item_ids.remove(0);
+    unqueue(state.queued_item_ids[0], state);
     state.start_pending = false;
+}
+
+fn move_to_end(item_id: i64, state: &mut ChatState) {
+    if let Some(index) = state.items.iter().position(|i| i.id == item_id) {
+        let item = state.items.remove(index);
+        state.items.push(item);
+    }
+}
+
+/// A queued message that starts joins the transcript below what came before it, ahead of the
+/// messages still waiting.
+fn unqueue(item_id: i64, state: &mut ChatState) {
+    state.queued_item_ids.retain(|q| *q != item_id);
+    if let Some(index) = state.items.iter().position(|i| i.id == item_id) {
+        let item = state.items.remove(index);
+        let at = open_end(state);
+        state.items.insert(at, item);
+    }
 }
 
 /// Takes the prompt a response answers out of the in-flight list; the turn stays working until
@@ -845,7 +886,9 @@ fn finish_prompt(id: &AcpId, state: &mut ChatState) -> Option<i64> {
     let mut finished = None;
     if let Some(index) = index {
         let prompt = state.in_flight.remove(index);
-        state.queued_item_ids.retain(|q| *q != prompt.item_id);
+        if state.queued_item_ids.contains(&prompt.item_id) {
+            unqueue(prompt.item_id, state);
+        }
         finished = Some(prompt.item_id);
         state.start_pending = !state.queued_item_ids.is_empty();
     }
@@ -1119,6 +1162,60 @@ mod tests {
         assert!(!s.is_queued(two));
         msg(&mut s, done(2, "end_turn"));
         assert_eq!(s.turn, Turn::Idle);
+    }
+
+    #[test]
+    fn a_queued_prompt_moves_below_the_turn_it_waited_on_when_it_starts() {
+        let mut s = ChatState::default();
+        prompt(&mut s, "one", 1);
+        prompt(&mut s, "two", 2);
+        msg(&mut s, chunk("working on one", "m1"));
+        msg(&mut s, done(1, "end_turn"));
+        msg(&mut s, chunk("working on two", "m2"));
+        let order: Vec<_> = s
+            .items
+            .iter()
+            .map(|i| match &i.kind {
+                ItemKind::User { text, .. } | ItemKind::Assistant { text, .. } => text.as_str(),
+                _ => "",
+            })
+            .collect();
+        assert_eq!(order, ["one", "working on one", "two", "working on two"]);
+    }
+
+    #[test]
+    fn the_running_answer_keeps_streaming_into_one_row_past_a_queued_message() {
+        let mut s = ChatState::default();
+        prompt(&mut s, "one", 1);
+        msg(&mut s, chunk("Hel", "m1"));
+        msg(
+            &mut s,
+            Inbound::Update(Update::AgentThought { text: "hm".into() }),
+        );
+        prompt(&mut s, "two", 2);
+        prompt(&mut s, "three", 3);
+        msg(
+            &mut s,
+            Inbound::Update(Update::AgentThought { text: "m".into() }),
+        );
+        msg(&mut s, chunk("lo", "m1"));
+        msg(&mut s, chunk("lo", "m1"));
+        let kinds: Vec<_> = s.items.iter().map(|i| &i.kind).collect();
+        assert!(matches!(kinds[1], ItemKind::Assistant { text, .. } if text == "Hel"));
+        assert!(matches!(kinds[2], ItemKind::Thought { text } if text == "hmm"));
+        assert!(matches!(kinds[3], ItemKind::Assistant { text, .. } if text == "lolo"));
+        assert_eq!(
+            user_texts(&s),
+            ["one", "two", "three"],
+            "queued ones wait at the end, in order"
+        );
+        msg(&mut s, done(1, "end_turn"));
+        msg(&mut s, chunk("on two", "m2"));
+        assert_eq!(user_texts(&s), ["one", "two", "three"]);
+        assert!(
+            matches!(&s.items.last().unwrap().kind, ItemKind::User { text, .. } if text == "three")
+        );
+        assert_eq!(s.queued_item_ids, [user_id("three", &s)]);
     }
 
     #[test]

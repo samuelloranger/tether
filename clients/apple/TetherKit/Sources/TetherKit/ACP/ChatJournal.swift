@@ -78,6 +78,9 @@ struct ChatJournal: Codable, Equatable, Sendable {
   /// Persisted so a resumed client never reuses an id the agent already answered.
   var nextRequestId = 1
   var entries: [Entry] = []
+  /// Names this client to a holder that takes several: its request ids carry it, and its own lines
+  /// echoed back in the log are skipped since the entries above already hold them.
+  var clientId: String?
 
   var answeredRequestIds: Set<ACPID> {
     Set(entries.compactMap { [.answer, .hostAnswer, .questionAnswer].contains($0.kind) ? $0.requestId : nil })
@@ -208,9 +211,11 @@ struct ChatTranscriptBuilder {
   private var splitter = ACPLineSplitter()
   private var pending: [ChatJournal.Entry]
   private let images: (any ChatImageSink)?
+  private let clientId: String?
 
   init(journal: ChatJournal = ChatJournal(), images: (any ChatImageSink)? = nil) {
     self.images = images
+    clientId = journal.clientId
     pending = journal.entries.enumerated()
       .sorted { ($0.element.offset, $0.offset) < ($1.element.offset, $1.offset) }
       .map(\.element)
@@ -221,6 +226,7 @@ struct ChatTranscriptBuilder {
   /// added since it was taken are applied now; the rest wait for the log to reach their offset.
   init(journal: ChatJournal, resuming snapshot: ChatSnapshot, images: (any ChatImageSink)? = nil) {
     self.images = images
+    clientId = journal.clientId
     state = snapshot.state
     state.connection = .live
     consumedOffset = snapshot.offset
@@ -244,7 +250,13 @@ struct ChatTranscriptBuilder {
       drain(upTo: line.start)
       let message = ACPDecoder.decode(line.bytes, images: images)
       messages.append(message)
-      state = ChatReducer.reduce(state, .message(message))
+      if case let .clientEcho(client, sent) = message {
+        if client != clientId {
+          for event in sent.events(atOffset: line.start) { state = ChatReducer.reduce(state, event) }
+        }
+      } else {
+        state = ChatReducer.reduce(state, .message(message))
+      }
       consumedOffset = line.end
       drain(upTo: line.end)
     }

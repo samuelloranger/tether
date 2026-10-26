@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use super::echo;
 use super::images::{ImageRef, ImageSink};
 use super::lines::{LineError, LineSplitter};
 use super::message::{AcpId, Inbound, decode};
@@ -131,6 +132,10 @@ pub struct Journal {
     pub next_request_id: i64,
     #[serde(default)]
     pub entries: Vec<Entry>,
+    /// Names this client to a holder that takes several: its request ids carry it, and its own
+    /// lines echoed back in the log are skipped since the entries above already hold them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
 }
 
 fn first_request_id() -> i64 {
@@ -144,6 +149,7 @@ impl Default for Journal {
             loaded_session_id: None,
             next_request_id: 1,
             entries: Vec::new(),
+            client_id: None,
         }
     }
 }
@@ -261,6 +267,7 @@ pub struct TranscriptBuilder {
     splitter: LineSplitter,
     pending: VecDeque<Entry>,
     images: Option<Arc<dyn ImageSink>>,
+    client_id: Option<String>,
 }
 
 fn sorted_entries(entries: impl Iterator<Item = Entry>) -> VecDeque<Entry> {
@@ -278,6 +285,7 @@ impl TranscriptBuilder {
             splitter: LineSplitter::default(),
             pending: sorted_entries(journal.entries.iter().cloned()),
             images,
+            client_id: journal.client_id.clone(),
         };
         builder.drain(0);
         builder
@@ -315,6 +323,7 @@ impl TranscriptBuilder {
             splitter: LineSplitter::new(super::lines::DEFAULT_MAX_LINE_BYTES, snapshot.offset),
             pending,
             images,
+            client_id: journal.client_id.clone(),
         }
     }
 
@@ -340,7 +349,16 @@ impl TranscriptBuilder {
             self.drain(line.start);
             let message = decode(&line.bytes, self.images.as_deref());
             messages.push(message.clone());
-            reduce(&mut self.state, ChatEvent::Message(message));
+            match message {
+                Inbound::ClientEcho { client, message } => {
+                    if self.client_id.as_deref() != Some(client.as_str()) {
+                        for event in echo::events(&message, line.start) {
+                            reduce(&mut self.state, event);
+                        }
+                    }
+                }
+                message => reduce(&mut self.state, ChatEvent::Message(message)),
+            }
             self.consumed_offset = line.end;
             self.drain(line.end);
         }

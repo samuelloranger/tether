@@ -14,7 +14,7 @@ func TestVersionText(t *testing.T) {
 	if err := runVersion(nil, &b); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := b.String(), "tether v1.2.3\nprotocol 1\n"; got != want {
+	if got, want := b.String(), "tether v1.2.3\nprotocol 2\n"; got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }

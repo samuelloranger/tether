@@ -84,6 +84,7 @@ newline-delimited JSON-RPC; nothing is injected into it.
     # run as a non-PTY ssh exec; stdin/stdout are the agent's, byte for byte
     tether acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
     tether acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
+    tether acp attach chat1 --client a1b2c3   # name this client so the others see what it sends
     tether acp ls                         # name, running|ended, log bytes, cwd, created, command
     tether acp status [chat1 ...]         # one JSON object per session (see below)
     tether acp sessions ~/src/app --limit 20   # the agent's saved conversations for a folder
@@ -92,23 +93,43 @@ newline-delimited JSON-RPC; nothing is injected into it.
 The first `attach --spawn` starts a detached daemon that owns the agent and appends
 everything it prints to `acp/<name>/out.log`; an `attach` replays that log from `--from`
 and then follows it live, so a client that tracks `from + bytesReceived` sees no gap and
-no duplicate. A new `attach` replaces the previous one (that one exits 5). Without
-`--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
+no duplicate. Any number of clients can be attached at once; each one follows the log and
+writes to the agent. Only an attach with the same `--client` closes the previous one, which
+exits 5 (a holder started by a tether older than protocol 2 closes any previous client). Without `--spawn`, a missing session exits 3. When the agent exits, `attach` drains the log and
 exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `attach`
 sends what is already logged and exits; `--linger 30s` keeps following until output has
 been idle that long.
+
+### Several clients
+
+The log only ever grows by whole lines: agent output after its last newline is held until the
+line ends. A client attached with `--client <id>` (letters, digits, `-`, `_`) gets what it sends
+written into the log, just before the line goes to the agent, as an ACP extension notification:
+
+    {"jsonrpc":"2.0","method":"_tether/client","params":{"client":"a1b2c3","message":{…the line…}}}
+
+This covers `session/new`, `session/load`, `session/prompt`, `session/cancel` and responses to
+the agent's requests, so every client, live or replaying later, sees the others' sessions,
+prompts, stops and answers in order. A client that attaches again with the same `--client` (or
+with none, as a client that predates echoes) replaces its older connection, which exits 5: a
+connection the host never saw drop would otherwise count as attached and hold back pushes. An answer
+`tether acp answer` writes is echoed with `"client":"host"`. Clients use their own request ids
+(for example strings prefixed with their id) so two clients never send the same id. An answer to
+a request that was already answered, from any client or from `acp answer`, is not sent to the
+agent. A client without `--client` is never echoed.
 
 ### Status and saved conversations
 
 `acp status` reads `meta.json` only, so it works without talking to the daemon. It prints one
 JSON line per named session, or per session when no name is given (exit 3 for an unknown name):
 
-    {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":""}
+    {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":"","multiClient":true}
 
 `state` is `running` or `ended`. `turn` is `working` between a client's `session/prompt` and
 its response, `waiting` while a permission or elicitation request is outstanding (this wins
 over `working`), else `idle`; an ended session is always `idle`. `title` is the latest
-`session_info_update` title. The daemon refreshes `title` and `turn` in `meta.json` as the
+`session_info_update` title. `multiClient` is true when the session's holder lets several clients
+attach (see below); a holder started by an older tether leaves it out. The daemon refreshes `title` and `turn` in `meta.json` as the
 stream moves, writing only when one of them changes. `acp ls` is unchanged.
 
 `acp sessions <cwd> [--limit N]` starts the agent itself for a moment (not a holder session):

@@ -68,10 +68,12 @@ type acpTracker struct {
 	dir     string
 	st      acpTrackerState
 	answers map[string]string
+	// done holds requests a client answered, so a second client's answer is not sent too.
+	done map[string]bool
 }
 
 func loadACPTracker(name string) *acpTracker {
-	t := &acpTracker{name: name, dir: acpDir(name), answers: map[string]string{}}
+	t := &acpTracker{name: name, dir: acpDir(name), answers: map[string]string{}, done: map[string]bool{}}
 	t.st.Requests = map[string]*acpRequest{}
 	if data, err := os.ReadFile(filepath.Join(t.dir, "pending.json")); err == nil {
 		var st acpTrackerState
@@ -268,23 +270,43 @@ func orderedProps(raw json.RawMessage) ([]string, map[string]json.RawMessage) {
 	return names, props
 }
 
-func (t *acpTracker) clientLine(line []byte) {
+// clientLine reports whether the line goes to the agent (an answer to a request that was answered
+// already does not: another client got there first) and whether the other clients must see it.
+func (t *acpTracker) clientLine(line []byte) (forward, echo bool) {
 	m, key, ok := parseRPC(line)
-	if !ok || key == "" {
-		return
+	if !ok {
+		return true, false
+	}
+	if m.Method == "session/cancel" {
+		return true, true
+	}
+	if key == "" {
+		return true, false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	switch {
+	case m.Method == "session/new" || m.Method == "session/load":
+		// A client joining later learns the session from these when no prompt names it yet.
+		return true, true
 	case m.Method == "session/prompt":
 		t.st.Prompts = append(t.st.Prompts, key)
 		t.saveLocked()
+		return true, true
 	case m.Method == "":
 		if _, ok := t.st.Requests[key]; ok {
 			delete(t.st.Requests, key)
+			t.done[key] = true
 			t.saveLocked()
+			return true, true
 		}
+		_, answered := t.answers[key]
+		if answered || t.done[key] {
+			return false, false
+		}
+		return true, true
 	}
+	return true, false
 }
 
 // claimNotify reports true exactly once per request.
@@ -337,6 +359,7 @@ func (t *acpTracker) answer(key string, write func(req *acpRequest) (string, err
 	}
 	delete(t.st.Requests, key)
 	t.answers[key] = value
+	t.done[key] = true
 	t.saveLocked()
 	t.saveAnswersLocked()
 	return nil
@@ -357,7 +380,7 @@ func splitLines(pend, chunk []byte) (lines [][]byte, rest []byte) {
 func (s *acpDaemonState) attached() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.cur != nil
+	return len(s.live) > 0
 }
 
 // acpHandshakeGrace is how long a push waits when a client has connected but not yet sent its
@@ -368,7 +391,7 @@ const acpHandshakeGrace = 400 * time.Millisecond
 // mid-handshake when the event arrives is given acpHandshakeGrace to finish before deciding.
 func (s *acpDaemonState) whenDetached(claim func() bool, push func()) {
 	s.mu.Lock()
-	attached, dialing := s.cur != nil, s.handshaking > 0
+	attached, dialing := len(s.live) > 0, s.handshaking > 0
 	s.mu.Unlock()
 	switch {
 	case attached:
@@ -579,6 +602,7 @@ func (s *acpDaemonState) control(conn net.Conn, rest string) {
 			return "", errors.New("agent has exited")
 		}
 		line, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(key.Bytes()), "result": result})
+		s.echoLocked("host", line)
 		_, err = s.stdin.Write(append(line, '\n'))
 		return v, err
 	})

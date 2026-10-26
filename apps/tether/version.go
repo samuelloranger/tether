@@ -7,9 +7,10 @@ import (
 	"io"
 )
 
-// protocol is bumped when a command or wire format the app depends on changes
-// incompatibly; the app refuses a host whose protocol is lower than it requires.
-const protocol = 1
+// protocol is bumped when a command or wire format the app depends on changes; the app
+// refuses a host whose protocol is lower than it requires. 2: several clients can attach to
+// one acp session at once (attach --client, `_tether/client` echoes).
+const protocol = 2
 
 // version is set by the installer with -ldflags "-X main.version=...".
 var version = "dev"

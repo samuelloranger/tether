@@ -27,8 +27,15 @@ final class DrawerChatsTests: XCTestCase {
 
   func test_the_route_follows_the_journal_mode() {
     let row = DrawerChatRows.rows(chats: [chat("c", "/srv/x")], titles: [:])[0]
-    XCTAssertEqual(row.route(readOnly: true), ChatRoute(name: "c", cwd: "/srv/x", readOnly: true))
-    XCTAssertFalse(row.route(readOnly: false).readOnly)
+    XCTAssertEqual(row.route(journal: ChatJournal()), ChatRoute(name: "c", cwd: "/srv/x", readOnly: true))
+    var journal = ChatJournal()
+    journal.sessionId = "s"
+    XCTAssertFalse(row.route(journal: journal).readOnly)
+    var shared = chat("c", "/srv/x")
+    shared.multiClient = true
+    let joined = DrawerChatRows.rows(chats: [shared], titles: [:])[0].route(journal: ChatJournal())
+    XCTAssertTrue(joined.join)
+    XCTAssertFalse(joined.readOnly)
   }
 
   func test_selection_swaps_between_a_chat_and_the_terminal() {

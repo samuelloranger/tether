@@ -29,6 +29,8 @@ actor ACPClient {
   private var lastSnapshot: ContinuousClock.Instant?
   private var wasWorking = false
   private var feedFailed = false
+  /// Joined a chat another client started: the session id comes from the log.
+  private var joining = false
 
   /// `resume` must already be checked against the journal with `ChatSnapshot.isConsistent`; the
   /// stream is then expected to start at its offset.
@@ -90,6 +92,13 @@ actor ACPClient {
   func startReading() {
     guard readTask == nil else { return }
     readTask = Task { await self.readLoop() }
+  }
+
+  /// For a chat another client started on a holder that takes several: no handshake of its own,
+  /// the session comes from the other client's `session/new` answer or prompts in the log.
+  func startJoining() {
+    joining = true
+    startReading()
   }
 
   func initialize() async throws -> ACPResult {
@@ -278,8 +287,11 @@ actor ACPClient {
     }
   }
 
+  /// A client named to a holder that takes several prefixes its ids with its name, so two clients
+  /// writing to one agent never send the same id.
   private func allocateId() -> ACPID {
-    let id = ACPID.int(journal.nextRequestId)
+    let number = journal.nextRequestId
+    let id = journal.clientId.map { ACPID.string("\($0)-\(number)") } ?? .int(number)
     journal.nextRequestId += 1
     store.save(journal)
     return id
@@ -362,7 +374,10 @@ actor ACPClient {
           journal.nextRequestId = number + 1
           store.save(journal)
         }
+        adoptSession(result.sessionId)
         pending.removeValue(forKey: id)?.continuation?.resume(returning: result)
+      case let .clientEcho(_, .prompt(_, _, _, sessionId)), let .clientEcho(_, .load(sessionId)):
+        adoptSession(sessionId)
       case let .errorResponse(id?, code, text):
         pending.removeValue(forKey: id)?.continuation?.resume(
           throwing: ACPClientError.agent(code: code, message: text))
@@ -370,6 +385,12 @@ actor ACPClient {
         break
       }
     }
+  }
+
+  private func adoptSession(_ id: String?) {
+    guard joining, journal.sessionId == nil, let id else { return }
+    journal.sessionId = id
+    store.save(journal)
   }
 
   private func finishLoop() {

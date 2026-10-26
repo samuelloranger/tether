@@ -498,8 +498,15 @@ impl Chats {
                 .as_ref()
                 .map(|f| f.journal(name))
                 .unwrap_or_default();
-            let read_only = tether_core::acp::host::open_mode(&journal) == host::OpenMode::ReadOnly;
-            let session = Session::new(name, &chat.cwd, read_only, None, self.files.as_ref());
+            let mode = host::open_mode(&journal, chat.multi_client);
+            let session = Session::new(
+                name,
+                &chat.cwd,
+                mode,
+                chat.multi_client,
+                None,
+                self.files.as_ref(),
+            );
             self.sessions.insert(name.to_string(), session);
         }
         self.active = Some(name.to_string());
@@ -518,6 +525,7 @@ impl Chats {
         name: String,
         cwd: String,
         load: Option<String>,
+        multi: bool,
         now: Duration,
         out: &mut Out,
     ) {
@@ -532,8 +540,16 @@ impl Chats {
             turn: host::HostTurn::Idle,
             host_title: None,
             has_status: false,
+            multi_client: multi,
         });
-        let session = Session::new(&name, &cwd, false, load, self.files.as_ref());
+        let session = Session::new(
+            &name,
+            &cwd,
+            host::OpenMode::Resume,
+            multi,
+            load,
+            self.files.as_ref(),
+        );
         self.sessions.insert(name.clone(), session);
         self.select(&name, now, out);
     }
@@ -614,9 +630,9 @@ impl Chats {
                 match nc.on_exec(request, step, result, &host) {
                     newchat::Next::Nothing => {}
                     newchat::Next::Job(job) => out.jobs.push(job),
-                    newchat::Next::Open { cwd, load } => {
+                    newchat::Next::Open { cwd, load, multi } => {
                         self.new_chat = None;
-                        self.open_route(host::new_chat_name(), cwd, load, now, out);
+                        self.open_route(host::new_chat_name(), cwd, load, multi, now, out);
                     }
                 }
             }

@@ -31,8 +31,7 @@ extension SSHTerminalController {
   }
 
   func chatRoute(for row: DrawerChatRow) -> ChatRoute {
-    let mode = ChatOpenMode.mode(for: UserDefaultsChatJournalStore(name: row.name).load())
-    return row.route(readOnly: mode == .readOnly)
+    row.route(journal: UserDefaultsChatJournalStore(name: row.name).load())
   }
 
   func newChat(cwdText: String) async -> ChatStart {

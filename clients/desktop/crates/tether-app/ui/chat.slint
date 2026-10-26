@@ -154,6 +154,7 @@ export global ChatVm {
     in property <float> context: -1;
     in property <string> context-text;
     in property <[ChatRowVm]> rows;
+    in property <[string]> queued;
     in property <int> follow-seq;
     in property <string> notice;
     // Composer.
@@ -570,9 +571,9 @@ component Entry inherits Rectangle {
         if root.e.kind == 0 || root.e.kind == 1: Pressable {
             enabled: root.e.expandable;
             hover-fill: root.e.expandable;
-            min-height: ChatStyle.row-height;
+            height: max(ChatStyle.row-height, tool-row.preferred-height);
             clicked => { ChatVm.toggle(root.e.key); }
-            HorizontalLayout {
+            tool-row := HorizontalLayout {
                 padding-left: 12px + root.indent;
                 padding-right: 12px;
                 spacing: 10px;
@@ -587,8 +588,8 @@ component Entry inherits Rectangle {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     alignment: center;
-                    padding-top: root.e.subtitle != "" ? 5px : 0px;
-                    padding-bottom: root.e.subtitle != "" ? 5px : 0px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
                     Text {
                         text: root.e.title;
                         font-size: 12.5px;
@@ -696,12 +697,12 @@ component Row inherits VerticalLayout {
     // User: a quiet surface inset from the left, so the agent's prose keeps the full measure.
     if root.r.kind == 0: HorizontalLayout {
         padding-left: 48px;
+        alignment: end;
         VerticalLayout {
             spacing: 3px;
             Rectangle {
                 background: Tokens.surface;
                 border-radius: 14px;
-                opacity: root.r.flag ? 0.72 : 1;
                 height: user-col.preferred-height;
                 user-col := VerticalLayout {
                     padding-left: 14px;
@@ -718,13 +719,6 @@ component Row inherits VerticalLayout {
                     }
                     if root.r.text != "": Prose { text: root.r.text; }
                 }
-            }
-            if root.r.flag: HorizontalLayout {
-                alignment: end;
-                spacing: 4px;
-                padding-right: 4px;
-                Glyph { which: 19; size: 11px; }
-                Text { text: "Queued"; font-size: 11px; color: Tokens.text-faint; }
             }
         }
     }
@@ -901,19 +895,21 @@ component ChatHeader inherits Rectangle {
             alignment: center;
             status := Pressable {
                 height: 28px;
-                width: status-row.preferred-width + 16px;
+                width: status-row.preferred-width + 20px;
                 border-radius: 8px;
                 background: ChatVm.ctl-open || self.hovered ? Tokens.surface-hover : transparent;
                 clicked => { ChatVm.controls(); }
                 status-row := HorizontalLayout {
-                    x: 8px;
+                    x: 10px;
+                    width: self.preferred-width;
+                    height: parent.height;
                     spacing: 0px;
                     if ChatVm.model-name != "": Text { text: ChatVm.model-name; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
                     if ChatVm.model-name != "" && ChatVm.mode-name != "": Text { text: " \u{00B7} "; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
                     if ChatVm.mode-name != "": Text { text: ChatVm.mode-name; font-size: 12px; color: ChatStyle.tint(ChatVm.mode-tint); vertical-alignment: center; }
                     if ChatVm.stats != "": Text { text: "   " + ChatVm.stats; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
-                    Rectangle { width: 8px; }
-                    VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 9px; height: 9px; transform-rotation: 90deg; } }
+                    Rectangle { width: 6px; }
+                    VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: ChatVm.ctl-open || status.hovered ? Tokens.text-secondary : Tokens.text-faint; width: 9px; height: 9px; transform-rotation: 90deg; } }
                 }
             }
         }
@@ -924,6 +920,7 @@ component ChatHeader inherits Rectangle {
         }
         if ChatVm.phase != 3: HorizontalLayout {
             horizontal-stretch: 0;
+            padding-left: 4px;
             spacing: 6px;
             TextDot { ink: ChatStyle.phase-ink(ChatVm.phase); line-height: word.preferred-height; }
             word := Text { text: ChatVm.phase-word; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
@@ -1348,11 +1345,35 @@ component Composer inherits VerticalLayout {
             }
         }
     }
+    // Waiting for the running turn: pinned here, and into the transcript once the agent starts it.
+    if ChatVm.queued.length > 0: HorizontalLayout {
+        padding-left: 38px;
+        padding-right: 40px;
+        Rectangle {
+            background: Tokens.surface;
+            border-radius: 12px;
+            height: queue-col.preferred-height;
+            queue-col := VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 7px;
+                padding-bottom: 7px;
+                spacing: 4px;
+                for q in ChatVm.queued: HorizontalLayout {
+                    spacing: 8px;
+                    accessible-role: text;
+                    accessible-label: "Queued: " + q;
+                    VerticalLayout { alignment: center; Glyph { which: 19; size: 11px; } }
+                    Text { horizontal-stretch: 1; text: q; font-size: 12.5px; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
+                }
+            }
+        }
+    }
     HorizontalLayout {
         spacing: 8px;
         VerticalLayout {
             alignment: end;
-            padding-bottom: 2px;
+            padding-bottom: 7px;
             attach := Rectangle {
                 width: 30px;
                 height: 30px;
@@ -1369,18 +1390,18 @@ component Composer inherits VerticalLayout {
         }
         field := Rectangle {
             horizontal-stretch: 1;
-            height: min(max(36px, input.preferred-height + 18px), 200px);
-            border-radius: 18px;
+            height: min(max(44px, input.preferred-height + 26px), 220px);
+            border-radius: 22px;
             background: Tokens.raised;
             border-width: 1px;
             border-color: input.has-focus ? Tokens.accent.with-alpha(0.6) : Tokens.border;
             opacity: ChatVm.dimmed ? 0.55 : 1;
             clip: true;
             scroller := Flickable {
-                x: 14px;
-                y: 9px;
-                width: parent.width - 28px;
-                height: parent.height - 18px;
+                x: 16px;
+                y: 13px;
+                width: parent.width - 32px;
+                height: parent.height - 26px;
                 content-height: max(self.height, input.preferred-height);
                 input := TextInput {
                     width: scroller.width;
@@ -1412,8 +1433,8 @@ component Composer inherits VerticalLayout {
                 }
             }
             if input.text == "": Text {
-                x: 15px;
-                height: 36px;
+                x: 17px;
+                height: 44px;
                 text: ChatVm.placeholder;
                 font-size: 14px;
                 color: Tokens.placeholder;
@@ -1422,7 +1443,7 @@ component Composer inherits VerticalLayout {
         }
         VerticalLayout {
             alignment: end;
-            padding-bottom: 2px;
+            padding-bottom: 6px;
             action := Rectangle {
                 width: 32px;
                 height: 32px;
@@ -1499,7 +1520,7 @@ export component ChatPane inherits Rectangle {
                     padding-left: max(20px, (scroll.visible-width - ChatStyle.column) / 2);
                     padding-right: max(20px, (scroll.visible-width - ChatStyle.column) / 2);
                     padding-top: 16px;
-                    padding-bottom: 20px;
+                    padding-bottom: 32px;
                     spacing: 12px;
                     alignment: start;
                     for r in ChatVm.rows: Row { r: r; }

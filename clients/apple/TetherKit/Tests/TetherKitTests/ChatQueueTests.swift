@@ -222,9 +222,9 @@ final class ChatQueueTests: XCTestCase {
 
   func test_a_signed_out_chat_reopens_live_and_an_untouched_one_stays_read_only() {
     var journal = ChatJournal()
-    XCTAssertEqual(ChatOpenMode.mode(for: journal), .readOnly)
+    XCTAssertEqual(ChatOpenMode.mode(for: journal, multiClient: false), .readOnly)
     journal.nextRequestId = 3
-    XCTAssertEqual(ChatOpenMode.mode(for: journal), .resume)
+    XCTAssertEqual(ChatOpenMode.mode(for: journal, multiClient: false), .resume)
   }
 }
 

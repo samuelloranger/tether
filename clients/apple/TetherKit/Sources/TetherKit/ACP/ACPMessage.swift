@@ -146,6 +146,8 @@ enum ACPInbound: Equatable, Sendable {
   /// The adapter's `_auth/status_update`: whether the host's agent has a login. Sent at session start and
   /// again when a queued prompt begins.
   case authStatus(signedIn: Bool)
+  /// A line another client attached to the same holder sent (`_tether/client`).
+  case clientEcho(client: String, line: ACPClientLine)
   case unknown(method: String?)
 }
 
@@ -171,6 +173,11 @@ enum ACPDecoder {
       if method == "session/update", let update = params["update"] as? JSON {
         return .update(decodeUpdate(update, images: images))
       }
+      if method == ACPClientLine.echoMethod, let client = params["client"] as? String,
+        let line = params["message"] as? JSON
+      {
+        return .clientEcho(client: client, line: clientLine(line))
+      }
       if method == "_auth/status_update", let status = (params["authStatus"] as? JSON)?["kind"] as? String {
         return .authStatus(signedIn: status != "none")
       }
@@ -184,6 +191,48 @@ enum ACPDecoder {
       return .response(id: id, result: decodeResult(object["result"] as? JSON ?? [:]))
     }
     return .unknown(method: nil)
+  }
+
+  private static func clientLine(_ line: JSON) -> ACPClientLine {
+    let id = parseID(line["id"])
+    switch line["method"] as? String {
+    case "session/prompt":
+      let params = line["params"] as? JSON
+      let blocks = params?["prompt"] as? [JSON] ?? []
+      let text = blocks.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
+      return .prompt(
+        id: id, text: text, imageCount: blocks.filter { $0["type"] as? String == "image" }.count,
+        sessionId: params?["sessionId"] as? String)
+    case "session/load":
+      return .load(sessionId: (line["params"] as? JSON)?["sessionId"] as? String)
+    case "session/cancel":
+      return .cancel
+    case .some:
+      return .other
+    case nil:
+      guard let id, let result = line["result"] as? JSON else { return .other }
+      if let outcome = result["outcome"] as? JSON {
+        switch outcome["outcome"] as? String {
+        case "selected": return (outcome["optionId"] as? String).map { .permissionAnswer(id: id, optionId: $0) } ?? .other
+        case "cancelled": return .permissionAnswer(id: id, optionId: "cancelled")
+        default: return .other
+        }
+      }
+      guard let action = (result["action"] as? String).flatMap(ChatQuestionAction.init(rawValue:)) else { return .other }
+      let content = (result["content"] as? JSON ?? [:]).compactMapValues(questionValue)
+      return .questionAnswer(id: id, action: action, content: content)
+    }
+  }
+
+  private static func questionValue(_ value: Any) -> ChatQuestionValue? {
+    if let flag = value as? Bool, CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() { return .flag(flag) }
+    if let text = value as? String { return .text(text) }
+    if let number = value as? NSNumber { return .text(number.stringValue) }
+    if let list = value as? [Any] {
+      let strings = list.compactMap { $0 as? String }
+      return strings.count == list.count ? .list(strings) : nil
+    }
+    return nil
   }
 
   private static func parseID(_ value: Any?) -> ACPID? {

@@ -31,6 +31,8 @@ type acpStatusLine struct {
 	Created     int64  `json:"created"`
 	LogBytes    int64  `json:"logBytes"`
 	EndedReason string `json:"endedReason"`
+	// MultiClient: the session's holder lets several clients attach at once (absent from older ones).
+	MultiClient bool `json:"multiClient,omitempty"`
 }
 
 func acpStatusOf(name string) (*acpStatusLine, error) {
@@ -38,7 +40,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason}
+	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient}
 	if metaRunning(m) {
 		l.State = "running"
 		if m.Turn == "working" || m.Turn == "waiting" {

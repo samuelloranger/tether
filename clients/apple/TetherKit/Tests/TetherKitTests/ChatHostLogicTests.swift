@@ -67,11 +67,27 @@ final class ChatHostLogicTests: XCTestCase {
     XCTAssertFalse(ACPCwd.needsHome("/srv"))
   }
 
-  func test_a_chat_without_a_local_session_opens_read_only() {
-    XCTAssertEqual(ChatOpenMode.mode(for: ChatJournal()), .readOnly)
+  func test_a_chat_without_a_local_session_joins_a_shared_holder_and_reads_an_old_one() {
+    XCTAssertEqual(ChatOpenMode.mode(for: ChatJournal(), multiClient: false), .readOnly)
+    XCTAssertEqual(ChatOpenMode.mode(for: ChatJournal(), multiClient: true), .join)
     var journal = ChatJournal()
     journal.sessionId = "s"
-    XCTAssertEqual(ChatOpenMode.mode(for: journal), .resume)
+    XCTAssertEqual(ChatOpenMode.mode(for: journal, multiClient: true), .resume)
+  }
+
+  func test_a_shared_holder_names_the_client_and_a_protocol_two_host_starts_one() {
+    XCTAssertEqual(
+      ACPHostCommand.attach(name: "chat-ab12", cwd: "/x", spawn: false, client: "k3x9"),
+      "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --client 'k3x9'")
+    XCTAssertTrue(
+      ACPHostCheck.multiClient(
+        in: "tether=found\nversion={\"name\":\"tether\",\"version\":\"v6.2.0\",\"protocol\":2}\nnode=ok\n"))
+    XCTAssertFalse(
+      ACPHostCheck.multiClient(in: "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n"))
+    let listing = ACPChatStatusListing.parse(
+      "{\"name\":\"a\",\"state\":\"running\",\"cwd\":\"/w\",\"created\":2,\"multiClient\":true}\n"
+        + "{\"name\":\"b\",\"state\":\"running\",\"cwd\":\"/w\",\"created\":1}")
+    XCTAssertEqual(listing.chats.map(\.multiClient), [true, false])
   }
 
   func test_the_link_is_interactive_only_after_the_replay_goes_quiet() {

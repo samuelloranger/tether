@@ -34,8 +34,18 @@ pub fn spawn_command() -> String {
 
 /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off
 /// so a lost holder never starts a fresh agent under a journal that names the old session.
-pub fn attach_command(name: &str, cwd: &str, spawn: bool, from: usize) -> String {
+/// `client` names this client to a holder that takes several, so the others see what it sends.
+pub fn attach_command(
+    name: &str,
+    cwd: &str,
+    spawn: bool,
+    from: usize,
+    client: Option<&str>,
+) -> String {
     let mut command = format!("{TETHER} attach {} --from {from}", shell_quote(name));
+    if let Some(client) = client {
+        command += &format!(" --client {}", shell_quote(client));
+    }
     if spawn {
         command += &format!(
             " --spawn {} --cwd {}",
@@ -129,6 +139,8 @@ pub struct ChatSummary {
     pub turn: HostTurn,
     pub host_title: Option<String>,
     pub has_status: bool,
+    /// The chat's holder lets several clients attach at once.
+    pub multi_client: bool,
 }
 
 impl ChatSummary {
@@ -143,6 +155,7 @@ impl ChatSummary {
             turn: HostTurn::Idle,
             host_title: None,
             has_status: false,
+            multi_client: false,
         }
     }
 
@@ -194,6 +207,7 @@ pub fn parse_listing(output: &str) -> Listing {
                 turn: HostTurn::Idle,
                 host_title: None,
                 has_status: false,
+                multi_client: false,
             })
         })();
         match parsed {
@@ -269,6 +283,7 @@ fn status_chat(line: &str) -> Option<ChatSummary> {
         turn,
         host_title: title,
         has_status: true,
+        multi_client: object.get("multiClient").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -586,41 +601,57 @@ pub fn needs_home(text: &str) -> bool {
     path.is_empty() || path == "~" || path.starts_with("~/")
 }
 
-/// A chat this client has a session id for resumes; any other can only be read.
+/// A chat this client has a session id for resumes. Any other joins the session another client
+/// started when its holder takes several clients, and can only be read when it does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenMode {
     Resume,
+    Join,
     ReadOnly,
 }
 
 /// A chat this client began but never got a session for (a signed-out agent) has sent
 /// requests, so it reopens as live and asks again; a chat it never touched stays read only.
-pub fn open_mode(journal: &Journal) -> OpenMode {
-    if journal.session_id.is_none() && journal.next_request_id <= 1 {
-        OpenMode::ReadOnly
-    } else {
-        OpenMode::Resume
+pub fn open_mode(journal: &Journal, multi_client: bool) -> OpenMode {
+    match (
+        journal.session_id.is_none() && journal.next_request_id <= 1,
+        multi_client,
+    ) {
+        (false, _) => OpenMode::Resume,
+        (true, true) => OpenMode::Join,
+        (true, false) => OpenMode::ReadOnly,
     }
+}
+
+/// Names this client in the log of a holder that takes several; ten of `[a-z0-9]`.
+pub fn new_client_id() -> String {
+    random_alnum(10)
 }
 
 /// "chat-" and six of `[a-z0-9]`.
 pub fn new_chat_name() -> String {
+    format!("chat-{}", random_alnum(6))
+}
+
+fn random_alnum(len: usize) -> String {
     const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    let mut name = String::from("chat-");
+    let mut out = String::new();
     let mut rng = OsRng;
-    while name.len() < 11 {
+    while out.len() < len {
         let mut byte = [0u8; 1];
         rng.fill_bytes(&mut byte);
         // 252 is the largest multiple of 36 that fits a byte: the rest would bias the pick.
         if byte[0] < 252 {
-            name.push(LETTERS[(byte[0] % 36) as usize] as char);
+            out.push(LETTERS[(byte[0] % 36) as usize] as char);
         }
     }
-    name
+    out
 }
 
 /// The lowest `tether version` protocol this client works with; bump with the host tool's `protocol`.
 pub const REQUIRED_PROTOCOL: i64 = 1;
+/// From this protocol a new chat's holder lets several clients attach (`attach --client`).
+pub const MULTI_CLIENT_PROTOCOL: i64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostProblem {
@@ -681,6 +712,16 @@ pub fn host_problems(output: &str) -> Vec<HostProblem> {
     found
 }
 
+/// Whether the host's `tether` starts holders that take several clients.
+pub fn host_multi_client(output: &str) -> bool {
+    lines_of(output)
+        .filter_map(|l| l.trim().strip_prefix("version="))
+        .filter_map(|json| serde_json::from_str::<Version>(json).ok())
+        .any(|v| {
+            v.name.as_deref() == Some("tether") && v.protocol.unwrap_or(0) >= MULTI_CLIENT_PROTOCOL
+        })
+}
+
 pub fn host_problem_message(problems: &[HostProblem], host: &str) -> Option<String> {
     if problems.is_empty() {
         return None;
@@ -724,14 +765,18 @@ mod tests {
     #[test]
     fn attach_command_spawns_only_for_a_new_chat() {
         assert_eq!(
-            attach_command("chat-ab12", "/home/sam/my app", true, 0),
+            attach_command("chat-ab12", "/home/sam/my app", true, 0, None),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0' --cwd '/home/sam/my app'"
         );
         assert_eq!(
-            attach_command("chat-ab12", "/x", false, 0),
+            attach_command("chat-ab12", "/x", false, 0, None),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0"
         );
-        assert!(attach_command("c", "/x", false, 4096).ends_with("--from 4096"));
+        assert!(attach_command("c", "/x", false, 4096, None).ends_with("--from 4096"));
+        assert_eq!(
+            attach_command("chat-ab12", "/x", false, 0, Some("k3x9")),
+            "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --client 'k3x9'"
+        );
     }
 
     #[test]
@@ -741,14 +786,14 @@ mod tests {
             "npx -y @agentclientprotocol/claude-agent-acp@0.95.0"
         );
         assert_eq!(ADAPTER_VERSION, "0.95.0");
-        let command = attach_command("c", "/x", true, 0);
+        let command = attach_command("c", "/x", true, 0, None);
         assert!(command.contains("--spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0'"));
-        assert!(!attach_command("c", "/x", false, 0).contains("npx"));
+        assert!(!attach_command("c", "/x", false, 0, None).contains("npx"));
     }
 
     #[test]
     fn shell_metacharacters_in_a_name_or_folder_are_quoted() {
-        let command = attach_command("a'b", "/x; rm -rf /", true, 0);
+        let command = attach_command("a'b", "/x; rm -rf /", true, 0, None);
         assert!(command.contains("'a'\"'\"'b'"));
         assert!(command.contains("'/x; rm -rf /'"));
         assert_eq!(
@@ -1105,18 +1150,19 @@ mod tests {
     }
 
     #[test]
-    fn a_chat_without_a_local_session_opens_read_only() {
-        assert_eq!(open_mode(&Journal::default()), OpenMode::ReadOnly);
+    fn a_chat_without_a_local_session_joins_a_shared_holder_and_reads_an_old_one() {
+        assert_eq!(open_mode(&Journal::default(), false), OpenMode::ReadOnly);
+        assert_eq!(open_mode(&Journal::default(), true), OpenMode::Join);
         let journal = Journal {
             session_id: Some("s".into()),
             ..Journal::default()
         };
-        assert_eq!(open_mode(&journal), OpenMode::Resume);
+        assert_eq!(open_mode(&journal, true), OpenMode::Resume);
         let asked = Journal {
             next_request_id: 3,
             ..Journal::default()
         };
-        assert_eq!(open_mode(&asked), OpenMode::Resume);
+        assert_eq!(open_mode(&asked, false), OpenMode::Resume);
     }
 
     #[test]
@@ -1157,6 +1203,25 @@ mod tests {
                 "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
             ]
             .join("; ")
+        );
+    }
+
+    #[test]
+    fn a_protocol_two_host_starts_shared_holders() {
+        assert!(!host_multi_client(OURS));
+        assert!(host_multi_client(
+            "tether=found\nversion={\"name\":\"tether\",\"version\":\"v6.2.0\",\"protocol\":2}\nnode=ok\n"
+        ));
+        assert!(!host_multi_client("tether=missing\n"));
+        let listing = parse_status(concat!(
+            r#"{"name":"chat-a","state":"running","cwd":"/w","created":2,"multiClient":true}"#,
+            "\n",
+            r#"{"name":"chat-b","state":"running","cwd":"/w","created":1}"#,
+        ));
+        assert!(listing.chats[0].multi_client);
+        assert!(
+            !listing.chats[1].multi_client,
+            "a holder from an older tether"
         );
     }
 

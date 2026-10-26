@@ -40,7 +40,7 @@ func TestACPStatusTurnTransitions(t *testing.T) {
 	cleanupSession(t, "t")
 	p := startAttach(t, "t", "--spawn", script, "--cwd", t.TempDir())
 	waitTurn(t, "t", "idle")
-	if l := acpStatusJSON(t, "t"); l.State != "running" || l.Turn != "idle" || l.Title != "" {
+	if l := acpStatusJSON(t, "t"); l.State != "running" || l.Turn != "idle" || l.Title != "" || !l.MultiClient {
 		t.Fatalf("fresh %+v", l)
 	}
 

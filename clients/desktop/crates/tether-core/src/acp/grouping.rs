@@ -52,7 +52,14 @@ pub const PAGE_SIZE: usize = 60;
 
 /// `last_ids` is each block's last item id, in order; `start` is the id the window begins at.
 pub fn window_range(last_ids: &[i64], start: Option<i64>) -> Range<usize> {
-    let first = start.and_then(|s| last_ids.iter().position(|id| *id >= s));
+    // A queued message that started sits after items with higher ids, so ids are not in
+    // position order: the block that ends at `start` wins over the first one past it.
+    let first = start.and_then(|s| {
+        last_ids
+            .iter()
+            .position(|id| *id == s)
+            .or_else(|| last_ids.iter().position(|id| *id >= s))
+    });
     match first {
         Some(first) => first..last_ids.len(),
         None => last_ids.len().saturating_sub(PAGE_SIZE)..last_ids.len(),
@@ -72,6 +79,16 @@ mod tests {
     use super::super::message::{ToolFields, ToolKind};
     use super::super::reducer::{Permission, ToolCall};
     use super::*;
+
+    #[test]
+    fn the_window_starts_at_its_block_when_ids_are_out_of_order() {
+        assert_eq!(window_range(&[3, 8, 5, 9], Some(5)), 2..4);
+        assert_eq!(
+            window_range(&[3, 8, 9], Some(5)),
+            1..3,
+            "a block that went away"
+        );
+    }
 
     fn tool(id: i64) -> Item {
         Item {
