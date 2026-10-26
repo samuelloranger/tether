@@ -84,6 +84,8 @@ newline-delimited JSON-RPC; nothing is injected into it.
     tether-notify acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
     tether-notify acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
     tether-notify acp ls                         # name, running|ended, log bytes, cwd, created, command
+    tether-notify acp status [chat1 ...]         # one JSON object per session (see below)
+    tether-notify acp sessions ~/src/app --limit 20   # the agent's saved conversations for a folder
     tether-notify acp kill chat1                 # stop the agent and remove the session
 
 The first `attach --spawn` starts a detached daemon that owns the agent and appends
@@ -94,6 +96,30 @@ no duplicate. A new `attach` replaces the previous one (that one exits 5). Witho
 exits 0; the session stays in `ls` as `ended` until killed. After stdin EOF, `attach`
 sends what is already logged and exits; `--linger 30s` keeps following until output has
 been idle that long.
+
+### Status and saved conversations
+
+`acp status` reads `meta.json` only, so it works without talking to the daemon. It prints one
+JSON line per named session, or per session when no name is given (exit 3 for an unknown name):
+
+    {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":""}
+
+`state` is `running` or `ended`. `turn` is `working` between a client's `session/prompt` and
+its response, `waiting` while a permission or elicitation request is outstanding (this wins
+over `working`), else `idle`; an ended session is always `idle`. `title` is the latest
+`session_info_update` title. The daemon refreshes `title` and `turn` in `meta.json` as the
+stream moves, writing only when one of them changes. `acp ls` is unchanged.
+
+`acp sessions <cwd> [--limit N]` starts the agent itself for a moment (not a holder session):
+the same `$SHELL -lc` path as the holder, `initialize`, then `session/list` with `{cwd}`
+(following `nextCursor`), then the process group is killed. It prints one JSON line per saved
+conversation, newest first:
+
+    {"sessionId":"…","title":"…","updatedAt":"2026-03-01T00:00:00Z","cwd":"/home/me/src/app"}
+
+The agent command is `--agent-cmd`, else `TETHER_ACP_AGENT_CMD`, else the pinned
+`npx -y @agentclientprotocol/claude-agent-acp@0.95.0`. A failure or a 15 s timeout prints
+the reason on stderr and exits 1.
 
 ### Lifecycle and retention
 

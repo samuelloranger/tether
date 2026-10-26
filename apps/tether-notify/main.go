@@ -176,6 +176,10 @@ func usage() {
                                              for elicitations)
   acp answers NAME                           print the answers made this way as JSON {"<id>":"<optionId>|cancelled"}
   acp ls | acp kill NAME                     list or stop held agents
+  acp status [NAME...]                       one JSON line per session: state, turn (idle|working|waiting),
+                                             title, cwd, created, logBytes, endedReason (exit 3 if unknown)
+  acp sessions CWD [--limit N] [--agent-cmd CMD]
+                                             the agent's saved conversations for CWD as JSON lines, newest first
   list                                       list registered phones
   remove <token>                             forget a phone
 `)

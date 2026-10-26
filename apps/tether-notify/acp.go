@@ -45,6 +45,9 @@ type acpMeta struct {
 	// Ended is the unix time the agent ended; EndedReason is idle, log-limit, exited or killed.
 	Ended       int64  `json:"ended,omitempty"`
 	EndedReason string `json:"endedReason,omitempty"`
+	// Title and Turn mirror the stream tracker so `acp status` can answer without the daemon.
+	Title string `json:"title,omitempty"`
+	Turn  string `json:"turn,omitempty"`
 }
 
 func acpDir(name string) string { return filepath.Join(home(), "acp", name) }
@@ -99,7 +102,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|kill")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|kill")
 	}
 	switch args[0] {
 	case "attach":
@@ -118,6 +121,10 @@ func runACP(args []string) error {
 		return acpAnswers(args[1], os.Stdout)
 	case "ls":
 		return acpLs(os.Stdout)
+	case "status":
+		return acpStatus(args[1:], os.Stdout)
+	case "sessions":
+		return acpSessions(args[1:], os.Stdout)
 	case "kill":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: acp kill <name>")
@@ -351,6 +358,36 @@ func (s *acpDaemonState) broadcast() {
 	s.notify = make(chan struct{})
 }
 
+// acpShell is the login shell agent commands run under, so they see the user's PATH.
+func acpShell() string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		return "sh"
+	}
+	if _, err := exec.LookPath(shell); err != nil {
+		return "sh"
+	}
+	return shell
+}
+
+// syncStream publishes the tracker's title and turn into meta.json when either changed.
+func (s *acpDaemonState) syncStream() {
+	if s.meta == nil {
+		return
+	}
+	title, turn := s.tr.snapshot()
+	s.metaMu.Lock()
+	defer s.metaMu.Unlock()
+	if s.meta.State == "ended" {
+		return
+	}
+	if s.meta.Title == title && s.meta.Turn == turn {
+		return
+	}
+	s.meta.Title, s.meta.Turn = title, turn
+	_ = writeACPMeta(s.meta)
+}
+
 func acpDaemon(name string) error {
 	signal.Ignore(syscall.SIGHUP)
 	m, err := readACPMeta(name)
@@ -380,14 +417,7 @@ func acpDaemon(name string) error {
 		return err
 	}
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "sh"
-	}
-	if _, err := exec.LookPath(shell); err != nil {
-		shell = "sh"
-	}
-	cmd := exec.Command(shell, "-lc", m.Spawn)
+	cmd := exec.Command(acpShell(), "-lc", m.Spawn)
 	cmd.Dir = m.Cwd
 	cmd.Stderr = errf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -417,6 +447,7 @@ func acpDaemon(name string) error {
 		return err
 	}
 	_ = os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(m.Pid)), 0o600)
+	s.syncStream()
 
 	logMax := acpLogMax()
 	idleStop := make(chan struct{})
@@ -482,7 +513,7 @@ func acpDaemon(name string) error {
 		}
 	}
 	s.setMeta(func(m *acpMeta) {
-		m.State, m.ExitCode, m.Attached = "ended", &code, false
+		m.State, m.ExitCode, m.Attached, m.Turn = "ended", &code, false, "idle"
 		m.Ended, m.EndedReason = time.Now().Unix(), reason
 	})
 	s.mu.Lock()
@@ -572,6 +603,7 @@ func (s *acpDaemonState) serve(conn net.Conn) {
 					s.tr.clientLine(l)
 					_, _ = s.stdin.Write(l)
 					s.mu.Unlock()
+					s.syncStream()
 				}
 				if len(pend) > maxACPLine {
 					return

@@ -300,6 +300,20 @@ func (t *acpTracker) claimNotify(key string) bool {
 	return true
 }
 
+// snapshot is the chat title and the turn: waiting while a request is outstanding, else working
+// while a session/prompt is in flight, else idle.
+func (t *acpTracker) snapshot() (string, string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch {
+	case len(t.st.Requests) > 0:
+		return t.st.Title, "waiting"
+	case len(t.st.Prompts) > 0:
+		return t.st.Title, "working"
+	}
+	return t.st.Title, "idle"
+}
+
 func (t *acpTracker) chatName() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -390,6 +404,7 @@ func (s *acpDaemonState) scanAgent(chunk []byte) {
 	}
 	for _, l := range lines {
 		ev := s.tr.agentLine(l)
+		s.syncStream()
 		switch {
 		case ev.permission != nil:
 			s.whenDetached(func() bool { return s.tr.claimNotify(ev.key) }, func() {
@@ -552,6 +567,7 @@ func (s *acpDaemonState) control(conn net.Conn, rest string) {
 		return
 	}
 
+	defer s.syncStream()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	err := s.tr.answer(key.String(), func(req *acpRequest) (string, error) {
