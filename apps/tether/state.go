@@ -108,7 +108,7 @@ func runState(args []string, d stateDeps) error {
 		})
 	})
 	if err != nil {
-		fmt.Fprintf(d.stderr, "tether-notify: state for %s not saved: %v\n", *session, err)
+		fmt.Fprintf(d.stderr, "tether: state for %s not saved: %v\n", *session, err)
 	}
 
 	if preserved || !pushable || attached {
@@ -122,7 +122,7 @@ func runState(args []string, d stateDeps) error {
 		content.Version = stored.Version
 	}
 	if err := d.push(content, *collapse); err != nil {
-		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
+		fmt.Fprintf(d.stderr, "tether: push for %s failed: %v\n", *session, err)
 	}
 	return nil
 }
@@ -196,7 +196,7 @@ func runFlush(args []string, d stateDeps) error {
 		}
 	}
 	if err := d.push(content, agentCollapseID(*session)); err != nil {
-		fmt.Fprintf(d.stderr, "tether-notify: push for %s failed: %v\n", *session, err)
+		fmt.Fprintf(d.stderr, "tether: push for %s failed: %v\n", *session, err)
 		markSuppressed(*session, claimed.Version, claimed.Title)
 	}
 	return nil

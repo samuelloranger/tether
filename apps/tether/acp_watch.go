@@ -428,7 +428,7 @@ func (s *acpDaemonState) pushAsync(c PushContent, collapse string) {
 	go func() {
 		defer s.pushes.Done()
 		if err := s.push(c, collapse); err != nil && s.errf != nil {
-			fmt.Fprintf(s.errf, "tether-notify: acp push failed: %v\n", err)
+			fmt.Fprintf(s.errf, "tether: acp push failed: %v\n", err)
 		}
 	}()
 }

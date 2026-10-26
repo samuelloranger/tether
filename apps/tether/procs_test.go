@@ -52,7 +52,7 @@ func psRunner(table map[string]string) runner {
 func TestAgentPidSkipsShellsAndWrapper(t *testing.T) {
 	run := psRunner(map[string]string{
 		"300": "200 sh",
-		"200": "150 tether-notify-h", // Linux truncates comm to 15 chars
+		"200": "150 tether-hook", // Linux truncates comm to 15 chars
 		"150": "100 /bin/bash",
 		"100": "1 claude",
 	})

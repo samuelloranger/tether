@@ -1,14 +1,14 @@
-# tether-notify
+# tether
 
-Encrypted push for the v5 SSH host. Replaces the old server's `push/` path:
+The Tether host tool for the v5 SSH host (formerly `tether-notify`): encrypted push, agent state, and the ACP chat holder. Replaces the old server's `push/` path:
 a phone registers its APNs token + a per-device AES-256-GCM key (generated on
-the phone, sent over SSH), and `tether-notify` encrypts each notification to
+the phone, sent over SSH), and `tether` encrypts each notification to
 that key and posts the ciphertext to the shared relay. The relay and Apple
 never see the plaintext; the iOS Notification Service Extension decrypts it.
 
 ## Build
 
-    go build -o ~/.local/bin/tether-notify .
+    go build -o ~/.local/bin/tether .
     # or, from the repo root:  bash install.sh
 
 Wire it into agent hooks (Claude Code, Codex, Gemini CLI, Cursor Agent CLI) with
@@ -28,15 +28,15 @@ can see:
 ## Use
 
     # the app runs this over SSH on connect:
-    tether-notify register <apns-token> <secretKeyB64> [label]
+    tether register <apns-token> <secretKeyB64> [label]
 
     # agent hooks run this to raise a notification:
-    tether-notify notify --title "homelab · claude" --body "Waiting for input" \
+    tether notify --title "homelab · claude" --body "Waiting for input" \
       --link "tether://session/default?host=homelab" --collapse default
 
     # agent hooks run this on every state change; waiting/done also push,
     # unless `zmx ls` shows a client attached to the session:
-    tether-notify state --session work --agent claude --state waiting \
+    tether state --session work --agent claude --state waiting \
       --title "proj · needs you" --body "Allow Bash?" \
       --link "tether://session/work?host=devbox"
 
@@ -47,32 +47,33 @@ can see:
     # the app runs this over SSH to answer an action; it types the input with
     # `zmx send` only while the agent is still in that state (exit 3 otherwise,
     # exit 4 if it moved on between the text and Return):
-    tether-notify answer --session work --state waiting --version 3f9a… \
+    tether answer --session work --state waiting --version 3f9a… \
       --input DQ== [--submit]
 
     # the Claude Code mod runs these when a permission prompt would show and no
     # client is attached: hold records + pushes it (exit 3 when it won't hold),
     # wait blocks until the phone answers, someone attaches, or it goes stale.
     # `answer` then hands the decision to `wait` instead of typing keys.
-    tether-notify hold --session work --kind permission --tool Bash \
+    tether hold --session work --kind permission --tool Bash \
       --body "Allow Bash: npm test?"
-    tether-notify wait --session work --version 3f9a…
+    tether wait --session work --version 3f9a…
 
     # a question (AskUserQuestion) is held the same way, in any permission mode;
     # the questions go in as JSON on stdin. One single-choice question gets a
     # button per option on the phone; every question push offers Answer…:
-    tether-notify hold --session work --kind question --tool AskUserQuestion \
+    tether hold --session work --kind question --tool AskUserQuestion \
       --body "Which DB?" --questions-stdin < questions.json
-    tether-notify pending --session work      # the app's answer sheet reads this
-    tether-notify answer --session work --state waiting --version 3f9a… --option 2
-    tether-notify answer --session work --state waiting --version 3f9a… \
+    tether pending --session work      # the app's answer sheet reads this
+    tether answer --session work --state waiting --version 3f9a… --option 2
+    tether answer --session work --state waiting --version 3f9a… \
       --answers <base64 JSON {"question": "answer"}>
 
     # the app runs this to badge sessions; prunes dead agents and gone sessions:
-    tether-notify status
+    tether status
 
-    tether-notify list
-    tether-notify remove <apns-token>
+    tether version [--json]    # `tether <version>` then `protocol <N>`; the app checks both
+    tether list
+    tether remove <apns-token>
 
 ## ACP holder
 
@@ -81,12 +82,12 @@ alive on the host while the SSH connection comes and goes. The stream stays plai
 newline-delimited JSON-RPC; nothing is injected into it.
 
     # run as a non-PTY ssh exec; stdin/stdout are the agent's, byte for byte
-    tether-notify acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
-    tether-notify acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
-    tether-notify acp ls                         # name, running|ended, log bytes, cwd, created, command
-    tether-notify acp status [chat1 ...]         # one JSON object per session (see below)
-    tether-notify acp sessions ~/src/app --limit 20   # the agent's saved conversations for a folder
-    tether-notify acp kill chat1                 # stop the agent and remove the session
+    tether acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
+    tether acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
+    tether acp ls                         # name, running|ended, log bytes, cwd, created, command
+    tether acp status [chat1 ...]         # one JSON object per session (see below)
+    tether acp sessions ~/src/app --limit 20   # the agent's saved conversations for a folder
+    tether acp kill chat1                 # stop the agent and remove the session
 
 The first `attach --spawn` starts a detached daemon that owns the agent and appends
 everything it prints to `acp/<name>/out.log`; an `attach` replays that log from `--from`
@@ -161,9 +162,9 @@ each `session/prompt` turn. Outstanding requests live in `acp/<name>/pending.jso
   written to the agent's stdin, so a daemon-originated line never lands inside a client's
   half-written line (a partial line left by a dropped client is discarded).
 
-    tether-notify acp answer chat1 --request 7 --option allow   # or: --request 7 --cancel
-    tether-notify acp answer chat1 --request 0 --option green   # elicitation; also --cancel, --decline
-    tether-notify acp answers chat1                             # {"7":"allow"}
+    tether acp answer chat1 --request 7 --option allow   # or: --request 7 --cancel
+    tether acp answer chat1 --request 0 --option green   # elicitation; also --cancel, --decline
+    tether acp answers chat1                             # {"7":"allow"}
 
 `answer` goes through the daemon, which writes the JSON-RPC response (`outcome` `selected`
 with the `optionId`, or `cancelled`) to the agent and records it in `answers.json`.
@@ -200,3 +201,22 @@ Devices live in `~/.tether-notify/devices.json`, session state in
 zmx is found at `TETHER_ZMX`, else `~/.local/bin/zmx`, else on `PATH`. Relay URL defaults to the official one; override with
 `TETHER_PUSH_RELAY_URL`. `--dry-run` prints the relay requests instead of
 sending — used to prove wire-format parity with the server/NSE.
+
+## Version
+
+`tether version` prints `tether <version>` and `protocol <N>`; `tether version --json` prints
+`{"name":"tether","version":"<v>","protocol":<N>}`. The version is set by `install.sh`
+(`git describe --tags --always --dirty`) and is `dev` for a plain `go build`. `protocol` is a
+constant in `version.go`, bumped when a command or wire format the app depends on changes
+incompatibly; the app refuses a host whose protocol is lower than it requires.
+
+## Migration
+
+`tether-notify` is now `tether`, with no alias: the app and the host tool must be updated together.
+
+1. Re-run `bash install.sh` on every host. A `tether` binary that is not this tool (the retired v4
+   server) is moved to `tether.v4` (or `tether.v4.<unix time>`), never overwritten.
+2. Re-run `bash scripts/install-agent-hooks.sh` so agent hooks call `tether` / `tether-hook`; entries
+   that point at `tether-notify` / `tether-notify-hook` are replaced in place.
+3. `~/.local/bin/tether-notify` and `tether-notify-hook` are no longer used and can be deleted.
+4. State stays in `~/.tether-notify` (and `TETHER_NOTIFY_HOME`), so registered phones carry over.
