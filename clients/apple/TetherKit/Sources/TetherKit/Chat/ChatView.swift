@@ -22,6 +22,7 @@ struct ChatView: View {
   var sendDraft: String?
   var probeLastRow = false
   @State private var lastRowVisible = false
+  @State private var probeText = ""
   #endif
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
@@ -65,6 +66,7 @@ struct ChatView: View {
           .foregroundStyle(.white).padding(6)
           .background(lastRowVisible ? Color.green : Color.red)
           .padding(.top, 4)
+          .overlay(alignment: .bottom) { Text(probeText).font(.system(size: 8)).offset(y: 14) }
       }
     }
     #endif
@@ -167,11 +169,11 @@ struct ChatView: View {
       #if DEBUG
       if probeLastRow {
         Color.clear.frame(height: 1)
-          .onGeometryChange(for: Bool.self) { proxy in
-            guard let viewport = proxy.bounds(of: .named("probe-viewport")) else { return false }
+          .onGeometryChange(for: String.self) { proxy in
             let frame = proxy.frame(in: .named("probe-viewport"))
-            return frame.maxY > viewport.minY && frame.minY < viewport.maxY
-          } action: { lastRowVisible = $0 }
+            guard let viewport = proxy.bounds(of: .named("probe-viewport")) else { return "nil \(frame)" }
+            return "\(frame.maxY > viewport.minY && frame.minY < viewport.maxY) \(frame) \(viewport)"
+          } action: { probeText = $0; lastRowVisible = $0.hasPrefix("true") }
           .onDisappear { lastRowVisible = false }
       }
       #endif
