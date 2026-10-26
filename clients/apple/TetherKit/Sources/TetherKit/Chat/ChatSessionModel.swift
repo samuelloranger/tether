@@ -54,6 +54,8 @@ final class ChatSessionModel {
   private let outboxStore: (any ChatOutboxStore)?
   private let inspect: Inspect?
   private let listFiles: ListFiles?
+  /// The chat's picture files and how to show them; nil where nothing is kept.
+  let imageLibrary: ChatImageLibrary?
   private var client: ACPClient?
   private var forwardTask: Task<Void, Never>?
   private var settleTask: Task<Void, Never>?
@@ -71,8 +73,9 @@ final class ChatSessionModel {
     chatName: String, cwd: String, readOnly: Bool, store: any ChatJournalStore, titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
-    listFiles: ListFiles? = nil, dial: @escaping Dial
+    listFiles: ListFiles? = nil, images: ChatImageStore? = nil, dial: @escaping Dial
   ) {
+    self.imageLibrary = images.map(ChatImageLibrary.init)
     self.loadSessionId = loadSessionId
     self.listFiles = listFiles
     self.hostLabel = hostLabel
@@ -102,7 +105,8 @@ final class ChatSessionModel {
       listFiles: {
         await ACPHostExec.run(
           command: ChatFileList.command(cwd: route.cwd), config: config, store: hostKeyStore, deadline: 15)
-      }
+      },
+      images: files.images(route.name)
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -174,7 +178,8 @@ final class ChatSessionModel {
       await stream.close()
       return
     }
-    let fresh = ACPClient(stream: stream, store: store, resume: resume, snapshots: snapshots)
+    let fresh = ACPClient(
+      stream: stream, store: store, resume: resume, snapshots: snapshots, images: imageLibrary?.store)
     if resume == nil, snapshots != nil { learnIdentity(of: fresh, from: inspectRead, retry: spawn) }
     if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh

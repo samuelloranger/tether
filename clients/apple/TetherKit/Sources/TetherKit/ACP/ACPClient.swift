@@ -23,6 +23,7 @@ actor ACPClient {
   private var ended = false
   private var subscribers: [UUID: AsyncStream<ChatState>.Continuation] = [:]
   private let snapshotStore: (any ChatSnapshotStore)?
+  private let images: ChatImageStore?
   private var snapshotIdentity: Int?
   private let snapshotInterval: Duration
   private var lastSnapshot: ContinuousClock.Instant?
@@ -33,8 +34,10 @@ actor ACPClient {
   /// stream is then expected to start at its offset.
   init(
     stream: any TerminalByteStream, store: any ChatJournalStore = InMemoryChatJournalStore(),
-    resume: ChatSnapshot? = nil, snapshots: (any ChatSnapshotStore)? = nil, snapshotInterval: Duration = .seconds(3)
+    resume: ChatSnapshot? = nil, snapshots: (any ChatSnapshotStore)? = nil, snapshotInterval: Duration = .seconds(3),
+    images: ChatImageStore? = nil
   ) {
+    self.images = images
     self.stream = stream
     self.store = store
     self.snapshotStore = snapshots
@@ -43,9 +46,9 @@ actor ACPClient {
     let journal = store.load()
     self.journal = journal
     if let resume {
-      self.builder = ChatTranscriptBuilder(journal: journal, resuming: resume)
+      self.builder = ChatTranscriptBuilder(journal: journal, resuming: resume, images: images)
     } else {
-      self.builder = ChatTranscriptBuilder(journal: journal)
+      self.builder = ChatTranscriptBuilder(journal: journal, images: images)
     }
   }
 
@@ -129,9 +132,11 @@ actor ACPClient {
     guard !ended else { throw ACPClientError.connectionLost }
     let offset = builder.consumedOffset
     let count = images.count
+    let refs = images.compactMap { self.images?.put($0) }
     let requestId = allocateId()
-    journal.entries.append(.init(kind: .prompt, offset: offset, text: text, requestId: requestId, imageCount: count))
-    builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset, requestId: requestId))
+    journal.entries.append(
+      .init(kind: .prompt, offset: offset, text: text, requestId: requestId, imageCount: count, images: refs))
+    builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))
     publish()
     store.save(journal)
     var blocks: [[String: Any]] = images.map { ["type": "image", "mimeType": $0.mimeType, "data": $0.data] }
@@ -145,7 +150,7 @@ actor ACPClient {
         journal.entries.remove(at: index)
       }
       store.save(journal)
-      builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset, requestId: requestId))
+      builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))
       publish()
       throw error
     }

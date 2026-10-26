@@ -338,10 +338,11 @@ extension ChatState {
       switch last.kind {
       case let .assistant(text, _), let .thought(text), let .notice(text), let .error(text):
         hasher.combine(text.utf8.count)
-      case let .user(text, images, _):
+      case let .user(text, images, _, _):
         hasher.combine(images)
         hasher.combine(text.utf8.count)
       case let .tool(call): hasher.combine(call.status.rawValue)
+      case let .images(refs, _): hasher.combine(refs.count)
       default: break
       }
     }

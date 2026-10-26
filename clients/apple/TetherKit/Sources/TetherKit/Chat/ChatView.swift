@@ -49,6 +49,7 @@ struct ChatView: View {
 
   var body: some View {
     scroller
+    .environment(\.chatImages, model.imageLibrary)
     .onChange(of: atBottom) { _, near in windowFollowing(near) }
     #if DEBUG
     .coordinateSpace(name: "probe-viewport")

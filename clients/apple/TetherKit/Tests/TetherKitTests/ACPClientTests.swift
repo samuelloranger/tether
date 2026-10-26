@@ -246,7 +246,7 @@ final class ACPClientTests: XCTestCase {
     XCTAssertEqual(store.load().entries.map(\.imageCount), [2])
     let state = await client.state
     XCTAssertEqual(state.items.map(\.kind).count, 1)
-    guard case let .user(_, count, _)? = state.items.first?.kind else { return XCTFail() }
+    guard case let .user(_, count, _, _)? = state.items.first?.kind else { return XCTFail() }
     XCTAssertEqual(count, 2)
 
     try await client.prompt(text: "", images: [images[0]])

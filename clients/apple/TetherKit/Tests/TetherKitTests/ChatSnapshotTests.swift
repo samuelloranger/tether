@@ -139,7 +139,7 @@ final class ChatSnapshotTests: XCTestCase {
     let builder = ChatTranscriptBuilder(journal: test.journal, resuming: taken)
     XCTAssertTrue(taken.isConsistent(with: test.journal))
     XCTAssertTrue(
-      builder.state.items.contains { if case .user("later", _, _) = $0.kind { true } else { false } })
+      builder.state.items.contains { if case .user("later", _, _, _) = $0.kind { true } else { false } })
     XCTAssertEqual(builder.state.turn, .working)
     var resumed = builder
     try resumed.feed(full.subdata(in: taken.offset..<full.count))

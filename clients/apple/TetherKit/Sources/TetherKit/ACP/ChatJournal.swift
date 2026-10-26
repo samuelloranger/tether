@@ -19,12 +19,14 @@ struct ChatJournal: Codable, Equatable, Sendable {
     var requestId: ACPID?
     var optionId: String?
     var content: [String: ChatQuestionValue]?
-    /// Image bytes are never stored; only how many went with the prompt.
+    /// How many images went with the prompt.
     var imageCount = 0
+    /// Their references, for showing them again here: the bytes live in the chat's image store, never here.
+    var images: [ChatImageRef] = []
 
     init(
       kind: Kind, offset: Int, text: String? = nil, requestId: ACPID? = nil, optionId: String? = nil,
-      content: [String: ChatQuestionValue]? = nil, imageCount: Int = 0
+      content: [String: ChatQuestionValue]? = nil, imageCount: Int = 0, images: [ChatImageRef] = []
     ) {
       self.kind = kind
       self.offset = offset
@@ -33,6 +35,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
       self.optionId = optionId
       self.content = content
       self.imageCount = imageCount
+      self.images = images
     }
 
     init(from decoder: Decoder) throws {
@@ -44,12 +47,13 @@ struct ChatJournal: Codable, Equatable, Sendable {
       optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
       content = try container.decodeIfPresent([String: ChatQuestionValue].self, forKey: .content)
       imageCount = try container.decodeIfPresent(Int.self, forKey: .imageCount) ?? 0
+      images = try container.decodeIfPresent([ChatImageRef].self, forKey: .images) ?? []
     }
 
     var event: ChatEvent? {
       switch kind {
       case .prompt:
-        return text.map { .userPrompt(text: $0, imageCount: imageCount, atOffset: offset, requestId: requestId) }
+        return text.map { .userPrompt(text: $0, imageCount: imageCount, atOffset: offset, requestId: requestId, images: images) }
       case .cancel:
         return .cancelRequested
       case .silentRequest:
@@ -87,7 +91,7 @@ struct ChatJournal: Codable, Equatable, Sendable {
 /// `offset` instead of replaying everything. The journal stays authoritative: the snapshot only
 /// counts which of its entries it already reflects.
 struct ChatSnapshot: Codable, Equatable, Sendable {
-  static let currentVersion = 3
+  static let currentVersion = 4
 
   var version = ChatSnapshot.currentVersion
   /// The host session's created time (unix seconds): a session recreated under the same name has another.
@@ -129,6 +133,7 @@ struct ChatSnapshot: Codable, Equatable, Sendable {
         entry.kind.rawValue, "\(entry.offset)", entry.text ?? "", entry.requestId.map { "\($0)" } ?? "",
         entry.optionId ?? "", "\(entry.imageCount)",
       ]
+      if !entry.images.isEmpty { fields.append(entry.images.map(\.id).joined(separator: ",")) }
       if let content = entry.content { fields.append(canonical(content)) }
       let line = fields.joined(separator: "\u{1F}") + "\n"
       for byte in line.utf8 {
@@ -202,8 +207,10 @@ struct ChatTranscriptBuilder {
   private(set) var receivedBytes = 0
   private var splitter = ACPLineSplitter()
   private var pending: [ChatJournal.Entry]
+  private let images: (any ChatImageSink)?
 
-  init(journal: ChatJournal = ChatJournal()) {
+  init(journal: ChatJournal = ChatJournal(), images: (any ChatImageSink)? = nil) {
+    self.images = images
     pending = journal.entries.enumerated()
       .sorted { ($0.element.offset, $0.offset) < ($1.element.offset, $1.offset) }
       .map(\.element)
@@ -212,7 +219,8 @@ struct ChatTranscriptBuilder {
 
   /// Continues from a snapshot the caller has checked with `isConsistent`. Journal entries
   /// added since it was taken are applied now; the rest wait for the log to reach their offset.
-  init(journal: ChatJournal, resuming snapshot: ChatSnapshot) {
+  init(journal: ChatJournal, resuming snapshot: ChatSnapshot, images: (any ChatImageSink)? = nil) {
+    self.images = images
     state = snapshot.state
     state.connection = .live
     consumedOffset = snapshot.offset
@@ -234,7 +242,7 @@ struct ChatTranscriptBuilder {
     var messages: [ACPInbound] = []
     for line in try splitter.feed(data) {
       drain(upTo: line.start)
-      let message = ACPDecoder.decode(line.bytes)
+      let message = ACPDecoder.decode(line.bytes, images: images)
       messages.append(message)
       state = ChatReducer.reduce(state, .message(message))
       consumedOffset = line.end
@@ -259,8 +267,8 @@ struct ChatTranscriptBuilder {
     }
   }
 
-  static func replay(log: Data, journal: ChatJournal) throws -> ChatState {
-    var builder = ChatTranscriptBuilder(journal: journal)
+  static func replay(log: Data, journal: ChatJournal, images: (any ChatImageSink)? = nil) throws -> ChatState {
+    var builder = ChatTranscriptBuilder(journal: journal, images: images)
     try builder.feed(log)
     builder.finish()
     return builder.state

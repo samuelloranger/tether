@@ -77,10 +77,12 @@ struct ChatItemRow: View, Equatable {
 
   var body: some View {
     switch item.kind {
-    case let .user(text, images, _):
-      UserMessageRow(text: text, imageCount: images, queued: queued)
+    case let .user(text, count, _, images):
+      UserMessageRow(text: text, imageCount: count, images: images, queued: queued)
     case let .assistant(text, _):
       AssistantTextView(text: text)
+    case let .images(refs, _):
+      ChatImagesRow(refs: refs)
     case let .thought(text):
       ThoughtRow(text: text, expanded: expanded, toggle: toggle)
     case .tool, .permission:
@@ -165,7 +167,10 @@ struct SignedOutRow: View {
 struct UserMessageRow: View {
   let text: String
   var imageCount = 0
+  var images: [ChatImageRef] = []
   var queued = false
+
+  @Environment(\.chatImages) private var library
 
   var body: some View {
     VStack(alignment: .trailing, spacing: 3) {
@@ -181,7 +186,9 @@ struct UserMessageRow: View {
 
   private var bubble: some View {
     VStack(alignment: .leading, spacing: 4) {
-      if imageCount > 0 {
+      if ChatImageChips.canShow(images, in: library) {
+        ChatImageChips(refs: images)
+      } else if imageCount > 0 {
         Label(ChatComposerRule.imageLabel(imageCount), systemImage: "photo")
           .font(.caption).foregroundStyle(TetherColors.textSecondary)
       }
@@ -333,7 +340,9 @@ struct ToolCallRow: View {
   let expanded: Bool
   let toggle: () -> Void
 
-  private var expandable: Bool { call.diff != nil || ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput) }
+  private var expandable: Bool {
+    call.diff != nil || !call.images.isEmpty || ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput)
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -348,7 +357,7 @@ struct ToolCallRow: View {
 
   private var header: some View {
     ToolRowLayout(
-      symbol: call.kind.symbolName,
+      symbol: call.images.isEmpty ? call.kind.symbolName : "photo",
       tint: call.status == .failed ? TetherColors.danger : TetherColors.textFaint,
       title: call.title,
       titleTint: call.status == .failed ? TetherColors.danger : TetherColors.textSecondary
@@ -392,10 +401,15 @@ struct ToolCallRow: View {
       if let diff = call.diff {
         DiffReviewView(files: [ACPDiffAdapter.file(for: diff, relativeTo: cwd)])
       } else {
-        MarkdownBodyView(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput))
-          .textSelection(.enabled)
-          .padding(10)
-          .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(Array(call.images.enumerated()), id: \.offset) { _, ref in ChatImageView(ref: ref) }
+          if ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput) {
+            MarkdownBodyView(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput))
+              .textSelection(.enabled)
+          }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .background(TetherColors.background.opacity(0.5))
