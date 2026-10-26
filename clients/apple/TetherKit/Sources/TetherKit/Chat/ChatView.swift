@@ -20,6 +20,8 @@ struct ChatView: View {
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
+  var probeLastRow = false
+  @State private var lastRowVisible = false
   #endif
   @FocusState private var composerFocused: Bool
   @State private var draft = ""
@@ -52,6 +54,17 @@ struct ChatView: View {
     .toolbarBackground(.visible, for: .navigationBar)
     .navigationBarBackButtonHidden(true)
     .overlay(alignment: .top) { headerRule }
+    #if DEBUG
+    .overlay(alignment: .topTrailing) {
+      if probeLastRow {
+        Text("LAST ROW VISIBLE: \(lastRowVisible ? "yes" : "no")")
+          .font(.system(size: 13, weight: .bold, design: .monospaced))
+          .foregroundStyle(.white).padding(6)
+          .background(lastRowVisible ? Color.green : Color.red)
+          .padding(.top, 4)
+      }
+    }
+    #endif
     .toolbar {
       ToolbarItem(placement: .topBarLeading) { backButton }.withoutGlass()
       ToolbarItem(placement: .principal) { titleBlock }.withoutGlass()
@@ -148,6 +161,17 @@ struct ChatView: View {
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
       if model.state.turn == .working && !answerPending { WorkingIndicator(activity: model.state.subagentActivity) }
+      #if DEBUG
+      if probeLastRow {
+        Color.clear.frame(height: 1)
+          .onGeometryChange(for: Bool.self) { proxy in
+            guard let viewport = proxy.bounds(of: .scrollView) else { return false }
+            let frame = proxy.frame(in: .scrollView)
+            return frame.maxY > viewport.minY && frame.minY < viewport.maxY
+          } action: { lastRowVisible = $0 }
+          .onDisappear { lastRowVisible = false }
+      }
+      #endif
     }
     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
   }
