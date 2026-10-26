@@ -810,7 +810,7 @@ impl Session {
             return;
         };
         // Stop drops what was waiting; as in Claude Code, it goes out next instead.
-        let resend = client.state().queued_texts().join("\n\n");
+        let (resend, images) = client.state().queued_resend();
         let answers = client.cancelled();
         self.persist_journal(ctx);
         for out in answers {
@@ -818,6 +818,12 @@ impl Session {
         }
         if !resend.is_empty() {
             self.deliver(resend, Vec::new(), 0, ctx);
+        }
+        if images > 0 {
+            self.notice = Some(format!(
+                "The waiting messages went out again without their {}.",
+                format::image_label(images)
+            ));
         }
         self.touched();
     }

@@ -18,8 +18,8 @@ struct ChatView: View {
   /// Another session or chat is waiting on an answer; the drawer button carries a dot.
   var sessionsNeedYou = false
   /// Set when the chat sits inside the terminal screen: ends the chat and resumes its conversation
-  /// (session id, folder) with Claude Code in a new terminal session.
-  var onContinueInTerminal: ((String, String) -> Void)?
+  /// (session id, folder) with Claude Code in a new terminal session; returns why it could not.
+  var onContinueInTerminal: ((String, String) async -> String?)?
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
@@ -476,7 +476,8 @@ struct ChatView: View {
     .accessibilityLabel("More")
     .alert("Continue in a terminal?", isPresented: $confirmingTerminal) {
       Button("Continue") {
-        if let id = model.state.sessionId { onContinueInTerminal?(id, model.cwd) }
+        guard let id = model.state.sessionId, let onContinueInTerminal else { return }
+        Task { if let reason = await onContinueInTerminal(id, model.cwd) { model.notice = reason } }
       }
       Button("Cancel", role: .cancel) {}
     } message: {

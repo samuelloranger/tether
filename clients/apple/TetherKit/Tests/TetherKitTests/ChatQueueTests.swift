@@ -97,6 +97,16 @@ final class ChatQueueTests: XCTestCase {
     XCTAssertEqual(state.items[state.items.count - 2].kind, .assistant(text: "on two", messageId: "m2"))
   }
 
+  func test_a_stop_sends_the_waiting_text_again_and_counts_the_pictures_it_cannot() {
+    var state = prompt("one", id: 1, ChatState())
+    state = prompt("two", id: 2, state)
+    state = ChatReducer.reduce(state, .userPrompt(text: "", imageCount: 2, atOffset: 0, requestId: .int(3)))
+    state = ChatReducer.reduce(state, .userPrompt(text: "three", imageCount: 1, atOffset: 0, requestId: .int(4)))
+    let waiting = state.queuedResend
+    XCTAssertEqual(waiting.text, "two\n\nthree")
+    XCTAssertEqual(waiting.images, 3)
+  }
+
   func test_stop_withdraws_the_queued_prompts_and_notes_it_once() {
     var state = prompt("one", id: 1, ChatState())
     state = prompt("two", id: 2, state)

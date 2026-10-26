@@ -303,6 +303,21 @@ impl ChatState {
         self.queued_item_ids.contains(&item_id)
     }
 
+    /// What a Stop sends again: the waiting messages' text as one prompt. Their pictures are not
+    /// kept for it, so they are only counted, for the notice that says so.
+    pub fn queued_resend(&self) -> (String, usize) {
+        let images = self
+            .queued_item_ids
+            .iter()
+            .filter_map(|id| self.items.iter().find(|i| i.id == *id))
+            .map(|i| match &i.kind {
+                ItemKind::User { image_count, .. } => *image_count,
+                _ => 0,
+            })
+            .sum();
+        (self.queued_texts().join("\n\n"), images)
+    }
+
     /// The text of each message waiting for the running turn, oldest first.
     pub fn queued_texts(&self) -> Vec<String> {
         self.queued_item_ids

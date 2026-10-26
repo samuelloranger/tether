@@ -371,14 +371,17 @@ final class ChatSessionModel {
   func cancel() {
     guard canInteract, let client else { return }
     Task {
-      let resend = await client.state.queuedTexts.joined(separator: "\n\n")
+      let waiting: (text: String, images: Int)
       do {
-        try await client.cancel()
+        waiting = try await client.cancel()
       } catch {
         notice = "Stop didn't reach the agent. Try again."
         return
       }
-      if !resend.isEmpty { _ = send(resend) }
+      if !waiting.text.isEmpty { _ = send(waiting.text) }
+      if waiting.images > 0 {
+        notice = "The waiting messages went out again without their \(ChatComposerRule.imageLabel(waiting.images))."
+      }
     }
   }
 

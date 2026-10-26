@@ -156,6 +156,16 @@ struct ChatState: Codable, Equatable, Sendable {
 
   func isQueued(_ itemId: Int) -> Bool { queuedItemIds.contains(itemId) }
 
+  /// What a Stop sends again: the waiting messages' text as one prompt. Their pictures are not
+  /// kept for it, so they are only counted, for the notice that says so.
+  var queuedResend: (text: String, images: Int) {
+    let images = queuedItemIds.reduce(0) { total, id in
+      guard case let .user(_, count, _, _)? = items.first(where: { $0.id == id })?.kind else { return total }
+      return total + count
+    }
+    return (queuedTexts.joined(separator: "\n\n"), images)
+  }
+
   /// The text of each message waiting for the running turn, oldest first.
   var queuedTexts: [String] {
     queuedItemIds.compactMap { id in

@@ -4,12 +4,12 @@ import SwiftUI
 struct EmbeddedChat: View {
   let onSessions: () -> Void
   let needsYou: Bool
-  let onContinueInTerminal: (String, String) -> Void
+  let onContinueInTerminal: (String, String) async -> String?
   @State private var model: ChatSessionModel
 
   init(
     route: ChatRoute, controller: SSHTerminalController, needsYou: Bool = false, onSessions: @escaping () -> Void,
-    onContinueInTerminal: @escaping (String, String) -> Void
+    onContinueInTerminal: @escaping (String, String) async -> String?
   ) {
     self.onSessions = onSessions
     self.needsYou = needsYou

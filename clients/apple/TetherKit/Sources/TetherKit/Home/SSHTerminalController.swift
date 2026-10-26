@@ -483,6 +483,8 @@ public final class SSHTerminalController {
   public func openSession(_ name: String, running command: String) async {
     launchCommands[name] = command
     await switchSession(to: name)
+    // A switch that was skipped or replaced never typed it; a later plain attach must not.
+    launchCommands[name] = nil
   }
 
   /// Switch away first when killing the current session — killing the one we're
