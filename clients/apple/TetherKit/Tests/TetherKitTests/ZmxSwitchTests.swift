@@ -39,6 +39,15 @@ final class ZmxSwitchTests: XCTestCase {
     XCTAssertEqual(writes, ["\(zmx) attach 'work'\n"])
   }
 
+  func test_a_session_opened_for_a_command_attaches_with_it() {
+    let command = ZmxSwitch.resumeCommand(sessionId: "e89c02fe", cwd: "/home/sam/my app")
+    XCTAssertEqual(
+      command,
+      #"sh -c 'cd "${1:-$HOME}" && claude --resume "$2"; exec "${SHELL:-/bin/sh}" -l' sh '/home/sam/my app' 'e89c02fe'"#)
+    let writes = ZmxSwitch.writes(typing: .detachThenAttach, zmx: zmx, name: "claude-e89c02fe", command: command)
+    XCTAssertEqual(writes.last, "\u{15}\(zmx) attach 'claude-e89c02fe' \(command)\n")
+  }
+
   func test_the_session_name_is_quoted() {
     let writes = ZmxSwitch.writes(typing: .attachInPlace, zmx: zmx, name: "my project'; rm -rf /")
     XCTAssertEqual(writes, ["\(zmx) attach 'my project'\"'\"'; rm -rf /'\n"])

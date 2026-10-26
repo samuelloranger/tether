@@ -4,17 +4,23 @@ import SwiftUI
 struct EmbeddedChat: View {
   let onSessions: () -> Void
   let needsYou: Bool
+  let onContinueInTerminal: (String, String) -> Void
   @State private var model: ChatSessionModel
 
-  init(route: ChatRoute, controller: SSHTerminalController, needsYou: Bool = false, onSessions: @escaping () -> Void) {
+  init(
+    route: ChatRoute, controller: SSHTerminalController, needsYou: Bool = false, onSessions: @escaping () -> Void,
+    onContinueInTerminal: @escaping (String, String) -> Void
+  ) {
     self.onSessions = onSessions
     self.needsYou = needsYou
+    self.onContinueInTerminal = onContinueInTerminal
     _model = State(initialValue: controller.makeChatModel(route: route))
   }
 
   var body: some View {
     NavigationStack {
-      ChatView(model: model, onSessions: onSessions, sessionsNeedYou: needsYou)
+      ChatView(
+        model: model, onSessions: onSessions, sessionsNeedYou: needsYou, onContinueInTerminal: onContinueInTerminal)
     }
     .tint(TetherColors.accent)
   }

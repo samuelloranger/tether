@@ -127,6 +127,11 @@ public final class SSHTerminalController {
   @ObservationIgnored var debugChatModel: ((ChatRoute) -> ChatSessionModel)?
   #endif
   public private(set) var attach: String
+  /// Counts switches to another session (a drawer tap, a session link). The first connect's
+  /// pick of the newest session changes `attach` too, but is not one: an open chat stays open.
+  public private(set) var sessionSwitches = 0
+  /// What a session opened for it runs instead of a login shell, until it is attached once.
+  var launchCommands: [String: String] = [:]
   /// False on a host with no zmx sessions: the PTY is a bare login shell until one is created.
   public private(set) var hasSession = true
   public private(set) var gitFiles: [DiffFile] = []
@@ -296,7 +301,9 @@ public final class SSHTerminalController {
           hasSession = false
         } else {
           hasSession = true
-          pipeline.outbound.yield(.input(ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach), key: sessionKey))
+          let command = launchCommands.removeValue(forKey: attach)
+          pipeline.outbound.yield(
+            .input(ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach, command: command), key: sessionKey))
           lastAttachWrite = .now
         }
         schedulePushRegister()
@@ -451,6 +458,7 @@ public final class SSHTerminalController {
     let wasAttached = hasSession
     let departing = attach
     attach = name
+    sessionSwitches += 1
     if agentAlert?.session == name { agentAlert = nil }
     pendingNoSession = false
     hasSession = true
@@ -461,13 +469,20 @@ public final class SSHTerminalController {
       return
     }
     await pipeline.holdFramesForSwitch()
-    for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name).enumerated() {
+    let command = launchCommands.removeValue(forKey: name)
+    for (index, write) in ZmxSwitch.writes(typing: typing, zmx: Self.zmx, name: name, command: command).enumerated() {
       // Separate writes: the detach key's own read must not carry the command.
       if index > 0 { try? await Task.sleep(nanoseconds: ZmxSwitch.settleNanoseconds) }
       pipeline.outbound.yield(.input(write, key: sessionKey))
     }
     lastAttachWrite = .now
     if wasAttached { flushPushInBackground(session: departing) }
+  }
+
+  /// Opens a new session that runs `command` (already shell-quoted) in place of a login shell.
+  public func openSession(_ name: String, running command: String) async {
+    launchCommands[name] = command
+    await switchSession(to: name)
   }
 
   /// Switch away first when killing the current session — killing the one we're

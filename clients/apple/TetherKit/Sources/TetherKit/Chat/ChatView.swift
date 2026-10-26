@@ -17,6 +17,9 @@ struct ChatView: View {
   var onSessions: (() -> Void)?
   /// Another session or chat is waiting on an answer; the drawer button carries a dot.
   var sessionsNeedYou = false
+  /// Set when the chat sits inside the terminal screen: ends the chat and resumes its conversation
+  /// (session id, folder) with Claude Code in a new terminal session.
+  var onContinueInTerminal: ((String, String) -> Void)?
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
@@ -42,6 +45,7 @@ struct ChatView: View {
   @State private var pickingPhotos = false
   @State private var pickedPhotos: [PhotosPickerItem] = []
   @State private var copiedFolder = false
+  @State private var confirmingTerminal = false
   @State private var cursor: Int?
   @State private var caretRequest: Int?
 
@@ -76,7 +80,12 @@ struct ChatView: View {
     .toolbar {
       ToolbarItem(placement: .topBarLeading) { backButton }.withoutGlass()
       ToolbarItem(placement: .principal) { titleBlock }.withoutGlass()
-      ToolbarItem(placement: .topBarTrailing) { connectionBadge }.withoutGlass()
+      ToolbarItem(placement: .topBarTrailing) {
+        HStack(spacing: 12) {
+          connectionBadge
+          moreMenu
+        }
+      }.withoutGlass()
     }
     .task { await model.connect() }
     .task {
@@ -396,6 +405,35 @@ struct ChatView: View {
         .accessibilityLabel("Context used")
         .accessibilityValue(
           ChatFormat.contextSummary(used: model.state.contextUsed, size: model.state.contextSize) ?? "")
+    }
+  }
+
+  private var moreMenu: some View {
+    Menu {
+      if onContinueInTerminal != nil, model.state.sessionId != nil, !model.readOnly {
+        Button { confirmingTerminal = true } label: { MenuLabel("Continue in terminal", systemImage: "terminal") }
+      }
+      if let id = model.state.sessionId {
+        Button { UIPasteboard.general.string = "claude --resume \(id)" } label: {
+          MenuLabel("Copy resume command", systemImage: "doc.on.doc")
+        }
+      }
+      Button { copyFolder() } label: { MenuLabel("Copy folder path", systemImage: "folder") }
+    } label: {
+      Image(systemName: "ellipsis")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(TetherColors.textSecondary)
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle())
+    }
+    .accessibilityLabel("More")
+    .alert("Continue in a terminal?", isPresented: $confirmingTerminal) {
+      Button("Continue") {
+        if let id = model.state.sessionId { onContinueInTerminal?(id, model.cwd) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The chat ends here and Claude Code picks the conversation up in a new terminal session.")
     }
   }
 
