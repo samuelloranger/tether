@@ -468,7 +468,8 @@ component PaneHeader inherits Rectangle {
 
 export component TerminalPage inherits Rectangle {
     property <bool> docked: TerminalVm.sidebar == 0;
-    property <length> side-w: root.docked ? 248px : 0px;
+    // Follows the slide, so the git panel's cap and the chat overlays move with the sidebar.
+    property <length> side-w: 248px * root.side-t;
     background: Tokens.background;
     // The docked sidebar and the git panel grow and shrink with the terminal beside them. The grid
     // redraws each frame, but the PTY only hears the settled size (see `relayout`), so a slide is one
