@@ -29,6 +29,7 @@ final class ChatSessionModel {
   let agent: ChatAgentProfile?
   /// The New chat sheet's option picks for this chat: nil applies the stored defaults, `[:]` nothing.
   private let optionPicks: [String: String]?
+  private let changedPicks: Set<String>
 
   private(set) var state = ChatState()
   private(set) var link = ChatLinkTracker()
@@ -92,10 +93,11 @@ final class ChatSessionModel {
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
     listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, images: ChatImageStore? = nil,
     optionDefaults: ChatOptionDefaultsStore? = nil, agent: ChatAgentProfile? = ChatAgents.claude,
-    optionPicks: [String: String]? = nil, optionsCache: ChatOptionsCache? = nil, dial: @escaping Dial
+    optionPicks: [String: String]? = nil, changedPicks: Set<String> = [], optionsCache: ChatOptionsCache? = nil, dial: @escaping Dial
   ) {
     self.agent = agent
     self.optionPicks = optionPicks
+    self.changedPicks = changedPicks
     self.optionsCache = optionsCache
     self.optionDefaults = optionDefaults
     self.imageLibrary = images.map(ChatImageLibrary.init)
@@ -123,7 +125,7 @@ final class ChatSessionModel {
     let files = ChatLocalFiles(scope: ChatTitleStore.scope(for: config))
     let titleStore = ChatTitleStore(config: config)
     let agent = ChatAgents.profile(forKey: route.agentKey)
-    if let agent { titleStore.setAgent(agent.key, for: route.name) }
+    if let recorded = route.agentToRecord { titleStore.setAgent(recorded.key, for: route.name) }
     var clientId: String?
     if route.multiClient, !route.readOnly {
       var journal = store.load()
@@ -146,7 +148,7 @@ final class ChatSessionModel {
       },
       spinnerVerbs: { await ChatVerbCache.shared.verbs(config: config, store: hostKeyStore) },
       images: files.images(route.name), optionDefaults: ChatOptionDefaultsStore(), agent: agent,
-      optionPicks: route.optionPicks, optionsCache: ChatOptionsCache(config: config)
+      optionPicks: route.optionPicks, changedPicks: route.changedPicks, optionsCache: ChatOptionsCache(config: config)
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -352,8 +354,14 @@ final class ChatSessionModel {
       tried.insert(call.id)
       do {
         try await client.setConfigOption(id: call.id, value: call.value)
-        if optionPicks != nil { optionDefaults.remember(agent: agent.key, id: call.id, value: call.value) }
+        if changedPicks.contains(call.id) {
+          optionDefaults.remember(agent: agent.key, id: call.id, value: call.value)
+        }
       } catch {}
+    }
+    for id in ChatOptionDefaults.alreadySet(picks: stored, changed: changedPicks, offered: await client.state.configOptions)
+    where !userTouchedOptions.contains(id) {
+      if let value = stored[id] { optionDefaults.remember(agent: agent.key, id: id, value: value) }
     }
     if !tried.isEmpty, mine == generation { receive(await client.state, generation: mine) }
   }

@@ -46,7 +46,8 @@ extension SSHTerminalController {
   }
 
   func newChat(cwdText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)) async -> ChatStart {
-    await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks) {
+    await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed
+    ) {
       try await self.control.exec($0)
     }
   }
@@ -60,7 +61,8 @@ extension SSHTerminalController {
     session: ACPSavedSession, folderText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)
   ) async -> ChatStart {
     await ChatRoute.startContinuing(
-      session: session, cwdText: folderText, host: config.host, agent: request.agent, picks: request.picks
+      session: session, cwdText: folderText, host: config.host, agent: request.agent, picks: request.picks,
+      changed: request.changed
     ) { try await self.control.exec($0) }
   }
 

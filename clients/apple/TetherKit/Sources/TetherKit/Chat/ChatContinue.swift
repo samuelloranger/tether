@@ -153,9 +153,9 @@ extension ChatRoute {
   /// A chat that continues `session`: the same host checks as a fresh chat, then the folder it was listed under.
   static func startContinuing(
     session: ACPSavedSession, cwdText: String, host: String, agent: ChatAgentProfile = ChatAgents.claude,
-    picks: [String: String]? = nil, exec: (String) async throws -> String
+    picks: [String: String]? = nil, changed: Set<String> = [], exec: (String) async throws -> String
   ) async -> ChatStart {
-    switch await start(cwdText: cwdText, host: host, agent: agent, picks: picks, exec: exec) {
+    switch await start(cwdText: cwdText, host: host, agent: agent, picks: picks, changed: changed, exec: exec) {
     case var .ready(route):
       route.loadSessionId = session.sessionId
       return .ready(route)

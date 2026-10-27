@@ -23,6 +23,11 @@ enum ChatOptionDefaults {
     }
     return nil
   }
+
+  /// The sheet's changed picks the agent already has set: no request is sent, but they are still the user's choice.
+  static func alreadySet(picks: [String: String], changed: Set<String>, offered: [ACPConfigOption]) -> [String] {
+    offered.filter { changed.contains($0.id) && picks[$0.id] == $0.currentValue }.map(\.id)
+  }
 }
 
 /// `{agentKey: {optionId: value}}`, per device.

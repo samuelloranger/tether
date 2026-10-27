@@ -188,4 +188,23 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertEqual(ready.agentKey, "opencode")
     XCTAssertEqual(ready.optionPicks, ["mode": "plan"])
   }
+
+  func test_only_a_chat_this_device_starts_records_its_agent() async {
+    let joined = ChatRoute(name: "chat-a", cwd: "/x", readOnly: false, join: true)
+    XCTAssertNil(joined.agentToRecord, "an existing or joined chat leaves the agent to the host")
+    XCTAssertEqual(ChatAgents.resolve(localKey: nil, statusSpawn: ChatAgents.codex.spawn)?.key, "codex")
+    let started = await ChatRoute.start(cwdText: "/srv/x", host: "h", agent: ChatAgents.codex) { command in
+      command.contains("command -v tether") ? "tether=found\nversion={\"name\":\"tether\",\"protocol\":2}\nnode=found" : ""
+    }
+    guard case let .ready(ready) = started else { return XCTFail("\(started)") }
+    XCTAssertEqual(ready.agentToRecord?.key, "codex")
+  }
+
+  func test_a_changed_pick_the_agent_already_has_is_still_the_users_choice() {
+    let offered = [option("effort", "Effort", current: "medium", [("medium", "Medium"), ("high", "High")])]
+    let picks = ["effort": "medium"]
+    XCTAssertEqual(ChatOptionDefaults.alreadySet(picks: picks, changed: ["effort"], offered: offered), ["effort"])
+    XCTAssertTrue(ChatOptionDefaults.alreadySet(picks: picks, changed: [], offered: offered).isEmpty)
+    XCTAssertTrue(ChatOptionDefaults.alreadySet(picks: ["effort": "high"], changed: ["effort"], offered: offered).isEmpty)
+  }
 }

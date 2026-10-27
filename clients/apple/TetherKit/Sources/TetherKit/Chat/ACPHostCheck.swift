@@ -105,7 +105,7 @@ extension ChatRoute {
   /// A fresh chat, after the host checks. The failure text is for the new-chat UI as it stands.
   static func start(
     cwdText: String, host: String, agent: ChatAgentProfile = ChatAgents.claude, picks: [String: String]? = nil,
-    exec: (String) async throws -> String
+    changed: Set<String> = [], exec: (String) async throws -> String
   ) async -> ChatStart {
     let check = await ACPHostCheck.verify(host: host, needsNode: agent.key != ChatAgents.opencode.key, exec: exec)
     if let message = check.problem { return .failed(message) }
@@ -115,6 +115,8 @@ extension ChatRoute {
     route.multiClient = check.multiClient
     route.agentKey = agent.key
     route.optionPicks = picks
+    route.changedPicks = changed
+    route.startedHere = true
     return .ready(route)
   }
 }

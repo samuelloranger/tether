@@ -137,6 +137,11 @@ struct ChatRoute: Hashable, Identifiable {
   var agentKey: String? = ChatAgents.claude.key
   /// The New chat sheet's option choices for a fresh chat: nil applies the stored defaults, `[:]` applies nothing.
   var optionPicks: [String: String]?
+  /// The picks the sheet changed; only these become the stored defaults.
+  var changedPicks: Set<String> = []
+  /// This device starts the chat (a new one or a Continue), so it records the agent; an existing or joined chat leaves that to the host.
+  var startedHere = false
+  var agentToRecord: ChatAgentProfile? { startedHere ? ChatAgents.profile(forKey: agentKey) : nil }
   var id: String { name }
 
   /// A listed chat, opened the way its journal and holder allow.

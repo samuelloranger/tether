@@ -170,6 +170,7 @@ impl OptionsDraft {
             .iter()
             .map(|o| (o.id.clone(), o.current_value.clone()))
             .collect();
+        self.base = self.values.clone();
         self.reset = true;
     }
 
@@ -334,6 +335,19 @@ mod tests {
         assert!(draft.pick("mode", "plan"));
         assert!(!draft.is_reset());
         assert!(matches!(draft.start_options(), StartOptions::Picks { .. }));
+    }
+
+    #[test]
+    fn after_a_reset_only_the_options_picked_count_as_changed() {
+        let mut stored = ChatDefaults::default();
+        stored.remember("claude", "effort", "high");
+        let mut draft = OptionsDraft::new(&CLAUDE, &stored, &claude_options());
+        draft.reset();
+        assert!(draft.pick("model", "opus"));
+        let StartOptions::Picks { changed, .. } = draft.start_options() else {
+            panic!("picks");
+        };
+        assert_eq!(changed, ["model"]);
     }
 
     #[test]

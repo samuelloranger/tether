@@ -31,6 +31,8 @@ struct NewChatRequest: Equatable {
   var agent: ChatAgentProfile
   /// nil applies the stored defaults; see `ChatNewOptions.picks`.
   var picks: [String: String]?
+  /// The options the sheet changed from what it opened with.
+  var changed: Set<String> = []
 }
 
 /// The working-folder step of a new chat, opened from the drawer's "+" menu, with a second mode
@@ -87,7 +89,9 @@ struct NewChatSheet: View {
     ChatNewOptions.rows(agent: agent, stored: stored, cached: cached, changes: changes, reset: reset)
   }
   private var request: NewChatRequest {
-    NewChatRequest(agent: agent, picks: ChatNewOptions.picks(stored: stored, changes: changes, reset: reset))
+    NewChatRequest(
+      agent: agent, picks: ChatNewOptions.picks(stored: stored, changes: changes, reset: reset),
+      changed: Set(changes.keys))
   }
 
   var body: some View {
