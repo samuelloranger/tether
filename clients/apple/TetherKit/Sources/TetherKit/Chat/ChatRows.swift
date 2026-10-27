@@ -97,6 +97,10 @@ struct ChatItemRow: View, Equatable {
       QuietRow(symbol: "exclamationmark.triangle", text: text, tint: TetherColors.danger)
     case let .divider(text):
       ChatDividerRow(text: text)
+    case let .agentNotice(notice):
+      AgentNoticeRow(notice: notice)
+    case let .compaction(compaction):
+      CompactionRow(compaction: compaction, expanded: expanded, toggle: toggle)
     case .signedOut:
       SignedOutRow(host: host, retry: signInRetry, action: retrySignIn)
     }
@@ -116,6 +120,96 @@ struct ChatDividerRow: View {
     .padding(.vertical, 4)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(text)
+  }
+}
+
+/// The agent's own notice: a quiet row with a 2 pt edge in the severity's colour.
+struct AgentNoticeRow: View {
+  let notice: ChatAgentNotice
+
+  private var tint: Color {
+    switch notice.severity {
+    case .info: TetherColors.accent
+    case .warning: TetherColors.warning
+    case .error: TetherColors.danger
+    case nil: TetherColors.textFaint
+    }
+  }
+
+  private var label: String {
+    notice.detail.map { $0.isEmpty ? notice.title : "\(notice.title) \u{00B7} \($0)" } ?? notice.title
+  }
+
+  var body: some View {
+    HStack(spacing: 0) {
+      Rectangle().fill(tint).frame(width: 2)
+      (Text(notice.title).bold()
+        + Text(notice.detail.flatMap { $0.isEmpty ? nil : " \u{00B7} \($0)" } ?? ""))
+        .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        .textSelection(.enabled)
+        .padding(.leading, 8).padding(.vertical, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(label)
+  }
+}
+
+/// The divider where the agent's context was compacted; a summary, when there is one, opens below it.
+struct CompactionRow: View {
+  let compaction: ChatCompaction
+  let expanded: Bool
+  let toggle: () -> Void
+
+  private var text: String {
+    switch compaction.status {
+    case .inProgress: "Compacting context\u{2026}"
+    case .completed: "Context compacted"
+    case .failed: "Compaction failed"
+    case .cancelled: "Compaction cancelled"
+    }
+  }
+
+  private var summary: String? {
+    guard let summary = compaction.summary, !summary.isEmpty else { return nil }
+    return summary
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Button(action: toggle) {
+        HStack(spacing: 10) {
+          Rectangle().fill(TetherColors.border).frame(height: 0.5)
+          HStack(spacing: 5) {
+            if compaction.status == .inProgress { ProgressView().controlSize(.mini).tint(TetherColors.textFaint) }
+            Text(text).font(.caption)
+              .foregroundStyle(compaction.status == .failed ? TetherColors.danger : TetherColors.textFaint)
+            if summary != nil {
+              Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+            }
+          }
+          .fixedSize()
+          Rectangle().fill(TetherColors.border).frame(height: 0.5)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .disabled(summary == nil)
+      .accessibilityLabel(text)
+      .accessibilityHint(summary == nil ? "" : (expanded ? "Hides the summary" : "Shows the summary"))
+      if expanded, let summary {
+        ScrollView {
+          Text(summary).font(.caption).foregroundStyle(TetherColors.textSecondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+        }
+        .frame(maxHeight: 260)
+        .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 8))
+      }
+    }
   }
 }
 
@@ -371,6 +465,11 @@ struct ToolCallRow: View {
           }
           .font(.caption2.monospacedDigit())
         }
+        if call.isBackgroundRunning {
+          Text("background").font(.caption2.monospaced()).foregroundStyle(TetherColors.accent)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(TetherColors.accent.opacity(0.6), lineWidth: 1))
+        }
         statusGlyph.frame(width: 14)
         if expandable {
           Image(systemName: expanded ? "chevron.down" : "chevron.right")
@@ -380,7 +479,7 @@ struct ToolCallRow: View {
     }
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(call.title), \(statusWord)")
+    .accessibilityLabel("\(call.title), \(call.isBackgroundRunning ? "running in the background" : statusWord)")
     .accessibilityHint(expandable ? (expanded ? "Hides the details" : "Shows the details") : "")
   }
 

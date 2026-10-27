@@ -327,10 +327,28 @@ struct ChatView: View {
   private func isExpanded(_ item: ChatItem) -> Bool {
     #if DEBUG
     if ProcessInfo.processInfo.environment["TETHER_DEBUG_TOOLS_OPEN"] != nil { return true }
+    if ChatFixture.openTasks, case .compaction = item.kind { return true }
     if ChatFixture.openSubagents, case let .tool(call) = item.kind, call.subagent != nil { return true }
     if ChatFixture.openImages, case let .tool(call) = item.kind, !call.images.isEmpty { return true }
     #endif
     return expanded.contains(item.id)
+  }
+
+  /// Opens the command's row in the transcript and brings it into view when it is in the window.
+  private func openBackgroundCommand(_ command: ChatToolCall) {
+    guard let item = model.state.items.first(where: { item in
+      guard case let .tool(call) = item.kind else { return false }
+      return call.id == command.id || call.children.contains { $0.id == command.id }
+    }) else { return }
+    withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { _ = expanded.insert(item.id) }
+    if let block = ChatGrouping.blocks(visibleItems).first(where: { block in
+      switch block {
+      case let .item(entry): entry.id == item.id
+      case let .tools(entries): entries.contains { $0.id == item.id }
+      }
+    }) {
+      windowAnchor = block.id
+    }
   }
 
   private func toggleExpanded(_ id: Int) {
@@ -558,6 +576,9 @@ struct ChatView: View {
             .padding(.horizontal, 4)
             .accessibilityIdentifier("chatAnswerRetry")
         }
+      }
+      if !model.hasEnded, !model.state.backgroundCommands.isEmpty {
+        ChatTaskStrip(commands: model.state.backgroundCommands, open: openBackgroundCommand)
       }
       if model.readOnly {
         Label("Started on another device. Read only.", systemImage: "eye")

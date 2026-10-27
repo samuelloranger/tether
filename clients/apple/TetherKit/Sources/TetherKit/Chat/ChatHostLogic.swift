@@ -51,6 +51,8 @@ struct ACPChatSummary: Equatable, Identifiable, Sendable {
   var hasStatus = false
   /// The chat's holder lets several clients attach at once.
   var multiClient = false
+  /// Background commands the holder counts as running; the host omits the field at zero.
+  var tasks = 0
 
   var id: String { name }
 
@@ -377,6 +379,9 @@ extension ChatState {
         hasher.combine(text.utf8.count)
       case let .tool(call): hasher.combine(call.status.rawValue)
       case let .images(refs, _): hasher.combine(refs.count)
+      case let .compaction(compaction):
+        hasher.combine(compaction.status)
+        hasher.combine(compaction.summary?.utf8.count ?? 0)
       default: break
       }
     }

@@ -3,7 +3,7 @@ import SwiftUI
 extension DrawerChatState {
   var tint: Color {
     switch self {
-    case .working: TetherColors.accent
+    case .working, .tasks: TetherColors.accent
     case .waiting: TetherColors.warning
     case .running: TetherColors.success
     case .idle, .ended: TetherColors.textFaint
@@ -24,6 +24,7 @@ struct ChatStateTag: View {
         Circle().fill(state.tint).frame(width: 6, height: 6)
           .opacity(state == .working && pulsing ? 0.35 : 1)
       }
+      if case .tasks = state { ProgressView().controlSize(.mini).tint(TetherColors.accent) }
       Text(state.label).font(.caption2.monospaced().weight(state == .waiting ? .bold : .regular))
     }
     .foregroundStyle(state.tint)

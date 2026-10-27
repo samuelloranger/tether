@@ -110,6 +110,8 @@ actor ACPClient {
           "fs": ["readTextFile": false, "writeTextFile": false], "terminal": false,
           // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
           "elicitation": ["form": [String: Any]()],
+          "session": ["notices": [String: Any](), "compaction": [String: Any]()],
+          "_meta": ["terminal_output": true],
         ],
       ])
   }
@@ -129,6 +131,8 @@ actor ACPClient {
   func loadSession(_ id: String, cwd: String) async throws -> String {
     journal.loadedSessionId = id
     store.save(journal)
+    builder.apply(.loadRequested)
+    publish()
     let result = try await request("session/load", ["sessionId": id, "cwd": cwd, "mcpServers": [Any]()])
     let loaded = result.sessionId ?? id
     journal.sessionId = loaded
