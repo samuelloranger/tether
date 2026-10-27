@@ -597,7 +597,7 @@ export component GitOverlays inherits Rectangle {
         background: Tokens.background;
         opacity: md.shown ? 1 : 0;
         animate opacity { duration: Motion.base; easing: ease-out; }
-        TouchArea { }
+        TouchArea { enabled: md.shown; }
         VerticalLayout {
             Rectangle {
                 height: 48px;
@@ -644,7 +644,7 @@ export component GitOverlays inherits Rectangle {
         background: Tokens.background.with-alpha(0.62);
         opacity: gd.shown ? 1 : 0;
         animate opacity { duration: Motion.base; easing: ease-out; }
-        TouchArea { }
+        TouchArea { enabled: gd.shown; }
         Rectangle {
             width: min(420px, parent.width - 48px);
             height: dialog-col.preferred-height;

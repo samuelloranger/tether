@@ -445,6 +445,14 @@ export component ConfirmDialog inherits Rectangle {
     changed body => { if (root.shown) { root.held-body = root.body; } }
     changed extra => { if (root.shown) { root.held-extra = root.extra; } }
     changed action => { if (root.shown) { root.held-action = root.action; } }
+    changed shown => {
+        if (root.shown) {
+            root.held-title = root.title;
+            root.held-body = root.body;
+            root.held-extra = root.extra;
+            root.held-action = root.action;
+        }
+    }
     TouchArea { enabled: root.shown; }
     card := Rectangle {
         width: min(460px, root.width - 48px);

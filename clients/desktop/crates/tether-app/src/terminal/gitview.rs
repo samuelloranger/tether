@@ -136,6 +136,14 @@ fn set_pr(vm: &GitVm<'_>, pr: Option<&PrView>) {
 
 pub fn apply(w: &AppWindow, v: GitView) {
     let vm = w.global::<GitVm>();
+    // A closed panel slides out showing what it last held, so only the flags that close it change.
+    if !v.open {
+        vm.set_open(false);
+        vm.set_modal(false);
+        vm.set_dialog_open(false);
+        vm.set_md_open(false);
+        return;
+    }
     vm.set_open(v.open);
     vm.set_modal(
         v.open && (v.markdown.is_some() || v.pr.as_ref().is_some_and(|p| p.dialog.is_some())),
