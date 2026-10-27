@@ -816,10 +816,12 @@ pub fn wire(ui: &crate::AppWindow) {
     });
     vm.on_send(|| send(ChatMsg::Send));
     vm.on_stop(|| send(ChatMsg::Stop));
-    vm.on_pick_images(|| {
+    vm.on_attach_files(|| {
         crate::terminal::glue::platform().pick_files(Box::new(|files| {
-            if !files.is_empty() {
-                send(ChatMsg::AttachFiles(files));
+            if !files.is_empty()
+                && let Some(sink) = crate::terminal::glue::current()
+            {
+                sink(Msg::SendFiles(files));
             }
         }));
     });
