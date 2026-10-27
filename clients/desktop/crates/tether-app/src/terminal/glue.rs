@@ -26,6 +26,7 @@ thread_local! {
     static APP: RefCell<Weak<App>> = const { RefCell::new(Weak::new()) };
     static PLATFORM: RefCell<Option<Arc<dyn Platform>>> = const { RefCell::new(None) };
     static WIRED: Cell<bool> = const { Cell::new(false) };
+    static SIDEBAR_OVER: Cell<bool> = const { Cell::new(false) };
     static MODS: Cell<tether_core::keymap::Mods> = Cell::new(tether_core::keymap::Mods::default());
     #[cfg(target_os = "linux")]
     static SUPER: Cell<bool> = const { Cell::new(false) };
@@ -142,6 +143,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     ));
     model.set_chat_defaults(chat_defaults);
     model.set_chat_options(chat_options, &chat_scope, &chat_agent);
+    model.set_sidebar_closed(app.state.borrow().prefs.sidebar_closed);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
@@ -149,6 +151,8 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(target_os = "linux")]
     crate::platform::linux::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    SIDEBAR_OVER.set(false);
+    send_window_width(app);
     dev_chat();
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
@@ -390,6 +394,22 @@ fn window_keys(app: &App) -> bool {
         && !app.ui.global::<crate::GitVm>().get_modal()
 }
 
+fn send_window_width(app: &App) {
+    let window = app.ui.window();
+    send(Msg::WindowWidth(
+        window.size().to_logical(window.scale_factor()).width,
+    ));
+}
+
+/// Esc closes the sidebar shown over a narrow window before anything else.
+pub fn dismiss_sidebar() -> bool {
+    if !SIDEBAR_OVER.get() {
+        return false;
+    }
+    send(Msg::SidebarDismiss);
+    true
+}
+
 /// Slint learns modifiers from key events, and the terminal consumes those before Slint sees
 /// them, so its pointer events report Ctrl and Shift as up. winit's own state fills them in.
 fn held_mods(shift: bool, alt: bool, ctrl: bool) -> tether_core::keymap::Mods {
@@ -496,6 +516,11 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
         }
         WindowEvent::ScaleFactorChanged { .. } => {
             remeasure_well(&app.ui);
+            send_window_width(app);
+            EventResult::Propagate
+        }
+        WindowEvent::Resized(_) => {
+            send_window_width(app);
             EventResult::Propagate
         }
         _ => EventResult::Propagate,
@@ -587,6 +612,16 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
             if s.prefs.chat_options.store(&scope, &agent, &options) {
                 s.save_prefs();
             }
+        }
+        UiEffect::RememberSidebar { closed } => {
+            let mut s = app.state.borrow_mut();
+            if s.prefs.sidebar_closed != closed {
+                s.prefs.sidebar_closed = closed;
+                s.save_prefs();
+            }
+        }
+        UiEffect::Sidebar(shown) => {
+            SIDEBAR_OVER.set(shown == tether_core::sidebar::Shown::Overlay);
         }
         UiEffect::RememberChatAgent(agent) => {
             let mut s = app.state.borrow_mut();

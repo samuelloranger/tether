@@ -8,6 +8,26 @@ pub enum TabJump {
     Last,
 }
 
+pub const SIDEBAR_WIDTH: f32 = 248.0;
+pub const MIN_CONTENT_WIDTH: f32 = 420.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shown {
+    Docked,
+    Hidden,
+    /// Over the content, in a window too narrow to dock it.
+    Overlay,
+}
+
+pub fn visibility(pref_open: bool, overlay_requested: bool, window_width: f32) -> Shown {
+    let narrow = window_width - SIDEBAR_WIDTH < MIN_CONTENT_WIDTH;
+    match (narrow, pref_open, overlay_requested) {
+        (false, true, _) => Shown::Docked,
+        (true, _, true) => Shown::Overlay,
+        _ => Shown::Hidden,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Terminal(String),
@@ -52,6 +72,26 @@ mod tests {
 
     fn c(n: &str) -> Row {
         Row::Chat(n.into())
+    }
+
+    #[test]
+    fn visibility_docks_when_open_and_wide_enough() {
+        for (open, overlay, width, want) in [
+            (true, false, 1200.0, Shown::Docked),
+            (false, false, 1200.0, Shown::Hidden),
+            (true, false, 640.0, Shown::Hidden),
+            (true, true, 640.0, Shown::Overlay),
+            (false, true, 640.0, Shown::Overlay),
+            (false, true, 1200.0, Shown::Hidden),
+            (true, false, 668.0, Shown::Docked),
+            (true, false, 667.0, Shown::Hidden),
+        ] {
+            assert_eq!(
+                visibility(open, overlay, width),
+                want,
+                "{open} {overlay} {width}"
+            );
+        }
     }
 
     #[test]

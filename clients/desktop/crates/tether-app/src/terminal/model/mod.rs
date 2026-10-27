@@ -30,6 +30,7 @@ mod pointer;
 mod reconnect;
 mod search;
 pub(crate) mod send;
+mod sidebar;
 mod tabs;
 
 pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
@@ -172,6 +173,9 @@ pub enum Msg {
     PasteClipboard,
     /// A window shortcut read before the focused widget saw it.
     Command(TetherCommand),
+    WindowWidth(f32),
+    /// Esc, or a pick, closes the sidebar shown over a narrow window.
+    SidebarDismiss,
     HistoryOpen,
     HistoryClose,
     HistoryCopy,
@@ -306,6 +310,10 @@ pub enum UiEffect {
     },
     /// The agent the last chat was started with.
     RememberChatAgent(String),
+    Sidebar(tether_core::sidebar::Shown),
+    RememberSidebar {
+        closed: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -409,6 +417,7 @@ pub struct TerminalModel {
     agents: agents::AgentsState,
     git: GitPanel,
     git_shown: GitView,
+    sidebar: sidebar::SidebarState,
     session_pids: HashMap<String, i64>,
     chats: chat::Chats,
 }
@@ -455,6 +464,7 @@ impl TerminalModel {
             agents: agents::AgentsState::default(),
             git: GitPanel::default(),
             git_shown: GitView::default(),
+            sidebar: sidebar::SidebarState::default(),
             session_pids: HashMap::new(),
             chats: chat::Chats::new(None, ""),
         };
@@ -571,6 +581,8 @@ impl TerminalModel {
                 &mut fx,
             ),
             Msg::Command(cmd) => self.on_command(cmd, self.mods, now, &mut fx),
+            Msg::WindowWidth(width) => self.on_window_width(width, &mut fx),
+            Msg::SidebarDismiss => self.on_sidebar_dismiss(&mut fx),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
             Msg::SearchOpen => self.on_search_open(&mut fx),
             Msg::SearchQuery(q) => self.on_search_query(q, now, &mut fx),

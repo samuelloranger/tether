@@ -193,6 +193,8 @@ mod tests {
     use super::super::tests::{has_attach, live, t};
     use super::*;
     use crate::terminal::testkit::session;
+    use tether_core::keymap::TetherCommand;
+    use tether_core::sidebar::Shown;
 
     #[test]
     fn refresh_runs_every_10s_only_while_focused() {
@@ -360,6 +362,52 @@ mod tests {
         assert_eq!(m.view().header.session, "a");
         m.handle(Msg::TabShortcut(TabJump::Position(3)), t(13));
         assert_eq!(m.chats.active(), Some("chat-c"));
+    }
+
+    fn sidebar_effects(fx: &[Effect]) -> (Option<Shown>, Option<bool>) {
+        let mut shown = None;
+        let mut saved = None;
+        for e in fx {
+            match e {
+                Effect::Ui(UiEffect::Sidebar(s)) => shown = Some(*s),
+                Effect::Ui(UiEffect::RememberSidebar { closed }) => saved = Some(*closed),
+                _ => {}
+            }
+        }
+        (shown, saved)
+    }
+
+    #[test]
+    fn narrowing_hides_without_saving_and_widening_restores() {
+        let mut m = live(vec![session("a", 1)]);
+        let fx = m.handle(Msg::WindowWidth(1200.0), t(10));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), None));
+        let fx = m.handle(Msg::WindowWidth(600.0), t(11));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+        let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(12));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Overlay), None));
+        let fx = m.handle(Msg::SidebarDismiss, t(13));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+        let fx = m.handle(Msg::WindowWidth(1200.0), t(14));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), None));
+    }
+
+    #[test]
+    fn the_toggle_closes_and_reopens_and_saves_when_wide() {
+        let mut m = live(vec![session("a", 1)]);
+        m.handle(Msg::WindowWidth(1200.0), t(10));
+        let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(11));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), Some(true)));
+        let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(12));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), Some(false)));
+    }
+
+    #[test]
+    fn a_saved_closed_sidebar_starts_hidden() {
+        let mut m = live(vec![session("a", 1)]);
+        m.set_sidebar_closed(true);
+        let fx = m.handle(Msg::WindowWidth(1200.0), t(10));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
     }
 
     #[test]

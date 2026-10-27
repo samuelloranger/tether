@@ -78,7 +78,7 @@ impl TerminalModel {
             TetherCommand::LastTab => self.on_jump(TabJump::Last, now, fx),
             TetherCommand::NewTab => self.on_new_begin(),
             TetherCommand::NewChat => self.on_chat(ChatMsg::NewChat(0), now, fx),
-            TetherCommand::ToggleSidebar => {} // Task 3
+            TetherCommand::ToggleSidebar => self.toggle_sidebar(fx),
             TetherCommand::Find => self.on_search_open(fx),
             TetherCommand::Snippets => self.on_palette_open(),
             TetherCommand::History => self.on_history_open(fx),
