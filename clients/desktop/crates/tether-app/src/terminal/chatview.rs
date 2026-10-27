@@ -11,7 +11,7 @@ use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
-    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatVm, CtlChoiceVm,
+    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatTaskVm, ChatVm, CtlChoiceVm,
     CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, PaletteItemVm, PermOptionVm,
     QChoiceVm, QFieldVm, SavedSessionVm,
 };
@@ -140,8 +140,10 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
             removed,
             expandable,
             open,
+            background,
         } => {
             vm.kind = 0;
+            vm.background = *background;
             vm.icon = *icon as i32;
             vm.title = title.as_str().into();
             vm.subtitle = subtitle.as_str().into();
@@ -253,6 +255,29 @@ fn row_vm(r: &Row) -> ChatRowVm {
         RowBody::Notice(text) => {
             vm.kind = 6;
             vm.text = text.as_str().into();
+        }
+        RowBody::AgentNotice {
+            severity,
+            title,
+            description,
+        } => {
+            vm.kind = 15;
+            vm.state = i32::from(*severity);
+            vm.text = title.as_str().into();
+            vm.detail = description.as_str().into();
+        }
+        RowBody::Compaction {
+            state,
+            label,
+            summary,
+            open,
+        } => {
+            vm.kind = 16;
+            vm.state = i32::from(*state);
+            vm.text = label.as_str().into();
+            vm.detail = summary.as_str().into();
+            vm.flag = !summary.is_empty();
+            vm.open = *open;
         }
         RowBody::Error(text) => {
             vm.kind = 7;
@@ -454,6 +479,18 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     let queued: Vec<SharedString> = s.queued.iter().map(|q| q.as_str().into()).collect();
     if vm.get_queued().iter().ne(queued.iter().cloned()) {
         vm.set_queued(model(queued));
+    }
+
+    let tasks: Vec<ChatTaskVm> = s
+        .tasks
+        .iter()
+        .map(|t| ChatTaskVm {
+            key: t.key.as_str().into(),
+            title: t.title.as_str().into(),
+        })
+        .collect();
+    if vm.get_tasks().iter().ne(tasks.iter().cloned()) {
+        vm.set_tasks(model(tasks));
     }
 
     let c = &s.composer;
@@ -671,6 +708,7 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_delete_cancelled(|| send(ChatMsg::DeleteCancelled));
     vm.on_new_chat(|mode| send(ChatMsg::NewChat(u8::try_from(mode).unwrap_or(0))));
     vm.on_toggle(|k| send(ChatMsg::Toggle(k.into())));
+    vm.on_task_open(|k| send(ChatMsg::OpenTool(k.into())));
     vm.on_open_link(|url| send(ChatMsg::OpenLink(url.into())));
     vm.on_open_image(|id| send(ChatMsg::OpenImage(id.into())));
     vm.on_close_viewer(|| send(ChatMsg::CloseViewer));

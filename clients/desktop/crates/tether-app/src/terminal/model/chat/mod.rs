@@ -14,6 +14,8 @@ use tether_core::acp::images::ImageAttachment;
 use tether_core::acp::message::AcpId;
 use tether_core::connect::ConnectError;
 
+#[cfg(debug_assertions)]
+mod devsample;
 mod newchat;
 mod rows;
 mod screen;
@@ -146,6 +148,11 @@ pub enum ChatMsg {
     DeleteCancelled,
     NewChat(u8),
     Toggle(String),
+    /// A task line in the strip: open the tool row it stands for.
+    OpenTool(String),
+    /// Debug builds: show the canned chat.
+    #[cfg(debug_assertions)]
+    DevSample,
     OpenLink(String),
     OpenImage(String),
     CloseViewer,
@@ -569,6 +576,30 @@ impl Chats {
         self.select(&name, now, out);
     }
 
+    #[cfg(debug_assertions)]
+    fn dev_sample(&mut self, now: Duration) {
+        let mut sample = Session::new(
+            "sample",
+            "/srv/app",
+            host::OpenMode::Resume,
+            false,
+            None,
+            None,
+        );
+        sample.dev_state(devsample::state(), now);
+        self.sessions.insert("sample".into(), sample);
+        self.provisional
+            .push(ChatSummary::new("sample", "/srv/app"));
+        let mut other = ChatSummary::new("other", "/srv/docs");
+        other.has_status = true;
+        other.tasks = 2;
+        other.created = 1;
+        self.provisional.push(other);
+        self.active = Some("sample".into());
+        self.follow_seq += 1;
+        self.focus_seq += 1;
+    }
+
     pub fn take_new_chat_when_ready(&mut self) -> bool {
         std::mem::take(&mut self.new_chat_when_ready)
     }
@@ -596,6 +627,8 @@ impl Chats {
     pub fn handle(&mut self, msg: ChatMsg, now: Duration, out: &mut Out) {
         self.dirty = true;
         match msg {
+            #[cfg(debug_assertions)]
+            ChatMsg::DevSample => self.dev_sample(now),
             ChatMsg::Select(name) => self.select(&name, now, out),
             ChatMsg::Delete(name) => self.delete_prompt = Some(name),
             ChatMsg::NewChatWhenReady => self.new_chat_when_ready = true,

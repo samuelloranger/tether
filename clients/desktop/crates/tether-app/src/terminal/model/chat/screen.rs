@@ -9,6 +9,7 @@ use tether_core::acp::format::{
 use tether_core::acp::host::{self, DrawerChatState};
 use tether_core::acp::message::ToolKind;
 use tether_core::acp::question::{FieldKind, QuestionDraft};
+use tether_core::acp::reducer::Turn;
 
 use super::newchat::Listing;
 use super::rows::{self, RowCtx};
@@ -33,6 +34,7 @@ fn tab_state(state: DrawerChatState) -> i8 {
         DrawerChatState::Idle => 2,
         DrawerChatState::Running => 3,
         DrawerChatState::Ended => 4,
+        DrawerChatState::Tasks => 5,
     }
 }
 
@@ -82,12 +84,28 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let ordered: Vec<_> = chats.ordered().into_iter().cloned().collect();
     let names: Vec<String> = ordered.iter().map(|c| c.name.clone()).collect();
     let titles = chats.stored_titles(&names);
-    for row in host::drawer_rows(&ordered, &titles) {
+    for mut row in host::drawer_rows(&ordered, &titles) {
+        // An open chat knows its own commands sooner than the host's next status read.
+        if let Some(open) = chats.sessions.get(&row.name)
+            && !open.has_ended()
+            && matches!(
+                row.state,
+                DrawerChatState::Idle | DrawerChatState::Running | DrawerChatState::Tasks
+            )
+            && open.state().turn == Turn::Idle
+        {
+            row.tasks = open.state().background_commands().len() as u32;
+            row.state = if row.tasks > 0 {
+                DrawerChatState::Tasks
+            } else {
+                DrawerChatState::Idle
+            };
+        }
         screen.tabs.push(TabView {
             active: chats.active.as_deref() == Some(row.name.as_str()),
             title: row.title.clone(),
             state: tab_state(row.state),
-            label: row.state.label().to_string(),
+            label: row.tag(),
             name: row.name,
         });
     }
@@ -163,6 +181,9 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     };
     screen.rows = rows::build(s, &mut ctx);
     screen.queued = rows::queued(s);
+    if !s.has_ended() {
+        screen.tasks = rows::tasks(s);
+    }
     let need = std::mem::take(&mut ctx.need);
 
     composer(s, &mut screen);

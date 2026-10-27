@@ -208,6 +208,13 @@ impl Session {
         }
     }
 
+    #[cfg(debug_assertions)]
+    pub(super) fn dev_state(&mut self, state: ChatState, now: Duration) {
+        self.frozen = state;
+        self.link.dial_succeeded(now);
+        self.link.settle_if_quiet(now + Duration::from_secs(60));
+    }
+
     pub fn state(&self) -> &ChatState {
         match &self.client {
             Some(c) if !self.holding => c.state(),
@@ -1219,6 +1226,9 @@ impl Session {
                 if !self.expanded.remove(&key) {
                     self.expanded.insert(key);
                 }
+            }
+            ChatMsg::OpenTool(key) => {
+                self.expanded.insert(key);
             }
             ChatMsg::Earlier => {
                 self.window_start = super::rows::earlier_start(self);
