@@ -69,7 +69,10 @@ final class ChatSignInModelTests: XCTestCase {
     journal.nextRequestId = 4
     journal.entries = [.init(kind: .prompt, offset: ACPFixture.promptOffset, text: ACPFixture.promptText)]
     let stream = ScriptedByteStream()
-    let model = model(stream, journal: journal)
+    let store = InMemoryChatJournalStore(journal)
+    let model = ChatSessionModel(
+      chatName: "chat-s", cwd: "/work/project", readOnly: false, store: store, hostLabel: "homelab"
+    ) { _, _ in stream }
     Task { await model.connect() }
     stream.push(ACPFixture.log(ACPFixture.index(containing: "session/request_permission")))
     let live = await eventually(timeout: 4) { model.link.phase == .live && model.state.turn == .working }
@@ -89,6 +92,7 @@ final class ChatSignInModelTests: XCTestCase {
     XCTAssertTrue(resent, "Stop sends the waiting message again")
     print("DBG notice=\(String(describing: model.notice)) queued=\(model.state.queuedTexts) turn=\(model.state.turn)")
     print("DBG written=\(stream.writtenText.replacingOccurrences(of: "\n", with: " || "))")
+    print("DBG journal=\(store.load().entries.map { "\($0.kind)@\($0.offset)" })")
     print("DBG items=\(model.state.items.suffix(5).map { "\($0.kind)".prefix(60) })")
     let waiting = await eventually { model.state.queuedTexts == ["and then tidy up"] }
     XCTAssertTrue(waiting, "it waits for the stopped turn to end")
