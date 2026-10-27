@@ -413,6 +413,16 @@ impl Chats {
         self.active.as_deref()
     }
 
+    /// The active chat's folder, when the host reported an absolute one.
+    pub fn active_cwd(&self) -> Option<&str> {
+        let active = self.active.as_deref()?;
+        self.ordered()
+            .into_iter()
+            .find(|c| c.name == active)
+            .map(|c| c.cwd.as_str())
+            .filter(|cwd| cwd.starts_with('/'))
+    }
+
     pub fn is_chat(&self, name: &str) -> bool {
         self.tab_names().iter().any(|n| n == name)
     }
