@@ -17,6 +17,9 @@ struct ChatView: View {
   var onSessions: (() -> Void)?
   /// Another session or chat is waiting on an answer; the drawer button carries a dot.
   var sessionsNeedYou = false
+  /// Set when the chat sits inside the terminal screen: ends the chat and resumes its conversation
+  /// (session id, folder) with Claude Code in a new terminal session; returns why it could not.
+  var onContinueInTerminal: ((String, String) async -> String?)?
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
@@ -42,6 +45,8 @@ struct ChatView: View {
   @State private var pickingPhotos = false
   @State private var pickedPhotos: [PhotosPickerItem] = []
   @State private var copiedFolder = false
+  @State private var confirmingTerminal = false
+  @State private var chipsHeight: CGFloat = 0
   @State private var cursor: Int?
   @State private var caretRequest: Int?
 
@@ -56,7 +61,7 @@ struct ChatView: View {
     .coordinateSpace(name: "probe-viewport")
     #endif
     .background(TetherColors.background.ignoresSafeArea())
-    .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+    .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar.overlay(alignment: .top) { queuedChips } }
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(TetherColors.background, for: .navigationBar)
     .toolbarBackground(.visible, for: .navigationBar)
@@ -76,7 +81,12 @@ struct ChatView: View {
     .toolbar {
       ToolbarItem(placement: .topBarLeading) { backButton }.withoutGlass()
       ToolbarItem(placement: .principal) { titleBlock }.withoutGlass()
-      ToolbarItem(placement: .topBarTrailing) { connectionBadge }.withoutGlass()
+      ToolbarItem(placement: .topBarTrailing) {
+        HStack(spacing: 12) {
+          connectionBadge
+          moreMenu
+        }
+      }.withoutGlass()
     }
     .task { await model.connect() }
     .task {
@@ -192,7 +202,9 @@ struct ChatView: View {
           message: message, canRetry: model.canSend,
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
-      if model.state.turn == .working && !answerPending { WorkingIndicator(activity: model.state.subagentActivity) }
+      if model.state.turn == .working && !answerPending {
+        WorkingIndicator(activity: model.state.subagentActivity ?? ChatVerbs.pick(model.verbs, seed: turnSeed))
+      }
       #if DEBUG
       if probeLastRow {
         Color.clear.frame(height: 1)
@@ -204,7 +216,7 @@ struct ChatView: View {
       }
       #endif
     }
-    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
+    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16 + CGFloat(queuedTexts.count) * 40)
   }
 
   /// iOS 17: the transcript follows by scrolling to a sentinel when the tail changes.
@@ -260,11 +272,55 @@ struct ChatView: View {
   }
 
   /// An unanswered permission or question lives in the card, not in the scroll.
+  /// Pending asks live in their cards, and queued messages above the composer until they start.
   private var visibleItems: [ChatItem] {
     model.state.items.filter {
       if case let .permission(permission) = $0.kind { return permission.resolvedOptionId != nil }
       if case let .question(question) = $0.kind { return !question.isPending }
+      if case .user = $0.kind { return !model.state.isQueued($0.id) }
       return true
+    }
+  }
+
+  /// Changes when a new prompt starts a turn, so a turn keeps one word.
+  private var turnSeed: Int {
+    model.state.items.last { item in
+      if case .user = item.kind { return !model.state.isQueued(item.id) }
+      return false
+    }?.id ?? 0
+  }
+
+  private var queuedTexts: [(id: Int, text: String)] {
+    model.state.items.compactMap { item in
+      guard model.state.isQueued(item.id), case let .user(text, count, _, _) = item.kind else { return nil }
+      if text.isEmpty { return (item.id, ChatComposerRule.imageLabel(count)) }
+      return (item.id, count > 0 ? "\(ChatComposerRule.imageLabel(count)) · \(text)" : text)
+    }
+  }
+
+  /// Floats on the bar's top edge, over the end of the transcript, which keeps room for it.
+  @ViewBuilder private var queuedChips: some View {
+    let queued = queuedTexts
+    if !queued.isEmpty {
+      VStack(alignment: .trailing, spacing: 6) {
+        ForEach(queued, id: \.id) { entry in
+          HStack(spacing: 6) {
+            Text(entry.text).font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+              .lineLimit(1).truncationMode(.tail)
+            Image(systemName: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
+          }
+          .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 7)
+          .background(TetherColors.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 14))
+          .overlay(RoundedRectangle(cornerRadius: 14).stroke(TetherColors.border, lineWidth: 1))
+          .shadow(color: .black.opacity(0.35), radius: 9, y: 6)
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel("Queued: \(entry.text)")
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .trailing)
+      .padding(.leading, 44).padding(.trailing, 16)
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chipsHeight = $0 }
+      .offset(y: -chipsHeight - 8)
     }
   }
 
@@ -396,6 +452,36 @@ struct ChatView: View {
         .accessibilityLabel("Context used")
         .accessibilityValue(
           ChatFormat.contextSummary(used: model.state.contextUsed, size: model.state.contextSize) ?? "")
+    }
+  }
+
+  private var moreMenu: some View {
+    Menu {
+      if onContinueInTerminal != nil, model.state.sessionId != nil, !model.readOnly {
+        Button { confirmingTerminal = true } label: { MenuLabel("Continue in terminal", systemImage: "terminal") }
+      }
+      if let id = model.state.sessionId {
+        Button { UIPasteboard.general.string = "claude --resume \(id)" } label: {
+          MenuLabel("Copy resume command", systemImage: "doc.on.doc")
+        }
+      }
+      Button { copyFolder() } label: { MenuLabel("Copy folder path", systemImage: "folder") }
+    } label: {
+      Image(systemName: "ellipsis")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(TetherColors.textSecondary)
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle())
+    }
+    .accessibilityLabel("More")
+    .alert("Continue in a terminal?", isPresented: $confirmingTerminal) {
+      Button("Continue") {
+        guard let id = model.state.sessionId, let onContinueInTerminal else { return }
+        Task { if let reason = await onContinueInTerminal(id, model.cwd) { model.notice = reason } }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The chat ends here and Claude Code picks the conversation up in a new terminal session.")
     }
   }
 

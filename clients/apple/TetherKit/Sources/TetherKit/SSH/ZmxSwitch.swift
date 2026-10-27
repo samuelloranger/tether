@@ -30,18 +30,27 @@ enum ZmxSwitch {
     return .type(attached ? .detachThenAttach : .attachInPlace)
   }
 
-  static func attachCommand(zmx: String, name: String) -> String {
-    "\(zmx) attach \(shellQuote(name))\n"
+  /// `command` (already quoted for a shell) runs instead of a login shell when the session is new.
+  static func attachCommand(zmx: String, name: String, command: String? = nil) -> String {
+    "\(zmx) attach \(shellQuote(name))\(command.map { " " + $0 } ?? "")\n"
   }
 
   /// The PTY writes the switch performs, in order. More than one element means
   /// they must reach the host as separate writes, `settleNanoseconds` apart.
-  static func writes(typing: Typing, zmx: String, name: String) -> [String] {
+  static func writes(typing: Typing, zmx: String, name: String, command: String? = nil) -> [String] {
+    let attach = attachCommand(zmx: zmx, name: name, command: command)
     switch typing {
     case .attachInPlace:
-      return [attachCommand(zmx: zmx, name: name)]
+      return [attach]
     case .detachThenAttach:
-      return [detachKey, killLine + attachCommand(zmx: zmx, name: name)]
+      return [detachKey, killLine + attach]
     }
+  }
+
+  /// Resumes a Claude Code conversation in `cwd`, then leaves a login shell when it exits. POSIX
+  /// `sh` runs it, so the line typed at the host's prompt is the same in bash, zsh or fish.
+  static func resumeCommand(sessionId: String, cwd: String) -> String {
+    let script = #"cd "${1:-$HOME}" && claude --resume "$2"; exec "${SHELL:-/bin/sh}" -l"#
+    return "sh -c \(shellQuote(script)) sh \(shellQuote(cwd)) \(shellQuote(sessionId))"
   }
 }

@@ -158,6 +158,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         host: &chats.host,
         files: chats.files.as_ref(),
         thumbs: &chats.thumbs,
+        verbs: &chats.verbs,
         need: Vec::new(),
     };
     screen.rows = rows::build(s, &mut ctx);

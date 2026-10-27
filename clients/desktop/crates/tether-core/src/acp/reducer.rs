@@ -303,6 +303,33 @@ impl ChatState {
         self.queued_item_ids.contains(&item_id)
     }
 
+    /// What a Stop sends again: the waiting messages' text as one prompt. Their pictures are not
+    /// kept for it, so they are only counted, for the notice that says so.
+    pub fn queued_resend(&self) -> (String, usize) {
+        let images = self
+            .queued_item_ids
+            .iter()
+            .filter_map(|id| self.items.iter().find(|i| i.id == *id))
+            .map(|i| match &i.kind {
+                ItemKind::User { image_count, .. } => *image_count,
+                _ => 0,
+            })
+            .sum();
+        (self.queued_texts().join("\n\n"), images)
+    }
+
+    /// The text of each message waiting for the running turn, oldest first.
+    pub fn queued_texts(&self) -> Vec<String> {
+        self.queued_item_ids
+            .iter()
+            .filter_map(|id| self.items.iter().find(|i| i.id == *id))
+            .filter_map(|i| match &i.kind {
+                ItemKind::User { text, .. } if !text.trim().is_empty() => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn option(&self, id: &str) -> Option<&ConfigOption> {
         self.config_options.iter().find(|o| o.id == id)
     }
@@ -462,8 +489,11 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
             state.turn = Turn::Working;
         }
         ChatEvent::CancelRequested => {
-            // Already in the order they were sent, at the end.
-            state.queued_item_ids.clear();
+            // The agent drops every prompt that has not started, so they leave the transcript; the
+            // client that pressed Stop sends their text again as one new prompt.
+            let queued = std::mem::take(&mut state.queued_item_ids);
+            state.items.retain(|i| !queued.contains(&i.id));
+            state.in_flight.retain(|p| !queued.contains(&p.item_id));
             state.start_pending = false;
             if state.turn == Turn::Working {
                 append(ItemKind::Notice("Stopped".into()), state);
@@ -1255,12 +1285,13 @@ mod tests {
     }
 
     #[test]
-    fn stop_clears_queued_labels_and_notes_it_once() {
+    fn stop_withdraws_the_queued_prompts_and_notes_it_once() {
         let mut s = ChatState::default();
         prompt(&mut s, "one", 1);
         prompt(&mut s, "two", 2);
         reduce(&mut s, ChatEvent::CancelRequested);
         assert!(s.queued_item_ids.is_empty());
+        assert_eq!(user_texts(&s), ["one"], "the agent never ran it");
         assert_eq!(
             s.items.last().unwrap().kind,
             ItemKind::Notice("Stopped".into())

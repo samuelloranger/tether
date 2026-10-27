@@ -234,3 +234,29 @@ final class SSHTerminalControllerLifecycleTests: XCTestCase {
     await controller.leave()
   }
 }
+
+@MainActor
+final class SSHTerminalControllerSessionSwitchTests: XCTestCase {
+  private let config = SSHConnectionConfig(
+    host: "example.internal", port: 22, username: "sam", credentials: [.password("pw")])
+
+  func test_the_first_connects_pick_of_a_session_is_not_a_switch_but_a_switch_is() async {
+    let store = InMemoryHostKeyStore()
+    let ops = FakeOps()
+    ops.execResult = { command in
+      command.hasSuffix(" ls") ? "name=servers\tpid=1\tclients=0\tcreated=1789875110\tcwd=file://h/home/sam\n" : ""
+    }
+    let controller = SSHTerminalController(
+      title: "test", config: config, hostKeyStore: store,
+      dial: { _, _ in ScriptedByteStream() },
+      control: ControlConnection(config: config, store: store) { ops })
+    await controller.connect()
+    XCTAssertEqual(controller.attach, "servers")
+    XCTAssertEqual(controller.sessionSwitches, 0, "a chat opened from a push must stay open")
+
+    await controller.switchSession(to: "work")
+    XCTAssertEqual(controller.attach, "work")
+    XCTAssertEqual(controller.sessionSwitches, 1)
+    await controller.leave()
+  }
+}

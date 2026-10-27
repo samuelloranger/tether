@@ -13,6 +13,8 @@ final class ChatSessionModel {
   typealias HostAnswers = @Sendable () async -> String?
   /// The output of the file listing in the chat's folder, or nil when the host can't say.
   typealias ListFiles = @Sendable () async -> String?
+  /// The words a running turn may show (see `ChatVerbs`).
+  typealias SpinnerVerbs = @Sendable () async -> [String]
 
   let chatName: String
   let cwd: String
@@ -56,6 +58,10 @@ final class ChatSessionModel {
   private let outboxStore: (any ChatOutboxStore)?
   private let inspect: Inspect?
   private let listFiles: ListFiles?
+  private let spinnerVerbs: SpinnerVerbs?
+  private var verbsAsked = false
+  /// Empty until the host answered; Tether's own words stand in meanwhile.
+  private(set) var verbs: [String] = []
   /// The chat's picture files and how to show them; nil where nothing is kept.
   let imageLibrary: ChatImageLibrary?
   private var client: ACPClient?
@@ -76,11 +82,13 @@ final class ChatSessionModel {
     titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
-    listFiles: ListFiles? = nil, images: ChatImageStore? = nil, dial: @escaping Dial
+    listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, images: ChatImageStore? = nil,
+    dial: @escaping Dial
   ) {
     self.imageLibrary = images.map(ChatImageLibrary.init)
     self.loadSessionId = loadSessionId
     self.listFiles = listFiles
+    self.spinnerVerbs = spinnerVerbs
     self.hostLabel = hostLabel
     self.outboxStore = outboxStore
     self.outbox = ChatOutbox(restoring: outboxStore?.load() ?? [])
@@ -120,6 +128,7 @@ final class ChatSessionModel {
         await ACPHostExec.run(
           command: ChatFileList.command(cwd: route.cwd), config: config, store: hostKeyStore, deadline: 15)
       },
+      spinnerVerbs: { await ChatVerbCache.shared.verbs(config: config, store: hostKeyStore) },
       images: files.images(route.name)
     ) { spawn, from in
       try await SSHConnector.connectExec(
@@ -145,6 +154,10 @@ final class ChatSessionModel {
   var hasEnded: Bool { link.phase == .ended }
 
   func connect() async {
+    if !verbsAsked, let spinnerVerbs {
+      verbsAsked = true
+      Task { verbs = await spinnerVerbs() }
+    }
     guard !dialInFlight, !left, client == nil || link.phase == .lost else { return }
     dialInFlight = true
     generation += 1
@@ -354,13 +367,21 @@ final class ChatSessionModel {
 
   private func persistOutbox() { outboxStore?.save(outbox.persisted) }
 
+  /// Stop drops what was waiting; as in Claude Code, it goes out next instead.
   func cancel() {
     guard canInteract, let client else { return }
     Task {
+      let waiting: (text: String, images: Int)
       do {
-        try await client.cancel()
+        waiting = try await client.cancel()
       } catch {
         notice = "Stop didn't reach the agent. Try again."
+        return
+      }
+      // Not through `send`: the composer's gate is for what the user types, and this was sent already.
+      if !waiting.text.isEmpty { await deliver(waiting.text, []) }
+      if waiting.images > 0 {
+        notice = "The waiting messages went out again without their \(ChatComposerRule.imageLabel(waiting.images))."
       }
     }
   }

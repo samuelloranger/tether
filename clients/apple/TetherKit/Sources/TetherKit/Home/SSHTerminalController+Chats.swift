@@ -23,6 +23,17 @@ extension SSHTerminalController {
 
   func killChat(_ name: String) async {
     _ = try? await control.exec(ACPHostCommand.kill(name: name))
+    await forgetChat(name)
+  }
+
+  /// Ends the chat's agent; false unless the host confirmed it, since the exec reports no status.
+  func endChatAgent(_ name: String) async -> Bool {
+    let output = try? await control.exec(ACPHostCommand.kill(name: name) + " && echo ended")
+    return output?.split(whereSeparator: \.isNewline).contains { $0.trimmingCharacters(in: .whitespaces) == "ended" } == true
+  }
+
+  /// Drops what this device kept for a chat the host no longer has.
+  func forgetChat(_ name: String) async {
     UserDefaultsChatJournalStore(name: name).save(ChatJournal())
     chatTitles.clear(name)
     ChatLocalFiles(scope: ChatTitleStore.scope(for: config)).clear(name)

@@ -63,13 +63,16 @@ final class ChatSignInModelTests: XCTestCase {
     model.leave()
   }
 
-  func test_a_message_can_be_sent_while_the_agent_works_and_shows_as_queued() async throws {
+  func test_a_message_sent_while_the_agent_works_is_queued_and_stop_sends_it_again() async throws {
     var journal = ChatJournal()
     journal.sessionId = "sess-1"
     journal.nextRequestId = 4
     journal.entries = [.init(kind: .prompt, offset: ACPFixture.promptOffset, text: ACPFixture.promptText)]
     let stream = ScriptedByteStream()
-    let model = model(stream, journal: journal)
+    let store = InMemoryChatJournalStore(journal)
+    let model = ChatSessionModel(
+      chatName: "chat-s", cwd: "/work/project", readOnly: false, store: store, hostLabel: "homelab"
+    ) { _, _ in stream }
     Task { await model.connect() }
     stream.push(ACPFixture.log(ACPFixture.index(containing: "session/request_permission")))
     let live = await eventually(timeout: 4) { model.link.phase == .live && model.state.turn == .working }
@@ -85,9 +88,15 @@ final class ChatSignInModelTests: XCTestCase {
     model.cancel()
     let stopped = await eventually { stream.writtenText.contains("session/cancel") }
     XCTAssertTrue(stopped)
-    let cleared = await eventually { model.state.queuedItemIds.isEmpty }
-    XCTAssertTrue(cleared)
-    XCTAssertEqual(model.state.items.last?.kind, .notice("Stopped"))
+    let resent = await eventually { stream.writtenText.components(separatedBy: "and then tidy up").count == 3 }
+    XCTAssertTrue(resent, "Stop sends the waiting message again")
+    // The model takes the client's state a frame later.
+    let shown = await eventually {
+      let copies = model.state.items.filter { if case let .user(text, _, _, _) = $0.kind { text == "and then tidy up" } else { false } }
+      return model.state.items.contains { $0.kind == .notice("Stopped") } && copies.count == 1
+    }
+    XCTAssertTrue(shown, "stopped, with the dropped copy gone and the resent one in its place")
+    XCTAssertEqual(model.state.queuedTexts, ["and then tidy up"], "it waits for the stopped turn to end")
     model.leave()
   }
 }

@@ -18,6 +18,7 @@ pub mod question;
 pub mod reducer;
 pub mod slash;
 pub mod tooldetail;
+pub mod verbs;
 
 #[cfg(test)]
 pub(crate) mod fixture;

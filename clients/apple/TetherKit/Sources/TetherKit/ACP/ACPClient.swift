@@ -173,19 +173,25 @@ actor ACPClient {
       "session/set_config_option", ["sessionId": sessionId, "configId": id, "value": value], silent: true)
   }
 
-  func cancel() async throws {
+  /// Returns what was waiting when the cancel landed, read in the same step that withdraws it,
+  /// for the caller to send again. Only a cancel that never reached the agent throws: an answer
+  /// to a pending card that fails afterwards reopens that card instead.
+  @discardableResult
+  func cancel() async throws -> (text: String, images: Int) {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
     try await write(["jsonrpc": "2.0", "method": "session/cancel", "params": ["sessionId": sessionId]])
+    let waiting = builder.state.queuedResend
     journal.entries.append(.init(kind: .cancel, offset: builder.consumedOffset))
     builder.apply(.cancelRequested)
     publish()
     store.save(journal)
     for permission in builder.state.pendingPermissions {
-      try await respond(to: permission.requestId, outcome: ["outcome": "cancelled"], optionId: "cancelled")
+      try? await respond(to: permission.requestId, outcome: ["outcome": "cancelled"], optionId: "cancelled")
     }
     for question in builder.state.pendingQuestions {
-      try await answerQuestion(requestId: question.requestId, action: .cancel)
+      try? await answerQuestion(requestId: question.requestId, action: .cancel)
     }
+    return waiting
   }
 
   /// Journaled and shown before the write, and taken back if it fails, like a permission answer.

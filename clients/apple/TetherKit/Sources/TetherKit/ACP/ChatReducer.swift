@@ -156,6 +156,26 @@ struct ChatState: Codable, Equatable, Sendable {
 
   func isQueued(_ itemId: Int) -> Bool { queuedItemIds.contains(itemId) }
 
+  /// What a Stop sends again: the waiting messages' text as one prompt. Their pictures are not
+  /// kept for it, so they are only counted, for the notice that says so.
+  var queuedResend: (text: String, images: Int) {
+    let images = queuedItemIds.reduce(0) { total, id in
+      guard case let .user(_, count, _, _)? = items.first(where: { $0.id == id })?.kind else { return total }
+      return total + count
+    }
+    return (queuedTexts.joined(separator: "\n\n"), images)
+  }
+
+  /// The text of each message waiting for the running turn, oldest first.
+  var queuedTexts: [String] {
+    queuedItemIds.compactMap { id in
+      guard case let .user(text, _, _, _)? = items.first(where: { $0.id == id })?.kind,
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else { return nil }
+      return text
+    }
+  }
+
   func option(id: String) -> ACPConfigOption? { configOptions.first { $0.id == id } }
 
   /// The human name of the option's current choice, for a chip.
@@ -224,11 +244,19 @@ enum ChatReducer {
     case let .userPrompt(text, imageCount, offset, requestId, images):
       let itemId = next.nextItemId
       append(.user(text: text, imageCount: imageCount, offset: offset, images: images), to: &next)
-      if !next.inFlight.isEmpty { next.queuedItemIds.append(itemId) }
+      if !next.inFlight.isEmpty {
+        next.queuedItemIds.append(itemId)
+        moveToEnd(itemId, in: &next)
+      }
       next.inFlight.append(.init(itemId: itemId, requestId: requestId))
       next.turn = .working
     case .cancelRequested:
+      // The agent drops every prompt that has not started, so they leave the transcript; the
+      // client that pressed Stop sends their text again as one new prompt.
+      let queued = Set(next.queuedItemIds)
       next.queuedItemIds = []
+      next.items.removeAll { queued.contains($0.id) }
+      next.inFlight.removeAll { queued.contains($0.itemId) }
       next.startPending = false
       if next.turn == .working { append(.notice("Stopped"), to: &next) }
     case let .silentRequest(requestId):
@@ -265,9 +293,37 @@ enum ChatReducer {
     return next
   }
 
+  /// Queued messages wait at the end of `items` in the order they were sent; everything else goes
+  /// in before them, so the running turn keeps streaming into its own rows.
+  private static func openEnd(_ state: ChatState) -> Int {
+    var end = state.items.count
+    while end > 0, state.queuedItemIds.contains(state.items[end - 1].id) { end -= 1 }
+    return end
+  }
+
+  /// The index of the last item that is not waiting in the queue.
+  private static func lastOpen(_ state: ChatState) -> Int? {
+    let end = openEnd(state)
+    return end > 0 ? end - 1 : nil
+  }
+
   private static func append(_ kind: ChatItem.Kind, to state: inout ChatState) {
-    state.items.append(ChatItem(id: state.nextItemId, kind: kind))
+    state.items.insert(ChatItem(id: state.nextItemId, kind: kind), at: openEnd(state))
     state.nextItemId += 1
+  }
+
+  private static func moveToEnd(_ itemId: Int, in state: inout ChatState) {
+    guard let index = state.items.firstIndex(where: { $0.id == itemId }) else { return }
+    state.items.append(state.items.remove(at: index))
+  }
+
+  /// A queued message that starts joins the transcript below what came before it, ahead of the
+  /// messages still waiting.
+  private static func unqueue(_ itemId: Int, in state: inout ChatState) {
+    state.queuedItemIds.removeAll { $0 == itemId }
+    guard let index = state.items.firstIndex(where: { $0.id == itemId }) else { return }
+    let item = state.items.remove(at: index)
+    state.items.insert(item, at: openEnd(state))
   }
 
   private static func apply(_ message: ACPInbound, to state: inout ChatState) {
@@ -333,7 +389,7 @@ enum ChatReducer {
     switch update {
     case let .agentMessage(text, messageId):
       startQueued(in: &state)
-      if let last = state.items.indices.last,
+      if let last = lastOpen(state),
         case let .assistant(existing, existingId) = state.items[last].kind, existingId == messageId
       {
         state.items[last].kind = .assistant(text: existing + text, messageId: messageId)
@@ -342,7 +398,7 @@ enum ChatReducer {
       }
     case let .agentImage(ref, messageId):
       startQueued(in: &state)
-      if let last = state.items.indices.last,
+      if let last = lastOpen(state),
         case let .images(existing, existingId) = state.items[last].kind, existingId == messageId
       {
         state.items[last].kind = .images(existing + [ref], messageId: messageId)
@@ -351,14 +407,14 @@ enum ChatReducer {
       }
     case let .agentThought(text):
       startQueued(in: &state)
-      if let last = state.items.indices.last, case let .thought(existing) = state.items[last].kind {
+      if let last = lastOpen(state), case let .thought(existing) = state.items[last].kind {
         state.items[last].kind = .thought(text: existing + text)
       } else {
         append(.thought(text: text), to: &state)
       }
     case let .userMessage(text, messageId):
       if let first = state.queuedItemIds.first {
-        state.queuedItemIds.removeFirst()
+        unqueue(first, in: &state)
         state.startPending = false
         if let index = state.items.firstIndex(where: { $0.id == first }),
           case let .user(echoed, _, _, _) = state.items[index].kind, echoed == text
@@ -366,7 +422,7 @@ enum ChatReducer {
           return
         }
       }
-      if let last = state.items.indices.last, case let .user(existing, count, offset, refs) = state.items[last].kind,
+      if let last = lastOpen(state), case let .user(existing, count, offset, refs) = state.items[last].kind,
         messageId == nil || state.lastUserMessageId == nil || messageId == state.lastUserMessageId
       {
         state.items[last].kind = .user(text: existing + text, imageCount: count, offset: offset, images: refs)
@@ -382,7 +438,7 @@ enum ChatReducer {
     case let .plan(entries):
       startQueued(in: &state)
       var replaced = false
-      for index in state.items.indices.reversed() {
+      for index in state.items.indices.prefix(openEnd(state)).reversed() {
         if case .user = state.items[index].kind { break }
         if case .plan = state.items[index].kind {
           state.items[index].kind = .plan(entries)
@@ -413,14 +469,14 @@ enum ChatReducer {
   }
 
   private static func markSignedOut(in state: inout ChatState) {
-    if case .signedOut? = state.items.last?.kind { return }
+    if let last = lastOpen(state), case .signedOut = state.items[last].kind { return }
     append(.signedOut, to: &state)
   }
 
   /// Agent output after a prompt ended is what tells the next waiting message has begun.
   private static func startQueued(in state: inout ChatState) {
-    guard state.startPending, !state.queuedItemIds.isEmpty else { return }
-    state.queuedItemIds.removeFirst()
+    guard state.startPending, let first = state.queuedItemIds.first else { return }
+    unqueue(first, in: &state)
     state.startPending = false
   }
 
@@ -435,7 +491,7 @@ enum ChatReducer {
     var finished: FinishedPrompt?
     if let index {
       let prompt = state.inFlight.remove(at: index)
-      state.queuedItemIds.removeAll { $0 == prompt.itemId }
+      if state.queuedItemIds.contains(prompt.itemId) { unqueue(prompt.itemId, in: &state) }
       finished = FinishedPrompt(itemId: prompt.itemId)
       state.startPending = !state.queuedItemIds.isEmpty
     }

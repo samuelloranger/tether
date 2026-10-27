@@ -70,7 +70,9 @@ public struct SSHTerminalView: View {
         .accessibilityHidden(content.showsChat)
         .ignoresSafeArea(.keyboard, edges: content.showsChat ? .bottom : [])
       if let route = content.chat {
-        EmbeddedChat(route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) })
+        EmbeddedChat(
+          route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) },
+          onContinueInTerminal: { id, cwd in await continueInTerminal(chat: route.name, sessionId: id, cwd: cwd) })
           .id(route.name)
       }
       if drawerProgress > 0 {
@@ -200,7 +202,7 @@ public struct SSHTerminalView: View {
       openChat(ChatRoute.opening(
         name: name, chats: controller.chats, journal: UserDefaultsChatJournalStore(name: name).load()))
     }
-    .onChange(of: controller.attach) { _, _ in
+    .onChange(of: controller.sessionSwitches) { _, _ in
       if content.showsChat { showTerminal() }
     }
     .onChange(of: drawerProgress > 0 || content.showsChat, initial: true) { _, hidden in accessory.visible = !hidden }
@@ -271,6 +273,20 @@ public struct SSHTerminalView: View {
       content.chatKilled(row.name)
       Task { await controller.killChat(row.name) }
     }
+  }
+
+  /// Two Claude Codes on one conversation would both write it, so the chat's agent ends first; if
+  /// the host does not confirm that, the chat stays and the reason is returned for it to show.
+  private func continueInTerminal(chat: String, sessionId: String, cwd: String) async -> String? {
+    guard await controller.endChatAgent(chat) else {
+      return "Couldn't end the chat on the host, so it stays here. Try again."
+    }
+    await controller.forgetChat(chat)
+    let name = "claude-" + String(sessionId.prefix(8))
+    let command = ZmxSwitch.resumeCommand(sessionId: sessionId, cwd: cwd)
+    showTerminal()
+    if let tabs { tabs.open(name, running: command) } else { await controller.openSession(name, running: command) }
+    return nil
   }
 
   private func openChat(_ route: ChatRoute) {

@@ -173,6 +173,21 @@ public final class MacSessionTabs {
     }
   }
 
+  /// A new tab whose session runs `command` (already shell-quoted) in place of a login shell.
+  func open(_ name: String, running command: String) {
+    guard !state.names.contains(name) else { return select(name) }
+    teardown(state.open(name))
+    let controller = make(name, false, nil)
+    controller.launchCommands[name] = command
+    track(controller)
+    controllers[name] = controller
+    Task {
+      await controller.connect()
+      try? await Task.sleep(nanoseconds: 1_500_000_000)
+      await refresh()
+    }
+  }
+
   /// Never recreates: killing the last session leaves the empty state.
   func kill(_ name: String) {
     guard let victim = controllers[name] else {
