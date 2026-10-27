@@ -483,7 +483,9 @@ struct ToolCallRow: View {
     .accessibilityHint(expandable ? (expanded ? "Hides the details" : "Shows the details") : "")
   }
 
-  private var statusGlyph: some View { ToolStatusGlyph(status: call.status, active: call.isRunning) }
+  private var statusGlyph: some View {
+    ToolStatusGlyph(status: call.status, active: call.isRunning || call.isBackgroundRunning)
+  }
 
   private var statusWord: String {
     switch call.status {
