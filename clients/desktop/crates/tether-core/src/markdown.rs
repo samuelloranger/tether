@@ -21,6 +21,7 @@ pub enum ItemKind {
     Code,
     Quote,
     Rule,
+    Table,
 }
 
 /// One row of the rendered document. `level` is the heading level (1–3) for a heading and
@@ -238,7 +239,7 @@ impl Builder {
                 let table = self.table.take().unwrap_or_default();
                 let links = std::mem::take(&mut self.table_links);
                 self.out.push(Item {
-                    kind: ItemKind::Code,
+                    kind: ItemKind::Table,
                     level: 0,
                     text: render_table(&table),
                     links,
@@ -514,7 +515,7 @@ mod tests {
     #[test]
     fn a_table_becomes_aligned_monospace_columns() {
         let list = items("| name | n |\n|---|--:|\n| **alpha** | 1 |\n| b | 22 |\n\nafter");
-        assert_eq!(list[0].kind, ItemKind::Code);
+        assert_eq!(list[0].kind, ItemKind::Table);
         assert_eq!(
             list[0].text,
             "name   n\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\nalpha  1\nb      22"

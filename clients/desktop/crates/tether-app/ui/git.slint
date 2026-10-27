@@ -38,7 +38,7 @@ export struct MdLinkVm {
     url: string,
 }
 
-// kind: 0 heading, 1 paragraph, 2 bullet, 3 numbered, 4 code, 5 quote, 6 rule.
+// kind: 0 heading, 1 paragraph, 2 bullet, 3 numbered, 4 code, 5 quote, 6 rule, 7 table.
 export struct MdItemVm {
     kind: int,
     level: int,
@@ -467,11 +467,42 @@ export component GitSidePanel inherits Rectangle {
     }
 }
 
+// Tables are padded monospace columns. Wrap would split rows and destroy their alignment.
+// Keep their intrinsic width inside a horizontal scroller, including in narrow side panes.
+export component MdTable inherits Rectangle {
+    in property <string> text;
+    background: Tokens.input;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    height: table.preferred-height + 32px;
+    ScrollView {
+        x: 10px;
+        y: 8px;
+        width: parent.width - 20px;
+        height: parent.height - 16px;
+        content-width: max(self.visible-width, table.preferred-width);
+        content-height: table.preferred-height;
+        vertical-scrollbar-policy: always-off;
+        table := TextInput {
+            text: root.text;
+            read-only: true;
+            single-line: false;
+            wrap: no-wrap;
+            font-family: Tokens.mono-font;
+            font-size: 12px;
+            color: Tokens.text;
+            selection-background-color: Tokens.accent.with-alpha(0.35);
+        }
+    }
+}
+
 component MdBlock inherits VerticalLayout {
     in property <MdItemVm> item;
     spacing: 4px;
     padding-top: item.kind == 0 ? 10px : 2px;
     if item.kind == 6: Rectangle { height: 1px; background: Tokens.border; }
+    if item.kind == 7: MdTable { text: item.text; }
     if item.kind == 4: Rectangle {
         background: Tokens.input;
         border-radius: 8px;

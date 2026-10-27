@@ -1,6 +1,6 @@
 import { Tokens } from "tokens.slint";
 import { IconButton, Segment, ConfirmDialog } from "components.slint";
-import { MdLinkVm, MdItemVm, DiffLineVm } from "git.slint";
+import { MdLinkVm, MdItemVm, MdTable, DiffLineVm } from "git.slint";
 import { Heat, TextDot } from "agents.slint";
 import { ScrollView } from "std-widgets.slint";
 
@@ -507,6 +507,7 @@ component Md inherits VerticalLayout {
     in property <color> ink: Tokens.text;
     spacing: 4px;
     if root.kind == 6: Rectangle { height: 1px; background: Tokens.border; }
+    if root.kind == 7: MdTable { text: root.text; }
     if root.kind == 4: Rectangle {
         background: Tokens.input;
         border-radius: 8px;

@@ -106,6 +106,21 @@ mod tests {
     }
 
     #[test]
+    fn wide_tables_keep_their_columns_and_links_without_code_truncation() {
+        let finding = "A long finding. ".repeat(150);
+        let table = format!(
+            "| Severity | Finding | Action |\n|---|---|---|\n| High | {finding} | [Back up](https://example.test/backup) |"
+        );
+        let parsed = blocks(Some(&table), None);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].kind, ItemKind::Table);
+        assert_eq!(parsed[0].text.lines().count(), 3);
+        assert!(parsed[0].text.contains(finding.trim_end()));
+        assert!(parsed[0].text.lines().last().unwrap().ends_with("Back up"));
+        assert_eq!(parsed[0].links[0].url, "https://example.test/backup");
+    }
+
+    #[test]
     fn shell_output_arrives_as_a_code_block_not_literal_backticks() {
         let b = blocks(Some("```console\nports 8081 closed\n```"), Some("ignored"));
         assert_eq!(b, [code("ports 8081 closed")]);
