@@ -12,8 +12,8 @@ use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
     AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatTaskVm, ChatVm, CtlChoiceVm,
-    CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, PaletteItemVm, PermOptionVm,
-    QChoiceVm, QFieldVm, SavedSessionVm,
+    CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
+    PermOptionVm, QChoiceVm, QFieldVm, SavedSessionVm,
 };
 
 thread_local! {
@@ -405,6 +405,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                 state: i32::from(t.state),
                 label: t.label.as_str().into(),
                 active: t.active,
+                agent: i32::from(t.agent),
             })
             .collect(),
     ));
@@ -417,7 +418,37 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             if !DIALOG_SHOWN.replace(true) {
                 vm.set_nc_mode(i32::from(nc.mode));
                 vm.set_nc_folder(nc.folder.as_str().into());
+                // `TETHER_DEV_CHAT_OPTIONS` opens the Options row for a screenshot.
+                vm.set_nc_opts_open(
+                    cfg!(debug_assertions)
+                        && crate::app::dev_env("TETHER_DEV_CHAT_OPTIONS").is_some(),
+                );
             }
+            vm.set_nc_agent(i32::from(nc.agent));
+            vm.set_nc_summary(nc.summary.as_str().into());
+            vm.set_nc_note(nc.note.as_str().into());
+            vm.set_nc_is_reset(nc.reset);
+            vm.set_nc_menus(model(
+                nc.menus
+                    .iter()
+                    .map(|m| NcMenuVm {
+                        id: m.id.as_str().into(),
+                        name: m.name.as_str().into(),
+                        value_name: m.value_name.as_str().into(),
+                        changed: m.changed,
+                        choices: model(
+                            m.choices
+                                .iter()
+                                .map(|c| NcChoiceVm {
+                                    value: c.value.as_str().into(),
+                                    name: c.name.as_str().into(),
+                                    selected: c.selected,
+                                })
+                                .collect(),
+                        ),
+                    })
+                    .collect(),
+            ));
             vm.set_nc_busy(nc.busy);
             vm.set_nc_error(nc.error.as_str().into());
             vm.set_nc_continuing(nc.continuing);
@@ -459,6 +490,8 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_folder_copied(h.folder_copied);
     vm.set_phase(i32::from(h.phase));
     vm.set_phase_word(h.phase_word.as_str().into());
+    vm.set_agent(i32::from(h.agent));
+    vm.set_agent_label(h.agent_label.as_str().into());
     vm.set_has_status(!h.model.is_empty() || !h.mode.is_empty());
     vm.set_model_name(h.model.as_str().into());
     vm.set_mode_name(h.mode.as_str().into());
@@ -796,6 +829,21 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_nc_folder_edited(|f| send(ChatMsg::NewChatFolder(f.into())));
     vm.on_nc_continue(|id| send(ChatMsg::NewChatContinue(id.into())));
     vm.on_nc_retry(|| send(ChatMsg::NewChatRetry));
+    vm.on_nc_agent_picked(|i| {
+        if let Some(agent) = usize::try_from(i)
+            .ok()
+            .and_then(|i| tether_core::acp::agent::ALL.get(i))
+        {
+            send(ChatMsg::NewChatAgent(agent.key.to_string()));
+        }
+    });
+    vm.on_nc_pick(|id, value| {
+        send(ChatMsg::NewChatPick {
+            id: id.into(),
+            value: value.into(),
+        })
+    });
+    vm.on_nc_reset(|| send(ChatMsg::NewChatReset));
 }
 
 /// A machine opens with no chat shown: whatever the last one left goes.
