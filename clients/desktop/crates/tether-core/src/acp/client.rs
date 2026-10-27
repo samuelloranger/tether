@@ -18,13 +18,21 @@ use super::message::{AcpId, AcpResult, Inbound, sorted};
 use super::question::{QuestionAction, QuestionValue};
 use super::reducer::{ChatEvent, ChatState, LinkState, Turn};
 
+fn agent_error_text(code: i64, message: &str) -> String {
+    if message.is_empty() {
+        format!("The agent reported an error (code {code}).")
+    } else {
+        message.to_string()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientError {
-    #[error("connection lost")]
+    #[error("The connection to the agent was lost.")]
     ConnectionLost,
-    #[error("no session")]
+    #[error("The agent stopped before the chat started.")]
     NoSession,
-    #[error("agent error {code}: {message}")]
+    #[error("{}", agent_error_text(*code, message))]
     Agent { code: i64, message: String },
 }
 

@@ -255,7 +255,7 @@ final class ChatSessionModel {
         return
       }
       // The transcript already carries the sign-in row; the link itself is fine.
-      if !ChatAuthError.matches(error) { fail(error) }
+      if !ChatAuthError.matches(error) { fail(error, started: true) }
     }
   }
 
@@ -569,10 +569,10 @@ final class ChatSessionModel {
     optionsCache.save(state.configOptions, agent: agent)
   }
 
-  private func fail(_ error: Error) {
+  private func fail(_ error: Error, started: Bool = false) {
     link.dialFailed()
     flushHeld()
-    notice = "Couldn't reach the host: \(error.localizedDescription)"
+    notice = ACPClientError.hostFailureText(error, started: started)
   }
 
   private func detachClient() {

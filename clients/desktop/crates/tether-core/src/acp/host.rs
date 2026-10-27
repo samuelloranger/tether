@@ -710,6 +710,7 @@ pub enum HostProblem {
     TetherForeign,
     TetherOutdated,
     NodeMissing,
+    OpencodeMissing,
 }
 
 /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter.
@@ -725,6 +726,10 @@ pub const HOST_CHECK_SCRIPT: &str = concat!(
     "else echo tether=missing; fi",
     "; ",
     "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
+    "; ",
+    "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] ",
+    "|| PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; ",
+    "then echo opencode=ok; else echo opencode=missing; fi",
 );
 
 pub fn host_check_command() -> String {
@@ -760,7 +765,23 @@ pub fn host_problems(output: &str) -> Vec<HostProblem> {
     if lines.contains(&"node=missing") {
         found.push(HostProblem::NodeMissing);
     }
+    if lines.contains(&"opencode=missing") {
+        found.push(HostProblem::OpencodeMissing);
+    }
     found
+}
+
+/// Node serves the npx-run agents; opencode is its own binary.
+pub fn host_problems_for(output: &str, agent: &AgentProfile) -> Vec<HostProblem> {
+    let opencode = agent.key == agent::OPENCODE.key;
+    host_problems(output)
+        .into_iter()
+        .filter(|p| match p {
+            HostProblem::OpencodeMissing => opencode,
+            HostProblem::NodeMissing => !opencode,
+            _ => true,
+        })
+        .collect()
 }
 
 /// Whether the host's `tether` starts holders that take several clients.
@@ -791,6 +812,11 @@ pub fn host_problem_message(problems: &[HostProblem], host: &str) -> Option<Stri
     }
     if problems.contains(&HostProblem::NodeMissing) {
         parts.push(format!("Node.js is required on {host}."));
+    }
+    if problems.contains(&HostProblem::OpencodeMissing) {
+        parts.push(format!(
+            "Install opencode on {host} (opencode.ai), or check it is on the PATH of a login shell."
+        ));
     }
     Some(parts.join(" "))
 }
@@ -887,14 +913,18 @@ mod tests {
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp sessions '/x' --limit 20 --agent-cmd 'npx -y @agentclientprotocol/codex-acp@2.3.0' 2>&1"
         );
         assert!(
-            sessions_command("/x", 5, &agent::OPENCODE).contains("--agent-cmd 'opencode acp' 2>&1")
+            sessions_command("/x", 5, &agent::OPENCODE)
+                .contains(r#"--agent-cmd 'PATH="$HOME/.opencode/bin:$PATH" opencode acp' 2>&1"#)
         );
     }
 
     #[test]
     fn attach_spawns_the_picked_agent() {
         let command = attach_command("c", "/x", Some(&agent::OPENCODE), 0, None);
-        assert!(command.contains("--spawn 'opencode acp' --cwd '/x'"));
+        assert!(
+            command
+                .contains(r#"--spawn 'PATH="$HOME/.opencode/bin:$PATH" opencode acp' --cwd '/x'"#)
+        );
         let command = attach_command("c", "/x", Some(&agent::CODEX), 0, None);
         assert!(command.contains("--spawn 'npx -y @agentclientprotocol/codex-acp@2.3.0'"));
     }
@@ -1325,6 +1355,7 @@ mod tests {
                 "T=\"\"; if command -v timeout >/dev/null 2>&1; then T=\"timeout 5\"; fi",
                 "if command -v tether >/dev/null 2>&1; then echo tether=found; echo \"version=$($T tether version --json </dev/null 2>/dev/null | head -n 1)\"; else echo tether=missing; fi",
                 "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
+                "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] || PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; then echo opencode=ok; else echo opencode=missing; fi",
             ]
             .join("; ")
         );
@@ -1399,6 +1430,26 @@ mod tests {
     }
 
     #[test]
+    fn the_report_judges_only_what_the_picked_agent_needs() {
+        use HostProblem::*;
+        let missing = format!("{OURS}opencode=missing\n");
+        assert_eq!(host_problems(&missing), [OpencodeMissing]);
+        assert_eq!(
+            host_problems_for(&missing, &agent::OPENCODE),
+            [OpencodeMissing]
+        );
+        assert_eq!(host_problems_for(&missing, &agent::CLAUDE), []);
+        assert_eq!(host_problems_for(&missing, &agent::CODEX), []);
+        let no_node = "node=missing\nopencode=ok\n";
+        assert_eq!(host_problems_for(no_node, &agent::CODEX), [NodeMissing]);
+        assert_eq!(host_problems_for(no_node, &agent::OPENCODE), []);
+        assert_eq!(host_problems(&format!("{OURS}opencode=ok\n")), []);
+        assert!(HOST_CHECK_SCRIPT.contains("$HOME/.opencode/bin/opencode"));
+        assert!(HOST_CHECK_SCRIPT.contains(r#"-lc "command -v opencode""#));
+        assert!(!HOST_CHECK_SCRIPT.contains('\''));
+    }
+
+    #[test]
     fn each_problem_has_a_plain_message_naming_the_host() {
         use HostProblem::*;
         assert_eq!(host_problem_message(&[], "box"), None);
@@ -1413,6 +1464,10 @@ mod tests {
         );
         assert_eq!(msg(&[TetherOutdated]), "Update tether on box (install.sh).");
         assert_eq!(msg(&[NodeMissing]), "Node.js is required on box.");
+        assert_eq!(
+            msg(&[OpencodeMissing]),
+            "Install opencode on box (opencode.ai), or check it is on the PATH of a login shell."
+        );
         assert_eq!(
             msg(&[TetherMissing, NodeMissing]),
             "Install tether on box (install.sh). tether-notify is now called tether. Node.js is required on box."

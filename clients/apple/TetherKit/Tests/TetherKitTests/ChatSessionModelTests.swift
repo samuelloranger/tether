@@ -108,6 +108,42 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  func test_an_agent_that_exits_during_initialize_or_session_new_reads_stopped() async throws {
+    for answeredInitialize in [false, true] {
+      let stream = ScriptedByteStream()
+      let model = model(Dialer([stream]), journal: ChatJournal())
+      Task { await model.connect() }
+      let asked = await eventually { stream.writtenText.contains("initialize") }
+      XCTAssertTrue(asked)
+      if answeredInitialize {
+        stream.push(Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}\n".utf8))
+        let opening = await eventually { stream.writtenText.contains("session/new") }
+        XCTAssertTrue(opening)
+      }
+      await stream.close()
+      let told = await eventually { model.notice != nil }
+      XCTAssertTrue(told)
+      XCTAssertEqual(model.notice, "The agent stopped before the chat started.")
+      model.leave()
+    }
+  }
+
+  func test_an_agent_error_while_starting_shows_its_message_without_the_host_prefix() async throws {
+    for (message, expected) in [("model unavailable", "model unavailable"), ("", "The agent reported an error (code -32603).")] {
+      let stream = ScriptedByteStream()
+      let model = model(Dialer([stream]), journal: ChatJournal())
+      Task { await model.connect() }
+      let asked = await eventually { stream.writtenText.contains("initialize") }
+      XCTAssertTrue(asked)
+      stream.push(
+        Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32603,\"message\":\"\(message)\"}}\n".utf8))
+      let told = await eventually { model.notice != nil }
+      XCTAssertTrue(told)
+      XCTAssertEqual(model.notice, expected)
+      model.leave()
+    }
+  }
+
   func test_a_failed_dial_is_lost_with_a_note_and_a_second_try_works() async throws {
     let stream = ScriptedByteStream()
     let dialer = Dialer([])

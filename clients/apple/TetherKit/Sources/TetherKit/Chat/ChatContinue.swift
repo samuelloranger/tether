@@ -119,7 +119,7 @@ enum ChatContinueLoader {
     } catch is ChatDeadlineExceeded {
       return .failed("The host took too long to answer.")
     } catch {
-      return .failed("Couldn't reach the host: \(error.localizedDescription)")
+      return .failed(ACPClientError.hostFailureText(error))
     }
   }
 
