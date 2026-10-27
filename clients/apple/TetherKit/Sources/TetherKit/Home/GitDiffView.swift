@@ -65,7 +65,7 @@ struct GitDiffView: View {
         }
       }
       .overlay(alignment: .bottom) { if let message = controller.gitActionMessage { Text(message).font(.caption.monospaced()).padding(12).background(TetherColors.surface, in: Capsule()).padding(.bottom, 12) } }
-      .task(id: "\(tab.rawValue)-\(scenePhase == .active)") {
+      .task(id: "\(tab.rawValue)-\(scenePhase == .active)-\(controller.gitGeneration)") {
         while !Task.isCancelled, scenePhase == .active {
           await refreshVisiblePayload()
           loadedOnce = true

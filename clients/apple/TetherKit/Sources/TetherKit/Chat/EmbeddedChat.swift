@@ -6,6 +6,9 @@ struct EmbeddedChat: View {
   let needsYou: Bool
   let onContinueInTerminal: (String, String) async -> String?
   @State private var model: ChatSessionModel
+  @State private var showGit = false
+  private let controller: SSHTerminalController
+  private let folder: String
 
   init(
     route: ChatRoute, controller: SSHTerminalController, needsYou: Bool = false, onSessions: @escaping () -> Void,
@@ -14,13 +17,25 @@ struct EmbeddedChat: View {
     self.onSessions = onSessions
     self.needsYou = needsYou
     self.onContinueInTerminal = onContinueInTerminal
+    self.controller = controller
+    folder = route.cwd
     _model = State(initialValue: controller.makeChatModel(route: route))
   }
 
   var body: some View {
     NavigationStack {
       ChatView(
-        model: model, onSessions: onSessions, sessionsNeedYou: needsYou, onContinueInTerminal: onContinueInTerminal)
+        model: model, onSessions: onSessions, sessionsNeedYou: needsYou, onContinueInTerminal: onContinueInTerminal,
+        onShowGit: {
+          controller.setGitTarget(GitTarget.forChat(folder: folder))
+          showGit = true
+        },
+        onUpload: { data, name in await controller.sendFile(data: data, filename: name, to: .uploads) },
+        uploads: controller.chatUploads)
+    }
+    .sheet(isPresented: $showGit, onDismiss: { controller.setGitTarget(.session) }) {
+      GitDiffView(controller: controller) { showGit = false }
+        .onAppear { controller.setGitTarget(GitTarget.forChat(folder: folder)) }
     }
     .tint(TetherColors.accent)
   }

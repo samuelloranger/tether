@@ -1060,7 +1060,8 @@ public struct ChatFixtureRoot: View {
         ChatView(
           model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasSuffix("-kb") || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "images-top" || mode == "send-long-top" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
-          openControls: mode == "controls-sheet", seedAttachments: mode == "attach",
+          openControls: mode == "controls-sheet", onShowGit: {}, onUpload: { _, _ in nil}, uploads: nil,
+          seedAttachments: mode == "attach",
           sendDraft: mode == "send" || mode == "send-long" ? ChatFixture.sendDraft : nil,
           probeLastRow: mode == "send-long" || mode == "send-long-top" || mode.hasPrefix("open-"))
       }

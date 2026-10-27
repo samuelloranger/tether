@@ -259,8 +259,10 @@ public struct SSHTerminalView: View {
         onCancel: { showNewChat = false }
       )
     }
-    .sheet(isPresented: $showGit) {
+    .sheet(isPresented: $showGit, onDismiss: { controller.setGitTarget(.session) }) {
       GitDiffView(controller: controller) { showGit = false }
+        // Set again on appear: a sheet queued behind a chat's own Git sheet opens after that one reset it.
+        .onAppear { controller.setGitTarget(content.chat.map { GitTarget.forChat(folder: $0.cwd) } ?? .session) }
         .macSheetSize(width: 900, height: 640, large: true)
     }
     .sheet(isPresented: $showHistory) {
@@ -794,7 +796,11 @@ public struct SSHTerminalView: View {
     actions.previousSession = { tabs.step(-1) }
     actions.killSession = { pendingKill = tabs.state.active }
     actions.showHistory = { showHistory = true }
-    actions.showGit = { showGit = true }
+    // The menu bar's Git follows what is in front: a chat's folder, else the session's.
+    actions.showGit = {
+      if let route = content.chat { controller.setGitTarget(GitTarget.forChat(folder: route.cwd)) }
+      showGit = true
+    }
     actions.sendFile = { showFileImporter = true }
     actions.openSettings = { showSettings = true }
     actions.backToMachines = onHome

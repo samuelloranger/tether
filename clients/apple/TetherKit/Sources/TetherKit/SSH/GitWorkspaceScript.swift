@@ -70,6 +70,12 @@ enum GitWorkspaceScript {
       + (announce ? "printf '%s%s\\034' \"$s\" \"$d\"; " : "")
   }
 
+  /// `enterCwd` for a fixed folder (an open chat's) instead of a session's shell.
+  static func enterFolder(_ folder: String, announce: Bool = true) -> String {
+    "d=\(shellQuote(folder)); if ! cd \"$d\" 2>/dev/null; then printf '%s' \(noCwd); exit 0; fi; "
+      + (announce ? "printf 'P%s\\034' \"$d\"; " : "")
+  }
+
   /// Splits `enterCwd`'s announcement from the command's output; nil when there was no cwd.
   static func splitCwd(_ output: String) -> (cwd: String, source: CwdSource, output: String)? {
     guard output != noCwd, let marker = output.firstIndex(of: "\u{1C}"), let flag = output.first else { return nil }
