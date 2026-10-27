@@ -17,9 +17,6 @@ pub const PATCH_BYTE_CAP: usize = 2 * 1024 * 1024;
 /// Whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` say, the parser reads `a/` and
 /// `b/` paths.
 const PATCH_OPTIONS: &str = "--no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/";
-/// `git hash-object -t tree /dev/null`: what an unborn branch diffs against.
-const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-
 /// An absolute directory that is safe to put inside a quoted command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoDir(String);
@@ -93,7 +90,7 @@ pub fn workspace_command(dir: &RepoDir) -> String {
     let missing = shell_quote(GH_MISSING);
     wrap(&format!(
         "if git -C {q} rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-         if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base={EMPTY_TREE}; fi; \
+         if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base=$(git -C {q} hash-object -t tree /dev/null); fi; \
          git -C {q} -c core.quotepath=off --no-pager diff {PATCH_OPTIONS} \"$base\" 2>/dev/null | head -c {cap}; printf '\\035'; \
          git -C {q} rev-parse --show-toplevel 2>/dev/null; printf '%s\\n' \"$(git -C {q} branch --show-current 2>/dev/null)\"; \
          u=$(git -C {q} rev-parse --abbrev-ref --symbolic-full-name '@{{u}}' 2>/dev/null) && c=$(git -C {q} rev-list --left-right --count 'HEAD...@{{u}}' 2>/dev/null) || {{ u=; c=; }}; \
@@ -130,7 +127,9 @@ pub fn commit_command(dir: &RepoDir, id: &str) -> Option<String> {
 pub fn untracked_diff_command(top: &RepoDir, relative: &str) -> Option<String> {
     valid_repo_relative(relative).then(|| {
         wrap(&format!(
-            "cd {} && git -c core.quotepath=off --no-pager diff --no-index {PATCH_OPTIONS} -- /dev/null {} 2>/dev/null | head -c {}",
+            // `diff --no-index` exits 1 when the file differs, which a pipe would hide; the
+            // `false` keeps that status, and a folder that can't be entered says 2.
+            "if cd {} 2>/dev/null; then git -c core.quotepath=off --no-pager diff --no-index {PATCH_OPTIONS} -- /dev/null {} 2>/dev/null | head -c {}; false; else echo \"Couldn't open the repository folder.\"; (exit 2); fi",
             top.q(),
             shell_quote(relative),
             PATCH_BYTE_CAP + 1
@@ -1328,7 +1327,10 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
             command.contains("--src-prefix=a/ --dst-prefix=b/"),
             "{command}"
         );
-        assert!(command.contains(EMPTY_TREE), "{command}");
+        assert!(
+            command.contains("hash-object -t tree /dev/null"),
+            "an unborn branch diffs against the empty tree of the repository's own hash"
+        );
         assert!(command.contains("head -c 2097153"), "{command}");
         let commit = commit_command(&RepoDir::new("/r").unwrap(), "abc1234").unwrap();
         assert!(

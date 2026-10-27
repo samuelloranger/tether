@@ -1209,6 +1209,10 @@ pub fn commit_result(raw: Result<String, String>) -> Result<Patch, String> {
 pub fn untracked_result(raw: Result<String, String>) -> Result<Patch, String> {
     let output = raw?;
     if let (text, Some(1)) = git::unwrap_output(&output) {
+        // Even an empty file diffs with a header; nothing at all means git didn't run.
+        if text.trim().is_empty() {
+            return Err("Couldn't read the file.".into());
+        }
         return patch_result(Ok(text));
     }
     patch_result(failure(Ok(output)))
@@ -1483,8 +1487,14 @@ mod tests {
     #[test]
     fn an_untracked_diff_that_could_not_run_says_why() {
         assert_eq!(
-            untracked_result(Ok("sh: cd: can't cd\n__TETHER_RC__2".into())),
-            Err("sh: cd: can't cd".into())
+            untracked_result(Ok(
+                "Couldn't open the repository folder.\n__TETHER_RC__2".into()
+            )),
+            Err("Couldn't open the repository folder.".into())
+        );
+        assert_eq!(
+            untracked_result(Ok("\n__TETHER_RC__1".into())),
+            Err("Couldn't read the file.".into())
         );
         assert!(
             untracked_result(Ok("\n__TETHER_RC__0".into()))
