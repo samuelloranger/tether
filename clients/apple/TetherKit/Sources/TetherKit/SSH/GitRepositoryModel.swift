@@ -78,11 +78,32 @@ public enum GitMergeMethod: String, Equatable, Sendable, Identifiable {
   }
 }
 
+/// Where the branch stands against its upstream.
+public struct GitBranchStatus: Equatable, Sendable {
+  public let upstream: String
+  public let ahead: Int
+  public let behind: Int
+
+  /// `↑2 ↓1`: a count shows only when it is not zero.
+  public var counts: String {
+    [ahead > 0 ? "↑\(ahead)" : nil, behind > 0 ? "↓\(behind)" : nil].compactMap { $0 }.joined(separator: " ")
+  }
+}
+
 /// Parses machine-readable output from the remote repository commands.
 public enum GitRepositoryModel {
   /// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e.
   public static func branch(from output: String) -> String {
     output.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// The upstream's name and `rev-list --left-right --count HEAD...@{u}`; both are empty
+  /// without an upstream or on a detached HEAD.
+  public static func branchStatus(upstream: String, counts: String) -> GitBranchStatus? {
+    let name = upstream.trimmingCharacters(in: .whitespacesAndNewlines)
+    let numbers = counts.split(whereSeparator: \.isWhitespace).map { Int($0) }
+    guard !name.isEmpty, numbers.count >= 2, let ahead = numbers[0], let behind = numbers[1] else { return nil }
+    return GitBranchStatus(upstream: name, ahead: ahead, behind: behind)
   }
 
   public static func commits(from output: String) -> [GitCommit] {

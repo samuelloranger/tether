@@ -11,9 +11,12 @@ pub const NOT_A_REPO: &str = "__TETHER_NOTREPO__";
 /// Emitted when `gh` is absent, so that is distinguishable from gh running and refusing.
 pub const GH_MISSING: &str = "__TETHER_NO_GH__";
 const RC_MARKER: &str = "\n__TETHER_RC__";
-/// Larger patches are cut on the host: the list below is rendered row by row.
-pub const PATCH_BYTE_CAP: usize = 2_000_000;
-
+/// Larger patches are cut on the host: the list below is rendered row by row. The host sends one
+/// byte past it, so a cut patch is told from one that is exactly this long.
+pub const PATCH_BYTE_CAP: usize = 2 * 1024 * 1024;
+/// Whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` say, the parser reads `a/` and
+/// `b/` paths.
+const PATCH_OPTIONS: &str = "--no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/";
 /// An absolute directory that is safe to put inside a quoted command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoDir(String);
@@ -56,8 +59,11 @@ pub fn join_repo_path(top: &str, relative: &str) -> Option<String> {
 
 /// The exec channel reports a non-zero exit as a failure and drops stdout with it. Running the
 /// script in `sh -c` also keeps it independent of the login shell (fish rejects `{ }`).
+/// `GIT_OPTIONAL_LOCKS=0`: the panel's polling must never take the index lock from a git command
+/// the user is running in the terminal.
 pub fn wrap(script: &str) -> String {
-    let inner = format!("{{ {script}\n}}; printf '\\n__TETHER_RC__%s' \"$?\"");
+    let inner =
+        format!("export GIT_OPTIONAL_LOCKS=0; {{ {script}\n}}; printf '\\n__TETHER_RC__%s' \"$?\"");
     format!("sh -c {}", shell_quote(&inner))
 }
 
@@ -84,14 +90,17 @@ pub fn workspace_command(dir: &RepoDir) -> String {
     let missing = shell_quote(GH_MISSING);
     wrap(&format!(
         "if git -C {q} rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-         if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base=; fi; \
-         git -C {q} -c core.quotepath=off --no-pager diff --no-color --no-ext-diff $base 2>&1; printf '\\035'; \
-         git -C {q} rev-parse --show-toplevel 2>/dev/null; git -C {q} branch --show-current 2>/dev/null; printf '\\035'; \
+         if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base=$(git -C {q} hash-object -t tree /dev/null); fi; \
+         git -C {q} -c core.quotepath=off --no-pager diff {PATCH_OPTIONS} \"$base\" 2>/dev/null | head -c {cap}; printf '\\035'; \
+         git -C {q} rev-parse --show-toplevel 2>/dev/null; printf '%s\\n' \"$(git -C {q} branch --show-current 2>/dev/null)\"; \
+         u=$(git -C {q} rev-parse --abbrev-ref --symbolic-full-name '@{{u}}' 2>/dev/null) && c=$(git -C {q} rev-list --left-right --count 'HEAD...@{{u}}' 2>/dev/null) || {{ u=; c=; }}; \
+         printf '%s\\n%s\\n\\035' \"$u\" \"$c\"; \
          git -C {q} --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e' 2>/dev/null; printf '\\035'; \
-         git -C {q} -c core.quotepath=off ls-files --others --exclude-standard 2>/dev/null | head -n 200; printf '\\035'; \
+         git -C {q} -c core.quotepath=off ls-files --others --exclude-standard --full-name -- ':/' 2>/dev/null | head -n 200; printf '\\035'; \
          if command -v gh >/dev/null 2>&1; then (cd {q} && gh pr list --state all --limit 50 --json {PR_LIST_FIELDS} 2>&1); else printf '%s' {missing}; fi; \
          else printf '%s\\035\\035\\035\\035' {nr}; fi",
         nr = shell_quote(NOT_A_REPO),
+        cap = PATCH_BYTE_CAP + 1,
     ))
 }
 
@@ -105,9 +114,25 @@ pub fn docs_command(top: &RepoDir) -> String {
 pub fn commit_command(dir: &RepoDir, id: &str) -> Option<String> {
     valid_commit_id(id).then(|| {
         wrap(&format!(
-            "git -C {} --no-pager show {} --patch --no-color --format=%b%x1e 2>&1 | head -c {PATCH_BYTE_CAP}",
+            "git -C {} --no-pager show {} --patch {PATCH_OPTIONS} --format=%b%x1e 2>&1 | head -c {}",
             dir.q(),
-            shell_quote(id)
+            shell_quote(id),
+            PATCH_BYTE_CAP + 1
+        ))
+    })
+}
+
+/// An untracked file's contents as an all-added patch. `relative` is from the top of the
+/// repository, as `ls-files --full-name` gave it.
+pub fn untracked_diff_command(top: &RepoDir, relative: &str) -> Option<String> {
+    valid_repo_relative(relative).then(|| {
+        wrap(&format!(
+            // `diff --no-index` exits 1 when the file differs, which a pipe would hide; the
+            // `false` keeps that status, and a folder that can't be entered says 2.
+            "if cd {} 2>/dev/null; then git -c core.quotepath=off --no-pager diff --no-index {PATCH_OPTIONS} -- /dev/null {} 2>/dev/null | head -c {}; false; else echo \"Couldn't open the repository folder.\"; (exit 2); fi",
+            top.q(),
+            shell_quote(relative),
+            PATCH_BYTE_CAP + 1
         ))
     })
 }
@@ -122,8 +147,9 @@ pub fn pr_detail_command(dir: &RepoDir, number: u64) -> String {
 
 pub fn pr_diff_command(dir: &RepoDir, number: u64) -> String {
     wrap(&format!(
-        "cd {} && gh pr diff {number} --color never 2>&1 | head -c {PATCH_BYTE_CAP}",
-        dir.q()
+        "cd {} && gh pr diff {number} --color never 2>&1 | head -c {}",
+        dir.q(),
+        PATCH_BYTE_CAP + 1
     ))
 }
 
@@ -282,10 +308,11 @@ pub struct WorkspaceSections<'a> {
     pub pull_requests: &'a str,
 }
 
-/// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e.
+/// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e. A patch may hold
+/// any byte, so it is split from the right and the patch takes whatever is left.
 pub fn workspace_sections(output: &str) -> Option<WorkspaceSections<'_>> {
-    let parts: Vec<&str> = output.split('\u{1D}').collect();
-    let [diff, location, commits, untracked, pull_requests] = parts.as_slice() else {
+    let parts: Vec<&str> = output.rsplitn(5, '\u{1D}').collect();
+    let [pull_requests, untracked, commits, location, diff] = parts.as_slice() else {
         return None;
     };
     Some(WorkspaceSections {
@@ -297,12 +324,70 @@ pub fn workspace_sections(output: &str) -> Option<WorkspaceSections<'_>> {
     })
 }
 
+/// Output past the cap ends mid-line, maybe mid-character: keep only whole lines.
+pub fn capped_patch(output: &str) -> (&str, bool) {
+    if output.len() <= PATCH_BYTE_CAP {
+        return (output, false);
+    }
+    let head = &output.as_bytes()[..PATCH_BYTE_CAP];
+    match head.iter().rposition(|&b| b == b'\n') {
+        Some(at) => (&output[..at], true),
+        None => ("", true),
+    }
+}
+
 /// First line: the repository root. Second: the branch, empty when HEAD is detached.
 pub fn parse_location(section: &str) -> (String, String) {
     let mut lines = section.lines().map(str::trim);
     let top = lines.next().unwrap_or("").to_owned();
     let branch = lines.next().unwrap_or("").to_owned();
     (top, branch)
+}
+
+/// Where the branch stands against its upstream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchStatus {
+    pub upstream: String,
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+/// Third and fourth lines of the location section: the upstream's name, then
+/// `rev-list --left-right --count HEAD...@{u}`. Both are empty without an upstream (or on a
+/// detached HEAD), and absent from older output.
+pub fn parse_upstream(section: &str) -> Option<BranchStatus> {
+    let mut lines = section.lines().skip(2);
+    branch_status(lines.next().unwrap_or(""), lines.next().unwrap_or(""))
+}
+
+pub fn branch_status(upstream: &str, counts: &str) -> Option<BranchStatus> {
+    let upstream = upstream.trim();
+    if upstream.is_empty() {
+        return None;
+    }
+    let mut numbers = counts.split_whitespace().map(|n| n.parse().ok());
+    let (Some(Some(ahead)), Some(Some(behind))) = (numbers.next(), numbers.next()) else {
+        return None;
+    };
+    Some(BranchStatus {
+        upstream: upstream.to_owned(),
+        ahead,
+        behind,
+    })
+}
+
+/// `main ↑2 ↓1`: a count shows only when it is not zero.
+pub fn branch_label(branch: &str, status: Option<&BranchStatus>) -> String {
+    let mut label = branch.to_owned();
+    if let Some(s) = status {
+        if s.ahead > 0 {
+            label.push_str(&format!(" \u{2191}{}", s.ahead));
+        }
+        if s.behind > 0 {
+            label.push_str(&format!(" \u{2193}{}", s.behind));
+        }
+    }
+    label
 }
 
 pub fn parse_commits(output: &str) -> Vec<GitCommit> {
@@ -535,39 +620,155 @@ pub enum LineKind {
     Added,
     Removed,
     Context,
+    /// Inside a file but not a line of code: `\ No newline at end of file`, `Binary files … differ`.
+    Note,
 }
 
-pub fn classify(diff: &str) -> Vec<(LineKind, &str)> {
+/// A classified line and how many marker columns precede its code: one in a plain diff, one per
+/// parent in a combined (merge) diff.
+pub type ClassifiedLine<'a> = (LineKind, &'a str, usize);
+
+/// A line's prefix only means something in the right place: inside a hunk the first column is the
+/// marker (so a removed `-- comment` is a removal, not a `--- ` header), and the hunk's own line
+/// counts say where it ends. Mirrors iOS `GitDiffModel.classify`.
+pub fn classify(diff: &str) -> Vec<ClassifiedLine<'_>> {
+    use LineKind::*;
     if diff.is_empty() {
         return Vec::new();
     }
-    diff.split('\n').map(|raw| (line_kind(raw), raw)).collect()
+    let mut raw: Vec<&str> = diff.split('\n').collect();
+    if raw.last() == Some(&"") {
+        raw.pop();
+    }
+    let mut lines = Vec::with_capacity(raw.len());
+    let (mut in_file, mut in_hunk) = (false, false);
+    // A hunk has started in this file: a +/-/context line after one whose counts ran out is still
+    // code (a miscounted header), unless it reads as the next file's header.
+    let mut after_hunk = false;
+    let mut parents = 1usize;
+    let (mut old_left, mut new_left) = (0i64, 0i64);
+
+    for text in raw {
+        let first = text.as_bytes().first().copied();
+        if in_hunk {
+            if parents == 1 {
+                let kind = match first {
+                    Some(b'+') => {
+                        new_left -= 1;
+                        Some(Added)
+                    }
+                    Some(b'-') => {
+                        old_left -= 1;
+                        Some(Removed)
+                    }
+                    Some(b' ') | None => {
+                        old_left -= 1;
+                        new_left -= 1;
+                        Some(Context)
+                    }
+                    Some(b'\\') => Some(Note),
+                    // A stray line is shown, not allowed to end the hunk and take the rest of its
+                    // lines with it.
+                    _ => (!leaves_hunk(text)).then_some(Note),
+                };
+                if let Some(kind) = kind {
+                    lines.push((kind, text, 1));
+                    if old_left <= 0 && new_left <= 0 {
+                        in_hunk = false;
+                    }
+                    continue;
+                }
+                in_hunk = false;
+            } else if let Some(kind) = combined_kind(text, parents) {
+                lines.push((kind, text, parents));
+                continue;
+            } else if !leaves_hunk(text) {
+                lines.push((Note, text, 1));
+                continue;
+            } else {
+                in_hunk = false;
+            }
+        }
+
+        let kind =
+            if text.starts_with("diff ") || text.starts_with("--- ") || text.starts_with("+++ ") {
+                in_file = true;
+                after_hunk = false;
+                FileHeader
+            } else if after_hunk && parents == 1 && matches!(first, Some(b'+' | b'-' | b' ')) {
+                match first {
+                    Some(b'+') => Added,
+                    Some(b'-') => Removed,
+                    _ => Context,
+                }
+            } else if in_file && first == Some(b'@') {
+                let ats = text.bytes().take_while(|&b| b == b'@').count();
+                parents = ats.saturating_sub(1).max(1);
+                (old_left, new_left) = hunk_counts(text);
+                in_hunk = parents > 1 || old_left > 0 || new_left > 0;
+                after_hunk = true;
+                Hunk
+            } else if text.starts_with("Binary files ") || first == Some(b'\\') {
+                Note
+            } else if in_file {
+                FileHeader
+            } else {
+                Context
+            };
+        lines.push((kind, text, 1));
+    }
+    lines
 }
 
-fn line_kind(line: &str) -> LineKind {
-    const HEADERS: [&str; 10] = [
-        "diff ",
-        "index ",
-        "--- ",
-        "+++ ",
-        "new file",
-        "deleted file",
-        "rename ",
-        "similarity ",
-        "old mode ",
-        "new mode ",
-    ];
-    if HEADERS.iter().any(|h| line.starts_with(h)) {
-        LineKind::FileHeader
-    } else if line.starts_with("@@") {
-        LineKind::Hunk
-    } else if line.starts_with('+') {
+/// Only the next file or the next hunk ends a hunk early.
+fn leaves_hunk(line: &str) -> bool {
+    line.starts_with('@') || line.starts_with("diff ")
+}
+
+/// `@@ -a,b +c,d @@`: the lines the hunk spans on each side (a missing count means one).
+fn hunk_counts(header: &str) -> (i64, i64) {
+    let (mut old, mut new) = (0, 0);
+    for token in header.split(' ').filter(|t| !t.is_empty()).skip(1) {
+        let sign = match token.as_bytes()[0] {
+            b'-' => '-',
+            b'+' => '+',
+            _ => break,
+        };
+        let mut parts = token[1..].split(',');
+        parts.next();
+        let count = parts.next().map_or(1, |c| c.parse().unwrap_or(0));
+        if sign == '-' {
+            old = count;
+        } else {
+            new = count;
+        }
+    }
+    (old, new)
+}
+
+/// A combined diff marks each parent in its own column; a line added against any parent reads as
+/// an addition. Anything without a marker in every column has left the hunk.
+fn combined_kind(line: &str, parents: usize) -> Option<LineKind> {
+    let markers = &line.as_bytes()[..parents.min(line.len())];
+    if markers.len() < parents {
+        return line.is_empty().then_some(LineKind::Context);
+    }
+    let (mut added, mut removed) = (false, false);
+    for marker in markers {
+        match marker {
+            b'+' => added = true,
+            b'-' => removed = true,
+            b' ' => {}
+            _ => return None,
+        }
+    }
+    Some(if added {
         LineKind::Added
-    } else if line.starts_with('-') {
+    } else if removed {
         LineKind::Removed
     } else {
         LineKind::Context
-    }
+    })
 }
 
 /// Splits `git show --format=%b%x1e` into message and patch. Without the marker git separates
@@ -616,8 +817,9 @@ impl DiffFile {
     }
 }
 
-fn drop_first(s: &str) -> &str {
-    s.chars().next().map_or("", |c| &s[c.len_utf8()..])
+/// Markers are ASCII, so `n` bytes are `n` characters.
+fn drop_markers(s: &str, n: usize) -> &str {
+    s.get(n.min(s.len())..).unwrap_or("")
 }
 
 pub fn group_diff(patch: &str) -> Vec<DiffFile> {
@@ -644,13 +846,12 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
         *removed = 0;
     };
 
-    for (kind, text) in classify(patch) {
-        if text.starts_with("diff --git ") {
-            flush(&mut files, &path, &mut rows, &mut added, &mut removed);
-            path = new_path(text);
-            continue;
-        }
+    for (kind, text, markers) in classify(patch) {
         if kind == LineKind::FileHeader {
+            if is_file_start(text) {
+                flush(&mut files, &path, &mut rows, &mut added, &mut removed);
+                path = new_path(text);
+            }
             continue;
         }
         let row = |kind, old_line, new_line, text: &str| DiffRow {
@@ -660,11 +861,6 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
             new_line,
             text: text.to_owned(),
         };
-        // Neither is a line of either file: they take no number and keep their words.
-        if !path.is_empty() && (text.starts_with("Binary files ") || text.starts_with('\\')) {
-            rows.push(row(RowKind::Plain, None, None, text));
-            continue;
-        }
         match kind {
             LineKind::Hunk => {
                 (old_line, new_line) = hunk_start(text);
@@ -674,7 +870,12 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
             }
             LineKind::Added => {
                 added += 1;
-                rows.push(row(RowKind::Added, None, Some(new_line), drop_first(text)));
+                rows.push(row(
+                    RowKind::Added,
+                    None,
+                    Some(new_line),
+                    drop_markers(text, markers),
+                ));
                 new_line += 1;
             }
             LineKind::Removed => {
@@ -683,7 +884,7 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
                     RowKind::Removed,
                     Some(old_line),
                     None,
-                    drop_first(text),
+                    drop_markers(text, markers),
                 ));
                 old_line += 1;
             }
@@ -692,11 +893,12 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
                     RowKind::Context,
                     Some(old_line),
                     Some(new_line),
-                    drop_first(text),
+                    drop_markers(text, markers),
                 ));
                 old_line += 1;
                 new_line += 1;
             }
+            // A note is no line of either file: it takes no number and keeps its words.
             _ => rows.push(row(RowKind::Plain, None, None, text)),
         }
     }
@@ -711,10 +913,20 @@ pub fn diff_stat(files: &[DiffFile]) -> (u32, u32) {
         .fold((0, 0), |(a, r), f| (a + f.added, r + f.removed))
 }
 
+fn is_file_start(header: &str) -> bool {
+    ["diff --git ", "diff --cc ", "diff --combined "]
+        .iter()
+        .any(|p| header.starts_with(p))
+}
+
 fn new_path(header: &str) -> String {
+    if let Some(at) = header.find(" b/") {
+        return header[at + 3..].to_owned();
+    }
     header
-        .find(" b/")
-        .map_or(header, |at| &header[at + 3..])
+        .strip_prefix("diff --cc ")
+        .or_else(|| header.strip_prefix("diff --combined "))
+        .unwrap_or(header)
         .to_owned()
 }
 
@@ -871,6 +1083,77 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
     }
 
     #[test]
+    fn a_removed_double_dash_line_inside_a_hunk_is_a_removal() {
+        let patch = "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,1 @@\n--- comment\n select 1;\n";
+        let kinds: Vec<_> = classify(patch).iter().map(|l| l.0).collect();
+        use LineKind::*;
+        assert_eq!(
+            kinds,
+            [FileHeader, FileHeader, FileHeader, Hunk, Removed, Context]
+        );
+        let files = group_diff(patch);
+        assert_eq!((files[0].added, files[0].removed), (0, 1));
+        assert_eq!(files[0].rows[1].text, "-- comment");
+        assert_eq!(files[0].rows[1].old_line, Some(1));
+    }
+
+    #[test]
+    fn an_added_double_plus_line_inside_a_hunk_is_an_addition() {
+        let patch = "diff --git a/a.c b/a.c\n--- a/a.c\n+++ b/a.c\n@@ -1 +1,2 @@\n x;\n+++x;\n";
+        let files = group_diff(patch);
+        assert_eq!((files[0].added, files[0].removed), (1, 0));
+        let added = files[0]
+            .rows
+            .iter()
+            .find(|r| r.kind == RowKind::Added)
+            .unwrap();
+        assert_eq!(added.text, "++x;");
+        assert_eq!(added.new_line, Some(2));
+    }
+
+    #[test]
+    fn the_next_files_headers_follow_a_hunk_whose_counts_ran_out() {
+        let patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+z\n";
+        let files = group_diff(patch);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[1].path, "b");
+        assert_eq!((files[1].added, files[1].removed), (1, 0));
+    }
+
+    #[test]
+    fn hunk_counts_default_to_one_when_omitted() {
+        assert_eq!(hunk_counts("@@ -3 +4,0 @@ fn x"), (1, 0));
+        assert_eq!(hunk_counts("@@ -0,0 +1,12 @@"), (0, 12));
+    }
+
+    #[test]
+    fn a_combined_diff_reads_one_marker_per_parent() {
+        let patch = "diff --cc m.txt\nindex 1,2..3\n--- a/m.txt\n+++ b/m.txt\n@@@ -1,1 -1,1 +1,2 @@@\n  kept\n++both\n- gone\n";
+        let files = group_diff(patch);
+        assert_eq!(files[0].path, "m.txt");
+        let rows: Vec<_> = files[0]
+            .rows
+            .iter()
+            .skip(1)
+            .map(|r| (r.kind, r.text.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (RowKind::Context, "kept"),
+                (RowKind::Added, "both"),
+                (RowKind::Removed, "gone")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_trailing_newline_of_a_patch_adds_no_row() {
+        let files = group_diff("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n");
+        assert_eq!(files[0].rows.len(), 3);
+    }
+
+    #[test]
     fn classifies_each_line_of_a_unified_diff() {
         let diff = "diff --git a/foo.txt b/foo.txt\nindex 1234567..89abcde 100644\n--- a/foo.txt\n+++ b/foo.txt\n@@ -1,3 +1,3 @@ context header\n unchanged line\n-removed line\n+added line";
         let kinds: Vec<_> = classify(diff).iter().map(|l| l.0).collect();
@@ -968,6 +1251,107 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         assert_eq!(s.diff, "+a\u{1E}b");
         assert_eq!(s.commits, commits);
         assert_eq!(parse_commits(s.commits).len(), 2);
+    }
+
+    #[test]
+    fn the_upstream_and_its_counts_follow_the_branch() {
+        let section = "/r\nmain\norigin/main\n2\t1\n";
+        assert_eq!(parse_location(section), ("/r".into(), "main".into()));
+        let status = parse_upstream(section).unwrap();
+        assert_eq!(
+            status,
+            BranchStatus {
+                upstream: "origin/main".into(),
+                ahead: 2,
+                behind: 1
+            }
+        );
+        assert_eq!(
+            branch_label("main", Some(&status)),
+            "main \u{2191}2 \u{2193}1"
+        );
+    }
+
+    #[test]
+    fn no_upstream_or_a_detached_head_shows_only_the_branch() {
+        assert_eq!(parse_upstream("/r\nmain\n\n\n"), None);
+        assert_eq!(parse_upstream("/r\n\n\n\n"), None);
+        // Older output had only the root and the branch.
+        assert_eq!(parse_upstream("/r\nmain\n"), None);
+        assert_eq!(branch_status("origin/main", "garbage"), None);
+        assert_eq!(branch_label("main", None), "main");
+        let even = branch_status("origin/main", "0\t0").unwrap();
+        assert_eq!(branch_label("main", Some(&even)), "main");
+        let behind = branch_status("origin/main", "0\t3").unwrap();
+        assert_eq!(branch_label("main", Some(&behind)), "main \u{2193}3");
+    }
+
+    #[test]
+    fn the_workspace_command_reads_the_upstream_without_failing_when_there_is_none() {
+        let command = workspace_command(&RepoDir::new("/r").unwrap());
+        assert!(command.contains("--symbolic-full-name"), "{command}");
+        assert!(command.contains("--left-right --count"), "{command}");
+        assert!(command.contains("|| { u=; c=; }"), "{command}");
+    }
+
+    #[test]
+    fn an_untracked_file_is_diffed_against_nothing_from_the_top_of_the_repository() {
+        let top = RepoDir::new("/r").unwrap();
+        let command = untracked_diff_command(&top, "docs/it's new.txt").unwrap();
+        assert!(command.contains("diff --no-index"), "{command}");
+        assert!(
+            command.contains("--src-prefix=a/ --dst-prefix=b/"),
+            "{command}"
+        );
+        assert!(command.contains("-- /dev/null "), "{command}");
+        assert!(command.contains("head -c 2097153"), "{command}");
+        assert!(!command.contains("it's new"), "{command}");
+        assert!(untracked_diff_command(&top, "../etc/passwd").is_none());
+        assert!(untracked_diff_command(&top, "/etc/passwd").is_none());
+        assert!(workspace_command(&top).contains("--full-name -- "));
+    }
+
+    #[test]
+    fn a_group_separator_inside_the_patch_stays_in_the_patch() {
+        let out = "+a\u{1D}b\u{1D}/r\nmain\n\u{1D}\u{1D}\u{1D}[]";
+        let s = workspace_sections(out).unwrap();
+        assert_eq!(s.diff, "+a\u{1D}b");
+        assert_eq!(s.location, "/r\nmain\n");
+        assert_eq!(s.pull_requests, "[]");
+    }
+
+    #[test]
+    fn the_working_tree_diff_forces_prefixes_handles_an_unborn_branch_and_is_capped() {
+        let command = workspace_command(&RepoDir::new("/r").unwrap());
+        assert!(
+            command.contains("--src-prefix=a/ --dst-prefix=b/"),
+            "{command}"
+        );
+        assert!(
+            command.contains("hash-object -t tree /dev/null"),
+            "an unborn branch diffs against the empty tree of the repository's own hash"
+        );
+        assert!(command.contains("head -c 2097153"), "{command}");
+        let commit = commit_command(&RepoDir::new("/r").unwrap(), "abc1234").unwrap();
+        assert!(
+            commit.contains("--src-prefix=a/ --dst-prefix=b/"),
+            "{commit}"
+        );
+        assert!(commit.contains("head -c 2097153"), "{commit}");
+    }
+
+    #[test]
+    fn a_patch_past_the_cap_keeps_only_whole_lines() {
+        let short = "diff --git a/x b/x\n+a\n";
+        assert_eq!(capped_patch(short), (short, false));
+        let line = "+".repeat(99) + "\n";
+        let long = line.repeat(PATCH_BYTE_CAP / 100 + 1);
+        let (cut, truncated) = capped_patch(&long);
+        assert!(truncated);
+        assert!(cut.len() < PATCH_BYTE_CAP);
+        assert!(cut.ends_with(&"+".repeat(99)));
+        let exact = "a".repeat(PATCH_BYTE_CAP);
+        assert_eq!(capped_patch(&exact), (exact.as_str(), false));
     }
 
     #[test]
@@ -1306,7 +1690,8 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
     #[test]
     fn a_wrapped_command_reports_its_exit_status_even_when_it_fails() {
         let command = wrap("echo hi; exit 3");
-        assert!(command.starts_with("sh -c '"));
+        assert!(command.starts_with("sh -c 'export GIT_OPTIONAL_LOCKS=0; "));
+        assert!(workspace_command(&RepoDir::new("/r").unwrap()).contains("GIT_OPTIONAL_LOCKS=0"));
         assert_eq!(
             unwrap_output("hi\n\n__TETHER_RC__3"),
             ("hi\n".to_owned(), Some(3))

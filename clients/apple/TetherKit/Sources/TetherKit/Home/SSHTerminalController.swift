@@ -142,6 +142,8 @@ public final class SSHTerminalController {
   /// The working-tree patch hit the size cap and was cut short.
   public private(set) var gitDiffTruncated = false
   public private(set) var gitBranch = ""
+  /// nil when the branch has no upstream (or HEAD is detached).
+  public private(set) var gitUpstream: GitBranchStatus?
   public private(set) var gitCommits: [GitCommit] = []
   public private(set) var gitPullRequests: [GitPullRequest] = []
   /// Why the list is empty, when the reason is not "none open".
@@ -634,6 +636,7 @@ public final class SSHTerminalController {
       }
       if !gitLoaded { gitLoaded = true }
       if gitBranch != sections.branch { gitBranch = sections.branch }
+      if gitUpstream != sections.upstream { gitUpstream = sections.upstream }
       if diff {
         if gitRawDiff != sections.diff {
           gitRawDiff = sections.diff
@@ -690,6 +693,7 @@ public final class SSHTerminalController {
     gitUntrackedTruncated = false
     gitDiffTruncated = false
     gitBranch = ""
+    gitUpstream = nil
     gitCommits = []
     gitPullRequests = []
     gitPullRequestNotice = nil

@@ -34,6 +34,7 @@ struct GitWorkspaceSections: Equatable, Sendable {
 
   var cwd: String
   var branch: String
+  var upstream: GitBranchStatus?
   var untracked: [String]
   var untrackedTruncated: Bool
   var commits: Commits
@@ -104,10 +105,13 @@ enum GitWorkspaceScript {
     } else {
       log = "printf ''"
     }
-    // A detached HEAD has no branch name; its short hash stands in.
-    return "if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
+    // A detached HEAD has no branch name; its short hash stands in. GIT_OPTIONAL_LOCKS=0: the
+    // poll must never take the index lock from a git command the user runs in the terminal.
+    return "export GIT_OPTIONAL_LOCKS=0; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
       + "b=$(git branch --show-current 2>/dev/null); [ -n \"$b\" ] || b=$(git rev-parse --short HEAD 2>/dev/null); "
-      + "printf '%s\\035' \"$b\"; "
+      + "u=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) "
+      + "&& c=$(git rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null) || { u=; c=; }; "
+      + "printf '%s\\n%s\\n%s\\035' \"$b\" \"$u\" \"$c\"; "
       + "\(untracked); printf '\\035'; "
       + "{ \(log); }; printf '\\035'; "
       + "\(diff ? "{ \(workingTreeDiff); }" : "printf ''"); "
@@ -154,9 +158,14 @@ enum GitWorkspaceScript {
       commits = .list(head: String(head), GitRepositoryModel.commits(from: String(parts[2].dropFirst(head.count + 1))))
     }
     let (diff, truncated) = capped(String(parts[3]))
+    // Branch, then the upstream and its ahead/behind counts (absent from older output).
+    let branchLines = parts[0].split(separator: "\n", omittingEmptySubsequences: false)
     return .repository(GitWorkspaceSections(
       cwd: cwd,
-      branch: GitRepositoryModel.branch(from: String(parts[0])),
+      branch: GitRepositoryModel.branch(from: branchLines.first.map(String.init) ?? ""),
+      upstream: GitRepositoryModel.branchStatus(
+        upstream: branchLines.count > 1 ? String(branchLines[1]) : "",
+        counts: branchLines.count > 2 ? String(branchLines[2]) : ""),
       untracked: paths,
       untrackedTruncated: untrackedTruncated,
       commits: commits,

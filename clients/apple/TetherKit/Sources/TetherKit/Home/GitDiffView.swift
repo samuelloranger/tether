@@ -21,6 +21,12 @@ struct GitDiffView: View {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
           Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
             .opacity(loadedOnce ? 1 : 0.5)
+          if let upstream = controller.gitUpstream {
+            if !upstream.counts.isEmpty {
+              Text(upstream.counts).font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.accent)
+            }
+            Text(upstream.upstream).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+          }
           if !loadedOnce && controller.gitLoaded { ProgressView().controlSize(.mini).tint(TetherColors.accent) }
           Spacer()
           Text("\(controller.gitPullRequests.filter { $0.state == .open }.count) open").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)

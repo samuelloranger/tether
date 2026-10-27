@@ -114,6 +114,18 @@ pub async fn execute<R: Remote>(remote: &R, target: &GitTarget, job: GitJob) -> 
                 result: panel::markdown_result(raw),
             }
         }
+        GitJob::Untracked { req, top, path } => {
+            let command =
+                RepoDir::new(&top).and_then(|dir| git::untracked_diff_command(&dir, &path));
+            let raw = match command {
+                Some(command) => exec(remote, &command).await,
+                None => Err("That path can't be opened.".into()),
+            };
+            GitDone::Untracked {
+                req,
+                result: panel::untracked_result(raw),
+            }
+        }
     }
 }
 
@@ -224,6 +236,35 @@ mod tests {
             panic!();
         };
         assert_eq!(result, Err("GraphQL: blocked".into()));
+    }
+
+    #[tokio::test]
+    async fn an_untracked_file_is_diffed_from_the_top_and_a_hostile_path_runs_nothing() {
+        let remote = FakeRemote::default();
+        reply(
+            &remote,
+            &[Ok(
+                "diff --git a/n.txt b/n.txt\n--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1 @@\n+hi\n\n__TETHER_RC__1",
+            )],
+        );
+        let job = |path: &str| GitJob::Untracked {
+            req: 4,
+            top: "/r".into(),
+            path: path.into(),
+        };
+        let done = execute(&remote, &target(), job("n.txt")).await;
+        let log = remote.log();
+        assert_eq!(log.len(), 1);
+        assert!(log[0].contains("--no-index"), "{}", log[0]);
+        let GitDone::Untracked { req, result } = done else {
+            panic!();
+        };
+        assert_eq!(req, 4);
+        assert_eq!(result.unwrap().files[0].added, 1);
+        let remote = FakeRemote::default();
+        let done = execute(&remote, &target(), job("../x")).await;
+        assert!(remote.log().is_empty());
+        assert!(matches!(done, GitDone::Untracked { result: Err(_), .. }));
     }
 
     #[tokio::test]

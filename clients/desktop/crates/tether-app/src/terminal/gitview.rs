@@ -142,6 +142,7 @@ pub fn apply(w: &AppWindow, v: GitView) {
     );
     vm.set_title(v.title.as_str().into());
     vm.set_subtitle(v.subtitle.as_str().into());
+    vm.set_upstream(v.upstream.as_str().into());
     vm.set_stat_shown(v.stat.is_some());
     let (added, removed) = v.stat.unwrap_or_default();
     vm.set_stat_added(added as i32);
