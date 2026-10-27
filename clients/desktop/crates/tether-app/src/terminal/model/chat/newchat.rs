@@ -1,9 +1,11 @@
 //! The new-chat dialog: a working folder, and in Continue mode the agent's earlier conversations
-//! there. Starting runs the host checks first, so a chat never fails later for a missing tool.
+//! there. Starting runs the host checks first, so a chat never fails later for a missing tool;
+//! the same check runs as the dialog opens, so an agent the host can't run is dimmed up front.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
-use tether_core::acp::agent::AgentProfile;
+use tether_core::acp::agent::{self, AgentProfile};
 use tether_core::acp::host::{self, SavedSession};
 use tether_core::acp::options::{OptionsDraft, StartOptions};
 use tether_core::connect::ConnectError;
@@ -55,6 +57,15 @@ pub struct NewChat {
     list_request: u64,
     reload_at: Option<Duration>,
     multi: bool,
+    /// Agent key → why the host can't run it, from the probe the dialog sends as it opens.
+    unavailable: HashMap<&'static str, String>,
+}
+
+pub fn probe_job() -> ChatJob {
+    ChatJob::Exec {
+        tag: ExecTag::AgentProbe,
+        command: host::host_check_command(),
+    }
 }
 
 fn exec(request: u64, step: Step, command: String) -> ChatJob {
@@ -91,7 +102,27 @@ impl NewChat {
             list_request: 0,
             reload_at: None,
             multi: false,
+            unavailable: HashMap::new(),
         }
+    }
+
+    pub fn unavailable(&self, agent: &AgentProfile) -> Option<&str> {
+        self.unavailable.get(agent.key).map(String::as_str)
+    }
+
+    /// A host that could not be checked dims nothing; Start checks again either way.
+    pub fn on_probe(&mut self, output: &str, host_name: &str) {
+        self.unavailable = agent::ALL
+            .iter()
+            .filter_map(|a| host::agent_unavailable(output, a, host_name).map(|m| (a.key, m)))
+            .collect();
+    }
+
+    /// The last failure, else why the picked agent can't run here; derived so a mode change keeps it.
+    pub fn shown_error(&self) -> Option<&str> {
+        self.error
+            .as_deref()
+            .or_else(|| self.unavailable(self.agent))
     }
 
     pub fn set_mode(&mut self, mode: u8, now: Duration) -> Option<ChatJob> {
@@ -108,6 +139,10 @@ impl NewChat {
         now: Duration,
     ) -> Option<ChatJob> {
         if self.agent == agent || self.busy || self.continuing.is_some() {
+            return None;
+        }
+        if let Some(reason) = self.unavailable(agent) {
+            self.error = Some(reason.to_string());
             return None;
         }
         self.agent = agent;

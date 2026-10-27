@@ -142,4 +142,22 @@ final class ACPHostCheckTests: XCTestCase {
     guard case let .failed(message) = model.load else { return XCTFail() }
     XCTAssertTrue(message.hasPrefix("Update tether on box."))
   }
+
+  func test_copilot_is_checked_and_only_blocks_copilot() {
+    let found = ACPHostCheck.problems(in: Self.ours + "copilot=missing\n")
+    XCTAssertEqual(found, [.copilotMissing])
+    XCTAssertEqual(ACPHostCheck.relevant(found, for: ChatAgents.copilot), [.copilotMissing])
+    XCTAssertEqual(ACPHostCheck.relevant(found, for: ChatAgents.claude), [])
+    XCTAssertTrue(ACPHostCheck.script.contains(#"-lc "command -v copilot""#))
+  }
+
+  func test_the_picker_names_only_the_missing_tool_an_agent_runs_on() {
+    let reasons = ACPHostCheck.unavailable(
+      in: "tether=missing\nnode=missing\nopencode=ok\ncopilot=missing\n", host: "devbox")
+    XCTAssertEqual(reasons["claude"], "Node.js is required on devbox.")
+    XCTAssertNotNil(reasons["codex"])
+    XCTAssertNil(reasons["opencode"], "a missing tether is for Start to report")
+    XCTAssertTrue(reasons["copilot"]?.contains("Copilot CLI on devbox") ?? false)
+    XCTAssertEqual(ACPHostCheck.unavailable(in: "", host: "devbox"), [:])
+  }
 }

@@ -426,6 +426,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                 );
             }
             vm.set_nc_agent(i32::from(nc.agent));
+            vm.set_nc_unavailable(model(nc.unavailable.clone()));
             vm.set_nc_summary(nc.summary.as_str().into());
             vm.set_nc_note(nc.note.as_str().into());
             vm.set_nc_is_reset(nc.reset);

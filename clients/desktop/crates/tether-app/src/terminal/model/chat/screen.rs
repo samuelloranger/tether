@@ -129,6 +129,10 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     if let Some(nc) = &chats.new_chat {
         screen.new_chat = Some(NewChatView {
             agent: agent_index(Some(nc.agent)),
+            unavailable: agent::ALL
+                .iter()
+                .map(|a| nc.unavailable(a).is_some())
+                .collect(),
             summary: nc.options.summary(),
             note: nc.options.note(),
             reset: nc.options.is_reset(),
@@ -155,7 +159,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             mode: nc.mode,
             folder: nc.folder.clone(),
             busy: nc.busy,
-            error: nc.error.clone().unwrap_or_default(),
+            error: nc.shown_error().unwrap_or_default().to_string(),
             listing: match &nc.listing {
                 Listing::Loading => ListingView::Loading,
                 Listing::Failed(m) => ListingView::Failed(m.clone()),

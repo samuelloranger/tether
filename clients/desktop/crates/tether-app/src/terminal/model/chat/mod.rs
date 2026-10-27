@@ -60,6 +60,8 @@ pub enum ExecTag {
         request: u64,
         step: newchat::Step,
     },
+    /// The host check the New chat dialog runs as it opens, to dim the agents the host can't run.
+    AgentProbe,
     /// The words a running turn shows (see `acp::verbs`).
     Verbs,
 }
@@ -739,6 +741,7 @@ impl Chats {
         self.dirty = true;
         let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
         self.new_chat = Some(NewChat::open(mode, folder, agent, self.draft_for(agent)));
+        out.jobs.push(newchat::probe_job());
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
             out.jobs.push(job);
         }
@@ -818,6 +821,14 @@ impl Chats {
             ChatMsg::NewChatContinue(id) => {
                 if let Some(job) = self.new_chat.as_mut().and_then(|n| n.start(Some(id))) {
                     out.jobs.push(job);
+                }
+            }
+            ChatMsg::ExecDone {
+                tag: ExecTag::AgentProbe,
+                result,
+            } => {
+                if let (Some(nc), Ok(output)) = (self.new_chat.as_mut(), result) {
+                    nc.on_probe(&output, &self.host);
                 }
             }
             ChatMsg::ExecDone {

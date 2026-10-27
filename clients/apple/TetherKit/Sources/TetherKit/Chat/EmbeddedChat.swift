@@ -55,6 +55,8 @@ struct NewChatSheet: View {
   var storedDefaults: (ChatAgentProfile) -> [String: String] = { _ in [:] }
   var cachedOptions: (ChatAgentProfile) -> [ACPConfigOption] = { _ in [] }
   var onAgentPicked: (ChatAgentProfile) -> Void = { _ in }
+  /// Agent key → why the host can't run it; those agents are dimmed and refuse the pick.
+  var checkAgents: () async -> [String: String] = { [:] }
   /// Resolves the folder and opens the chat; a message leaves the sheet up showing it.
   let onStart: (String, NewChatRequest) async -> String?
   /// The earlier conversations of an agent in a folder.
@@ -74,6 +76,7 @@ struct NewChatSheet: View {
   @State private var optionsOpen = false
   @State private var changes: [String: String] = [:]
   @State private var reset = false
+  @State private var unavailable: [String: String] = [:]
   @FocusState private var focused: Bool
 
   enum Listing: Equatable {
@@ -83,6 +86,8 @@ struct NewChatSheet: View {
     case failed(String)
   }
 
+  /// The last failure, else why the picked agent can't run here; derived so a mode change keeps it.
+  private var shownFailure: String? { failure ?? unavailable[agent.key] }
   private var stored: [String: String] { storedDefaults(agent) }
   private var cached: [ACPConfigOption] { cachedOptions(agent) }
   private var optionRows: [ChatNewOptions.Row] {
@@ -120,8 +125,8 @@ struct NewChatSheet: View {
           .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
           .accessibilityLabel("Working folder for the new chat")
           .accessibilityIdentifier("sshNewChatFolder")
-        if let failure {
-          Text(failure).font(.caption).foregroundStyle(TetherColors.warning)
+        if let shownFailure {
+          Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("sshNewChatError")
         }
@@ -158,13 +163,14 @@ struct NewChatSheet: View {
       changes = initialChanges
     }
     .task(id: "\(mode.rawValue)|\(agent.key)|\(folder)|\(reloads)") { await reload() }
+    .task { unavailable = await checkAgents() }
     .onChange(of: mode) { _, _ in failure = nil }
   }
 
   /// The sheet is as tall as what it holds: the agent picker and the Options row add to the folder step.
   private var newHeight: CGFloat {
     var height: CGFloat = 330
-    if failure != nil { height += 68 }
+    if shownFailure != nil { height += 68 }
     if optionsOpen { height += optionRows.isEmpty ? 64 : CGFloat(optionRows.count) * 40 + 36 }
     return height
   }
@@ -177,6 +183,7 @@ struct NewChatSheet: View {
       HStack(spacing: 2) {
         ForEach(ChatAgents.all) { option in
           let on = option == agent
+          let missing = unavailable[option.key] != nil
           Button { pick(option) } label: {
             HStack(spacing: 6) {
               ChatAgentMark(agent: option, size: 14).opacity(on || !option.tintsIcon ? 1 : 0.7)
@@ -186,10 +193,12 @@ struct NewChatSheet: View {
             .foregroundStyle(on ? TetherColors.textPrimary : TetherColors.textSecondary)
             .frame(maxWidth: .infinity).frame(height: 30)
             .background(on ? TetherColors.surfaceHover : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            .opacity(missing ? 0.4 : 1)
             .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
           .accessibilityLabel(option.label)
+          .accessibilityHint(missing ? "Not installed on the host" : "")
           .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
           .accessibilityIdentifier("sshNewChatAgent_\(option.key)")
         }
@@ -201,6 +210,10 @@ struct NewChatSheet: View {
 
   private func pick(_ option: ChatAgentProfile) {
     guard option != agent else { return }
+    if let reason = unavailable[option.key] {
+      failure = reason
+      return
+    }
     agent = option
     changes = [:]
     reset = false

@@ -236,6 +236,7 @@ public struct SSHTerminalView: View {
         storedDefaults: { ChatOptionDefaultsStore().stored(agent: $0.key) },
         cachedOptions: { controller.cachedOptions(agent: $0) },
         onAgentPicked: { ChatLastAgentStore().set($0) },
+        checkAgents: { await controller.unavailableAgents() },
         onStart: { folder, request in
           switch await controller.newChat(cwdText: folder, request: request) {
           case let .failed(message): return message

@@ -386,6 +386,8 @@ pub struct OptionMenuView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewChatView {
     pub agent: i8,
+    /// In `agent::ALL` order: the host can't run that agent, so the picker dims it.
+    pub unavailable: Vec<bool>,
     pub summary: String,
     pub note: String,
     pub menus: Vec<OptionMenuView>,
