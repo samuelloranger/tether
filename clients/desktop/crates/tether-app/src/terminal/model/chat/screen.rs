@@ -475,7 +475,6 @@ fn composer(s: &Session, screen: &mut ChatScreen) {
         "Send"
     }
     .into();
-    c.can_attach = s.attachments.len() < format::MAX_IMAGES && !c.dimmed;
     c.attachments = s
         .attachments
         .iter()

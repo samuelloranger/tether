@@ -328,6 +328,35 @@ mod tests {
     }
 
     #[test]
+    fn the_composers_picker_sends_to_its_chat_and_drops_files_picked_after_a_switch() {
+        let (mut m, _dir) = chat_in_front();
+        let fx = m.handle(Msg::Chat(ChatMsg::AttachRequested), t(11));
+        assert!(
+            fx.iter().any(
+                |e| matches!(e, Effect::Ui(UiEffect::PickChatFiles { chat }) if chat == "chat-c")
+            ),
+            "{fx:?}"
+        );
+        let picked = || Msg::ChatFilesPicked {
+            chat: "chat-c".into(),
+            files: vec![PathBuf::from("notes.pdf")],
+        };
+        let starts = |fx: &[Effect]| {
+            fx.iter()
+                .filter(|e| matches!(e, Effect::StartSend(_)))
+                .count()
+        };
+        m.handle(Msg::SelectTab("a".into()), t(12));
+        assert_eq!(
+            starts(&m.handle(picked(), t(13))),
+            0,
+            "a terminal in front gets nothing"
+        );
+        m.handle(Msg::Chat(ChatMsg::Select("chat-c".into())), t(14));
+        assert_eq!(starts(&m.handle(picked(), t(15))), 1);
+    }
+
+    #[test]
     fn a_path_lands_in_the_chat_that_started_the_send() {
         let (mut m, _dir) = chat_in_front();
         m.handle(Msg::SendFiles(vec![PathBuf::from("notes.pdf")]), t(11));

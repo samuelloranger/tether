@@ -242,7 +242,6 @@ pub struct ComposerView {
     pub stopping: bool,
     pub action_enabled: bool,
     pub action_label: String,
-    pub can_attach: bool,
     pub attachments: Vec<AttachmentView>,
     pub attach_error: String,
     pub palette: Option<(PaletteKind, Vec<(String, String)>)>,
