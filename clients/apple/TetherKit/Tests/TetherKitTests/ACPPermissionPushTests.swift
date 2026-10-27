@@ -187,7 +187,7 @@ final class ACPPermissionPushTests: XCTestCase {
 
   func test_the_chat_a_push_names_resumes_with_a_journal_and_is_read_only_without() {
     var journal = ChatJournal()
-    let chats = [ACPChatSummary(name: "c1", isRunning: true, logBytes: 1, cwd: "/srv/app", created: .now, spawn: "x")]
+    let chats = [ACPChatSummary(name: "c1", isRunning: true, logBytes: 1, cwd: "/srv/app", created: .now, spawn: "claude")]
     XCTAssertEqual(
       ChatRoute.opening(name: "c1", chats: chats, journal: journal), ChatRoute(name: "c1", cwd: "/srv/app", readOnly: true))
     journal.sessionId = "s"

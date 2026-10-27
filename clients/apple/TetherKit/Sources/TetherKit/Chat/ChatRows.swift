@@ -66,13 +66,14 @@ struct ChatItemRow: View, Equatable {
   let toggle: () -> Void
   var queued = false
   var host = "the host"
+  var agent: ChatAgentProfile? = ChatAgents.claude
   /// Set while the agent has no session for want of a login: the row then offers another try.
   var signInRetry: ChatSessionModel.SignInRetry?
   var retrySignIn: () -> Void = {}
 
   static func == (lhs: ChatItemRow, rhs: ChatItemRow) -> Bool {
     lhs.item == rhs.item && lhs.cwd == rhs.cwd && lhs.expanded == rhs.expanded && lhs.queued == rhs.queued
-      && lhs.host == rhs.host && lhs.signInRetry == rhs.signInRetry
+      && lhs.host == rhs.host && lhs.agent == rhs.agent && lhs.signInRetry == rhs.signInRetry
   }
 
   var body: some View {
@@ -102,7 +103,7 @@ struct ChatItemRow: View, Equatable {
     case let .compaction(compaction):
       CompactionRow(compaction: compaction, expanded: expanded, toggle: toggle)
     case .signedOut:
-      SignedOutRow(host: host, retry: signInRetry, action: retrySignIn)
+      SignedOutRow(host: host, agent: agent, retry: signInRetry, action: retrySignIn)
     }
   }
 }
@@ -214,13 +215,15 @@ struct CompactionRow: View {
 }
 
 enum ChatSignInCopy {
-  static func message(host: String) -> String {
-    "Claude isn't signed in on \(host). Open a terminal there and run claude to sign in."
+  static func message(host: String, agent: ChatAgentProfile? = ChatAgents.claude) -> String {
+    guard let agent else { return "The agent isn't signed in on \(host). Open a terminal there and sign in." }
+    return "\(agent.label) isn't signed in on \(host). Open a terminal there and run \(agent.signInCommand) to sign in."
   }
 }
 
 struct SignedOutRow: View {
   let host: String
+  var agent: ChatAgentProfile? = ChatAgents.claude
   let retry: ChatSessionModel.SignInRetry?
   let action: () -> Void
 
@@ -228,7 +231,7 @@ struct SignedOutRow: View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         Image(systemName: "person.crop.circle.badge.exclamationmark").font(.caption).foregroundStyle(TetherColors.warning)
-        Text(ChatSignInCopy.message(host: host)).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        Text(ChatSignInCopy.message(host: host, agent: agent)).font(.footnote).foregroundStyle(TetherColors.textSecondary)
           .textSelection(.enabled)
       }
       if let retry {

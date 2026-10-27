@@ -272,7 +272,7 @@ final class ChatSessionModelTests: XCTestCase {
     var commands: [String] = []
     let listModel = ChatListModel(hostName: "h") { command in
       commands.append(command)
-      if command == ACPHostCommand.listWithErrors { return "chat-a\trunning\t1\t/srv/api\t5\tx\n" }
+      if command == ACPHostCommand.listWithErrors { return "chat-a\trunning\t1\t/srv/api\t5\tclaude\n" }
       if command == ACPHostCommand.home { return "/home/sam" }
       return ""
     }

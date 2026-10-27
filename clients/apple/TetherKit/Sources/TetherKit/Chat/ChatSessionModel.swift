@@ -25,6 +25,10 @@ final class ChatSessionModel {
   let loadSessionId: String?
   /// What the host is called in messages about it; the connection's host name.
   let hostLabel: String
+  /// The agent the chat runs; nil for one this app does not know (no defaults, no Claude words).
+  let agent: ChatAgentProfile?
+  /// The New chat sheet's option picks for this chat: nil applies the stored defaults, `[:]` nothing.
+  private let optionPicks: [String: String]?
 
   private(set) var state = ChatState()
   private(set) var link = ChatLinkTracker()
@@ -77,6 +81,8 @@ final class ChatSessionModel {
   private var skipSnapshot = false
   private var stopping: Task<Void, Never>?
   private let optionDefaults: ChatOptionDefaultsStore?
+  private let optionsCache: ChatOptionsCache?
+  private var lastCachedOptions: [ACPConfigOption] = []
   private var userTouchedOptions = Set<String>()
 
   init(
@@ -85,8 +91,12 @@ final class ChatSessionModel {
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
     listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, images: ChatImageStore? = nil,
-    optionDefaults: ChatOptionDefaultsStore? = nil, dial: @escaping Dial
+    optionDefaults: ChatOptionDefaultsStore? = nil, agent: ChatAgentProfile? = ChatAgents.claude,
+    optionPicks: [String: String]? = nil, optionsCache: ChatOptionsCache? = nil, dial: @escaping Dial
   ) {
+    self.agent = agent
+    self.optionPicks = optionPicks
+    self.optionsCache = optionsCache
     self.optionDefaults = optionDefaults
     self.imageLibrary = images.map(ChatImageLibrary.init)
     self.loadSessionId = loadSessionId
@@ -111,6 +121,9 @@ final class ChatSessionModel {
     let store: any ChatJournalStore =
       route.readOnly ? InMemoryChatJournalStore() : UserDefaultsChatJournalStore(name: route.name)
     let files = ChatLocalFiles(scope: ChatTitleStore.scope(for: config))
+    let titleStore = ChatTitleStore(config: config)
+    let agent = ChatAgents.profile(forKey: route.agentKey)
+    if let agent { titleStore.setAgent(agent.key, for: route.name) }
     var clientId: String?
     if route.multiClient, !route.readOnly {
       var journal = store.load()
@@ -122,7 +135,7 @@ final class ChatSessionModel {
     }
     return ChatSessionModel(
       chatName: route.name, cwd: route.cwd, readOnly: route.readOnly, join: route.join, store: store,
-      titleStore: ChatTitleStore(config: config),
+      titleStore: titleStore,
       hostAnswers: { await ACPHostAnswers.read(name: route.name, config: config, store: hostKeyStore) },
       snapshots: files.snapshots(route.name),
       inspect: { await ACPHostInspect.summary(name: route.name, config: config, store: hostKeyStore) },
@@ -132,11 +145,13 @@ final class ChatSessionModel {
           command: ChatFileList.command(cwd: route.cwd), config: config, store: hostKeyStore, deadline: 15)
       },
       spinnerVerbs: { await ChatVerbCache.shared.verbs(config: config, store: hostKeyStore) },
-      images: files.images(route.name), optionDefaults: ChatOptionDefaultsStore()
+      images: files.images(route.name), optionDefaults: ChatOptionDefaultsStore(), agent: agent,
+      optionPicks: route.optionPicks, optionsCache: ChatOptionsCache(config: config)
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
-        command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from, client: clientId))
+        command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from, client: clientId,
+          spawnCommand: agent?.spawn ?? ACPHostCommand.spawnCommand))
     }
   }
 
@@ -157,7 +172,7 @@ final class ChatSessionModel {
   var hasEnded: Bool { link.phase == .ended }
 
   func connect() async {
-    if !verbsAsked, let spinnerVerbs {
+    if !verbsAsked, let spinnerVerbs, agent?.usesClaudeVerbs == true {
       verbsAsked = true
       Task { verbs = await spinnerVerbs() }
     }
@@ -323,17 +338,22 @@ final class ChatSessionModel {
   }
 
   /// One after the other, each picked from the options as the last answer left them; a refusal is
-  /// dropped quietly and keeps the stored value. An option the user touched is left alone.
+  /// dropped quietly and keeps the stored value. An option the user touched is left alone. The New
+  /// chat sheet's picks stand in for the stored defaults, and what the agent confirms is stored.
   private func applyStoredDefaults(_ client: ACPClient, generation mine: Int) async {
-    guard let optionDefaults else { return }
-    let stored = optionDefaults.stored(agent: ACPHostCommand.agentKey)
+    guard let optionDefaults, let agent else { return }
+    let stored = optionPicks ?? optionDefaults.stored(agent: agent.key)
     var tried = Set<String>()
     while mine == generation,
       let call = ChatOptionDefaults.next(
-        stored: stored, offered: await client.state.configOptions, skipping: tried.union(userTouchedOptions))
+        stored: stored, offered: await client.state.configOptions, skipping: tried.union(userTouchedOptions),
+        remembered: agent.rememberedIds)
     {
       tried.insert(call.id)
-      try? await client.setConfigOption(id: call.id, value: call.value)
+      do {
+        try await client.setConfigOption(id: call.id, value: call.value)
+        if optionPicks != nil { optionDefaults.remember(agent: agent.key, id: call.id, value: call.value) }
+      } catch {}
     }
     if !tried.isEmpty, mine == generation { receive(await client.state, generation: mine) }
   }
@@ -351,7 +371,7 @@ final class ChatSessionModel {
     Task {
       do {
         try await client.setConfigOption(id: id, value: value)
-        optionDefaults?.remember(agent: ACPHostCommand.agentKey, id: id, value: value)
+        if let agent { optionDefaults?.remember(agent: agent.key, id: id, value: value) }
         optionChanges[id] = nil
         receive(await client.state, generation: mine)
       } catch {
@@ -531,6 +551,14 @@ final class ChatSessionModel {
 
   private func persistTitle() {
     if let title = state.title { titleStore?.set(title, for: chatName) }
+    persistOptions()
+  }
+
+  /// The choices the New chat sheet offers come from the agent's latest session.
+  private func persistOptions() {
+    guard let agent, let optionsCache, !state.configOptions.isEmpty, state.configOptions != lastCachedOptions else { return }
+    lastCachedOptions = state.configOptions
+    optionsCache.save(state.configOptions, agent: agent)
   }
 
   private func fail(_ error: Error) {
