@@ -77,16 +77,18 @@ actor ACPClient {
 
   /// Starts reading. With a persisted session id the handshake is skipped entirely; otherwise
   /// runs `initialize` and `session/new`, or `session/load` when continuing an earlier conversation.
-  func start(cwd: String, loadSessionId: String? = nil) async throws {
+  /// Returns true when this call created or loaded the session, false when one was already persisted.
+  @discardableResult
+  func start(cwd: String, loadSessionId: String? = nil) async throws -> Bool {
     startReading()
-    if journal.sessionId == nil {
-      _ = try await initialize()
-      if let id = loadSessionId ?? journal.loadedSessionId {
-        _ = try await loadSession(id, cwd: cwd)
-      } else {
-        _ = try await newSession(cwd: cwd)
-      }
+    guard journal.sessionId == nil else { return false }
+    _ = try await initialize()
+    if let id = loadSessionId ?? journal.loadedSessionId {
+      _ = try await loadSession(id, cwd: cwd)
+    } else {
+      _ = try await newSession(cwd: cwd)
     }
+    return true
   }
 
   func startReading() {

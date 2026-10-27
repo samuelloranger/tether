@@ -389,6 +389,107 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertNil(model.optionChanges["effort"])
     model.leave()
   }
+
+  private func defaultsStore(_ stored: [String: String] = [:]) -> ChatOptionDefaultsStore {
+    let store = ChatOptionDefaultsStore(defaults: UserDefaults(suiteName: "tether.test.\(UUID().uuidString)")!)
+    for (id, value) in stored { store.remember(agent: ACPHostCommand.agentKey, id: id, value: value) }
+    return store
+  }
+
+  private func optionModel(
+    _ stream: ScriptedByteStream, journal: ChatJournal, join: Bool = false, defaults: ChatOptionDefaultsStore
+  ) -> ChatSessionModel {
+    ChatSessionModel(
+      chatName: "chat-t", cwd: "/work/project", readOnly: false, join: join,
+      store: InMemoryChatJournalStore(journal), optionDefaults: defaults
+    ) { _, _ in stream }
+  }
+
+  private func setCalls(_ stream: ScriptedByteStream) -> Int {
+    stream.writtenText.components(separatedBy: "session/set_config_option").count - 1
+  }
+
+  func test_a_new_chat_sends_the_stored_defaults_that_are_offered_and_differ() async throws {
+    let stream = ScriptedByteStream()
+    let defaults = defaultsStore(["model": "haiku", "effort": "medium", "mode": "gone"])
+    let model = optionModel(stream, journal: ChatJournal(), defaults: defaults)
+    Task { await model.connect() }
+    stream.push(ACPFixture.Controls.log(0..<2))
+    let sent = await eventually { stream.writtenText.contains("session/set_config_option") }
+    XCTAssertTrue(sent)
+    XCTAssertTrue(stream.writtenText.contains("\"configId\":\"model\""))
+    stream.push(ACPFixture.Controls.log(2..<3))
+    let done = await eventually { model.state.currentChoice(of: "model") == "Haiku 5.5" }
+    XCTAssertTrue(done)
+    XCTAssertEqual(setCalls(stream), 1)
+    XCTAssertTrue(model.optionChanges.isEmpty)
+    model.leave()
+  }
+
+  func test_a_refused_default_is_not_shown_and_stays_stored() async throws {
+    let stream = ScriptedByteStream()
+    let defaults = defaultsStore(["model": "haiku"])
+    let model = optionModel(stream, journal: ChatJournal(), defaults: defaults)
+    Task { await model.connect() }
+    stream.push(ACPFixture.Controls.log(0..<2))
+    _ = await eventually { stream.writtenText.contains("session/set_config_option") }
+    stream.push(Data("{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32602,\"message\":\"no\"}}\n".utf8))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.optionChanges.isEmpty)
+    XCTAssertNil(model.notice)
+    XCTAssertEqual(defaults.stored(agent: ACPHostCommand.agentKey), ["model": "haiku"])
+    model.leave()
+  }
+
+  func test_a_resumed_or_joined_chat_sends_no_defaults() async throws {
+    let defaults = defaultsStore(["model": "haiku"])
+    let resumed = ScriptedByteStream()
+    var journal = ChatJournal()
+    journal.sessionId = "sess-2"
+    journal.nextRequestId = 3
+    let resumedModel = optionModel(resumed, journal: journal, defaults: defaults)
+    Task { await resumedModel.connect() }
+    resumed.push(ACPFixture.Controls.log(1..<2))
+    let live = await settled(resumedModel)
+    XCTAssertTrue(live)
+    XCTAssertEqual(setCalls(resumed), 0)
+    resumedModel.leave()
+
+    let joined = ScriptedByteStream()
+    let joinedModel = optionModel(joined, journal: ChatJournal(), join: true, defaults: defaults)
+    Task { await joinedModel.connect() }
+    joined.push(ACPFixture.Controls.log(0..<2))
+    let joinedLive = await eventually { joinedModel.state.currentChoice(of: "model") == "Sonnet 5.5" }
+    XCTAssertTrue(joinedLive)
+    XCTAssertEqual(setCalls(joined), 0)
+    XCTAssertFalse(joined.writtenText.contains("session/new"))
+    joinedModel.leave()
+  }
+
+  func test_a_confirmed_user_change_is_stored_and_a_refused_one_is_not() async throws {
+    let stream = ScriptedByteStream()
+    let defaults = defaultsStore()
+    var journal = ChatJournal()
+    journal.sessionId = "sess-2"
+    journal.nextRequestId = 3
+    let model = optionModel(stream, journal: journal, defaults: defaults)
+    Task { await model.connect() }
+    stream.push(ACPFixture.Controls.log(1..<2))
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    model.setOption(id: "model", value: "haiku")
+    _ = await eventually { stream.writtenText.contains("session/set_config_option") }
+    XCTAssertTrue(defaults.stored(agent: ACPHostCommand.agentKey).isEmpty)
+    stream.push(ACPFixture.Controls.log(2..<3))
+    let stored = await eventually { defaults.stored(agent: ACPHostCommand.agentKey)["model"] == "haiku" }
+    XCTAssertTrue(stored)
+    model.setOption(id: "effort", value: "max")
+    stream.push(Data("{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32602,\"message\":\"unsupported\"}}\n".utf8))
+    _ = await eventually { model.optionChanges["effort"] != nil && model.optionChanges["effort"] != .pending(value: "max") }
+    XCTAssertEqual(defaults.stored(agent: ACPHostCommand.agentKey), ["model": "haiku"])
+    model.leave()
+  }
 }
 
 /// Reads pass through; every write fails, as a socket the host already dropped would.

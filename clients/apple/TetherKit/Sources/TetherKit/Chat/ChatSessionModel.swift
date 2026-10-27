@@ -76,6 +76,7 @@ final class ChatSessionModel {
   private var attempt: ChatResume.Attempt?
   private var skipSnapshot = false
   private var stopping: Task<Void, Never>?
+  private let optionDefaults: ChatOptionDefaultsStore?
 
   init(
     chatName: String, cwd: String, readOnly: Bool, join: Bool = false, store: any ChatJournalStore,
@@ -83,8 +84,9 @@ final class ChatSessionModel {
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
     listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, images: ChatImageStore? = nil,
-    dial: @escaping Dial
+    optionDefaults: ChatOptionDefaultsStore? = nil, dial: @escaping Dial
   ) {
+    self.optionDefaults = optionDefaults
     self.imageLibrary = images.map(ChatImageLibrary.init)
     self.loadSessionId = loadSessionId
     self.listFiles = listFiles
@@ -129,7 +131,7 @@ final class ChatSessionModel {
           command: ChatFileList.command(cwd: route.cwd), config: config, store: hostKeyStore, deadline: 15)
       },
       spinnerVerbs: { await ChatVerbCache.shared.verbs(config: config, store: hostKeyStore) },
-      images: files.images(route.name)
+      images: files.images(route.name), optionDefaults: ChatOptionDefaultsStore()
     ) { spawn, from in
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
@@ -226,7 +228,7 @@ final class ChatSessionModel {
       } else if join {
         await fresh.startJoining()
       } else {
-        try await fresh.start(cwd: cwd, loadSessionId: loadSessionId)
+        if try await fresh.start(cwd: cwd, loadSessionId: loadSessionId) { await applyStoredDefaults(fresh, generation: mine) }
       }
     } catch {
       guard mine == generation else { return }
@@ -246,8 +248,9 @@ final class ChatSessionModel {
     let mine = generation
     Task {
       do {
-        try await client.start(cwd: cwd, loadSessionId: loadSessionId)
+        let created = try await client.start(cwd: cwd, loadSessionId: loadSessionId)
         guard mine == generation else { return }
+        if created { await applyStoredDefaults(client, generation: mine) }
         signInRetry = .idle
       } catch {
         guard mine == generation else { return }
@@ -318,6 +321,18 @@ final class ChatSessionModel {
     Task { await deliver(entry.text, entry.images, imagesLost: entry.imagesLost) }
   }
 
+  /// One after the other; a refusal is dropped quietly and keeps the stored value.
+  private func applyStoredDefaults(_ client: ACPClient, generation mine: Int) async {
+    guard let optionDefaults else { return }
+    let calls = ChatOptionDefaults.plan(
+      stored: optionDefaults.stored(agent: ACPHostCommand.agentKey), offered: await client.state.configOptions)
+    for call in calls {
+      guard mine == generation else { return }
+      try? await client.setConfigOption(id: call.id, value: call.value)
+    }
+    if !calls.isEmpty, mine == generation { receive(await client.state, generation: mine) }
+  }
+
   func setOption(id: String, value: String) {
     guard canInteract, let client else { return }
     if case .pending = optionChanges[id] { return }
@@ -330,6 +345,7 @@ final class ChatSessionModel {
     Task {
       do {
         try await client.setConfigOption(id: id, value: value)
+        optionDefaults?.remember(agent: ACPHostCommand.agentKey, id: id, value: value)
         optionChanges[id] = nil
         receive(await client.state, generation: mine)
       } catch {
