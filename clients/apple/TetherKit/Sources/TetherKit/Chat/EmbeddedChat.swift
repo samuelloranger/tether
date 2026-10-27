@@ -35,6 +35,7 @@ struct EmbeddedChat: View {
     }
     .sheet(isPresented: $showGit, onDismiss: { controller.setGitTarget(.session) }) {
       GitDiffView(controller: controller) { showGit = false }
+        .onAppear { controller.setGitTarget(GitTarget.forChat(folder: folder)) }
     }
     .tint(TetherColors.accent)
   }

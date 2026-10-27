@@ -261,6 +261,8 @@ public struct SSHTerminalView: View {
     }
     .sheet(isPresented: $showGit, onDismiss: { controller.setGitTarget(.session) }) {
       GitDiffView(controller: controller) { showGit = false }
+        // Set again on appear: a sheet queued behind a chat's own Git sheet opens after that one reset it.
+        .onAppear { controller.setGitTarget(content.chat.map { GitTarget.forChat(folder: $0.cwd) } ?? .session) }
         .macSheetSize(width: 900, height: 640, large: true)
     }
     .sheet(isPresented: $showHistory) {

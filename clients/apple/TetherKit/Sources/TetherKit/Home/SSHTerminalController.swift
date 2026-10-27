@@ -573,6 +573,7 @@ public final class SSHTerminalController {
     gitTarget = target
     gitGeneration += 1
     gitLoads.removeAll()
+    gitLoading = false
     clearGitWorkspace()
     gitCwd = nil
     pullRequestsCwd = nil
@@ -605,13 +606,15 @@ public final class SSHTerminalController {
     let load = Task { await performGitLoad(payload) }
     gitLoads[payload] = load
     await load.value
-    gitLoads[payload] = nil
+    // A target change may already have put a newer load here.
+    if gitLoads[payload] == load { gitLoads[payload] = nil }
   }
 
   private func performGitLoad(_ payload: GitWorkspacePayload) async {
     // Only a first load shows a spinner; flipping this on every poll redrew the whole screen.
+    let generation = gitGeneration
     if !gitLoaded { gitLoading = true }
-    defer { if gitLoading { gitLoading = false } }
+    defer { if gitLoading, generation == gitGeneration { gitLoading = false } }
     switch payload {
     case .all:
       async let local: Void = loadLocalGit(diff: true, commits: true)

@@ -750,7 +750,9 @@ struct ChatView: View {
       let split = ChatFileSend.split(read.files)
       let room = attachments.room
       for image in split.images.prefix(room) { attachments.add(data: image.data) }
-      if split.images.count > room { problems.append("Only \(room) more pictures fit in this message.") }
+      if split.images.count > room {
+        problems.append(room == 0 ? "No room for more pictures in this message." : "Only \(room) more pictures fit in this message.")
+      }
       if let onUpload {
         for file in split.uploads {
           if let path = await onUpload(file.data, file.name) {
@@ -760,7 +762,7 @@ struct ChatView: View {
           }
         }
       }
-      if let first = problems.first { attachments.error = first }
+      if !problems.isEmpty { attachments.error = problems.joined(separator: " ") }
     }
   }
 
