@@ -508,6 +508,7 @@ struct ChatView: View {
     case .lost:
       Button { model.reconnect() } label: {
         Label("Reconnect", systemImage: "arrow.clockwise").font(.caption.weight(.semibold))
+          .lineLimit(1).fixedSize()
           .frame(height: 24).hitSlop(vertical: 10)
       }
       .accessibilityHint("The connection to the host was lost")
@@ -523,8 +524,10 @@ struct ChatView: View {
   private func badge(color: Color, text: String) -> some View {
     HStack(spacing: 5) {
       Circle().fill(color).frame(width: 6, height: 6)
-      Text(text).font(.caption).foregroundStyle(TetherColors.textSecondary)
+      Text(text).font(.caption).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
     }
+    // A long title gives way first; the badge never wraps.
+    .fixedSize()
     .accessibilityElement(children: .combine)
     .accessibilityLabel("Connection: \(text)")
   }
