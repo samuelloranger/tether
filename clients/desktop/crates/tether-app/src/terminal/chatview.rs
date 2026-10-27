@@ -13,7 +13,7 @@ use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
     AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatTaskVm, ChatVm, CtlChoiceVm,
     CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
-    PermOptionVm, QChoiceVm, QFieldVm, SavedSessionVm,
+    PermOptionVm, QChoiceVm, QFieldVm, QueuedVm, SavedSessionVm,
 };
 
 thread_local! {
@@ -358,6 +358,62 @@ fn sync<V: PartialEq + Clone, T: Clone + 'static>(
     None
 }
 
+/// How the queued strip goes from the messages it shows to `next`: the first `leaving` start or
+/// are removed, and `arriving` join at the back. Messages leave from the front and arrive at
+/// the back, so the smallest such split is the one that happened.
+fn queue_shift<'a>(shown: &[String], next: &'a [String]) -> (usize, &'a [String]) {
+    (0..=shown.len())
+        .find_map(|k| {
+            let kept = &shown[k..];
+            next.starts_with(kept).then(|| (k, &next[kept.len()..]))
+        })
+        .unwrap_or((shown.len(), next))
+}
+
+/// How long a leaving chip stays to fade out (`Motion.base` and a frame).
+const QUEUED_FADE: std::time::Duration = std::time::Duration::from_millis(200);
+
+fn sync_queued(vm: &ChatVm, next: &[String]) {
+    let current = vm.get_queued();
+    let Some(rows) = current.as_any().downcast_ref::<VecModel<QueuedVm>>() else {
+        vm.set_queued(model(next.iter().map(|t| queued_vm(t, false)).collect()));
+        return;
+    };
+    let staying: Vec<(usize, String)> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, q)| !q.leaving)
+        .map(|(i, q)| (i, q.text.to_string()))
+        .collect();
+    let shown: Vec<String> = staying.iter().map(|(_, t)| t.clone()).collect();
+    let (leaving, arriving) = queue_shift(&shown, next);
+    for (i, text) in staying.iter().take(leaving) {
+        rows.set_row_data(*i, queued_vm(text, true));
+    }
+    for text in arriving {
+        rows.push(queued_vm(text, false));
+    }
+    if leaving > 0 {
+        let rows = current.clone();
+        slint::Timer::single_shot(QUEUED_FADE, move || {
+            if let Some(rows) = rows.as_any().downcast_ref::<VecModel<QueuedVm>>() {
+                for i in (0..rows.row_count()).rev() {
+                    if rows.row_data(i).is_some_and(|q| q.leaving) {
+                        rows.remove(i);
+                    }
+                }
+            }
+        });
+    }
+}
+
+fn queued_vm(text: &str, leaving: bool) -> QueuedVm {
+    QueuedVm {
+        text: text.into(),
+        leaving,
+    }
+}
+
 fn option(o: &Option<(String, String)>) -> PermOptionVm {
     o.as_ref()
         .map(|(id, label)| PermOptionVm {
@@ -511,10 +567,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
         }
     });
 
-    let queued: Vec<SharedString> = s.queued.iter().map(|q| q.as_str().into()).collect();
-    if vm.get_queued().iter().ne(queued.iter().cloned()) {
-        vm.set_queued(model(queued));
-    }
+    sync_queued(&vm, &s.queued);
 
     let tasks: Vec<ChatTaskVm> = s
         .tasks
@@ -881,4 +934,32 @@ pub fn close_add_menu(ui: &crate::AppWindow) -> bool {
     let open = vm.get_add_menu();
     vm.set_add_menu(false);
     open
+}
+
+#[cfg(test)]
+mod tests {
+    use super::queue_shift;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_queued_message_arrives_at_the_back_and_starts_from_the_front() {
+        let next = v(&["a", "b", "c"]);
+        assert_eq!(queue_shift(&v(&["a", "b"]), &next), (0, &next[2..]));
+        let next = v(&["b", "c"]);
+        assert_eq!(queue_shift(&v(&["a", "b", "c"]), &next), (1, &next[2..]));
+        let next = v(&["c", "d"]);
+        assert_eq!(queue_shift(&v(&["a", "b", "c"]), &next), (2, &next[1..]));
+    }
+
+    #[test]
+    fn an_unrelated_queue_replaces_every_chip_and_an_unchanged_one_moves_nothing() {
+        let next = v(&["x", "y"]);
+        assert_eq!(queue_shift(&v(&["a", "b"]), &next), (2, &next[..]));
+        let next = v(&["a", "a"]);
+        assert_eq!(queue_shift(&v(&["a", "a"]), &next), (0, &next[2..]));
+        assert_eq!(queue_shift(&[], &[]), (0, &[][..]));
+    }
 }

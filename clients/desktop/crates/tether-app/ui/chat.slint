@@ -1,5 +1,5 @@
 import { Tokens, Motion } from "tokens.slint";
-import { IconButton, Segment, ConfirmDialog } from "components.slint";
+import { IconButton, Segment, ConfirmDialog, Linger } from "components.slint";
 import { MdLinkVm, MdItemVm, MdTable, DiffLineVm } from "git.slint";
 import { Heat, TextDot } from "agents.slint";
 import { ScrollView } from "std-widgets.slint";
@@ -80,6 +80,12 @@ export struct NcMenuVm {
     value-name: string,
     changed: bool,
     choices: [NcChoiceVm],
+}
+
+// A queued message; `leaving` while it fades out after it started or was removed.
+export struct QueuedVm {
+    text: string,
+    leaving: bool,
 }
 
 export struct ChatTaskVm {
@@ -178,7 +184,7 @@ export global ChatVm {
     in property <float> context: -1;
     in property <string> context-text;
     in property <[ChatRowVm]> rows;
-    in property <[string]> queued;
+    in property <[QueuedVm]> queued;
     in property <[ChatTaskVm]> tasks;
     in property <int> follow-seq;
     in property <string> notice;
@@ -1590,7 +1596,13 @@ component Composer inherits VerticalLayout {
 // A message sent while a turn runs, until the agent starts it.
 component QueuedChip inherits Rectangle {
     in property <string> text;
+    in property <bool> leaving;
     in property <length> max-chip: 480px;
+    property <bool> entered;
+    Timer { interval: 30ms; running: !root.entered; triggered => { root.entered = true; } }
+    opacity: root.entered && !root.leaving ? 1 : 0;
+    transform-scale: root.entered && !root.leaving ? 1 : 0.94;
+    animate opacity, transform-scale { duration: Motion.base; easing: ease-out; }
     width: min(chip-row.preferred-width, root.max-chip);
     height: chip-row.preferred-height;
     background: Tokens.raised.with-alpha(0.94);
@@ -1668,7 +1680,7 @@ component BottomBar inherits Rectangle {
         spacing: 6px;
         for q in ChatVm.queued: HorizontalLayout {
             alignment: end;
-            QueuedChip { text: q; max-chip: queue.width * 0.78; }
+            QueuedChip { text: q.text; leaving: q.leaving; max-chip: queue.width * 0.78; }
         }
     }
     col := VerticalLayout {
@@ -1940,7 +1952,9 @@ export component ChatControls inherits Rectangle {
             }
         }
     }
-    if ChatVm.bypass-confirm: ConfirmDialog {
+    bypass := Linger { open: ChatVm.bypass-confirm; }
+    if bypass.alive: ConfirmDialog {
+        shown: bypass.shown;
         title: "Bypass permissions?";
         body: "The agent runs every tool without asking.";
         action: "Bypass permissions";
@@ -1995,11 +2009,11 @@ export component ChatReview inherits Rectangle {
 
 export component ChatViewer inherits Rectangle {
     background: #000000e0;
-    property <bool> shown;
+    // Set by a Linger where it is used, so it fades out as well as in.
+    in property <bool> shown: true;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Motion.base; easing: ease-out; }
-    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
-    TouchArea { clicked => { ChatVm.close-viewer(); } }
+    TouchArea { enabled: root.shown; clicked => { ChatVm.close-viewer(); } }
     // At most the picture's own size: a small screenshot is not blown up to the window.
     if !ChatVm.viewer-missing: Image {
         property <float> fit: min(1, min((parent.width - 48px) / max(1px, self.source.width * 1px), (parent.height - 48px) / max(1px, self.source.height * 1px)));
@@ -2101,11 +2115,11 @@ component NcMenu inherits Rectangle {
 
 export component NewChatDialog inherits Rectangle {
     background: Tokens.background.with-alpha(0.62);
-    property <bool> shown;
+    // Set by a Linger where it is used, so it fades out as well as in.
+    in property <bool> shown: true;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Motion.base; easing: ease-out; }
-    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
-    TouchArea { }
+    TouchArea { enabled: root.shown; }
     Rectangle {
         width: min(480px, parent.width - 48px);
         height: min(dialog.preferred-height, parent.height - 48px);
@@ -2373,9 +2387,13 @@ export component ChatOverlays inherits Rectangle {
     in property <length> left;   // the docked sidebar's width
     if ChatVm.active && ChatVm.ctl-open: ChatControls { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     if ChatVm.active && ChatVm.review-open: ChatReview { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
-    if ChatVm.viewer-open: ChatViewer { }
-    if ChatVm.nc-open: NewChatDialog { }
-    if ChatVm.delete-title != "": ConfirmDialog {
+    viewer := Linger { open: ChatVm.viewer-open; }
+    new-chat := Linger { open: ChatVm.nc-open; }
+    delete := Linger { open: ChatVm.delete-title != ""; }
+    if viewer.alive: ChatViewer { shown: viewer.shown; }
+    if new-chat.alive: NewChatDialog { shown: new-chat.shown; }
+    if delete.alive: ConfirmDialog {
+        shown: delete.shown;
         title: "Delete " + ChatVm.delete-title + "?";
         body: "The agent stops and the conversation is removed from the host.";
         action: "Delete chat";

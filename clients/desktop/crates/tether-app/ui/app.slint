@@ -1,7 +1,7 @@
 import { Palette } from "std-widgets.slint";
 import { Tokens } from "tokens.slint";
 import { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge, KeyFormBridge, SettingsBridge, PickerBridge, SchemeRow, FontRow, SshImportBridge, ImportRow } from "bridge.slint";
-import { ConfirmDialog, Reveal } from "components.slint";
+import { ConfirmDialog, Reveal, Linger } from "components.slint";
 import { HomePage } from "home.slint";
 import { ServerFormPage, KeyGeneratePage, KeyMaterialPage } from "forms.slint";
 import { SettingsPage } from "settings.slint";
@@ -34,7 +34,7 @@ export { PageKind, AppBridge, HomeBridge, MachineCard, KeyCard, ServerFormBridge
 export { TerminalPage, TerminalVm, TermTab } from "terminal.slint";
 export { AgentVm, AgentQuestionRow, AgentOption } from "agents.slint";
 export { GitVm, GitRowVm, DiffLineVm, CheckVm, MethodVm, MdLinkVm, MdItemVm } from "git.slint";
-export { ChatVm, ChatRowVm, ChatEntryVm, ChatImageVm, ChatTabVm, ChatTaskVm, PaletteItemVm, AttachmentVm, PermOptionVm, QChoiceVm, QFieldVm, CtlChoiceVm, CtlOptionVm, CtlCommandVm, SavedSessionVm, NcMenuVm, NcChoiceVm } from "chat.slint";
+export { ChatVm, QueuedVm, ChatRowVm, ChatEntryVm, ChatImageVm, ChatTabVm, ChatTaskVm, PaletteItemVm, AttachmentVm, PermOptionVm, QChoiceVm, QFieldVm, CtlChoiceVm, CtlOptionVm, CtlCommandVm, SavedSessionVm, NcMenuVm, NcChoiceVm } from "chat.slint";
 export { HostKeyRefusedPage, CouldntConnectPage, ConnectVm } from "connect_pages.slint";
 export { HistoryVm, PaletteVm, PaletteRowData } from "extras.slint";
 export { SnippetsBridge, SnippetRow, GoogleFontsBridge, GoogleFontRow, ChipRow } from "extras_bridge.slint";
@@ -77,7 +77,9 @@ export component AppWindow inherits Window {
         if AppBridge.page == PageKind.host-key-refused: Reveal { rise: 6px; HostKeyRefusedPage { } }
         if AppBridge.page == PageKind.couldnt-connect: Reveal { rise: 6px; CouldntConnectPage { } }
         if AppBridge.page == PageKind.snippets: Reveal { rise: 6px; SnippetsPage { } }
-        if AppBridge.dialog-open: ConfirmDialog {
+        dialog := Linger { open: AppBridge.dialog-open; }
+        if dialog.alive: ConfirmDialog {
+            shown: dialog.shown;
             title: AppBridge.dialog-title;
             body: AppBridge.dialog-body;
             extra: AppBridge.dialog-extra;

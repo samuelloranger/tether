@@ -1,5 +1,5 @@
 import { Tokens, Motion } from "tokens.slint";
-import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
+import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton, Linger } from "components.slint";
 import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
 import { AgentVm, AgentChip, AgentBanner, AgentSheet, Heat, TextDot } from "agents.slint";
 import { GitVm, GitSidePanel, GitOverlays } from "git.slint";
@@ -470,8 +470,17 @@ export component TerminalPage inherits Rectangle {
     property <bool> docked: TerminalVm.sidebar == 0;
     property <length> side-w: root.docked ? 248px : 0px;
     background: Tokens.background;
+    // The docked sidebar and the git panel take or give back their width at once, so the terminal
+    // resizes once; they slide within that width.
+    side := Linger { open: root.docked; duration: Motion.slow; }
+    git := Linger { open: GitVm.open; duration: Motion.slow; }
+    over := Linger { open: TerminalVm.sidebar == 2; duration: Motion.slow; }
     HorizontalLayout {
-    if root.docked: Sidebar { }
+    if side.alive: Rectangle {
+        width: 248px;
+        clip: true;
+        Sidebar { x: side.shown ? 0 : -self.width; animate x { duration: Motion.slow; easing: ease-out; } }
+    }
     VerticalLayout {
         horizontal-stretch: 1;
         PaneHeader { docked: root.docked; }
@@ -545,18 +554,16 @@ export component TerminalPage inherits Rectangle {
                 tip := Text { text: TerminalVm.tooltip; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
             }
         }
-        if GitVm.open: GitSidePanel { max-panel-width: (root.width - root.side-w) / 2; }
+        if git.alive: GitSidePanel { shown: git.shown; max-panel-width: (root.width - root.side-w) / 2; }
         }
     }
     }
-    if TerminalVm.sidebar == 2: over := Rectangle {
-        property <bool> shown;
-        Timer { interval: 30ms; running: !over.shown; triggered => { over.shown = true; } }
+    if over.alive: Rectangle {
         Rectangle {
             background: #00000066;
             opacity: over.shown ? 1 : 0;
             animate opacity { duration: Motion.base; easing: ease-out; }
-            TouchArea { clicked => { TerminalVm.sidebar-dismiss(); } }
+            TouchArea { enabled: over.shown; clicked => { TerminalVm.sidebar-dismiss(); } }
         }
         Sidebar {
             x: over.shown ? 0 : -self.width;
@@ -611,17 +618,23 @@ export component TerminalPage inherits Rectangle {
         }
     }
     // Over the sidebar too, so the session it shows cannot change underneath it.
-    if HistoryVm.open: HistoryOverlay {
+    history := Linger { open: HistoryVm.open; }
+    palette := Linger { open: PaletteVm.open; }
+    kill := Linger { open: TerminalVm.kill-name != ""; }
+    if history.alive: HistoryOverlay {
+        shown: history.shown;
         width: parent.width;
         height: parent.height;
         well: TerminalVm.well-color;
     }
-    if PaletteVm.open: PaletteOverlay {
+    if palette.alive: PaletteOverlay {
+        shown: palette.shown;
         width: parent.width;
         height: parent.height;
     }
     if AgentVm.open: AgentSheet { }
-    if TerminalVm.kill-name != "": ConfirmDialog {
+    if kill.alive: ConfirmDialog {
+        shown: kill.shown;
         title: "Kill session " + TerminalVm.kill-name + "?";
         body: "Everything running in it stops. This can't be undone.";
         action: "Kill session";

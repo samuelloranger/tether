@@ -432,11 +432,28 @@ export component ConfirmDialog inherits Rectangle {
     callback confirmed();
     callback cancelled();
     background: Tokens.background.with-alpha(0.62);
-    property <bool> shown;
+    // Set by a Linger where it is used, so it fades out as well as in.
+    in property <bool> shown: true;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Motion.base; easing: ease-out; }
-    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
-    TouchArea { }
+    // The text it opened with stays while it fades out, though the caller's may already be gone.
+    property <string> held-title;
+    property <string> held-body;
+    property <string> held-extra;
+    property <string> held-action;
+    changed title => { if (root.shown) { root.held-title = root.title; } }
+    changed body => { if (root.shown) { root.held-body = root.body; } }
+    changed extra => { if (root.shown) { root.held-extra = root.extra; } }
+    changed action => { if (root.shown) { root.held-action = root.action; } }
+    changed shown => {
+        if (root.shown) {
+            root.held-title = root.title;
+            root.held-body = root.body;
+            root.held-extra = root.extra;
+            root.held-action = root.action;
+        }
+    }
+    TouchArea { enabled: root.shown; }
     card := Rectangle {
         width: min(460px, root.width - 48px);
         height: col.preferred-height;
@@ -454,19 +471,25 @@ export component ConfirmDialog inherits Rectangle {
             padding: 20px;
             padding-bottom: 16px;
             spacing: 8px;
-            Text { text: root.title; wrap: word-wrap; font-size: 18px; font-weight: 650; color: Tokens.text; }
-            Text { text: root.body; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
-            if root.extra != "": Text { text: root.extra; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
+            Text { text: root.held-title; wrap: word-wrap; font-size: 18px; font-weight: 650; color: Tokens.text; }
+            Text { text: root.held-body; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
+            if root.held-extra != "": Text { text: root.held-extra; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
             HorizontalLayout {
                 alignment: end;
                 spacing: 8px;
                 padding-top: 8px;
                 cancel := SecondaryButton { text: "Cancel"; clicked => { root.cancelled(); } }
-                DangerButton { text: root.action; clicked => { root.confirmed(); } }
+                DangerButton { text: root.held-action; clicked => { root.confirmed(); } }
             }
         }
     }
-    init => { cancel.focus(); }
+    init => {
+        root.held-title = root.title;
+        root.held-body = root.body;
+        root.held-extra = root.extra;
+        root.held-action = root.action;
+        cancel.focus();
+    }
 }
 
 // Matches Field; the Fluent ComboBox is a different height, radius, and fill.
@@ -702,5 +725,24 @@ export component Reveal inherits Rectangle {
         height: root.height;
         animate x, y { duration: root.duration; easing: ease-out; }
         @children
+    }
+}
+
+// Keeps an `if` element alive past its close so it can animate out: `alive` gates the `if`,
+// `shown` drives the motion. It is false for the first frame, since a starting value that was
+// never drawn has nothing to animate from, and while closing.
+export component Linger {
+    in property <bool> open;
+    in property <duration> duration: Motion.base;
+    out property <bool> alive: root.open || root.leaving;
+    out property <bool> shown: root.open && root.entered;
+    property <bool> leaving;
+    property <bool> entered;
+    changed open => { root.leaving = !root.open && root.entered; }
+    Timer { interval: 30ms; running: root.open && !root.entered; triggered => { root.entered = true; } }
+    Timer {
+        interval: root.duration;
+        running: root.leaving;
+        triggered => { root.leaving = false; root.entered = false; }
     }
 }

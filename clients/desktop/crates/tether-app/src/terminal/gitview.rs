@@ -116,6 +116,9 @@ fn set_pr(vm: &GitVm<'_>, pr: Option<&PrView>) {
     vm.set_pr_note(p.note.as_str().into());
     let dialog = p.dialog.as_ref();
     vm.set_dialog_open(dialog.is_some());
+    // A closing dialog fades out with what it showed.
+    let Some(dialog) = dialog else { return };
+    let dialog = Some(dialog);
     vm.set_dialog_title(dialog.map_or("", |d| d.title.as_str()).into());
     vm.set_dialog_body(dialog.map_or("", |d| d.body.as_str()).into());
     vm.set_dialog_methods(model(
@@ -136,6 +139,14 @@ fn set_pr(vm: &GitVm<'_>, pr: Option<&PrView>) {
 
 pub fn apply(w: &AppWindow, v: GitView) {
     let vm = w.global::<GitVm>();
+    // A closed panel slides out showing what it last held, so only the flags that close it change.
+    if !v.open {
+        vm.set_open(false);
+        vm.set_modal(false);
+        vm.set_dialog_open(false);
+        vm.set_md_open(false);
+        return;
+    }
     vm.set_open(v.open);
     vm.set_modal(
         v.open && (v.markdown.is_some() || v.pr.as_ref().is_some_and(|p| p.dialog.is_some())),
@@ -182,32 +193,35 @@ pub fn apply(w: &AppWindow, v: GitView) {
     set_pr(&vm, v.pr.as_ref());
     let md = v.markdown.as_ref();
     vm.set_md_open(md.is_some());
-    vm.set_md_title(md.map_or("", |m| m.title.as_str()).into());
-    vm.set_md_loading(md.is_some_and(|m| m.loading));
-    vm.set_md_error(md.map_or("", |m| m.error.as_str()).into());
-    vm.set_md_truncated(md.is_some_and(|m| m.truncated));
-    vm.set_md_items(model(
-        md.map(|m| {
-            m.items
-                .iter()
-                .map(|i| MdItemVm {
-                    kind: item_kind(i.kind),
-                    level: i32::from(i.level),
-                    text: i.text.as_str().into(),
-                    links: model(
-                        i.links
-                            .iter()
-                            .map(|l| MdLinkVm {
-                                label: l.label.as_str().into(),
-                                url: l.url.as_str().into(),
-                            })
-                            .collect(),
-                    ),
-                })
-                .collect()
-        })
-        .unwrap_or_default(),
-    ));
+    // A closing markdown view fades out with what it showed.
+    if md.is_some() {
+        vm.set_md_title(md.map_or("", |m| m.title.as_str()).into());
+        vm.set_md_loading(md.is_some_and(|m| m.loading));
+        vm.set_md_error(md.map_or("", |m| m.error.as_str()).into());
+        vm.set_md_truncated(md.is_some_and(|m| m.truncated));
+        vm.set_md_items(model(
+            md.map(|m| {
+                m.items
+                    .iter()
+                    .map(|i| MdItemVm {
+                        kind: item_kind(i.kind),
+                        level: i32::from(i.level),
+                        text: i.text.as_str().into(),
+                        links: model(
+                            i.links
+                                .iter()
+                                .map(|l| MdLinkVm {
+                                    label: l.label.as_str().into(),
+                                    url: l.url.as_str().into(),
+                                })
+                                .collect(),
+                        ),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        ));
+    }
 }
 
 fn send(m: GitMsg) {
