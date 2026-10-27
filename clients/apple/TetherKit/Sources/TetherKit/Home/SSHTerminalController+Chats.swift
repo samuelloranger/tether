@@ -52,6 +52,12 @@ extension SSHTerminalController {
     }
   }
 
+  /// Agent key → why this host can't run it; a host that could not be checked dims nothing.
+  func unavailableAgents() async -> [String: String] {
+    guard let output = try? await control.exec(ACPHostCheck.command) else { return [:] }
+    return ACPHostCheck.unavailable(in: output, host: config.host)
+  }
+
   func savedSessions(folderText: String, agent: ChatAgentProfile = ChatAgents.claude) async -> ChatContinueLoader.Result {
     let control = control
     return await ChatContinueLoader.load(folderText: folderText, agent: agent) { try await control.exec($0) }

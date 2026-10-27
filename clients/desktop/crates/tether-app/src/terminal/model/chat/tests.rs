@@ -1886,3 +1886,47 @@ fn devsample_option(
             .collect(),
     }
 }
+
+#[test]
+fn the_dialog_dims_the_agents_the_host_cannot_run_and_will_not_pick_them() {
+    let mut h = Harness::new();
+    h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
+    h.exec(
+        |t| matches!(t, ExecTag::AgentProbe),
+        "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\nopencode=missing\ncopilot=missing\n",
+    );
+    let dialog = h.dialog();
+    assert_eq!(dialog.unavailable, [false, false, true, true]);
+    assert_eq!(dialog.error, "");
+    h.msg(ChatMsg::NewChatAgent("copilot".into()));
+    let dialog = h.dialog();
+    assert_eq!(dialog.agent, 0, "the pick is refused");
+    assert!(
+        dialog.error.contains("Copilot CLI on devbox.local"),
+        "{}",
+        dialog.error
+    );
+    h.msg(ChatMsg::NewChatAgent("codex".into()));
+    let dialog = h.dialog();
+    assert_eq!(dialog.agent, 1);
+    assert_eq!(dialog.error, "");
+}
+
+#[test]
+fn a_dialog_opening_on_an_agent_the_host_lacks_says_why() {
+    let mut h = Harness::new();
+    h.chats
+        .set_options_cache(Default::default(), "devbox.local:22", "opencode");
+    h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
+    h.exec(
+        |t| matches!(t, ExecTag::AgentProbe),
+        "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=missing\nopencode=missing\n",
+    );
+    let dialog = h.dialog();
+    assert_eq!(dialog.unavailable, [true, true, true, false]);
+    assert!(
+        dialog.error.contains("Install opencode"),
+        "{}",
+        dialog.error
+    );
+}

@@ -14,6 +14,7 @@ enum ACPHostCheck {
     case tetherOutdated
     case nodeMissing
     case opencodeMissing
+    case copilotMissing
   }
 
   /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter. It
@@ -29,6 +30,9 @@ enum ACPHostCheck {
     "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] "
       + "|| PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; "
       + "then echo opencode=ok; else echo opencode=missing; fi",
+    "if command -v copilot >/dev/null 2>&1 "
+      + "|| $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; "
+      + "then echo copilot=ok; else echo copilot=missing; fi",
   ].joined(separator: "; ")
 
   static var command: String { "sh -c \(shellQuote(script))" }
@@ -59,6 +63,7 @@ enum ACPHostCheck {
     }
     if lines.contains("node=missing") { found.append(.nodeMissing) }
     if lines.contains("opencode=missing") { found.append(.opencodeMissing) }
+    if lines.contains("copilot=missing") { found.append(.copilotMissing) }
     return found
   }
 
@@ -74,8 +79,26 @@ enum ACPHostCheck {
 
   /// Node serves the npx-run agents; opencode and Copilot are their own binaries.
   static func relevant(_ problems: [Problem], for agent: ChatAgentProfile) -> [Problem] {
-    let opencode = agent.key == ChatAgents.opencode.key
-    return problems.filter { $0 == .opencodeMissing ? opencode : ($0 != .nodeMissing || agent.needsNode) }
+    problems.filter {
+      switch $0 {
+      case .opencodeMissing: agent.key == ChatAgents.opencode.key
+      case .copilotMissing: agent.key == ChatAgents.copilot.key
+      case .nodeMissing: agent.needsNode
+      default: true
+      }
+    }
+  }
+
+  /// Agent key → why the New chat picker can't offer it: the tool it runs on is missing. A missing
+  /// or old `tether` blocks every agent alike, so Start reports that instead.
+  static func unavailable(in output: String, host: String) -> [String: String] {
+    let tools: [Problem] = [.nodeMissing, .opencodeMissing, .copilotMissing]
+    let found = problems(in: output).filter(tools.contains)
+    var reasons: [String: String] = [:]
+    for agent in ChatAgents.all {
+      if let reason = message(for: relevant(found, for: agent), host: host) { reasons[agent.key] = reason }
+    }
+    return reasons
   }
 
   static func message(for problems: [Problem], host: String) -> String? {
@@ -94,6 +117,9 @@ enum ACPHostCheck {
     }
     if problems.contains(.opencodeMissing) {
       parts.append("Install opencode on \(host) (opencode.ai), or check it is on the PATH of a login shell.")
+    }
+    if problems.contains(.copilotMissing) {
+      parts.append("Install the GitHub Copilot CLI on \(host), or check it is on the PATH of a login shell.")
     }
     return parts.joined(separator: " ")
   }

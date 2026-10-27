@@ -711,6 +711,7 @@ pub enum HostProblem {
     TetherOutdated,
     NodeMissing,
     OpencodeMissing,
+    CopilotMissing,
 }
 
 /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter.
@@ -730,6 +731,10 @@ pub const HOST_CHECK_SCRIPT: &str = concat!(
     "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] ",
     "|| PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; ",
     "then echo opencode=ok; else echo opencode=missing; fi",
+    "; ",
+    "if command -v copilot >/dev/null 2>&1 ",
+    "|| $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; ",
+    "then echo copilot=ok; else echo copilot=missing; fi",
 );
 
 pub fn host_check_command() -> String {
@@ -768,20 +773,40 @@ pub fn host_problems(output: &str) -> Vec<HostProblem> {
     if lines.contains(&"opencode=missing") {
         found.push(HostProblem::OpencodeMissing);
     }
+    if lines.contains(&"copilot=missing") {
+        found.push(HostProblem::CopilotMissing);
+    }
     found
 }
 
 /// Node serves the npx-run agents; opencode and Copilot are their own binaries.
 pub fn host_problems_for(output: &str, agent: &AgentProfile) -> Vec<HostProblem> {
-    let opencode = agent.key == agent::OPENCODE.key;
     host_problems(output)
         .into_iter()
         .filter(|p| match p {
-            HostProblem::OpencodeMissing => opencode,
+            HostProblem::OpencodeMissing => agent.key == agent::OPENCODE.key,
+            HostProblem::CopilotMissing => agent.key == agent::COPILOT.key,
             HostProblem::NodeMissing => agent.needs_node,
             _ => true,
         })
         .collect()
+}
+
+/// Why the New chat picker can't offer `agent` on this host: the tool it runs on is missing.
+/// A missing or old `tether` blocks every agent alike, so Start reports that instead.
+pub fn agent_unavailable(output: &str, agent: &AgentProfile, host: &str) -> Option<String> {
+    let missing: Vec<HostProblem> = host_problems_for(output, agent)
+        .into_iter()
+        .filter(|p| {
+            matches!(
+                p,
+                HostProblem::NodeMissing
+                    | HostProblem::OpencodeMissing
+                    | HostProblem::CopilotMissing
+            )
+        })
+        .collect();
+    host_problem_message(&missing, host)
 }
 
 /// Whether the host's `tether` starts holders that take several clients.
@@ -816,6 +841,11 @@ pub fn host_problem_message(problems: &[HostProblem], host: &str) -> Option<Stri
     if problems.contains(&HostProblem::OpencodeMissing) {
         parts.push(format!(
             "Install opencode on {host} (opencode.ai), or check it is on the PATH of a login shell."
+        ));
+    }
+    if problems.contains(&HostProblem::CopilotMissing) {
+        parts.push(format!(
+            "Install the GitHub Copilot CLI on {host}, or check it is on the PATH of a login shell."
         ));
     }
     Some(parts.join(" "))
@@ -1356,9 +1386,29 @@ mod tests {
                 "if command -v tether >/dev/null 2>&1; then echo tether=found; echo \"version=$($T tether version --json </dev/null 2>/dev/null | head -n 1)\"; else echo tether=missing; fi",
                 "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
                 "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] || PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; then echo opencode=ok; else echo opencode=missing; fi",
+                "if command -v copilot >/dev/null 2>&1 || $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; then echo copilot=ok; else echo copilot=missing; fi",
             ]
             .join("; ")
         );
+    }
+
+    #[test]
+    fn the_picker_names_only_the_missing_tool_an_agent_runs_on() {
+        let report = "tether=missing\nnode=missing\nopencode=ok\ncopilot=missing\n";
+        let claude = agent_unavailable(report, &agent::CLAUDE, "devbox").unwrap();
+        assert_eq!(claude, "Node.js is required on devbox.");
+        assert!(agent_unavailable(report, &agent::CODEX, "devbox").is_some());
+        assert_eq!(
+            agent_unavailable(report, &agent::OPENCODE, "devbox"),
+            None,
+            "a missing tether is for Start to report"
+        );
+        assert!(
+            agent_unavailable(report, &agent::COPILOT, "devbox")
+                .unwrap()
+                .contains("Copilot CLI on devbox")
+        );
+        assert_eq!(agent_unavailable("", &agent::COPILOT, "devbox"), None);
     }
 
     #[test]
@@ -1429,6 +1479,11 @@ mod tests {
             host_problems_for("tether=missing\nnode=missing", &agent::OPENCODE),
             [TetherMissing]
         );
+        assert_eq!(
+            host_problems_for("copilot=missing\nopencode=missing", &agent::COPILOT),
+            [CopilotMissing]
+        );
+        assert!(host_problems_for("copilot=missing", &agent::CLAUDE).is_empty());
         assert_eq!(host_problems("  tether=missing \r\n"), [TetherMissing]);
         assert_eq!(
             host_problems(""),

@@ -260,6 +260,7 @@ export global ChatVm {
     in property <[SavedSessionVm]> nc-sessions;
     in property <bool> nc-continuing;
     in property <int> nc-agent;
+    in property <[bool]> nc-unavailable;     // per agent: the host can't run it, so it is dimmed
     in property <string> nc-summary;
     in property <string> nc-note;
     in property <bool> nc-is-reset;
@@ -2140,6 +2141,7 @@ export component NewChatDialog inherits Rectangle {
                         spacing: 3px;
                         for label[i] in ["Claude", "Codex", "opencode", "Copilot"]: Rectangle {
                             horizontal-stretch: 1;
+                            opacity: ChatVm.nc-unavailable[i] ? 0.4 : 1;
                             border-radius: 8px;
                             background: i == ChatVm.nc-agent ? Tokens.raised : agent-touch.has-hover ? Tokens.surface-hover : transparent;
                             HorizontalLayout {
