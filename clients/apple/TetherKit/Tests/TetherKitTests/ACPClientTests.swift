@@ -214,6 +214,14 @@ final class ACPClientTests: XCTestCase {
     XCTAssertEqual(ACPClientError.hostFailureText(ACPClientError.noSession), "The agent stopped before the chat started.")
     XCTAssertEqual(
       ACPClientError.hostFailureText(SSHConnectError.transport("down")).hasPrefix("Couldn't reach the host: "), true)
+    XCTAssertEqual(
+      ACPClientError.hostFailureText(ACPClientError.connectionLost, started: true),
+      "The agent stopped before the chat started.")
+    XCTAssertEqual(
+      ACPClientError.hostFailureText(ACPClientError.connectionLost), "Couldn't reach the host: The connection to the agent was lost.")
+    XCTAssertEqual(ACPClientError.hostFailureText(ACPClientError.agent(code: 7, message: "boom")), "boom")
+    XCTAssertEqual(
+      ACPClientError.hostFailureText(ACPClientError.agent(code: 7, message: "")), "The agent reported an error (code 7).")
   }
 
   func test_set_config_option_fails_without_a_session_or_on_a_dead_connection() async throws {

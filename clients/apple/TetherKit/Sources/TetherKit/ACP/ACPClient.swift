@@ -11,13 +11,18 @@ extension ACPClientError: LocalizedError {
     switch self {
     case .connectionLost: "The connection to the agent was lost."
     case .noSession: "The agent stopped before the chat started."
-    case let .agent(_, message): message
+    case let .agent(code, message): message.isEmpty ? "The agent reported an error (code \(code))." : message
     }
   }
 
   /// What a failed dial or start shows: an agent that ended is not a reachability problem.
-  static func hostFailureText(_ error: Error) -> String {
-    if case .noSession? = error as? ACPClientError { return ACPClientError.noSession.localizedDescription }
+  /// `started` is true once the agent's stream was open: a close then means the agent stopped.
+  static func hostFailureText(_ error: Error, started: Bool = false) -> String {
+    switch error as? ACPClientError {
+    case .noSession?, .agent?: return error.localizedDescription
+    case .connectionLost? where started: return ACPClientError.noSession.localizedDescription
+    default: break
+    }
     return "Couldn't reach the host: \(error.localizedDescription)"
   }
 }

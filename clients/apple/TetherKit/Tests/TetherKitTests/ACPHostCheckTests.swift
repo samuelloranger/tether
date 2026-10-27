@@ -19,6 +19,7 @@ final class ACPHostCheckTests: XCTestCase {
       ACPHostCheck.message(for: [.opencodeMissing], host: "box"),
       "Install opencode on box (opencode.ai), or check it is on the PATH of a login shell.")
     XCTAssertTrue(ACPHostCheck.script.contains("$HOME/.opencode/bin/opencode"))
+    XCTAssertTrue(ACPHostCheck.script.contains(#"-lc "command -v opencode""#), "opencode resolves through the login shell like the spawn")
   }
 
   func test_starting_an_opencode_chat_stops_when_opencode_is_missing() async {

@@ -727,7 +727,8 @@ pub const HOST_CHECK_SCRIPT: &str = concat!(
     "; ",
     "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
     "; ",
-    "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ]; ",
+    "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] ",
+    "|| PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; ",
     "then echo opencode=ok; else echo opencode=missing; fi",
 );
 
@@ -1354,7 +1355,7 @@ mod tests {
                 "T=\"\"; if command -v timeout >/dev/null 2>&1; then T=\"timeout 5\"; fi",
                 "if command -v tether >/dev/null 2>&1; then echo tether=found; echo \"version=$($T tether version --json </dev/null 2>/dev/null | head -n 1)\"; else echo tether=missing; fi",
                 "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
-                "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ]; then echo opencode=ok; else echo opencode=missing; fi",
+                "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] || PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; then echo opencode=ok; else echo opencode=missing; fi",
             ]
             .join("; ")
         );
@@ -1444,6 +1445,8 @@ mod tests {
         assert_eq!(host_problems_for(no_node, &agent::OPENCODE), []);
         assert_eq!(host_problems(&format!("{OURS}opencode=ok\n")), []);
         assert!(HOST_CHECK_SCRIPT.contains("$HOME/.opencode/bin/opencode"));
+        assert!(HOST_CHECK_SCRIPT.contains(r#"-lc "command -v opencode""#));
+        assert!(!HOST_CHECK_SCRIPT.contains('\''));
     }
 
     #[test]

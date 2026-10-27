@@ -532,6 +532,56 @@ fn an_agent_that_stops_before_the_chat_starts_is_not_a_host_problem() {
 }
 
 #[test]
+fn an_agent_that_exits_during_initialize_or_session_new_reads_stopped() {
+    for answered_initialize in [false, true] {
+        let mut h = Harness::new();
+        let name = h.new_chat();
+        let (_, generation, _) = h.open_stream();
+        if answered_initialize {
+            h.feed(
+                &name,
+                generation,
+                r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+            );
+            h.writes();
+        }
+        h.msg(ChatMsg::Closed {
+            name: name.clone(),
+            generation,
+        });
+        assert_eq!(
+            h.screen().notice,
+            "The agent stopped before the chat started."
+        );
+    }
+}
+
+#[test]
+fn an_agent_error_reads_as_its_message_without_the_host_prefix() {
+    let mut h = Harness::new();
+    let name = h.new_chat();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"model unavailable"}}"#,
+    );
+    assert_eq!(h.screen().notice, "model unavailable");
+    let mut h = Harness::new();
+    let name = h.new_chat();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":""}}"#,
+    );
+    assert_eq!(
+        h.screen().notice,
+        "The agent reported an error (code -32603)."
+    );
+}
+
+#[test]
 fn a_stream_that_ends_on_an_ended_chat_reads_ended() {
     let mut h = Harness::new();
     let (name, generation) = h.live_chat();

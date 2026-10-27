@@ -757,6 +757,9 @@ impl Session {
     fn start_failed(&mut self, error: ClientError) {
         self.handshake = Handshake::Idle;
         if error == ClientError::ConnectionLost {
+            if self.sign_in != SignIn::Checking {
+                self.agent_stopped();
+            }
             return;
         }
         if self.sign_in == SignIn::Checking {
@@ -783,7 +786,9 @@ impl Session {
         if error == ClientError::NoSession {
             self.agent_stopped();
         } else if !is_auth(&error) {
-            self.fail(describe(&error));
+            self.link.dial_failed();
+            self.holding = false;
+            self.notice = Some(error.to_string());
         }
     }
 
