@@ -92,6 +92,8 @@ pub enum TetherCommand {
     ScrollPageDown,
     Snippets,
     History,
+    NewChat,
+    ToggleSidebar,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +101,33 @@ pub enum KeyAction {
     Send(Vec<u8>),
     Tether(TetherCommand),
     Ignore,
+}
+
+/// The keys that switch and open things in the window. They work while a chat's composer has
+/// the keyboard too, so they are read before the composer sees them.
+pub fn window_shortcut(input: &KeyInput, mods: Mods) -> Option<TetherCommand> {
+    if !mods.ctrl || mods.alt {
+        return None;
+    }
+    let cmd = match input {
+        KeyInput::Named(NamedKey::Tab) if mods.shift => TetherCommand::PrevTab,
+        KeyInput::Named(NamedKey::Tab) => TetherCommand::NextTab,
+        KeyInput::Named(_) => return None,
+        KeyInput::Char {
+            unmodified, digit, ..
+        } => shortcut(*unmodified, *digit, mods.shift, &KeyContext::default())?,
+    };
+    matches!(
+        cmd,
+        TetherCommand::NextTab
+            | TetherCommand::PrevTab
+            | TetherCommand::TabAt(_)
+            | TetherCommand::LastTab
+            | TetherCommand::NewTab
+            | TetherCommand::NewChat
+            | TetherCommand::ToggleSidebar
+    )
+    .then_some(cmd)
 }
 
 pub fn encode_key(input: &KeyInput, mods: Mods, ctx: &KeyContext) -> KeyAction {
@@ -245,6 +274,8 @@ fn shortcut(
         ('c', _, true) => Some(TetherCommand::Copy),
         ('c', _, false) if ctx.has_selection => Some(TetherCommand::Copy),
         ('t', _, true) => Some(TetherCommand::NewTab),
+        ('n', _, true) => Some(TetherCommand::NewChat),
+        ('b', _, true) => Some(TetherCommand::ToggleSidebar),
         ('f', _, true) => Some(TetherCommand::Find),
         ('p', _, true) => Some(TetherCommand::Snippets),
         ('h', _, true) => Some(TetherCommand::History),
@@ -730,5 +761,64 @@ mod char_tests {
         );
         assert_eq!(enc(ch('p', None), ctrl), sent(b"\x10"));
         assert_eq!(enc(ch('h', None), ctrl), sent(b"\x08"));
+    }
+
+    #[test]
+    fn window_shortcuts_are_the_switching_and_new_keys() {
+        let ctrl = m(false, false, true);
+        let ctrl_shift = m(true, false, true);
+        let tab = KeyInput::Named(NamedKey::Tab);
+        assert_eq!(window_shortcut(&tab, ctrl), Some(TetherCommand::NextTab));
+        assert_eq!(
+            window_shortcut(&tab, ctrl_shift),
+            Some(TetherCommand::PrevTab)
+        );
+        assert_eq!(
+            window_shortcut(&digit(1, '&', None), ctrl_shift),
+            Some(TetherCommand::TabAt(1))
+        );
+        assert_eq!(
+            window_shortcut(&digit(9, '9', None), ctrl_shift),
+            Some(TetherCommand::LastTab)
+        );
+        assert_eq!(
+            window_shortcut(&ch('t', None), ctrl_shift),
+            Some(TetherCommand::NewTab)
+        );
+        assert_eq!(
+            window_shortcut(&ch('N', None), ctrl_shift),
+            Some(TetherCommand::NewChat)
+        );
+        assert_eq!(
+            window_shortcut(&ch('b', None), ctrl_shift),
+            Some(TetherCommand::ToggleSidebar)
+        );
+        for (c, mods) in [
+            ('b', ctrl),
+            ('t', ctrl),
+            ('n', ctrl),
+            ('f', ctrl_shift),
+            ('p', ctrl_shift),
+            ('h', ctrl_shift),
+            ('v', ctrl),
+        ] {
+            assert_eq!(window_shortcut(&ch(c, None), mods), None, "{c} {mods:?}");
+        }
+        assert_eq!(window_shortcut(&tab, m(false, false, false)), None);
+        assert_eq!(window_shortcut(&ch('b', None), m(true, true, true)), None);
+    }
+
+    #[test]
+    fn ctrl_shift_n_and_b_are_tether_commands_in_a_terminal() {
+        let ctrl_shift = m(true, false, true);
+        assert_eq!(
+            enc(ch('n', None), ctrl_shift),
+            KeyAction::Tether(TetherCommand::NewChat)
+        );
+        assert_eq!(
+            enc(ch('b', None), ctrl_shift),
+            KeyAction::Tether(TetherCommand::ToggleSidebar)
+        );
+        assert_eq!(enc(ch('b', None), m(false, false, true)), sent(b"\x02"));
     }
 }

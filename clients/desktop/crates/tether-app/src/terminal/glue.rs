@@ -371,18 +371,23 @@ fn wire_callbacks(ui: &AppWindow) {
 
 /// Keys go to the PTY only on the terminal page, with no name field, dialog, or menu open.
 fn keys_to_pty(app: &App) -> bool {
+    window_keys(app)
+        && !app.ui.global::<TerminalVm>().get_search_focused()
+        && !crate::terminal::chatview::takes_keys(&app.ui)
+}
+
+/// The terminal page with nothing modal over it: the window shortcuts apply, whoever has focus.
+fn window_keys(app: &App) -> bool {
     let vm = app.ui.global::<TerminalVm>();
     current().is_some()
         && app.router.current() == Page::Terminal
         && !vm.get_naming()
-        && !vm.get_search_focused()
         && vm.get_kill_name().is_empty()
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
         && !crate::extras::overlay_open(&app.ui)
         && !app.ui.global::<AgentVm>().get_open()
         && !app.ui.global::<crate::GitVm>().get_modal()
-        && !crate::terminal::chatview::takes_keys(&app.ui)
 }
 
 /// Slint learns modifiers from key events, and the terminal consumes those before Slint sees
@@ -400,6 +405,27 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             SUPER.set(m.state().super_key());
             send(Msg::Modifiers(mods));
             EventResult::Propagate
+        }
+        WindowEvent::KeyboardInput { event, .. }
+            if !keys_to_pty(app) && window_keys(app) && event.state == ElementState::Pressed =>
+        {
+            let shortcut = crate::terminal::keys::translate(
+                &event.logical_key,
+                &event.key_without_modifiers(),
+                event.text_with_all_modifiers(),
+                event.physical_key,
+                event.location,
+                MODS.get(),
+                crate::terminal::keys::app_keypad(),
+            )
+            .and_then(|input| tether_core::keymap::window_shortcut(&input, MODS.get()));
+            match shortcut {
+                Some(cmd) => {
+                    send(Msg::Command(cmd));
+                    EventResult::PreventDefault
+                }
+                None => EventResult::Propagate,
+            }
         }
         WindowEvent::KeyboardInput { event, .. } if keys_to_pty(app) => {
             // Super combos belong to the desktop; one that still reaches the window must not type its letter.

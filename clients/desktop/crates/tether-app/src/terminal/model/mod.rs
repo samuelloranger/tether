@@ -170,6 +170,8 @@ pub enum Msg {
     },
     CopySelection,
     PasteClipboard,
+    /// A window shortcut read before the focused widget saw it.
+    Command(TetherCommand),
     HistoryOpen,
     HistoryClose,
     HistoryCopy,
@@ -568,6 +570,7 @@ impl TerminalModel {
                 now,
                 &mut fx,
             ),
+            Msg::Command(cmd) => self.on_command(cmd, self.mods, now, &mut fx),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
             Msg::SearchOpen => self.on_search_open(&mut fx),
             Msg::SearchQuery(q) => self.on_search_query(q, now, &mut fx),

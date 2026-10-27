@@ -1,3 +1,4 @@
+use super::chat::ChatMsg;
 use super::send::SendSource;
 use super::*;
 use crate::terminal::geometry::{TermStyle, layout};
@@ -76,6 +77,8 @@ impl TerminalModel {
             TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), now, fx),
             TetherCommand::LastTab => self.on_jump(TabJump::Last, now, fx),
             TetherCommand::NewTab => self.on_new_begin(),
+            TetherCommand::NewChat => self.on_chat(ChatMsg::NewChat(0), now, fx),
+            TetherCommand::ToggleSidebar => {} // Task 3
             TetherCommand::Find => self.on_search_open(fx),
             TetherCommand::Snippets => self.on_palette_open(),
             TetherCommand::History => self.on_history_open(fx),
@@ -323,6 +326,24 @@ mod resize_tests {
 mod key_tests {
     use super::super::tests::{live, t};
     use super::*;
+
+    fn new_chat_shown(fx: &[Effect]) -> bool {
+        fx.iter()
+            .any(|e| matches!(e, Effect::Ui(UiEffect::Chat(screen)) if screen.new_chat.is_some()))
+    }
+
+    #[test]
+    fn new_chat_shortcut_opens_the_new_chat_sheet() {
+        let mut m = live(vec![crate::terminal::testkit::session("a", 1)]);
+        let fx = m.handle(Msg::Command(TetherCommand::NewChat), t(10));
+        assert!(new_chat_shown(&fx));
+        let mut menu = live(vec![crate::terminal::testkit::session("a", 1)]);
+        let fx = menu.handle(Msg::Chat(super::super::chat::ChatMsg::NewChat(0)), t(10));
+        assert!(
+            new_chat_shown(&fx),
+            "the + menu's New chat shows the same sheet"
+        );
+    }
     use crate::terminal::testkit::session;
     use tether_core::keymap::{KeyInput, Mods, NamedKey};
     use tether_term::{Cell, SelectKind};
