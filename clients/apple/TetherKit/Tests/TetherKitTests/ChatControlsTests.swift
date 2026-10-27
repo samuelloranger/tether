@@ -77,6 +77,14 @@ final class ChatControlsTests: XCTestCase {
     XCTAssertEqual(options[0].choices, [ACPConfigChoice(value: "a", name: "a", description: "")])
   }
 
+  func test_a_choice_listed_twice_is_one_choice() {
+    let line =
+      "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"config_option_update\",\"configOptions\":[{\"type\":\"select\",\"id\":\"model\",\"name\":\"Model\",\"currentValue\":\"auto\",\"options\":[{\"value\":\"auto\",\"name\":\"Auto\",\"description\":\"Let Copilot pick the best model\"},{\"value\":\"auto\",\"name\":\"Auto\",\"description\":\"Auto\"},{\"value\":\"claude-sonnet-5.5\",\"name\":\"Claude Sonnet 5.5\"}]}]}}}"
+    guard case let .update(.configOptions(options)) = ACPDecoder.decode(Data(line.utf8)) else { return XCTFail() }
+    XCTAssertEqual(options[0].choices.map(\.value), ["auto", "claude-sonnet-5.5"])
+    XCTAssertEqual(options[0].choices[0].description, "Let Copilot pick the best model")
+  }
+
   func test_a_stored_journal_without_image_counts_still_decodes() throws {
     let json = "{\"nextRequestId\":4,\"sessionId\":\"s\",\"entries\":[{\"kind\":\"prompt\",\"offset\":5,\"text\":\"hi\"}]}"
     let journal = try JSONDecoder().decode(ChatJournal.self, from: Data(json.utf8))

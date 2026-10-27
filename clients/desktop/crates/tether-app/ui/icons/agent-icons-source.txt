@@ -1,1 +1,1 @@
-agent-claude.svg, agent-codex.svg and agent-opencode.svg are from lobehub/icons (MIT, https://github.com/lobehub/lobe-icons); the marks belong to their owners.
+agent-claude.svg, agent-codex.svg, agent-opencode.svg and agent-copilot.svg are from lobehub/icons (MIT, https://github.com/lobehub/lobe-icons); the marks belong to their owners.

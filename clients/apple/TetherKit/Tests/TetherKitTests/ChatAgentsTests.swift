@@ -32,6 +32,8 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertEqual(ChatAgents.opencode.spawn, #"PATH="$HOME/.opencode/bin:$PATH" opencode acp"#)
     XCTAssertEqual(ChatAgents.profile(forSpawn: "opencode acp")?.key, "opencode", "a chat started with the old spawn still resolves")
     XCTAssertEqual(ChatAgents.profile(forSpawn: ChatAgents.opencode.spawn)?.key, "opencode")
+    XCTAssertEqual(ChatAgents.profile(forSpawn: "copilot --acp")?.key, "copilot")
+    XCTAssertEqual(ChatAgents.profile(forSpawn: "/home/me/.local/bin/copilot --acp --allow-all-tools")?.key, "copilot")
   }
 
   func test_a_chat_resolves_to_the_local_record_then_the_host_spawn_then_claude() {
@@ -74,6 +76,7 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertEqual(ChatAgents.claude.rememberedIds, ["model", "effort", "mode"])
     XCTAssertEqual(ChatAgents.codex.rememberedIds, ["model", "reasoning_effort", "mode"])
     XCTAssertEqual(ChatAgents.opencode.rememberedIds, ["model", "effort", "mode"])
+    XCTAssertEqual(ChatAgents.copilot.rememberedIds, ["model", "reasoning_effort", "mode"])
     let suite = UserDefaults(suiteName: "agents-\(UUID().uuidString)")!
     let store = ChatOptionDefaultsStore(defaults: suite)
     store.remember(agent: "codex", id: "reasoning_effort", value: "high")
@@ -116,6 +119,9 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertEqual(
       ChatSignInCopy.message(host: "h", agent: ChatAgents.opencode),
       "opencode isn't signed in on h. Open a terminal there and run opencode auth login to sign in.")
+    XCTAssertEqual(
+      ChatSignInCopy.message(host: "h", agent: ChatAgents.copilot),
+      "Copilot isn't signed in on h. Open a terminal there and run copilot login to sign in.")
     XCTAssertTrue(ChatSignInCopy.message(host: "h", agent: nil).hasPrefix("The agent isn't signed in on h."))
   }
 
@@ -123,6 +129,11 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertTrue(ChatAgents.claude.usesClaudeVerbs)
     XCTAssertFalse(ChatAgents.codex.usesClaudeVerbs)
     XCTAssertFalse(ChatAgents.opencode.usesClaudeVerbs)
+    XCTAssertFalse(ChatAgents.copilot.usesClaudeVerbs)
+  }
+
+  func test_only_the_npx_agents_need_node() {
+    XCTAssertEqual(ChatAgents.all.filter(\.needsNode).map(\.key), ["claude", "codex"])
   }
 
   func test_the_options_summary_prefills_stored_then_cached_current_then_nothing() {

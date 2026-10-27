@@ -150,6 +150,7 @@ type acpEvent struct {
 	key        string
 	turnEnded  bool
 	stopReason string
+	idle       *copilotIdle
 }
 
 func (t *acpTracker) agentLine(line []byte) acpEvent {
@@ -198,6 +199,8 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 			t.saveLocked()
 		}
 		return t.updateLocked(u)
+	case m.Method == copilotSessionEvent:
+		return t.sessionEventLocked(m.Params)
 	case m.Method == "" && key != "":
 		if i := slices.Index(t.st.Loads, key); i >= 0 {
 			// A loaded conversation's background tasks died with the agent that ran them.
@@ -528,6 +531,8 @@ func (s *acpDaemonState) scanAgent(chunk []byte) {
 			s.whenDetached(func() bool { return true }, func() {
 				s.pushAsync(s.donePush(ev.stopReason), "acp-done-"+threadKey(hostLabel(), s.tr.name))
 			})
+		case ev.idle != nil:
+			s.settleAfterIdle(ev.idle)
 		}
 	}
 }

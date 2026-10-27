@@ -14,6 +14,8 @@ struct ChatAgentProfile: Equatable, Identifiable, Sendable {
   let tintsIcon: Bool
   /// What the host's user runs to sign in; shown in the signed-out row.
   let signInCommand: String
+  /// Runs through npx, so the host needs Node.js.
+  let needsNode: Bool
 
   var id: String { key }
 
@@ -25,17 +27,23 @@ enum ChatAgents {
   static let claude = ChatAgentProfile(
     key: "claude", label: "Claude", spawn: "npx -y @agentclientprotocol/claude-agent-acp@0.95.0",
     marker: "claude-agent-acp", rememberedIds: ["model", "effort", "mode"], iconAsset: "agent-claude",
-    tintsIcon: false, signInCommand: "claude")
+    tintsIcon: false, signInCommand: "claude", needsNode: true)
   static let codex = ChatAgentProfile(
     key: "codex", label: "Codex", spawn: "npx -y @agentclientprotocol/codex-acp@2.3.0", marker: "codex-acp",
     rememberedIds: ["model", "reasoning_effort", "mode"], iconAsset: "agent-codex", tintsIcon: true,
-    signInCommand: "codex login")
+    signInCommand: "codex login", needsNode: true)
   static let opencode = ChatAgentProfile(
     key: "opencode", label: "opencode", spawn: "PATH=\"$HOME/.opencode/bin:$PATH\" opencode acp", marker: "opencode acp",
     rememberedIds: ["model", "effort", "mode"], iconAsset: "agent-opencode", tintsIcon: true,
-    signInCommand: "opencode auth login")
+    signInCommand: "opencode auth login", needsNode: false)
+  /// The Copilot CLI speaks ACP itself; the host's holder asks it for `assistant.idle` to end the
+  /// turns it holds open while a shell it started keeps running.
+  static let copilot = ChatAgentProfile(
+    key: "copilot", label: "Copilot", spawn: "copilot --acp", marker: "copilot --acp",
+    rememberedIds: ["model", "reasoning_effort", "mode"], iconAsset: "agent-copilot", tintsIcon: true,
+    signInCommand: "copilot login", needsNode: false)
 
-  static let all = [claude, codex, opencode]
+  static let all = [claude, codex, opencode, copilot]
 
   static func profile(forKey key: String?) -> ChatAgentProfile? {
     guard let key else { return nil }
