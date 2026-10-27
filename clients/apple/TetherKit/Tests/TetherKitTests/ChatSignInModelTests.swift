@@ -90,15 +90,13 @@ final class ChatSignInModelTests: XCTestCase {
     XCTAssertTrue(stopped)
     let resent = await eventually { stream.writtenText.components(separatedBy: "and then tidy up").count == 3 }
     XCTAssertTrue(resent, "Stop sends the waiting message again")
-    print("DBG notice=\(String(describing: model.notice)) queued=\(model.state.queuedTexts) turn=\(model.state.turn)")
-    print("DBG written=\(stream.writtenText.replacingOccurrences(of: "\n", with: " || "))")
-    print("DBG journal=\(store.load().entries.map { "\($0.kind)@\($0.offset)" })")
-    print("DBG items=\(model.state.items.suffix(5).map { "\($0.kind)".prefix(60) })")
-    let waiting = await eventually { model.state.queuedTexts == ["and then tidy up"] }
-    XCTAssertTrue(waiting, "it waits for the stopped turn to end")
-    XCTAssertTrue(model.state.items.contains { $0.kind == .notice("Stopped") })
-    let copies = model.state.items.filter { if case let .user(text, _, _, _) = $0.kind { text == "and then tidy up" } else { false } }
-    XCTAssertEqual(copies.count, 1, "the dropped copy left the transcript")
+    // The model takes the client's state a frame later.
+    let shown = await eventually {
+      let copies = model.state.items.filter { if case let .user(text, _, _, _) = $0.kind { text == "and then tidy up" } else { false } }
+      return model.state.items.contains { $0.kind == .notice("Stopped") } && copies.count == 1
+    }
+    XCTAssertTrue(shown, "stopped, with the dropped copy gone and the resent one in its place")
+    XCTAssertEqual(model.state.queuedTexts, ["and then tidy up"], "it waits for the stopped turn to end")
     model.leave()
   }
 }
