@@ -347,6 +347,9 @@ type acpDaemonState struct {
 	activity  time.Time // last agent output or busy moment, guarded by mu
 
 	handshaking int // connections accepted whose first line is not read yet, guarded by mu
+	// copilot asks the agent for assistant.idle; dropAnswers are prompts the holder answered for it.
+	copilot     bool
+	dropAnswers map[string]bool // guarded by mu
 	metaMu      sync.Mutex
 	meta        *acpMeta
 }
@@ -447,7 +450,7 @@ func acpDaemon(name string) error {
 
 	s := &acpDaemonState{
 		notify: make(chan struct{}), live: map[*acpClient]struct{}{}, stdin: stdin, log: logf, errf: errf,
-		tr: loadACPTracker(name), meta: m, activity: time.Now(),
+		tr: loadACPTracker(name), meta: m, activity: time.Now(), copilot: isCopilotSpawn(m.Spawn),
 		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
 	}
 	startErr := cmd.Start()
@@ -704,6 +707,9 @@ func (s *acpDaemonState) clientLineLocked(from *acpClient, line []byte) {
 	if !forward {
 		return
 	}
+	if s.copilot {
+		line = withCopilotEvents(line)
+	}
 	if echo && from.id != "" {
 		s.echoLocked(from.id, line)
 	}
@@ -748,7 +754,7 @@ func (s *acpDaemonState) agentOutputLocked(chunk []byte, eof bool, logMax int64)
 		cut = len(s.tail)
 	}
 	if cut > 0 {
-		s.appendLogLocked(s.tail[:cut])
+		s.appendLogLocked(s.keepAgentLinesLocked(s.tail[:cut]))
 		s.tail = append([]byte(nil), s.tail[cut:]...)
 	}
 	return logMax > 0 && s.size > logMax
