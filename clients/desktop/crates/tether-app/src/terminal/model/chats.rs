@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::osc::Notification;
 use tether_core::throttle::ToastDecision;
@@ -13,6 +14,10 @@ use crate::terminal::status::ConnStatus;
 impl TerminalModel {
     pub fn set_chat_files(&mut self, files: ChatFiles) {
         self.chats = Chats::new(Some(files), &self.machine.host);
+    }
+
+    pub fn set_chat_defaults(&mut self, defaults: ChatDefaults) {
+        self.chats.set_defaults(defaults);
     }
 
     pub(crate) fn chat_active(&self) -> bool {
@@ -84,6 +89,10 @@ impl TerminalModel {
     fn chat_out(&mut self, out: Out, now: Duration, fx: &mut Vec<Effect>) {
         for job in out.jobs {
             fx.push(Effect::Chat(job));
+        }
+        for (id, value) in out.remembered {
+            self.chats.remember(&id, &value);
+            fx.push(Effect::Ui(UiEffect::RememberChatOption { id, value }));
         }
         if let Some(url) = out.open_url {
             fx.push(Effect::Ui(UiEffect::OpenUrl(url)));

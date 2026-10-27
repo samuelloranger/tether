@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::acp::defaults::ChatDefaults;
 use crate::{DataDir, theme_named};
 
 pub const PREFERENCES_FILE: &str = "preferences.json";
@@ -121,6 +122,7 @@ pub struct Preferences {
     pub terminal: TerminalPrefs,
     pub window: Option<WindowPlacement>,
     pub update_channel: UpdateChannel,
+    pub chat_defaults: ChatDefaults,
 }
 
 /// What is read from disk: `Preferences` plus the `theme_mode` field it no longer has.
@@ -191,6 +193,16 @@ mod tests {
         assert_eq!((t.cursor, t.blink), (CursorShape::Block, false));
         assert!(p.window.is_none());
         assert_eq!(p.update_channel, UpdateChannel::Stable);
+    }
+
+    #[test]
+    fn chat_defaults_round_trip_and_an_older_file_loads_without_them() {
+        let mut p = Preferences::default();
+        p.chat_defaults.remember("claude", "model", "opus");
+        let back: Preferences = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back.chat_defaults.get("claude", "model"), Some("opus"));
+        let old: Preferences = serde_json::from_str(r#"{"update_channel":"edge"}"#).unwrap();
+        assert_eq!(old.chat_defaults, ChatDefaults::default());
     }
 
     #[test]
@@ -319,6 +331,7 @@ mod tests {
                 maximized: false,
             }),
             update_channel: UpdateChannel::Edge,
+            chat_defaults: ChatDefaults::default(),
         };
         p.save(&data).unwrap();
         assert_eq!(Preferences::load(&data, false).unwrap(), p);
@@ -408,6 +421,7 @@ mod tests {
                 maximized: true,
             }),
             update_channel: UpdateChannel::Stable,
+            chat_defaults: ChatDefaults::default(),
         };
         assert_eq!(p, expected);
         assert_eq!(

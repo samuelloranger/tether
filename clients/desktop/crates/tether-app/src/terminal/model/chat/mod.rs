@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tether_core::acp::client::Outbound;
+use tether_core::acp::defaults::{AGENT_CLAUDE, ChatDefaults};
 use tether_core::acp::files::ChatFiles;
 use tether_core::acp::host::{self, ChatSummary};
 use tether_core::acp::images::ImageAttachment;
@@ -262,10 +263,13 @@ pub struct Out {
     /// The chat left the front: the terminal's own tab comes back.
     pub show_terminal: bool,
     pub toasts: Vec<(String, String, String)>,
+    /// Options the user changed and the agent confirmed: `(option id, value)`.
+    pub remembered: Vec<(String, String)>,
 }
 
 pub struct Chats {
     files: Option<ChatFiles>,
+    defaults: ChatDefaults,
     /// The host as messages name it.
     host: String,
     listed: Vec<ChatSummary>,
@@ -303,9 +307,18 @@ pub struct Chats {
 }
 
 impl Chats {
+    pub fn set_defaults(&mut self, defaults: ChatDefaults) {
+        self.defaults = defaults;
+    }
+
+    pub fn remember(&mut self, id: &str, value: &str) {
+        self.defaults.remember(AGENT_CLAUDE, id, value);
+    }
+
     pub fn new(files: Option<ChatFiles>, host: &str) -> Self {
         Self {
             files,
+            defaults: ChatDefaults::default(),
             host: host.to_string(),
             listed: Vec::new(),
             provisional: Vec::new(),
@@ -980,6 +993,7 @@ impl Chats {
             out,
             files: self.files.as_ref(),
             connected: self.connected,
+            defaults: &self.defaults,
         }
     }
 
@@ -997,6 +1011,7 @@ impl Chats {
                 out,
                 files: self.files.as_ref(),
                 connected: self.connected,
+                defaults: &self.defaults,
             };
             f(&mut s, &mut ctx)
         };

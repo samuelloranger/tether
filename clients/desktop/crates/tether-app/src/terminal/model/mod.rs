@@ -295,6 +295,11 @@ pub enum UiEffect {
     Chat(Box<chat::ChatScreen>),
     /// The system picker for images to attach to the chat in front.
     PickImages,
+    /// A confirmed model, effort or mode change the user made: it becomes the device's default.
+    RememberChatOption {
+        id: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
