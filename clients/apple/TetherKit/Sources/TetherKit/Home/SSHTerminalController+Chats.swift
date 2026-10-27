@@ -45,19 +45,30 @@ extension SSHTerminalController {
     row.route(journal: UserDefaultsChatJournalStore(name: row.name).load())
   }
 
-  func newChat(cwdText: String) async -> ChatStart {
-    await ChatRoute.start(cwdText: cwdText, host: config.host) { try await self.control.exec($0) }
-  }
-
-  func savedSessions(folderText: String) async -> ChatContinueLoader.Result {
-    let control = control
-    return await ChatContinueLoader.load(folderText: folderText) { try await control.exec($0) }
-  }
-
-  func continueChat(session: ACPSavedSession, folderText: String) async -> ChatStart {
-    await ChatRoute.startContinuing(session: session, cwdText: folderText, host: config.host) {
+  func newChat(cwdText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)) async -> ChatStart {
+    await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed
+    ) {
       try await self.control.exec($0)
     }
+  }
+
+  func savedSessions(folderText: String, agent: ChatAgentProfile = ChatAgents.claude) async -> ChatContinueLoader.Result {
+    let control = control
+    return await ChatContinueLoader.load(folderText: folderText, agent: agent) { try await control.exec($0) }
+  }
+
+  func continueChat(
+    session: ACPSavedSession, folderText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)
+  ) async -> ChatStart {
+    await ChatRoute.startContinuing(
+      session: session, cwdText: folderText, host: config.host, agent: request.agent, picks: request.picks,
+      changed: request.changed
+    ) { try await self.control.exec($0) }
+  }
+
+  /// What the New chat sheet's Options row offers for an agent on this host.
+  func cachedOptions(agent: ChatAgentProfile) -> [ACPConfigOption] {
+    ChatOptionsCache(config: config).options(agent: agent.key)
   }
 
   /// The attached session's folder, the default for a new chat.

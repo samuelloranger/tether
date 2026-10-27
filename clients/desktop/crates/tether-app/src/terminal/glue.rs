@@ -86,7 +86,7 @@ pub(crate) fn platform() -> Arc<dyn Platform> {
 
 /// The body of M5's `open_machine::on_open_machine`.
 pub fn open_machine(app: &Rc<App>, machine: Machine) {
-    let (style, hostkeys, secrets, jumps, chats_root, chat_defaults) = {
+    let (style, hostkeys, secrets, jumps, chats_root, chat_defaults, chat_options, chat_agent) = {
         let s = app.state.borrow();
         (
             TermStyle::from_prefs(&s.prefs.terminal),
@@ -95,6 +95,8 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
             tether_core::connect::jump_chain(&s.profiles.machines, &machine),
             s.data.root().join("chats"),
             s.prefs.chat_defaults.clone(),
+            s.prefs.chat_options.clone(),
+            s.prefs.chat_agent.clone(),
         )
     };
     let chat_scope = format!("{}:{}", machine.host, machine.port);
@@ -139,6 +141,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         &chat_scope,
     ));
     model.set_chat_defaults(chat_defaults);
+    model.set_chat_options(chat_options, &chat_scope, &chat_agent);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
@@ -163,11 +166,23 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
 /// and `TETHER_DEV_CHAT_SEND` sends its `|`-separated prompts a few seconds apart.
 fn dev_chat() {
     use crate::terminal::model::chat::ChatMsg;
+    // `TETHER_DEV_CHAT_SAMPLE` is the agent in front (anything but codex or opencode is Claude);
+    // `TETHER_DEV_CHAT_DIALOG` then opens the New chat dialog on that agent, with one change made.
     #[cfg(debug_assertions)]
-    if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some() {
-        slint::Timer::single_shot(std::time::Duration::from_secs(3), || {
-            send(Msg::Chat(ChatMsg::DevSample));
+    if let Some(agent) = crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE") {
+        slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
+            send(Msg::Chat(ChatMsg::DevSample(agent)));
         });
+        if let Some(dialog) = crate::app::dev_env("TETHER_DEV_CHAT_DIALOG") {
+            slint::Timer::single_shot(std::time::Duration::from_secs(4), move || {
+                send(Msg::Chat(ChatMsg::NewChat(0)));
+                send(Msg::Chat(ChatMsg::NewChatAgent(dialog)));
+                send(Msg::Chat(ChatMsg::NewChatPick {
+                    id: "reasoning_effort".into(),
+                    value: "high".into(),
+                }));
+            });
+        }
     }
     let Some(folder) = crate::app::dev_env("TETHER_DEV_CHAT") else {
         return;
@@ -531,12 +546,26 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         UiEffect::FocusSearch => vm.set_search_focus_seq(vm.get_search_focus_seq() + 1),
         UiEffect::Git(view) => crate::terminal::gitview::apply(w, *view),
         UiEffect::Chat(screen) => crate::terminal::chatview::apply(w, *screen),
-        UiEffect::RememberChatOption { id, value } => {
+        UiEffect::RememberChatOption { agent, id, value } => {
             let mut s = app.state.borrow_mut();
-            if s.prefs
-                .chat_defaults
-                .remember(tether_core::acp::defaults::AGENT_CLAUDE, &id, &value)
-            {
+            if s.prefs.chat_defaults.remember(&agent, &id, &value) {
+                s.save_prefs();
+            }
+        }
+        UiEffect::CacheChatOptions {
+            scope,
+            agent,
+            options,
+        } => {
+            let mut s = app.state.borrow_mut();
+            if s.prefs.chat_options.store(&scope, &agent, &options) {
+                s.save_prefs();
+            }
+        }
+        UiEffect::RememberChatAgent(agent) => {
+            let mut s = app.state.borrow_mut();
+            if s.prefs.chat_agent != agent {
+                s.prefs.chat_agent = agent;
                 s.save_prefs();
             }
         }

@@ -33,6 +33,8 @@ type acpStatusLine struct {
 	EndedReason string `json:"endedReason"`
 	// Tasks counts the background commands still running (absent when none, and from older holders).
 	Tasks int `json:"tasks,omitempty"`
+	// Spawn is the command that started the agent, so a client can tell which agent a chat runs.
+	Spawn string `json:"spawn,omitempty"`
 	// MultiClient: the session's holder lets several clients attach at once (absent from older ones).
 	MultiClient bool `json:"multiClient,omitempty"`
 }
@@ -42,7 +44,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient}
+	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient, Spawn: m.Spawn}
 	if metaRunning(m) {
 		l.State = "running"
 		if m.Turn == "working" || m.Turn == "waiting" {

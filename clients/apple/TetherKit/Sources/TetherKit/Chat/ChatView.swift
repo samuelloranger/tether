@@ -184,7 +184,7 @@ struct ChatView: View {
         case let .item(item):
           ChatItemRow(
             item: item, cwd: model.cwd, expanded: isExpanded(item), toggle: { toggleExpanded(item.id) },
-            queued: model.state.isQueued(item.id), host: model.hostLabel,
+            queued: model.state.isQueued(item.id), host: model.hostLabel, agent: model.agent,
             signInRetry: model.needsSignIn && item.id == model.state.items.last?.id ? model.signInRetry : nil,
             retrySignIn: { model.retrySignIn() }
           )
@@ -393,13 +393,17 @@ struct ChatView: View {
   }
 
   private var titleBlock: some View {
-    let line = ChatStatusLine(state: model.state)
+    let line = ChatStatusLine(state: model.state, agent: model.agent)
     return VStack(spacing: 2) {
-      Text(copiedFolder ? "Folder copied" : model.title)
-        .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
-        .onLongPressGesture(minimumDuration: 0.4) { copyFolder() }
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityHint("Long press copies the folder")
+      HStack(spacing: 6) {
+        if model.agent?.key != ChatAgents.claude.key { ChatAgentMark(agent: model.agent, size: 13) }
+        Text(copiedFolder ? "Folder copied" : model.title)
+          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+      }
+      .onLongPressGesture(minimumDuration: 0.4) { copyFolder() }
+      .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(.isHeader)
+      .accessibilityHint("Long press copies the folder")
       if line.isAvailable {
         Button { showingControls = true } label: { statusLine(line) }
           .buttonStyle(.plain)
@@ -418,7 +422,11 @@ struct ChatView: View {
     HStack(spacing: 8) {
       HStack(spacing: 0) {
         if let name = line.model { Text(name).foregroundStyle(TetherColors.textSecondary) }
-        if line.model != nil, line.mode != nil { Text(" · ").foregroundStyle(TetherColors.textFaint) }
+        if line.model != nil, !line.extras.isEmpty {
+          Text(" · ").foregroundStyle(TetherColors.textFaint)
+          Text(line.extras.joined(separator: " · ")).foregroundStyle(TetherColors.textSecondary)
+        }
+        if line.model != nil || !line.extras.isEmpty, line.mode != nil { Text(" · ").foregroundStyle(TetherColors.textFaint) }
         if let mode = line.mode { Text(mode).foregroundStyle(tint(line.tint)).fixedSize() }
       }
       .lineLimit(1)
@@ -651,7 +659,7 @@ struct ChatView: View {
   }
 
   private var composerPrompt: Text {
-    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : "Message the agent")
+    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { $0.key == ChatAgents.claude.key ? "Message the agent" : "Message \($0.label)" } ?? "Message the agent")
       .foregroundStyle(TetherColors.placeholder)
   }
 

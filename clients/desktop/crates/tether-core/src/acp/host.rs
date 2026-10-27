@@ -8,6 +8,7 @@ use rand_core::{OsRng, RngCore};
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::agent::{self, AgentProfile, CLAUDE};
 use super::format::folder_name;
 use super::journal::Journal;
 use super::message::AcpId;
@@ -29,16 +30,16 @@ pub const ADAPTER_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
 pub const ADAPTER_VERSION: &str = "0.95.0";
 
 pub fn spawn_command() -> String {
-    format!("npx -y {ADAPTER_PACKAGE}@{ADAPTER_VERSION}")
+    CLAUDE.spawn.to_string()
 }
 
-/// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off
-/// so a lost holder never starts a fresh agent under a journal that names the old session.
-/// `client` names this client to a holder that takes several, so the others see what it sends.
+/// `spawn` names the agent to start; it is only given when the host has none for the name, and a
+/// resume leaves it off so a lost holder never starts a fresh agent under a journal that names
+/// the old session. `client` names this client to a holder that takes several, so the others see what it sends.
 pub fn attach_command(
     name: &str,
     cwd: &str,
-    spawn: bool,
+    spawn: Option<&AgentProfile>,
     from: usize,
     client: Option<&str>,
 ) -> String {
@@ -46,10 +47,10 @@ pub fn attach_command(
     if let Some(client) = client {
         command += &format!(" --client {}", shell_quote(client));
     }
-    if spawn {
+    if let Some(agent) = spawn {
         command += &format!(
             " --spawn {} --cwd {}",
-            shell_quote(&spawn_command()),
+            shell_quote(agent.spawn),
             shell_quote(cwd)
         );
     }
@@ -64,10 +65,16 @@ pub const STATUS: &str = concat!(tether_acp!(), " status 2>&1");
 pub const LIST_WITH_ERRORS: &str = concat!(tether_acp!(), " ls 2>&1");
 pub const HOME: &str = "printf %s \"$HOME\"";
 
-/// Earlier conversations in `cwd`, newest first, as JSON lines. Runs the adapter briefly on the host.
-pub fn sessions_command(cwd: &str, limit: usize) -> String {
+/// Earlier conversations of `agent` in `cwd`, newest first, as JSON lines. Runs the adapter
+/// briefly on the host. The host lists Claude's without being told which agent.
+pub fn sessions_command(cwd: &str, limit: usize, agent: &AgentProfile) -> String {
+    let which = if agent == &CLAUDE {
+        String::new()
+    } else {
+        format!(" --agent-cmd {}", shell_quote(agent.spawn))
+    };
     format!(
-        "{TETHER} sessions {} --limit {limit} 2>&1",
+        "{TETHER} sessions {} --limit {limit}{which} 2>&1",
         shell_quote(cwd)
     )
 }
@@ -283,7 +290,11 @@ fn status_chat(line: &str) -> Option<ChatSummary> {
             .unwrap_or("")
             .to_string(),
         created: number_int(object.get("created")).unwrap_or(0),
-        spawn: String::new(),
+        spawn: object
+            .get("spawn")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         turn,
         host_title: title,
         has_status: true,
@@ -343,6 +354,8 @@ pub struct DrawerChatRow {
     pub state: DrawerChatState,
     pub cwd: String,
     pub tasks: u32,
+    /// `None` is an agent this build does not know.
+    pub agent: Option<&'static AgentProfile>,
 }
 
 impl DrawerChatRow {
@@ -365,8 +378,14 @@ impl DrawerChatRow {
 }
 
 /// The host's title, else the stored agent title, else the folder name. The subtitle is the
-/// folder, or the path above it when the folder is already the title.
-pub fn drawer_rows(chats: &[ChatSummary], titles: &HashMap<String, String>) -> Vec<DrawerChatRow> {
+/// folder, or the path above it when the folder is already the title; a chat with another agent
+/// than Claude leads it with the agent's name. `local_agents` holds the agent key this device
+/// recorded for the chats it started.
+pub fn drawer_rows(
+    chats: &[ChatSummary],
+    titles: &HashMap<String, String>,
+    local_agents: &HashMap<String, String>,
+) -> Vec<DrawerChatRow> {
     chats
         .iter()
         .map(|chat| {
@@ -382,6 +401,15 @@ pub fn drawer_rows(chats: &[ChatSummary], titles: &HashMap<String, String>) -> V
             } else {
                 folder
             };
+            let agent = agent::resolve(
+                local_agents.get(&chat.name).map(String::as_str),
+                &chat.spawn,
+            );
+            let subtitle = if agent == Some(&CLAUDE) {
+                subtitle
+            } else {
+                format!("{} \u{b7} {subtitle}", agent::label(agent))
+            };
             DrawerChatRow {
                 name: chat.name.clone(),
                 title,
@@ -389,6 +417,7 @@ pub fn drawer_rows(chats: &[ChatSummary], titles: &HashMap<String, String>) -> V
                 state: DrawerChatState::of(chat),
                 cwd: chat.cwd.clone(),
                 tasks: chat.tasks,
+                agent,
             }
         })
         .collect()
@@ -787,16 +816,16 @@ mod tests {
     #[test]
     fn attach_command_spawns_only_for_a_new_chat() {
         assert_eq!(
-            attach_command("chat-ab12", "/home/sam/my app", true, 0, None),
+            attach_command("chat-ab12", "/home/sam/my app", Some(&CLAUDE), 0, None),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0' --cwd '/home/sam/my app'"
         );
         assert_eq!(
-            attach_command("chat-ab12", "/x", false, 0, None),
+            attach_command("chat-ab12", "/x", None, 0, None),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0"
         );
-        assert!(attach_command("c", "/x", false, 4096, None).ends_with("--from 4096"));
+        assert!(attach_command("c", "/x", None, 4096, None).ends_with("--from 4096"));
         assert_eq!(
-            attach_command("chat-ab12", "/x", false, 0, Some("k3x9")),
+            attach_command("chat-ab12", "/x", None, 0, Some("k3x9")),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --client 'k3x9'"
         );
     }
@@ -808,14 +837,14 @@ mod tests {
             "npx -y @agentclientprotocol/claude-agent-acp@0.95.0"
         );
         assert_eq!(ADAPTER_VERSION, "0.95.0");
-        let command = attach_command("c", "/x", true, 0, None);
+        let command = attach_command("c", "/x", Some(&CLAUDE), 0, None);
         assert!(command.contains("--spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0'"));
-        assert!(!attach_command("c", "/x", false, 0, None).contains("npx"));
+        assert!(!attach_command("c", "/x", None, 0, None).contains("npx"));
     }
 
     #[test]
     fn shell_metacharacters_in_a_name_or_folder_are_quoted() {
-        let command = attach_command("a'b", "/x; rm -rf /", true, 0, None);
+        let command = attach_command("a'b", "/x; rm -rf /", Some(&CLAUDE), 0, None);
         assert!(command.contains("'a'\"'\"'b'"));
         assert!(command.contains("'/x; rm -rf /'"));
         assert_eq!(
@@ -840,9 +869,66 @@ mod tests {
 
     #[test]
     fn the_sessions_command_quotes_a_hostile_folder_and_folds_stderr_in() {
-        let command = sessions_command("/tmp/it's $(rm -rf ~)", 20);
+        let command = sessions_command("/tmp/it's $(rm -rf ~)", 20, &CLAUDE);
         assert!(command.contains(" sessions '/tmp/it'\"'\"'s $(rm -rf ~)' --limit 20"));
         assert!(command.ends_with("2>&1"));
+    }
+
+    #[test]
+    fn the_sessions_command_names_the_agent_unless_it_is_claude() {
+        let claude = sessions_command("/x", 20, &CLAUDE);
+        assert_eq!(
+            claude,
+            "PATH=\"$HOME/.local/bin:$PATH\" tether acp sessions '/x' --limit 20 2>&1"
+        );
+        assert!(!claude.contains("--agent-cmd"));
+        assert_eq!(
+            sessions_command("/x", 20, &agent::CODEX),
+            "PATH=\"$HOME/.local/bin:$PATH\" tether acp sessions '/x' --limit 20 --agent-cmd 'npx -y @agentclientprotocol/codex-acp@2.3.0' 2>&1"
+        );
+        assert!(
+            sessions_command("/x", 5, &agent::OPENCODE).contains("--agent-cmd 'opencode acp' 2>&1")
+        );
+    }
+
+    #[test]
+    fn attach_spawns_the_picked_agent() {
+        let command = attach_command("c", "/x", Some(&agent::OPENCODE), 0, None);
+        assert!(command.contains("--spawn 'opencode acp' --cwd '/x'"));
+        let command = attach_command("c", "/x", Some(&agent::CODEX), 0, None);
+        assert!(command.contains("--spawn 'npx -y @agentclientprotocol/codex-acp@2.3.0'"));
+    }
+
+    #[test]
+    fn status_lines_carry_the_agents_spawn_command() {
+        let line =
+            r#"{"name":"c1","state":"running","spawn":"opencode acp","logBytes":3,"cwd":"/x"}"#;
+        let listing = parse_status(line);
+        assert_eq!(listing.chats[0].spawn, "opencode acp");
+        let old = parse_status(r#"{"name":"c2","state":"running"}"#);
+        assert_eq!(old.chats[0].spawn, "");
+    }
+
+    #[test]
+    fn drawer_rows_name_a_chats_agent_from_the_local_record_then_the_hosts_spawn() {
+        let mut codex = ChatSummary::new("c1", "/srv/app");
+        codex.spawn = agent::CODEX.spawn.to_string();
+        let plain = ChatSummary::new("c2", "/srv/api");
+        let mut local = ChatSummary::new("c3", "/srv/docs");
+        local.spawn = String::new();
+        let mut unknown = ChatSummary::new("c4", "/srv/x");
+        unknown.spawn = "mystery --acp".into();
+        let rows = drawer_rows(
+            &[codex, plain, local, unknown],
+            &HashMap::new(),
+            &HashMap::from([("c3".to_string(), "opencode".to_string())]),
+        );
+        let agents: Vec<_> = rows.iter().map(|r| agent::key(r.agent)).collect();
+        assert_eq!(agents, ["codex", "claude", "opencode", ""]);
+        assert_eq!(rows[0].subtitle, "Codex \u{b7} /srv");
+        assert_eq!(rows[1].subtitle, "/srv");
+        assert_eq!(rows[2].subtitle, "opencode \u{b7} /srv");
+        assert_eq!(rows[3].subtitle, "Agent \u{b7} /srv");
     }
 
     #[test]
@@ -918,7 +1004,7 @@ mod tests {
         let chats = parse_status(&[WORKING, idle, one, busy].join("\n")).chats;
         let tasks: Vec<_> = chats.iter().map(|c| c.tasks).collect();
         assert_eq!(tasks, [0, 2, 1, 3]);
-        let rows = drawer_rows(&chats, &HashMap::new());
+        let rows = drawer_rows(&chats, &HashMap::new(), &HashMap::new());
         let tags: Vec<_> = rows.iter().map(DrawerChatRow::tag).collect();
         assert_eq!(tags, ["working", "2 tasks", "1 task", "working"]);
         assert!(!others_waiting(&chats, None));
@@ -982,7 +1068,7 @@ mod tests {
             ("chat-a".to_string(), "Stored title".to_string()),
             ("chat-b".to_string(), "Stored title".to_string()),
         ]);
-        let rows = drawer_rows(&chats, &titles);
+        let rows = drawer_rows(&chats, &titles, &HashMap::new());
         let states: Vec<_> = rows.iter().map(|r| r.state).collect();
         assert_eq!(
             states,
@@ -1032,7 +1118,7 @@ mod tests {
         ChatSummary {
             is_running: running,
             created: 1,
-            spawn: "claude".into(),
+            spawn: CLAUDE.spawn.into(),
             log_bytes: 1,
             ..ChatSummary::new(name, cwd)
         }
@@ -1046,6 +1132,7 @@ mod tests {
                 chat("chat-b", "/srv/app", false),
             ],
             &HashMap::from([("chat-a".to_string(), "Add retry to fetchJSON".to_string())]),
+            &HashMap::new(),
         );
         assert_eq!(rows[0].title, "Add retry to fetchJSON");
         assert_eq!(rows[0].subtitle, "api-server");
@@ -1062,6 +1149,7 @@ mod tests {
         let rows = drawer_rows(
             &[chat("c", "/", true)],
             &HashMap::from([("c".to_string(), String::new())]),
+            &HashMap::new(),
         );
         assert_eq!(rows[0].title, "/");
         assert_eq!(rows[0].subtitle, "/");

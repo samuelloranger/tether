@@ -97,7 +97,8 @@ enum ChatContinueLoader {
   /// Resolves `~`, lists the folder's conversations and gives up after `deadline`. Never throws:
   /// the sheet shows the reason with a Retry.
   static func load(
-    folderText: String, deadline: TimeInterval = ChatContinueLoader.deadline,
+    folderText: String, agent: ChatAgentProfile = ChatAgents.claude,
+    deadline: TimeInterval = ChatContinueLoader.deadline,
     exec: @escaping @Sendable (String) async throws -> String
   ) async -> Result {
     do {
@@ -110,7 +111,7 @@ enum ChatContinueLoader {
           home = found.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let cwd = ACPCwd.expand(folderText, home: home)
-        let output = try await exec(ACPHostCommand.sessions(cwd: cwd, limit: limit))
+        let output = try await exec(ACPHostCommand.sessions(cwd: cwd, limit: limit, agent: agent))
         let listing = ACPSavedSessionListing.parse(output)
         if let failure = listing.failure { return .failed(failure) }
         return .loaded(listing.sessions)
@@ -151,9 +152,10 @@ enum ChatContinueLoader {
 extension ChatRoute {
   /// A chat that continues `session`: the same host checks as a fresh chat, then the folder it was listed under.
   static func startContinuing(
-    session: ACPSavedSession, cwdText: String, host: String, exec: (String) async throws -> String
+    session: ACPSavedSession, cwdText: String, host: String, agent: ChatAgentProfile = ChatAgents.claude,
+    picks: [String: String]? = nil, changed: Set<String> = [], exec: (String) async throws -> String
   ) async -> ChatStart {
-    switch await start(cwdText: cwdText, host: host, exec: exec) {
+    switch await start(cwdText: cwdText, host: host, agent: agent, picks: picks, changed: changed, exec: exec) {
     case var .ready(route):
       route.loadSessionId = session.sessionId
       return .ready(route)

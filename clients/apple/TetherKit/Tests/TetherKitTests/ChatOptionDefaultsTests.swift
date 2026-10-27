@@ -38,9 +38,9 @@ final class ChatOptionDefaultsTests: XCTestCase {
     let store = ChatOptionDefaultsStore(defaults: suite)
     store.remember(agent: "claude", id: "model", value: "haiku")
     store.remember(agent: "claude", id: "agent", value: "other")
-    store.remember(agent: "other", id: "mode", value: "plan")
+    store.remember(agent: "codex", id: "mode", value: "plan")
     XCTAssertEqual(store.stored(agent: "claude"), ["model": "haiku"])
-    XCTAssertEqual(store.stored(agent: "other"), ["mode": "plan"])
+    XCTAssertEqual(store.stored(agent: "codex"), ["mode": "plan"])
     XCTAssertEqual(ChatOptionDefaultsStore(defaults: suite).stored(agent: "claude"), ["model": "haiku"])
   }
 }

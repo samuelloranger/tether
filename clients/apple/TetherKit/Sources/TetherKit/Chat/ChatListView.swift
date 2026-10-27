@@ -134,7 +134,7 @@ struct ChatListView: View {
           .themedRow()
       }
       ForEach(model.chats) { chat in
-        Button { onOpen(model.route(for: chat)) } label: { ChatListRow(chat: chat) }
+        Button { onOpen(model.route(for: chat)) } label: { ChatListRow(chat: chat, agent: model.agent(for: chat)) }
           .buttonStyle(.plain)
           .themedRow()
           .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -147,18 +147,20 @@ struct ChatListView: View {
 
 private struct ChatListRow: View {
   let chat: ACPChatSummary
+  let agent: ChatAgentProfile?
 
   private var status: String { chat.isRunning ? "Running" : "Ended" }
-  private var agent: String? { ChatFormat.agentLabel(spawn: chat.spawn) }
+  private var agentTag: String? { ChatFormat.agentLabel(spawn: chat.spawn) ?? (agent == nil ? "Agent" : nil) }
 
   var body: some View {
     HStack(spacing: 12) {
+      ChatAgentMark(agent: agent, size: 18)
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
           Text(chat.title).font(.body.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(1)
-          if let agent {
-            Text(agent).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+          if let agentTag {
+            Text(agentTag).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
               .padding(.horizontal, 6).padding(.vertical, 1)
               .background(TetherColors.textPrimary.opacity(0.06), in: Capsule())
               .fixedSize()
@@ -219,7 +221,9 @@ struct ChatFlowView: View {
     }
     .onChange(of: opening, initial: true) { _, name in
       guard let name else { return }
-      route = ChatRoute.opening(name: name, chats: list.chats, journal: UserDefaultsChatJournalStore(name: name).load())
+      route = ChatRoute.opening(
+        name: name, chats: list.chats, journal: UserDefaultsChatJournalStore(name: name).load(),
+        localAgent: ChatTitleStore(config: config).agent(for: name))
     }
     .onDisappear { Task { await list.close() } }
   }

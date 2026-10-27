@@ -12,15 +12,21 @@ enum ChatOptionDefaults {
   /// holds the ids already tried or changed by the user. A stored value the agent does not offer,
   /// or that already is the current one, is skipped.
   static func next(
-    stored: [String: String], offered: [ACPConfigOption], skipping: Set<String>
+    stored: [String: String], offered: [ACPConfigOption], skipping: Set<String>,
+    remembered: [String] = ChatOptionDefaults.rememberedIds
   ) -> (id: String, value: String)? {
-    for id in rememberedIds where !skipping.contains(id) {
+    for id in remembered where !skipping.contains(id) {
       guard let value = stored[id], let option = offered.first(where: { $0.id == id }),
         option.currentValue != value, option.choices.contains(where: { $0.value == value })
       else { continue }
       return (id, value)
     }
     return nil
+  }
+
+  /// The sheet's changed picks the agent already has set: no request is sent, but they are still the user's choice.
+  static func alreadySet(picks: [String: String], changed: Set<String>, offered: [ACPConfigOption]) -> [String] {
+    offered.filter { changed.contains($0.id) && picks[$0.id] == $0.currentValue }.map(\.id)
   }
 }
 
@@ -42,7 +48,7 @@ final class ChatOptionDefaultsStore: @unchecked Sendable {
   }
 
   func remember(agent: String, id: String, value: String) {
-    guard ChatOptionDefaults.remembers(id) else { return }
+    guard ChatAgents.profile(forKey: agent)?.remembers(id) == true else { return }
     lock.lock(); defer { lock.unlock() }
     var everything = all()
     everything[agent, default: [:]][id] = value

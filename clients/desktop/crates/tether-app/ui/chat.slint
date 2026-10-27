@@ -65,6 +65,21 @@ export struct ChatTabVm {
     state: int,
     label: string,
     active: bool,
+    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, -1 an agent not known here
+}
+
+export struct NcChoiceVm {
+    value: string,
+    name: string,
+    selected: bool,
+}
+
+export struct NcMenuVm {
+    id: string,
+    name: string,
+    value-name: string,
+    changed: bool,
+    choices: [NcChoiceVm],
 }
 
 export struct ChatTaskVm {
@@ -154,6 +169,8 @@ export global ChatVm {
     in property <int> phase;                 // 0 connecting, 1 catching up, 2 live, 3 lost, 4 ended
     in property <string> phase-word;
     in property <bool> has-status;
+    in property <int> agent;                 // the chat's agent, as ChatTabVm.agent
+    in property <string> agent-label;        // set for an agent other than Claude
     in property <string> model-name;
     in property <string> mode-name;
     in property <int> mode-tint;             // 0 secondary, 1 accent, 2 success, 3 danger
@@ -242,6 +259,12 @@ export global ChatVm {
     in property <string> nc-listing-error;
     in property <[SavedSessionVm]> nc-sessions;
     in property <bool> nc-continuing;
+    in property <int> nc-agent;
+    in property <string> nc-summary;
+    in property <string> nc-note;
+    in property <bool> nc-is-reset;
+    in property <[NcMenuVm]> nc-menus;
+    in-out property <bool> nc-opts-open;
     in property <string> delete-title;
 
     callback select(string);
@@ -294,6 +317,9 @@ export global ChatVm {
     callback nc-folder-edited(string);
     callback nc-continue(string);
     callback nc-retry();
+    callback nc-agent-picked(int);
+    callback nc-pick(string, string);
+    callback nc-reset();
 }
 
 export global ChatStyle {
@@ -339,6 +365,19 @@ export global ChatStyle {
     }
     out property <length> column: 760px;
     out property <length> row-height: 34px;
+}
+
+// The agent's mark. Claude keeps its own colour; the single-colour marks take `ink`.
+component AgentMark inherits Rectangle {
+    in property <int> agent;
+    in property <length> size: 13px;
+    in property <color> ink: Tokens.text;
+    width: root.size;
+    height: root.size;
+    if root.agent == 0: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-claude.svg"); }
+    if root.agent == 1: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-codex.svg"); colorize: root.ink; }
+    if root.agent == 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-opencode.svg"); colorize: root.ink; }
+    if root.agent < 0 || root.agent > 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
 }
 
 component Glyph inherits Image {
@@ -997,6 +1036,12 @@ component ChatHeader inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
+        }
+        if ChatVm.agent-label != "": HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 6px;
+            VerticalLayout { alignment: center; AgentMark { agent: ChatVm.agent; size: 13px; ink: Tokens.text-secondary; } }
+            Text { text: ChatVm.agent-label; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
         }
         if ChatVm.has-status: VerticalLayout {
             horizontal-stretch: 0;
@@ -1976,6 +2021,84 @@ export component ChatViewer inherits Rectangle {
     }
 }
 
+// One of the Options row's menus: a compact select over the agent's choices for one option.
+component NcMenu inherits Rectangle {
+    in property <[NcChoiceVm]> choices;
+    in property <string> value-name;
+    in property <bool> changed;
+    callback picked(string);
+    height: 28px;
+    background: Tokens.raised;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.changed ? Tokens.accent.with-alpha(0.6) : Tokens.border;
+    Text {
+        x: 8px;
+        width: parent.width - 28px;
+        height: parent.height;
+        text: root.value-name;
+        font-size: 13px;
+        color: Tokens.text;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Image {
+        x: parent.width - 18px;
+        y: (parent.height - self.height) / 2;
+        width: 9px;
+        height: 9px;
+        source: @image-url("icons/chevron.svg");
+        transform-rotation: 90deg;
+        colorize: Tokens.text-secondary;
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { popup.show(); } }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: max(root.width, 190px);
+        height: min(list.preferred-height + 8px, 280px);
+        Rectangle {
+            background: Tokens.surface;
+            border-radius: 9px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            Flickable {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    for c in root.choices: Rectangle {
+                        height: 30px;
+                        border-radius: 7px;
+                        background: row-touch.has-hover ? Tokens.raised : transparent;
+                        Text {
+                            x: 8px;
+                            width: parent.width - 30px;
+                            height: parent.height;
+                            text: c.name;
+                            font-size: 13px;
+                            color: Tokens.text;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        if c.selected: Text {
+                            x: parent.width - 22px;
+                            height: parent.height;
+                            text: "\u{2713}";
+                            color: Tokens.accent;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        row-touch := TouchArea { mouse-cursor: pointer; clicked => { root.picked(c.value); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component NewChatDialog inherits Rectangle {
     background: Tokens.background.with-alpha(0.62);
     TouchArea { }
@@ -2000,6 +2123,33 @@ export component NewChatDialog inherits Rectangle {
                 options: ["New", "Continue"];
                 selected <=> ChatVm.nc-mode;
                 changed(i) => { ChatVm.nc-mode-changed(i); }
+            }
+            VerticalLayout {
+                spacing: 5px;
+                Text { text: "Agent"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+                Rectangle {
+                    height: 34px;
+                    background: Tokens.input;
+                    border-radius: Tokens.radius-control;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 3px;
+                        for label[i] in ["Claude", "Codex", "opencode"]: Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 8px;
+                            background: i == ChatVm.nc-agent ? Tokens.raised : agent-touch.has-hover ? Tokens.surface-hover : transparent;
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 6px;
+                                VerticalLayout { alignment: center; AgentMark { agent: i; size: 14px; ink: i == ChatVm.nc-agent ? Tokens.text : Tokens.text-secondary; } }
+                                Text { text: label; font-size: 12.5px; font-weight: i == ChatVm.nc-agent ? 650 : 500; color: i == ChatVm.nc-agent ? Tokens.text : Tokens.text-secondary; vertical-alignment: center; }
+                            }
+                            agent-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.nc-agent-picked(i); } }
+                        }
+                    }
+                }
             }
             VerticalLayout {
                 spacing: 5px;
@@ -2031,6 +2181,59 @@ export component NewChatDialog inherits Rectangle {
                     }
                 }
                 if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
+            }
+            Rectangle {
+                background: Tokens.surface;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: Tokens.border;
+                clip: true;
+                height: opts.preferred-height + 2px;
+                opts := VerticalLayout {
+                    Pressable {
+                        height: 34px;
+                        clicked => { ChatVm.nc-opts-open = !ChatVm.nc-opts-open; }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            Text { text: "Options"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                            Text { horizontal-stretch: 1; text: ChatVm.nc-opts-open ? "" : ChatVm.nc-summary; font-size: 12.5px; color: Tokens.text; overflow: elide; vertical-alignment: center; }
+                            VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 9px; height: 9px; transform-rotation: ChatVm.nc-opts-open ? 90deg : 0deg; } }
+                        }
+                    }
+                    if ChatVm.nc-opts-open && ChatVm.nc-menus.length > 0: VerticalLayout {
+                        Rectangle { height: 1px; background: Tokens.border; }
+                        HorizontalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+                            for m in ChatVm.nc-menus: VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+                                Text { text: m.name; font-size: 12px; color: Tokens.text-secondary; overflow: elide; }
+                                NcMenu { choices: m.choices; value-name: m.value-name; changed: m.changed; picked(v) => { ChatVm.nc-pick(m.id, v); } }
+                            }
+                        }
+                    }
+                    if ChatVm.nc-opts-open: VerticalLayout {
+                        Rectangle { height: 1px; background: Tokens.border; }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            padding-top: 7px;
+                            padding-bottom: 8px;
+                            spacing: 6px;
+                            Wrapped { horizontal-stretch: 1; text: ChatVm.nc-note; font-size: 11.5px; ink: Tokens.text-faint; }
+                            if ChatVm.nc-menus.length > 0 && !ChatVm.nc-is-reset: Pressable {
+                                width: reset-text.preferred-width + 4px;
+                                height: 16px;
+                                hover-fill: false;
+                                clicked => { ChatVm.nc-reset(); }
+                                reset-text := Text { text: "Reset"; font-size: 11.5px; color: Tokens.accent; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
             }
             if ChatVm.nc-mode == 0: HorizontalLayout {
                 alignment: end;
@@ -2100,7 +2303,7 @@ export component ChatTab inherits Rectangle {
         spacing: 7px;
         VerticalLayout {
             alignment: center;
-            Glyph { which: 18; size: 12px; ink: root.tab.active ? Tokens.accent : Tokens.text-faint; }
+            AgentMark { agent: root.tab.agent; size: 13px; ink: root.tab.active ? Tokens.text : Tokens.text-secondary; }
         }
         name := Text {
             text: root.tab.title;

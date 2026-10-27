@@ -38,7 +38,8 @@ enum ACPChatStatusListing {
     return ACPChatSummary(
       name: name, isRunning: state == "running", logBytes: (object["logBytes"] as? NSNumber)?.intValue ?? 0,
       cwd: object["cwd"] as? String ?? "",
-      created: Date(timeIntervalSince1970: (object["created"] as? NSNumber)?.doubleValue ?? 0), spawn: "",
+      created: Date(timeIntervalSince1970: (object["created"] as? NSNumber)?.doubleValue ?? 0),
+      spawn: object["spawn"] as? String ?? "",
       turn: (object["turn"] as? String).flatMap(ChatHostTurn.init(rawValue:)) ?? .idle,
       hostTitle: title.flatMap { $0.isEmpty ? nil : $0 }, hasStatus: true,
       multiClient: object["multiClient"] as? Bool == true,

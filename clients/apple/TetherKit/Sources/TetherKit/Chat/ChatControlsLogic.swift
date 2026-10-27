@@ -35,8 +35,14 @@ struct ChatStatusLine: Equatable {
   var tint: ChatModeTint = .secondary
   var percent: String?
   var cost: String?
+  /// The effort name after the model, for an agent other than Claude (whose header shows the model alone).
+  var extras: [String] = []
 
-  init(state: ChatState) {
+  init(state: ChatState, agent: ChatAgentProfile? = ChatAgents.claude) {
+    if let agent, agent.key != ChatAgents.claude.key {
+      let effort = agent.rememberedIds.first { $0 != "model" && $0 != "mode" }
+      extras = [effort].compactMap { $0.flatMap(state.currentChoice(of:)) }
+    }
     model = state.currentChoice(of: "model") ?? state.modelId
     mode = state.option(id: "mode").flatMap { Self.shortMode($0.currentValue) } ?? state.currentChoice(of: "mode")
     tint = ChatModeTint(modeId: state.option(id: "mode")?.currentValue)
@@ -50,7 +56,7 @@ struct ChatStatusLine: Equatable {
   }
 
   /// The line only opens the controls once there is something to change.
-  var isAvailable: Bool { model != nil || mode != nil }
+  var isAvailable: Bool { model != nil || mode != nil || !extras.isEmpty }
 
   var stats: String? {
     let parts = [percent, cost].compactMap { $0 }
@@ -60,6 +66,7 @@ struct ChatStatusLine: Equatable {
   var spoken: String {
     var parts: [String] = []
     if let model { parts.append("Model \(model)") }
+    parts.append(contentsOf: extras)
     if let mode { parts.append("Mode \(mode)") }
     if let percent { parts.append("Context \(percent) used") }
     if let cost { parts.append("Cost \(cost)") }

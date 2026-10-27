@@ -86,9 +86,13 @@ enum ACPHostCheck {
 
   /// `problem` is nil when the host is ready or cannot be checked: a failed connection is reported
   /// by the chat's own dial.
-  static func verify(host: String, exec: (String) async throws -> String) async -> (problem: String?, multiClient: Bool) {
+  /// `needsNode` is false for an agent that is not run through npx.
+  static func verify(
+    host: String, needsNode: Bool = true, exec: (String) async throws -> String
+  ) async -> (problem: String?, multiClient: Bool) {
     guard let output = try? await exec(command) else { return (nil, false) }
-    return (message(for: problems(in: output), host: host), multiClient(in: output))
+    let found = problems(in: output).filter { needsNode || $0 != .nodeMissing }
+    return (message(for: found, host: host), multiClient(in: output))
   }
 }
 
@@ -99,13 +103,20 @@ enum ChatStart: Equatable {
 
 extension ChatRoute {
   /// A fresh chat, after the host checks. The failure text is for the new-chat UI as it stands.
-  static func start(cwdText: String, host: String, exec: (String) async throws -> String) async -> ChatStart {
-    let check = await ACPHostCheck.verify(host: host, exec: exec)
+  static func start(
+    cwdText: String, host: String, agent: ChatAgentProfile = ChatAgents.claude, picks: [String: String]? = nil,
+    changed: Set<String> = [], exec: (String) async throws -> String
+  ) async -> ChatStart {
+    let check = await ACPHostCheck.verify(host: host, needsNode: agent.key != ChatAgents.opencode.key, exec: exec)
     if let message = check.problem { return .failed(message) }
     guard var route = await fresh(cwdText: cwdText, exec: exec) else {
       return .failed("Couldn't read the host's home folder.")
     }
     route.multiClient = check.multiClient
+    route.agentKey = agent.key
+    route.optionPicks = picks
+    route.changedPicks = changed
+    route.startedHere = true
     return .ready(route)
   }
 }

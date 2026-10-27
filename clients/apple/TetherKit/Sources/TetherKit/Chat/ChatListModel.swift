@@ -78,10 +78,15 @@ final class ChatListModel {
     }
   }
 
+  func agent(for chat: ACPChatSummary) -> ChatAgentProfile? {
+    ChatAgents.resolve(localKey: titles?.agent(for: chat.name), statusSpawn: chat.spawn)
+  }
+
   func route(for chat: ACPChatSummary) -> ChatRoute {
     ChatRoute(
       existing: chat.name, cwd: chat.cwd, journal: UserDefaultsChatJournalStore(name: chat.name).load(),
-      multiClient: chat.multiClient)
+      multiClient: chat.multiClient,
+      agentKey: ChatAgents.resolve(localKey: titles?.agent(for: chat.name), statusSpawn: chat.spawn)?.key)
   }
 
   func close() async { await closeConnection() }

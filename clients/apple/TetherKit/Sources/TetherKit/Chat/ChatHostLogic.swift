@@ -8,7 +8,7 @@ enum ACPHostCommand {
   static let adapterVersion = "0.95.0"
   static let spawnCommand = "npx -y \(adapterPackage)@\(adapterVersion)"
   /// Names this spawn command in the stored option defaults.
-  static let agentKey = "claude"
+  static let agentKey = ChatAgents.claude.key
   private static let prefix = "PATH=\"$HOME/.local/bin:$PATH\" tether acp"
 
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
@@ -33,8 +33,10 @@ enum ACPHostCommand {
   static let home = "printf %s \"$HOME\""
 
   /// Earlier conversations in `cwd`, newest first, as JSON lines. Runs the adapter briefly on the host.
-  static func sessions(cwd: String, limit: Int) -> String {
-    "\(prefix) sessions \(shellQuote(cwd)) --limit \(limit) 2>&1"
+  /// Claude's adapter is the host tool's default, so only another agent names its spawn command.
+  static func sessions(cwd: String, limit: Int, agent: ChatAgentProfile = ChatAgents.claude) -> String {
+    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.spawn))"
+    return "\(prefix) sessions \(shellQuote(cwd)) --limit \(limit)\(agentFlag) 2>&1"
   }
 
   static func kill(name: String) -> String { "\(prefix) kill \(shellQuote(name))" }
@@ -131,18 +133,31 @@ struct ChatRoute: Hashable, Identifiable {
   var multiClient = false
   /// Another client started the chat: no spawn and no handshake, the session comes from the log.
   var join = false
+  /// The agent's key; nil for one this app does not know (an existing chat only).
+  var agentKey: String? = ChatAgents.claude.key
+  /// The New chat sheet's option choices for a fresh chat: nil applies the stored defaults, `[:]` applies nothing.
+  var optionPicks: [String: String]?
+  /// The picks the sheet changed; only these become the stored defaults.
+  var changedPicks: Set<String> = []
+  /// This device starts the chat (a new one or a Continue), so it records the agent; an existing or joined chat leaves that to the host.
+  var startedHere = false
+  var agentToRecord: ChatAgentProfile? { startedHere ? ChatAgents.profile(forKey: agentKey) : nil }
   var id: String { name }
 
   /// A listed chat, opened the way its journal and holder allow.
-  init(existing name: String, cwd: String, journal: ChatJournal, multiClient: Bool) {
+  init(existing name: String, cwd: String, journal: ChatJournal, multiClient: Bool, agentKey: String? = ChatAgents.claude.key) {
     let mode = ChatOpenMode.mode(for: journal, multiClient: multiClient)
-    self.init(name: name, cwd: cwd, readOnly: mode == .readOnly, multiClient: multiClient, join: mode == .join)
+    self.init(
+      name: name, cwd: cwd, readOnly: mode == .readOnly, multiClient: multiClient, join: mode == .join,
+      agentKey: agentKey)
   }
 
   init(
     name: String, cwd: String, readOnly: Bool, loadSessionId: String? = nil, multiClient: Bool = false,
-    join: Bool = false
+    join: Bool = false, agentKey: String? = ChatAgents.claude.key, optionPicks: [String: String]? = nil
   ) {
+    self.agentKey = agentKey
+    self.optionPicks = optionPicks
     self.name = name
     self.cwd = cwd
     self.readOnly = readOnly

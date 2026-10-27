@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use tether_core::acp::agent::{self, CLAUDE};
 use tether_core::acp::diff::{self, DiffRowKind};
 use tether_core::acp::format::{
     self, ComposerAction, ModeTint, Phase as LinkPhase, QuickCommand, StatusLine,
@@ -36,6 +37,13 @@ fn tab_state(state: DrawerChatState) -> i8 {
         DrawerChatState::Ended => 4,
         DrawerChatState::Tasks => 5,
     }
+}
+
+fn agent_index(agent: Option<&'static agent::AgentProfile>) -> i8 {
+    agent::ALL
+        .iter()
+        .position(|p| Some(*p) == agent)
+        .map_or(-1, |i| i as i8)
 }
 
 fn icon_of(kind: &ToolKind) -> Icon {
@@ -84,7 +92,8 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let ordered: Vec<_> = chats.ordered().into_iter().cloned().collect();
     let names: Vec<String> = ordered.iter().map(|c| c.name.clone()).collect();
     let titles = chats.stored_titles(&names);
-    for mut row in host::drawer_rows(&ordered, &titles) {
+    let local_agents = chats.local_agents(&names);
+    for mut row in host::drawer_rows(&ordered, &titles, &local_agents) {
         // An open chat knows its own commands sooner than the host's next status read.
         if let Some(open) = chats.sessions.get(&row.name)
             && !open.has_ended()
@@ -106,6 +115,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             title: row.title.clone(),
             state: tab_state(row.state),
             label: row.tag(),
+            agent: agent_index(row.agent),
             name: row.name,
         });
     }
@@ -118,6 +128,30 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     }
     if let Some(nc) = &chats.new_chat {
         screen.new_chat = Some(NewChatView {
+            agent: agent_index(Some(nc.agent)),
+            summary: nc.options.summary(),
+            note: nc.options.note(),
+            reset: nc.options.is_reset(),
+            menus: nc
+                .options
+                .rows()
+                .into_iter()
+                .map(|r| OptionMenuView {
+                    choices: r
+                        .choices
+                        .into_iter()
+                        .map(|(value, name)| OptionChoiceView {
+                            selected: value == r.value,
+                            value,
+                            name,
+                        })
+                        .collect(),
+                    id: r.id,
+                    name: r.name,
+                    value_name: r.value_name,
+                    changed: r.changed,
+                })
+                .collect(),
             mode: nc.mode,
             folder: nc.folder.clone(),
             busy: nc.busy,
@@ -169,6 +203,12 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         context: format::context_fraction(state.context_used, state.context_size).map(|f| f as f32),
         context_text: format::context_summary(state.context_used, state.context_size)
             .unwrap_or_default(),
+        agent_label: if s.agent() == Some(&CLAUDE) {
+            String::new()
+        } else {
+            agent::label(s.agent()).to_string()
+        },
+        agent: agent_index(s.agent()),
     };
     screen.notice = s.notice.clone().unwrap_or_default();
 

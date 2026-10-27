@@ -130,7 +130,8 @@ its response, and during a turn Claude Code starts by itself (agent output while
 flight, until the usage report that carries its cost), `waiting` while a permission or elicitation request is outstanding (this wins
 over `working`), else `idle`; an ended session is always `idle`. `title` is the latest
 `session_info_update` title. `multiClient` is true when the session's holder lets several clients
-attach (see below); a holder started by an older tether leaves it out. `tasks`, when present,
+attach (see below); a holder started by an older tether leaves it out. `spawn` is the command that started the agent (absent from older holders), so a client can tell
+which agent a chat runs. `tasks`, when present,
 counts the background commands still running: Bash calls with a display terminal (the client
 declared `_meta.terminal_output`) whose result named a `backgroundTaskId`, until their
 `terminal_exit`. Tasks do not keep a session from being stopped for being idle. The end of a

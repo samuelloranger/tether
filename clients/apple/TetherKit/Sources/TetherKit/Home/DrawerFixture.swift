@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 /// The real terminal screen over canned host answers, so the session drawer can be shot without a host:
-/// `TETHER_DEBUG_DRAWER=open|chat|chat-open|newchat` (see `SSHTerminalView.applyDebugDrawerMode`).
+/// `TETHER_DEBUG_DRAWER=open|chat|chat-open|newchat|agents-open` (`TETHER_DEBUG_THEME=<terminal theme id>` picks the theme) (see `SSHTerminalView.applyDebugDrawerMode`).
 public struct DrawerFixtureRoot: View {
   @State private var controller: SSHTerminalController
   @State private var preferences = AppPreferences()
@@ -12,6 +12,10 @@ public struct DrawerFixtureRoot: View {
     let config = SSHConnectionConfig(host: "drawer.fixture", port: 22, username: "dev", credentials: [.password("fixture")])
     let store = FixtureHostKeys()
     let now = Int(Date().timeIntervalSince1970)
+    if let theme = ProcessInfo.processInfo.environment["TETHER_DEBUG_THEME"] {
+      MainActor.assumeIsolated { ChromeTheme.shared.apply(TerminalTheme.named(theme)) }
+    }
+    DrawerFixtureRoot.seedAgentOptions(config: config)
     let titles = ChatTitleStore(config: config)
     titles.set("Add retry with backoff to fetchJSON", for: "chat-a1b2c3")
     titles.clear("chat-d4e5f6")
@@ -23,6 +27,35 @@ public struct DrawerFixtureRoot: View {
       control: ControlConnection(config: config, store: store) { ops })
     created.debugChatModel = { _ in ChatFixture.longModel() }
     _controller = State(initialValue: created)
+  }
+
+  /// The New chat sheet's Options row reads the stored defaults and the cached choices; Claude and Codex
+  /// have some, opencode has none yet (the first-time note).
+  private static func seedAgentOptions(config: SSHConnectionConfig) {
+    guard ProcessInfo.processInfo.environment["TETHER_DEBUG_DRAWER"]?.hasPrefix("newchat") == true else { return }
+    func choices(_ names: [(String, String)]) -> [ACPConfigChoice] {
+      names.map { ACPConfigChoice(value: $0.0, name: $0.1, description: "") }
+    }
+    func option(_ id: String, _ name: String, current: String, _ list: [(String, String)]) -> ACPConfigOption {
+      ACPConfigOption(id: id, name: name, description: "", category: id, currentValue: current, choices: choices(list))
+    }
+    let cache = ChatOptionsCache(config: config)
+    cache.clear(agent: ChatAgents.opencode.key)
+    cache.save(
+      [
+        option("model", "Model", current: "opus", [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")]),
+        option("effort", "Effort", current: "high", [("low", "Low"), ("medium", "Medium"), ("high", "High")]),
+        option("mode", "Mode", current: "auto", [("default", "Manual"), ("plan", "Plan"), ("auto", "Auto")]),
+      ], agent: ChatAgents.claude)
+    cache.save(
+      [
+        option("model", "Model", current: "gpt-6-sol", [("gpt-6-sol", "gpt-6-sol"), ("gpt-6-mini", "gpt-6-mini")]),
+        option("reasoning_effort", "Reasoning effort", current: "medium", [("low", "Low"), ("medium", "Medium"), ("high", "High")]),
+        option("mode", "Mode", current: "agent", [("read-only", "Read only"), ("agent", "Agent")]),
+      ], agent: ChatAgents.codex)
+    let stored = ChatOptionDefaultsStore()
+    for (id, value) in [("model", "opus"), ("effort", "high"), ("mode", "auto")] { stored.remember(agent: "claude", id: id, value: value) }
+    for (id, value) in [("model", "gpt-6-sol"), ("reasoning_effort", "medium"), ("mode", "agent")] { stored.remember(agent: "codex", id: id, value: value) }
   }
 
   public var body: some View {
@@ -69,8 +102,21 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
     let env = ProcessInfo.processInfo.environment
     if command.contains("acp status") {
       if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether: unknown acp command \"status\"" }
-      func line(_ name: String, _ state: String, _ turn: String, _ title: String, _ cwd: String, _ age: Int) -> String {
-        "{\"name\":\"\(name)\",\"state\":\"\(state)\",\"turn\":\"\(turn)\",\"title\":\"\(title)\",\"cwd\":\"\(cwd)\",\"created\":\(now - age),\"logBytes\":48213,\"endedReason\":\"\"}"
+      func line(
+        _ name: String, _ state: String, _ turn: String, _ title: String, _ cwd: String, _ age: Int,
+        spawn: String? = nil, tasks: Int = 0
+      ) -> String {
+        let extra = (spawn.map { ",\"spawn\":\"\($0)\"" } ?? "") + (tasks > 0 ? ",\"tasks\":\(tasks)" : "")
+        return "{\"name\":\"\(name)\",\"state\":\"\(state)\",\"turn\":\"\(turn)\",\"title\":\"\(title)\",\"cwd\":\"\(cwd)\",\"created\":\(now - age),\"logBytes\":48213,\"endedReason\":\"\"\(extra)}"
+      }
+      if env["TETHER_DEBUG_DRAWER"]?.hasPrefix("agents") == true {
+        return [
+          line("chat-a1", "running", "working", "Release 6.3.1", "/home/dev/sites/tether", 600, spawn: ChatAgents.claude.spawn),
+          line("chat-b2", "running", "waiting", "Fix the season-pack cleanup", "/home/dev/sites/rawkoon", 1800, spawn: ChatAgents.codex.spawn),
+          line("chat-c3", "running", "idle", "Tidy the README", "/home/dev/sites/labby", 3600, spawn: ChatAgents.opencode.spawn, tasks: 1),
+          line("chat-d4", "running", "idle", "Chat access across devices", "/home/dev/sites/tether", 7200, spawn: ChatAgents.claude.spawn),
+          line("chat-e5", "ended", "idle", "Review PR 303", "/home/dev/sites/tether", 86400, spawn: ChatAgents.codex.spawn),
+        ].joined(separator: "\n")
       }
       return [
         line("chat-a1b2c3", "running", "working", "", "/home/dev/projects/api-server", 600),

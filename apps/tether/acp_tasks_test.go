@@ -95,7 +95,7 @@ func TestACPCancelEndsAgentStartedTurn(t *testing.T) {
 func TestACPStatusReportsTasks(t *testing.T) {
 	acpEnv(t)
 	_ = os.MkdirAll(acpDir("st"), 0o700)
-	m := &acpMeta{Name: "st", State: "running", Pid: os.Getpid(), Turn: "idle", Tasks: 2}
+	m := &acpMeta{Name: "st", State: "running", Pid: os.Getpid(), Turn: "idle", Tasks: 2, Spawn: "opencode acp"}
 	if err := writeACPMeta(m); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestACPStatusReportsTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.State != "running" || l.Tasks != 2 {
+	if l.State != "running" || l.Tasks != 2 || l.Spawn != "opencode acp" {
 		t.Fatalf("status %+v", l)
 	}
 }

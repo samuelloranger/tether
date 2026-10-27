@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use tether_core::acp::agent;
 use tether_core::acp::diff::{self, DiffRowKind};
 use tether_core::acp::files::ChatFiles;
 use tether_core::acp::format;
@@ -28,10 +29,6 @@ pub struct RowCtx<'a> {
     pub verbs: &'a [String],
     /// Pictures the rows show that have no thumbnail yet, with the file to make one from.
     pub need: Vec<(String, std::path::PathBuf)>,
-}
-
-pub fn sign_in_copy(host: &str) -> String {
-    format!("Claude isn't signed in on {host}. Open a terminal there and run claude to sign in.")
 }
 
 fn icon(kind: &ToolKind) -> Icon {
@@ -224,11 +221,9 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
     if state.turn == Turn::Working && !s.answer_pending() {
         rows.push(Row {
             key: "working".into(),
-            body: RowBody::Working(
-                state
-                    .subagent_activity()
-                    .unwrap_or_else(|| verbs::pick(ctx.verbs, turn_seed(state))),
-            ),
+            body: RowBody::Working(state.subagent_activity().unwrap_or_else(|| {
+                verbs::pick(agent::spinner_verbs(s.agent(), ctx.verbs), turn_seed(state))
+            })),
         });
     }
     rows
@@ -363,7 +358,7 @@ fn item_rows(
         ItemKind::Error(text) => RowBody::Error(text.clone()),
         ItemKind::Divider(text) => RowBody::Divider(text.clone()),
         ItemKind::SignedOut => RowBody::SignedOut {
-            message: sign_in_copy(ctx.host),
+            message: agent::sign_in_message(s.agent(), ctx.host),
             retry: (s.needs_sign_in() && Some(item.id) == last_item).then_some(match s.sign_in {
                 SignIn::Idle => 0,
                 SignIn::Checking => 1,

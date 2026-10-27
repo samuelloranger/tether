@@ -18,6 +18,7 @@ const JOURNAL: &str = "journal";
 const SNAPSHOT: &str = "snapshot";
 const OUTBOX: &str = "outbox";
 const TITLE: &str = "title";
+const AGENT: &str = "agent";
 
 /// Reversible percent-encoding, so two scopes or names never share a file.
 pub fn component(text: &str) -> String {
@@ -150,6 +151,25 @@ impl ChatFiles {
             .collect()
     }
 
+    /// The agent key this device recorded when it started the chat; chats it did not start have none.
+    pub fn agent(&self, name: &str) -> Option<String> {
+        self.read::<String>(name, AGENT).filter(|a| !a.is_empty())
+    }
+
+    pub fn set_agent(&self, name: &str, key: &str) -> io::Result<()> {
+        if key.is_empty() || self.agent(name).as_deref() == Some(key) {
+            return Ok(());
+        }
+        self.write(name, AGENT, key)
+    }
+
+    pub fn agents(&self, names: &[String]) -> HashMap<String, String> {
+        names
+            .iter()
+            .filter_map(|n| self.agent(n).map(|a| (n.clone(), a)))
+            .collect()
+    }
+
     fn images_directory(&self, name: &str) -> PathBuf {
         self.directory
             .join(format!("{}{DIRECTORY_SUFFIX}", component(name)))
@@ -167,7 +187,7 @@ impl ChatFiles {
 
     /// Removes everything kept for a chat: journal, snapshot, outbox, title and images.
     pub fn clear(&self, name: &str) {
-        for kind in [JOURNAL, SNAPSHOT, OUTBOX, TITLE] {
+        for kind in [JOURNAL, SNAPSHOT, OUTBOX, TITLE, AGENT] {
             self.remove(name, kind);
         }
         let _ = fs::remove_dir_all(self.images_directory(name));
@@ -282,6 +302,21 @@ mod tests {
         fs::create_dir_all(files.directory()).unwrap();
         fs::write(files.path("chat-a", OUTBOX), b"garbage").unwrap();
         assert!(files.outbox("chat-a").is_empty());
+    }
+
+    #[test]
+    fn a_chats_agent_is_recorded_per_chat_and_cleared_with_it() {
+        let (_dir, files) = files();
+        assert_eq!(files.agent("chat-a"), None);
+        files.set_agent("chat-a", "codex").unwrap();
+        files.set_agent("chat-b", "opencode").unwrap();
+        files.set_agent("chat-c", "").unwrap();
+        let found = files.agents(&["chat-a".into(), "chat-b".into(), "chat-c".into()]);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found["chat-a"], "codex");
+        files.clear("chat-a");
+        assert_eq!(files.agent("chat-a"), None);
+        assert_eq!(files.agent("chat-b").as_deref(), Some("opencode"));
     }
 
     #[test]

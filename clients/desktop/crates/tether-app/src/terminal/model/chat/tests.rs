@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tether_core::acp::defaults::{AGENT_CLAUDE, ChatDefaults};
+use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::connect::ConnectError;
 
@@ -19,6 +19,7 @@ struct Harness {
     jobs: Vec<ChatJob>,
     toasts: Vec<(String, String, String)>,
     remembered: Vec<(String, String)>,
+    seen: Vec<(String, Vec<tether_core::acp::message::ConfigOption>)>,
 }
 
 const CHECK_OK: &str = "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n";
@@ -38,6 +39,7 @@ impl Harness {
             jobs: Vec::new(),
             toasts: Vec::new(),
             remembered: Vec::new(),
+            seen: Vec::new(),
         };
         h.run(|c, now, out| c.on_connected(now, out));
         h.run(|c, now, out| c.on_tick(now, out));
@@ -50,7 +52,9 @@ impl Harness {
         f(&mut self.chats, t(self.now), &mut out);
         self.jobs.extend(out.jobs);
         self.toasts.extend(out.toasts);
-        self.remembered.extend(out.remembered);
+        self.seen.extend(out.options_seen);
+        self.remembered
+            .extend(out.remembered.into_iter().map(|(_, id, value)| (id, value)));
     }
 
     fn msg(&mut self, m: ChatMsg) {
@@ -1184,7 +1188,7 @@ fn stop_sends_the_queued_messages_as_the_next_prompt() {
 fn background_commands_notices_and_compaction_reach_the_screen() {
     use super::view::EntryBody;
     let mut h = Harness::new();
-    h.chats.dev_sample(t(h.now));
+    h.chats.dev_sample("claude", t(h.now));
     let s = h.screen();
 
     assert_eq!(s.tasks.len(), 2);
@@ -1258,9 +1262,9 @@ fn options_json(model: &str, effort: &str) -> String {
 fn a_new_chat_sets_the_stored_defaults_one_after_the_other_and_shows_no_error() {
     let mut h = Harness::new();
     let mut defaults = ChatDefaults::default();
-    defaults.remember(AGENT_CLAUDE, "model", "opus");
-    defaults.remember(AGENT_CLAUDE, "effort", "high");
-    defaults.remember(AGENT_CLAUDE, "mode", "plan");
+    defaults.remember("claude", "model", "opus");
+    defaults.remember("claude", "effort", "high");
+    defaults.remember("claude", "mode", "plan");
     h.chats.set_defaults(defaults);
     let name = h.new_chat();
     let (_, generation, _) = h.open_stream();
@@ -1326,7 +1330,7 @@ fn a_new_chat_sets_the_stored_defaults_one_after_the_other_and_shows_no_error() 
 fn start_with_defaults(h: &mut Harness, stored: &[(&str, &str)]) -> (String, u64) {
     let mut defaults = ChatDefaults::default();
     for (id, value) in stored {
-        defaults.remember(AGENT_CLAUDE, id, value);
+        defaults.remember("claude", id, value);
     }
     h.chats.set_defaults(defaults);
     let name = h.new_chat();
@@ -1482,7 +1486,7 @@ fn a_confirmed_user_change_is_remembered_but_an_unconfirmed_one_is_not() {
 fn joining_or_resuming_a_chat_sets_no_defaults() {
     let mut h = Harness::new();
     let mut defaults = ChatDefaults::default();
-    defaults.remember(AGENT_CLAUDE, "model", "opus");
+    defaults.remember("claude", "model", "opus");
     h.chats.set_defaults(defaults);
     h.exec(
         |t| *t == ExecTag::Status,
@@ -1501,4 +1505,317 @@ fn joining_or_resuming_a_chat_sets_no_defaults() {
     );
     h.settle();
     assert!(h.writes().is_empty(), "a joined chat keeps its own options");
+}
+
+fn select_json(id: &str, name: &str, current: &str, values: &[&str]) -> String {
+    let choices: Vec<String> = values
+        .iter()
+        .map(|v| format!(r#"{{"value":"{v}","name":"{v}"}}"#))
+        .collect();
+    format!(
+        r#"{{"id":"{id}","name":"{name}","type":"select","currentValue":"{current}","options":[{}]}}"#,
+        choices.join(",")
+    )
+}
+
+fn codex_options_json(effort: &str) -> String {
+    format!(
+        "[{},{},{}]",
+        select_json("model", "Model", "gpt", &["gpt", "gpt-mini"]),
+        select_json(
+            "reasoning_effort",
+            "Reasoning effort",
+            effort,
+            &["low", "medium", "high"]
+        ),
+        select_json("mode", "Mode", "agent", &["read-only", "agent"]),
+    )
+}
+
+impl Harness {
+    /// A New chat on `agent` in `~/proj`, started through the host checks.
+    fn new_chat_on(&mut self, agent: &str) -> String {
+        self.run(|c, now, out| c.open_new_chat(0, "~/proj".into(), now, out));
+        self.msg(ChatMsg::NewChatAgent(agent.into()));
+        self.msg(ChatMsg::NewChatStart);
+        self.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
+        self.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+        self.chats.active().unwrap().to_string()
+    }
+
+    fn dialog(&mut self) -> super::view::NewChatView {
+        self.screen().new_chat.expect("the dialog is open")
+    }
+}
+
+#[test]
+fn a_codex_chat_spawns_codex_is_recorded_and_wears_its_mark() {
+    let mut h = Harness::new();
+    let name = h.new_chat_on("codex");
+    let jobs = h.take();
+    let (_, _, command) = h.dial_of(&jobs).expect("a dial");
+    assert!(
+        command.contains("--spawn 'npx -y @agentclientprotocol/codex-acp@2.3.0'"),
+        "{command}"
+    );
+    assert_eq!(h.files.agent(&name).as_deref(), Some("codex"));
+    let screen = h.screen();
+    assert_eq!(screen.tabs[0].agent, 1);
+    assert_eq!(screen.header.agent_label, "Codex");
+}
+
+#[test]
+fn the_next_dialog_opens_on_the_agent_picked_last() {
+    let mut h = Harness::new();
+    h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
+    assert_eq!(h.dialog().agent, 0);
+    h.msg(ChatMsg::NewChatCancel);
+    let mut out = Out::default();
+    h.chats
+        .set_options_cache(Default::default(), "devbox.local:22", "opencode");
+    h.chats.open_new_chat(0, "~".into(), t(h.now), &mut out);
+    assert_eq!(h.dialog().agent, 2);
+    h.msg(ChatMsg::NewChatCancel);
+    h.msg(ChatMsg::NewChatCancel);
+    h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
+    h.msg(ChatMsg::NewChatAgent("codex".into()));
+    h.msg(ChatMsg::NewChatStart);
+    h.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
+    h.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+    h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
+    assert_eq!(h.dialog().agent, 1, "Codex was the last one started");
+}
+
+#[test]
+fn continuing_lists_the_picked_agents_conversations_and_reloads_on_a_change() {
+    let mut h = Harness::new();
+    h.run(|c, now, out| c.open_new_chat(1, "/srv/app".into(), now, out));
+    let command = |jobs: Vec<ChatJob>| {
+        jobs.into_iter().rev().find_map(|j| match j {
+            ChatJob::Exec {
+                tag: ExecTag::NewChat { .. },
+                command,
+            } => Some(command),
+            _ => None,
+        })
+    };
+    let first = command(h.take()).expect("a listing");
+    assert!(first.contains("sessions '/srv/app'") && !first.contains("--agent-cmd"));
+    h.msg(ChatMsg::NewChatAgent("opencode".into()));
+    let second = command(h.take()).expect("a reload");
+    assert!(second.contains("--agent-cmd 'opencode acp'"), "{second}");
+    h.msg(ChatMsg::NewChatAgent("opencode".into()));
+    assert!(
+        command(h.take()).is_none(),
+        "the same agent changes nothing"
+    );
+}
+
+#[test]
+fn the_sign_in_row_names_each_agents_own_command() {
+    for (agent, command) in [
+        ("claude", "run claude to sign in"),
+        ("codex", "run codex login to sign in"),
+        ("opencode", "run opencode auth login to sign in"),
+    ] {
+        let mut h = Harness::new();
+        let name = h.new_chat_on(agent);
+        let (_, generation, _) = h.open_stream();
+        h.feed(
+            &name,
+            generation,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+        );
+        h.writes();
+        h.feed(
+            &name,
+            generation,
+            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"Authentication required"}}"#,
+        );
+        h.settle();
+        let s = h.screen();
+        assert!(
+            matches!(rows(&s).last(), Some(RowBody::SignedOut { message, .. }) if message.contains(command)),
+            "{agent}: {:?}",
+            rows(&s).last()
+        );
+    }
+}
+
+#[test]
+fn chats_this_device_did_not_start_take_their_agent_from_the_hosts_report() {
+    let mut h = Harness::new();
+    let lines = [
+        r#"{"name":"chat-aaaaaa","state":"running","cwd":"/srv/a","spawn":"opencode acp","created":1}"#,
+        r#"{"name":"chat-bbbbbb","state":"running","cwd":"/srv/b","created":2}"#,
+        r#"{"name":"chat-cccccc","state":"running","cwd":"/srv/c","spawn":"mystery --acp","created":3}"#,
+    ];
+    h.exec(|t| *t == ExecTag::Status, &lines.join("\n"));
+    let screen = h.screen();
+    let agents: Vec<i8> = screen.tabs.iter().map(|t| t.agent).collect();
+    assert_eq!(agents, [2, 0, -1]);
+}
+
+#[test]
+fn a_settled_session_reports_its_options_once_for_the_new_chat_dialog() {
+    let mut h = Harness::new();
+    let name = h.new_chat_on("codex");
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            codex_options_json("medium")
+        ),
+    );
+    assert!(h.seen.is_empty(), "not while the link is still catching up");
+    h.settle();
+    h.settle();
+    assert_eq!(h.seen.len(), 1);
+    assert_eq!(h.seen[0].0, "codex");
+    let ids: Vec<_> = h.seen[0].1.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["model", "reasoning_effort", "mode"]);
+}
+
+#[test]
+fn the_dialogs_picks_are_applied_and_the_confirmed_ones_become_that_agents_defaults() {
+    let mut h = Harness::new();
+    let cached = vec![
+        devsample_option("model", "Model", "gpt", &["gpt", "gpt-mini"]),
+        devsample_option(
+            "reasoning_effort",
+            "Reasoning effort",
+            "medium",
+            &["low", "medium", "high"],
+        ),
+        devsample_option("mode", "Mode", "agent", &["read-only", "agent"]),
+    ];
+    assert!(h.chats.cache_options("codex", &cached));
+    h.run(|c, now, out| c.open_new_chat(0, "~/proj".into(), now, out));
+    h.msg(ChatMsg::NewChatAgent("codex".into()));
+    let dialog = h.dialog();
+    assert_eq!(dialog.summary, "gpt \u{b7} medium \u{b7} agent");
+    assert_eq!(dialog.menus.len(), 3);
+    h.msg(ChatMsg::NewChatPick {
+        id: "reasoning_effort".into(),
+        value: "high".into(),
+    });
+    let dialog = h.dialog();
+    assert!(dialog.menus[1].changed && !dialog.menus[0].changed);
+    h.msg(ChatMsg::NewChatStart);
+    h.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
+    h.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+    let name = h.chats.active().unwrap().to_string();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            codex_options_json("medium")
+        ),
+    );
+    let writes = h.writes();
+    let set: Vec<_> = writes
+        .iter()
+        .filter(|l| l.contains("session/set_config_option"))
+        .collect();
+    assert_eq!(set.len(), 1, "{writes:?}");
+    assert!(
+        set[0].contains(r#""configId":"reasoning_effort""#) && set[0].contains(r#""value":"high""#)
+    );
+    assert!(h.remembered.is_empty(), "not before the agent confirms");
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"result":{{"configOptions":{}}}}}"#,
+            codex_options_json("high")
+        ),
+    );
+    assert_eq!(
+        h.remembered,
+        vec![("reasoning_effort".to_string(), "high".to_string())]
+    );
+}
+
+#[test]
+fn reset_applies_nothing_to_the_new_chat() {
+    let mut h = Harness::new();
+    let mut stored = ChatDefaults::default();
+    stored.remember("codex", "reasoning_effort", "high");
+    h.chats.set_defaults(stored);
+    let cached = vec![devsample_option(
+        "reasoning_effort",
+        "Reasoning effort",
+        "medium",
+        &["low", "medium", "high"],
+    )];
+    h.chats.cache_options("codex", &cached);
+    h.run(|c, now, out| c.open_new_chat(0, "~/proj".into(), now, out));
+    h.msg(ChatMsg::NewChatAgent("codex".into()));
+    assert_eq!(h.dialog().menus[0].value_name, "high");
+    h.msg(ChatMsg::NewChatReset);
+    assert_eq!(h.dialog().summary, "Codex's defaults");
+    h.msg(ChatMsg::NewChatStart);
+    h.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
+    h.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+    let name = h.chats.active().unwrap().to_string();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            codex_options_json("medium")
+        ),
+    );
+    assert!(
+        h.writes()
+            .iter()
+            .all(|l| !l.contains("session/set_config_option"))
+    );
+}
+
+fn devsample_option(
+    id: &str,
+    name: &str,
+    current: &str,
+    values: &[&str],
+) -> tether_core::acp::message::ConfigOption {
+    use tether_core::acp::message::{ConfigChoice, ConfigOption};
+    ConfigOption {
+        id: id.into(),
+        name: name.into(),
+        description: String::new(),
+        category: None,
+        current_value: current.into(),
+        choices: values
+            .iter()
+            .map(|v| ConfigChoice {
+                value: (*v).into(),
+                name: (*v).into(),
+                description: String::new(),
+            })
+            .collect(),
+    }
 }
