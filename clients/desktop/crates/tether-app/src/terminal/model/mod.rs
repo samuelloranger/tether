@@ -158,6 +158,12 @@ pub enum Msg {
     },
     DroppedFiles(Vec<PathBuf>),
     SendFiles(Vec<PathBuf>),
+    /// Files picked for a chat's composer; dropped when another tab is in front by then, so a
+    /// path never lands in a terminal the user didn't pick for.
+    ChatFilesPicked {
+        chat: String,
+        files: Vec<PathBuf>,
+    },
     SendStarted {
         names: Vec<String>,
     },
@@ -295,8 +301,10 @@ pub enum UiEffect {
     FocusSearch,
     Git(Box<GitView>),
     Chat(Box<chat::ChatScreen>),
-    /// The system picker for images to attach to the chat in front.
-    PickImages,
+    /// The system picker for files to send to `chat`.
+    PickChatFiles {
+        chat: String,
+    },
     /// A confirmed model, effort or mode change the user made: it becomes the device's default.
     RememberChatOption {
         agent: String,
@@ -581,6 +589,11 @@ impl TerminalModel {
                 self.on_send_files(files, &mut fx);
             }
             Msg::DroppedFiles(paths) | Msg::SendFiles(paths) => self.on_send_files(paths, &mut fx),
+            Msg::ChatFilesPicked { chat, files } => {
+                if self.chat_active() && self.chats.active() == Some(chat.as_str()) {
+                    return self.handle(Msg::SendFiles(files), now);
+                }
+            }
             Msg::SendStarted { names } => self.on_send_started(names),
             Msg::SendFileStarted { index } => self.on_send_file_started(index),
             Msg::SendFileDone { remote } => self.on_send_file_done(&remote, now, &mut fx),

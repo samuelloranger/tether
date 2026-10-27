@@ -656,11 +656,9 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
                 s.save_prefs();
             }
         }
-        UiEffect::PickImages => platform().pick_files(Box::new(|files| {
+        UiEffect::PickChatFiles { chat } => platform().pick_files(Box::new(move |files| {
             if !files.is_empty() {
-                send(Msg::Chat(
-                    crate::terminal::model::chat::ChatMsg::AttachFiles(files),
-                ));
+                send(Msg::ChatFilesPicked { chat, files });
             }
         })),
         UiEffect::AllowIme => {

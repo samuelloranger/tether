@@ -448,8 +448,8 @@ component PaneHeader inherits Rectangle {
         if !ChatVm.active: IconButton { icon: @image-url("icons/search.svg"); tooltip: "Find in scrollback · Ctrl+Shift+F"; active: TerminalVm.search-open; clicked => { TerminalVm.find(); } }
         if !ChatVm.active: IconButton { icon: @image-url("icons/snippets.svg"); tooltip: "Snippets · Ctrl+Shift+P"; active: PaletteVm.open; clicked => { TerminalVm.snippets(); } }
         if !ChatVm.active: IconButton { icon: @image-url("icons/history.svg"); tooltip: "History · Ctrl+Shift+H"; active: HistoryVm.open; clicked => { TerminalVm.history(); } }
-        if ChatVm.active: IconButton { icon: @image-url("icons/image.svg"); tooltip: "Attach images"; enabled: ChatVm.can-attach && ChatVm.composer-shown; clicked => { ChatVm.pick-images(); } }
-        IconButton { icon: @image-url("icons/upload.svg"); tooltip: "Send file"; clicked => { TerminalVm.send-file(); } }
+        // A chat attaches files from its composer's + instead.
+        if !ChatVm.active: IconButton { icon: @image-url("icons/upload.svg"); tooltip: "Send file"; clicked => { TerminalVm.send-file(); } }
         IconButton { icon: @image-url("icons/git.svg"); tooltip: "Git"; active: GitVm.open; clicked => { GitVm.toggle(); } }
         if !root.docked: IconButton { icon: @image-url("icons/gear.svg"); tooltip: "Settings"; clicked => { TerminalVm.settings(); } }
     }

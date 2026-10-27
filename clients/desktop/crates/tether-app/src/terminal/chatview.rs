@@ -592,7 +592,6 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_stopping(c.stopping);
     vm.set_action_enabled(c.action_enabled);
     vm.set_action_label(c.action_label.as_str().into());
-    vm.set_can_attach(c.can_attach);
     vm.set_attachments(model(
         c.attachments
             .iter()
@@ -816,13 +815,7 @@ pub fn wire(ui: &crate::AppWindow) {
     });
     vm.on_send(|| send(ChatMsg::Send));
     vm.on_stop(|| send(ChatMsg::Stop));
-    vm.on_pick_images(|| {
-        crate::terminal::glue::platform().pick_files(Box::new(|files| {
-            if !files.is_empty() {
-                send(ChatMsg::AttachFiles(files));
-            }
-        }));
-    });
+    vm.on_attach_files(|| send(ChatMsg::AttachRequested));
     // Ctrl+V with a picture on the clipboard attaches it; text pastes into the composer as usual.
     vm.on_paste_image(|| {
         use tether_core::paste::ClipboardSnapshot;

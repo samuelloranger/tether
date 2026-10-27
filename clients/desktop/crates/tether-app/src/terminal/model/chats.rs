@@ -122,8 +122,8 @@ impl TerminalModel {
         if let Some(text) = out.clipboard {
             fx.push(Effect::Ui(UiEffect::SetClipboard(text)));
         }
-        if out.pick_images {
-            fx.push(Effect::Ui(UiEffect::PickImages));
+        if let Some(chat) = out.pick_files {
+            fx.push(Effect::Ui(UiEffect::PickChatFiles { chat }));
         }
         if out.show_terminal {
             fx.push(Effect::Ui(UiEffect::SetTitle(self.window_title())));

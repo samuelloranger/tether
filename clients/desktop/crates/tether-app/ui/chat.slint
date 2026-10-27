@@ -203,7 +203,6 @@ export global ChatVm {
     in property <bool> stopping;
     in property <bool> action-enabled;
     in property <string> action-label: "Send";
-    in property <bool> can-attach: true;
     in property <[AttachmentVm]> attachments;
     in property <string> attach-error;
     in property <int> palette-kind;          // 0 none, 1 slash commands, 2 files
@@ -296,7 +295,8 @@ export global ChatVm {
     callback draft-edited(string, int);
     callback send();
     callback stop();
-    callback pick-images();
+    // Any file: pictures join the message, other files are uploaded and their path goes in the draft.
+    callback attach-files();
     pure callback paste-image() -> bool;
     callback remove-attachment(string);
     callback dismiss-attach-error();
@@ -1505,14 +1505,16 @@ component Composer inherits VerticalLayout {
                 width: 30px;
                 height: 30px;
                 border-radius: 15px;
-                opacity: ChatVm.can-attach && !ChatVm.dimmed ? 1 : 0.45;
-                background: attach-touch.has-hover && ChatVm.can-attach ? Tokens.surface-hover : Tokens.raised;
+                opacity: ChatVm.dimmed ? 0.45 : 1;
+                background: attach-touch.has-hover && !ChatVm.dimmed ? Tokens.surface-hover : Tokens.raised;
                 animate background { duration: Motion.fast; easing: ease-out; }
                 Image { source: @image-url("icons/plus.svg"); colorize: Tokens.text-secondary; width: 13px; height: 13px; x: 8.5px; y: 8.5px; }
+                accessible-role: button;
+                accessible-label: "Attach files";
                 attach-touch := TouchArea {
-                    enabled: ChatVm.can-attach && !ChatVm.dimmed;
+                    enabled: !ChatVm.dimmed;
                     mouse-cursor: pointer;
-                    clicked => { ChatVm.pick-images(); }
+                    clicked => { ChatVm.attach-files(); }
                 }
             }
         }

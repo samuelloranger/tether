@@ -176,6 +176,8 @@ pub enum ChatMsg {
     Send,
     Stop,
     AttachFiles(Vec<PathBuf>),
+    /// The composer's +: a picker for any file, whose result goes to the chat in front now.
+    AttachRequested,
     /// Text for a chat's draft at its caret, such as a sent file's path; that chat need not be in front.
     InsertText {
         name: String,
@@ -276,7 +278,8 @@ pub struct Out {
     pub jobs: Vec<ChatJob>,
     pub open_url: Option<String>,
     pub clipboard: Option<String>,
-    pub pick_images: bool,
+    /// The system picker for files, on behalf of this chat.
+    pub pick_files: Option<String>,
     /// The chat left the front: the terminal's own tab comes back.
     pub show_terminal: bool,
     pub toasts: Vec<(String, String, String)>,
@@ -980,6 +983,7 @@ impl Chats {
                     }
                 }
             }
+            ChatMsg::AttachRequested => out.pick_files = self.active.clone(),
             ChatMsg::AttachFiles(paths) => {
                 if let Some(name) = self.active.clone() {
                     self.with_session(&name, now, out, |s, ctx| {
