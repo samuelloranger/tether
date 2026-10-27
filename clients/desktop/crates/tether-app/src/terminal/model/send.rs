@@ -1,7 +1,15 @@
 use std::path::PathBuf;
 
+use super::chat::ChatMsg;
 use super::*;
-use tether_core::upload::{PendingFile, SendQueue};
+use tether_core::upload::{ATTACHABLE_EXTENSIONS, PendingFile, SendQueue};
+
+/// A chat attaches these itself; any other file is sent to the host.
+pub(crate) fn is_attachable(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ATTACHABLE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SendSource {
@@ -16,8 +24,10 @@ pub struct SendJob {
 }
 
 pub(crate) struct SendState {
-    /// The tab that was active when the send began. Every path is pasted there.
+    /// The tab or chat that was active when the send began. Every path goes there.
     pub target: String,
+    /// The target is a chat: paths go into its draft, not a PTY.
+    pub chat: bool,
     pub queue: Option<SendQueue>,
     pub pending_paste: Option<Vec<u8>>,
 }
@@ -31,21 +41,30 @@ impl TerminalModel {
         if sources.is_empty() || busy {
             return;
         }
-        let Some(target) = self.active_name().map(str::to_string) else {
+        let chat = self.chats.active().map(str::to_string);
+        let Some(target) = chat
+            .clone()
+            .or_else(|| self.active_name().map(str::to_string))
+        else {
             return;
         };
-        let fallback_dir = self
-            .session_cwds
-            .get(&target)
-            .filter(|d| d.starts_with('/'))
-            .cloned()
-            .or_else(|| {
-                self.tabs
-                    .get(&target)
-                    .and_then(|t| t.term.reports().cwd.clone())
-            });
+        // A chat's folder is usually a repository: its files go to the uploads folder only.
+        let fallback_dir = if chat.is_some() {
+            None
+        } else {
+            self.session_cwds
+                .get(&target)
+                .filter(|d| d.starts_with('/'))
+                .cloned()
+                .or_else(|| {
+                    self.tabs
+                        .get(&target)
+                        .and_then(|t| t.term.reports().cwd.clone())
+                })
+        };
         self.capsule_shown = None;
         self.send = Some(SendState {
+            chat: chat.is_some(),
             target,
             queue: None,
             pending_paste: None,
@@ -81,6 +100,24 @@ impl TerminalModel {
             return;
         };
         let target = state.target.clone();
+        if state.chat {
+            let finished = state.queue.as_mut().is_some_and(|q| {
+                q.on_sent(remote, false);
+                q.is_finished()
+            });
+            self.on_chat(
+                ChatMsg::InsertText {
+                    name: target,
+                    text: format!("{remote} "),
+                },
+                now,
+                fx,
+            );
+            if finished {
+                self.capsule_shown = Some(now);
+            }
+            return;
+        }
         let bracketed = self
             .tabs
             .get(&target)
@@ -121,6 +158,7 @@ impl TerminalModel {
 
 #[cfg(test)]
 mod tests {
+    use super::super::chat::ChatMsg;
     use super::super::tests::{live, t};
     use super::*;
     use crate::terminal::model::CapsuleView;
@@ -250,6 +288,89 @@ mod tests {
             Some(CapsuleView::Send(
                 "Couldn't send b.png: Could not connect: reset".into()
             ))
+        );
+    }
+
+    fn chat_in_front() -> (TerminalModel, tempfile::TempDir) {
+        let (mut m, dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(Msg::Chat(ChatMsg::Select("chat-c".into())), t(10));
+        (m, dir)
+    }
+
+    #[test]
+    fn a_chat_send_splits_images_from_other_files() {
+        let (mut m, _dir) = chat_in_front();
+        let fx = m.handle(
+            Msg::SendFiles(vec![PathBuf::from("a.PNG"), PathBuf::from("notes.pdf")]),
+            t(11),
+        );
+        let sends: Vec<&SendJob> = fx
+            .iter()
+            .filter_map(|e| match e {
+                Effect::StartSend(job) => Some(job),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sends.len(), 1, "{fx:?}");
+        assert_eq!(sends[0].sources, [SendSource::Path("notes.pdf".into())]);
+        assert_eq!(sends[0].fallback_dir, None);
+        assert!(
+            fx.iter()
+                .any(|e| matches!(e, Effect::Chat(super::super::chat::ChatJob::Encode { .. })))
+        );
+    }
+
+    #[test]
+    fn a_path_lands_in_the_chat_that_started_the_send() {
+        let (mut m, _dir) = chat_in_front();
+        m.handle(Msg::SendFiles(vec![PathBuf::from("notes.pdf")]), t(11));
+        m.handle(
+            Msg::SendStarted {
+                names: vec!["notes.pdf".into()],
+            },
+            t(12),
+        );
+        m.handle(Msg::SelectTab("a".into()), t(13));
+        let fx = m.handle(
+            Msg::SendFileDone {
+                remote: format!("{UP}/notes.pdf"),
+            },
+            t(14),
+        );
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::Write { .. })),
+            "{fx:?}"
+        );
+        let want = format!("{UP}/notes.pdf ");
+        assert_eq!(
+            m.chats.draft_of("chat-c"),
+            Some((want.clone(), want.chars().count()))
+        );
+    }
+
+    #[test]
+    fn inserting_text_puts_it_at_the_caret() {
+        let (mut m, _dir) = chat_in_front();
+        m.handle(
+            Msg::Chat(ChatMsg::DraftEdited {
+                text: "read  please".into(),
+                cursor_byte: 5,
+            }),
+            t(11),
+        );
+        m.handle(
+            Msg::Chat(ChatMsg::InsertText {
+                name: "chat-c".into(),
+                text: "/x".into(),
+            }),
+            t(12),
+        );
+        assert_eq!(
+            m.chats.draft_of("chat-c"),
+            Some(("read /x please".into(), 7))
         );
     }
 

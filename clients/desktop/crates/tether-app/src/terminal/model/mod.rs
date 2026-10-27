@@ -30,6 +30,7 @@ mod pointer;
 mod reconnect;
 mod search;
 pub(crate) mod send;
+use send::is_attachable;
 mod sidebar;
 mod tabs;
 
@@ -563,7 +564,12 @@ impl TerminalModel {
             }
             Msg::RedialDue { generation } => self.on_redial_due(generation, &mut fx),
             Msg::DroppedFiles(paths) | Msg::SendFiles(paths) if self.chat_active() => {
-                self.on_chat(chat::ChatMsg::AttachFiles(paths), now, &mut fx);
+                let (images, files): (Vec<_>, Vec<_>) =
+                    paths.into_iter().partition(|p| is_attachable(p));
+                if !images.is_empty() {
+                    self.on_chat(chat::ChatMsg::AttachFiles(images), now, &mut fx);
+                }
+                self.on_send_files(files, &mut fx);
             }
             Msg::DroppedFiles(paths) | Msg::SendFiles(paths) => self.on_send_files(paths, &mut fx),
             Msg::SendStarted { names } => self.on_send_started(names),
@@ -1035,7 +1041,7 @@ pub(crate) mod tests {
         (m, dir)
     }
 
-    pub const ONE_CHAT: &str = r#"{"name":"chat-c","state":"running","logBytes":10,"cwd":"/srv/api","created":100,"turn":"idle","title":"Fix login"}"#;
+    pub const ONE_CHAT: &str = r#"{"name":"chat-c","state":"running","logBytes":10,"cwd":"/srv/api","created":100,"turn":"idle","title":"Fix login","multiClient":true}"#;
 
     #[test]
     fn a_tab_label_follows_osc_7_after_cd() {
