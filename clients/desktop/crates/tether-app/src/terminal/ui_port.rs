@@ -221,6 +221,14 @@ impl UiPort for SlintUi {
             let vm = w.global::<TerminalVm>();
             vm.set_machine(view.header.machine.as_str().into());
             vm.set_session(view.header.session.as_str().into());
+            vm.set_session_cwd(
+                view.tabs
+                    .iter()
+                    .find(|t| t.active)
+                    .and_then(|t| t.cwd_leaf.as_deref())
+                    .unwrap_or("")
+                    .into(),
+            );
             vm.set_word(view.header.word.into());
             vm.set_lamp(lamp_index(view.header.lamp));
             if let Some(tabs) = sync_rows(&vm.get_tabs(), tab_items_from(&view.tabs)) {

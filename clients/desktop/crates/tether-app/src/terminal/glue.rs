@@ -218,6 +218,12 @@ fn wire_callbacks(ui: &AppWindow) {
     vm.on_select_tab(|n| send(Msg::SelectTab(n.into())));
     vm.on_kill_tab(|n| send(Msg::KillRequested(n.into())));
     vm.on_new_session(|| send(Msg::NewSessionBegin));
+    vm.on_toggle_sidebar(|| {
+        send(Msg::Command(
+            tether_core::keymap::TetherCommand::ToggleSidebar,
+        ))
+    });
+    vm.on_sidebar_dismiss(|| send(Msg::SidebarDismiss));
     vm.on_commit_name(|n| send(Msg::NewSessionCommit(n.into())));
     vm.on_cancel_name(|| send(Msg::NewSessionCancel));
     vm.on_find(|| send(Msg::SearchOpen));
@@ -519,8 +525,10 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             send_window_width(app);
             EventResult::Propagate
         }
-        WindowEvent::Resized(_) => {
-            send_window_width(app);
+        // Slint takes the new size after this event, so the event's own size is the one to read.
+        WindowEvent::Resized(size) => {
+            let scale = app.ui.window().scale_factor();
+            send(Msg::WindowWidth(size.width as f32 / scale));
             EventResult::Propagate
         }
         _ => EventResult::Propagate,
@@ -621,7 +629,13 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
             }
         }
         UiEffect::Sidebar(shown) => {
-            SIDEBAR_OVER.set(shown == tether_core::sidebar::Shown::Overlay);
+            use tether_core::sidebar::Shown;
+            SIDEBAR_OVER.set(shown == Shown::Overlay);
+            vm.set_sidebar(match shown {
+                Shown::Docked => 0,
+                Shown::Hidden => 1,
+                Shown::Overlay => 2,
+            });
         }
         UiEffect::RememberChatAgent(agent) => {
             let mut s = app.state.borrow_mut();
