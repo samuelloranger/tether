@@ -16,6 +16,8 @@ pub struct AgentProfile {
     pub remembered: [&'static str; 3],
     /// What to run in a terminal on the host to sign in.
     sign_in_command: &'static str,
+    /// Runs through npx, so the host needs Node.js.
+    pub needs_node: bool,
 }
 
 /// Pinned: the transcript reducer is written against this adapter's output, so a host never
@@ -27,6 +29,7 @@ pub const CLAUDE: AgentProfile = AgentProfile {
     marker: "claude-agent-acp",
     remembered: ["model", "effort", "mode"],
     sign_in_command: "claude",
+    needs_node: true,
 };
 
 pub const CODEX: AgentProfile = AgentProfile {
@@ -36,6 +39,7 @@ pub const CODEX: AgentProfile = AgentProfile {
     marker: "codex-acp",
     remembered: ["model", "reasoning_effort", "mode"],
     sign_in_command: "codex login",
+    needs_node: true,
 };
 
 pub const OPENCODE: AgentProfile = AgentProfile {
@@ -45,10 +49,23 @@ pub const OPENCODE: AgentProfile = AgentProfile {
     marker: "opencode acp",
     remembered: ["model", "effort", "mode"],
     sign_in_command: "opencode auth login",
+    needs_node: false,
+};
+
+/// The Copilot CLI speaks ACP itself; a host holder asks it for `assistant.idle` to end turns it
+/// holds open for a running shell.
+pub const COPILOT: AgentProfile = AgentProfile {
+    key: "copilot",
+    label: "Copilot",
+    spawn: "copilot --acp",
+    marker: "copilot --acp",
+    remembered: ["model", "reasoning_effort", "mode"],
+    sign_in_command: "copilot login",
+    needs_node: false,
 };
 
 /// In the order the New chat picker lists them.
-pub const ALL: [&AgentProfile; 3] = [&CLAUDE, &CODEX, &OPENCODE];
+pub const ALL: [&AgentProfile; 4] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT];
 
 /// What a chat with an agent this build does not know is called.
 pub const GENERIC_LABEL: &str = "Agent";
@@ -147,6 +164,11 @@ mod tests {
             for_spawn("/usr/local/bin/opencode acp --pure"),
             Some(&OPENCODE)
         );
+        assert_eq!(for_spawn(COPILOT.spawn), Some(&COPILOT));
+        assert_eq!(
+            for_spawn("/home/me/.local/bin/copilot --acp --allow-all-tools"),
+            Some(&COPILOT)
+        );
         assert_eq!(for_spawn("some-other-agent --acp"), None);
         assert_eq!(for_spawn(""), None);
     }
@@ -170,6 +192,10 @@ mod tests {
             ["model", "reasoning_effort", "mode"]
         );
         assert_eq!(remembered_ids("opencode"), ["model", "effort", "mode"]);
+        assert_eq!(
+            remembered_ids("copilot"),
+            ["model", "reasoning_effort", "mode"]
+        );
         assert!(remembered_ids("other").is_empty());
     }
 
@@ -184,6 +210,7 @@ mod tests {
             sign_in_message(Some(&OPENCODE), "devbox")
                 .contains("run opencode auth login to sign in")
         );
+        assert!(sign_in_message(Some(&COPILOT), "devbox").contains("run copilot login to sign in"));
         assert!(sign_in_message(None, "devbox").starts_with("The agent isn't signed in"));
     }
 
@@ -193,6 +220,7 @@ mod tests {
         assert_eq!(spinner_verbs(Some(&CLAUDE), &words), words.as_slice());
         assert!(spinner_verbs(Some(&CODEX), &words).is_empty());
         assert!(spinner_verbs(Some(&OPENCODE), &words).is_empty());
+        assert!(spinner_verbs(Some(&COPILOT), &words).is_empty());
         assert!(spinner_verbs(None, &words).is_empty());
     }
 

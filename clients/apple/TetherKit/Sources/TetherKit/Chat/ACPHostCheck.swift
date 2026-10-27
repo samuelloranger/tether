@@ -72,10 +72,10 @@ enum ACPHostCheck {
       .contains { $0.name == "tether" && ($0.protocolNumber ?? 0) >= multiClientProtocol }
   }
 
-  /// Node serves the npx-run agents; opencode is its own binary.
+  /// Node serves the npx-run agents; opencode and Copilot are their own binaries.
   static func relevant(_ problems: [Problem], for agent: ChatAgentProfile) -> [Problem] {
     let opencode = agent.key == ChatAgents.opencode.key
-    return problems.filter { $0 == .opencodeMissing ? opencode : ($0 != .nodeMissing || !opencode) }
+    return problems.filter { $0 == .opencodeMissing ? opencode : ($0 != .nodeMissing || agent.needsNode) }
   }
 
   static func message(for problems: [Problem], host: String) -> String? {

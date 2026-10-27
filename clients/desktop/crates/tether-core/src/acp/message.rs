@@ -576,6 +576,7 @@ fn config_options(raw: &[&Json]) -> Vec<ConfigOption> {
             }
             let id = string(option.get("id"))?;
             let current = string(option.get("currentValue"))?;
+            let mut seen = std::collections::HashSet::new();
             let choices = option
                 .get("options")
                 .and_then(Value::as_array)
@@ -584,6 +585,10 @@ fn config_options(raw: &[&Json]) -> Vec<ConfigOption> {
                 .into_iter()
                 .filter_map(|choice| {
                     let value = string(choice.get("value"))?;
+                    // Copilot lists "auto" twice; a value is one choice.
+                    if !seen.insert(value.clone()) {
+                        return None;
+                    }
                     Some(ConfigChoice {
                         name: string(choice.get("name")).unwrap_or_else(|| value.clone()),
                         description: string(choice.get("description")).unwrap_or_default(),
@@ -937,6 +942,32 @@ mod tests {
         assert_eq!(
             fields.raw_output.unwrap(),
             r#"{"a":{"c":"x/y","d":1},"b":1}"#
+        );
+    }
+
+    #[test]
+    fn a_choice_listed_twice_is_one_choice() {
+        let line = update(
+            json!({"sessionUpdate": "config_option_update", "configOptions": [
+                {"type": "select", "id": "model", "name": "Model", "currentValue": "auto", "options": [
+                    {"value": "auto", "name": "Auto", "description": "Let Copilot pick the best model"},
+                    {"value": "auto", "name": "Auto", "description": "Auto"},
+                    {"value": "claude-sonnet-5.5", "name": "Claude Sonnet 5.5"},
+                ]},
+            ]}),
+        );
+        let Inbound::Update(Update::ConfigOptions(options)) = dec(&line) else {
+            panic!()
+        };
+        let values: Vec<_> = options[0]
+            .choices
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(values, ["auto", "claude-sonnet-5.5"]);
+        assert_eq!(
+            options[0].choices[0].description,
+            "Let Copilot pick the best model"
         );
     }
 

@@ -65,7 +65,7 @@ export struct ChatTabVm {
     state: int,
     label: string,
     active: bool,
-    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, -1 an agent not known here
+    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, -1 an agent not known here
 }
 
 export struct NcChoiceVm {
@@ -377,6 +377,7 @@ component AgentMark inherits Rectangle {
     if root.agent == 0: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-claude.svg"); }
     if root.agent == 1: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-codex.svg"); colorize: root.ink; }
     if root.agent == 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-opencode.svg"); colorize: root.ink; }
+    if root.agent == 3: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-copilot.svg"); colorize: root.ink; }
     if root.agent < 0 || root.agent > 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
 }
 
@@ -2137,7 +2138,7 @@ export component NewChatDialog inherits Rectangle {
                     HorizontalLayout {
                         padding: 3px;
                         spacing: 3px;
-                        for label[i] in ["Claude", "Codex", "opencode"]: Rectangle {
+                        for label[i] in ["Claude", "Codex", "opencode", "Copilot"]: Rectangle {
                             horizontal-stretch: 1;
                             border-radius: 8px;
                             background: i == ChatVm.nc-agent ? Tokens.raised : agent-touch.has-hover ? Tokens.surface-hover : transparent;

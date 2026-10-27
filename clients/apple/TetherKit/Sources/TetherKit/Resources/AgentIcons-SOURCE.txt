@@ -1,1 +1,1 @@
-agent-claude, agent-codex and agent-opencode (Agents.xcassets) are from lobehub/icons (MIT, https://github.com/lobehub/lobe-icons). The marks belong to their owners.
+agent-claude, agent-codex, agent-opencode and agent-copilot (Agents.xcassets) are from lobehub/icons (MIT, https://github.com/lobehub/lobe-icons). The marks belong to their owners.

@@ -771,14 +771,14 @@ pub fn host_problems(output: &str) -> Vec<HostProblem> {
     found
 }
 
-/// Node serves the npx-run agents; opencode is its own binary.
+/// Node serves the npx-run agents; opencode and Copilot are their own binaries.
 pub fn host_problems_for(output: &str, agent: &AgentProfile) -> Vec<HostProblem> {
     let opencode = agent.key == agent::OPENCODE.key;
     host_problems(output)
         .into_iter()
         .filter(|p| match p {
             HostProblem::OpencodeMissing => opencode,
-            HostProblem::NodeMissing => !opencode,
+            HostProblem::NodeMissing => agent.needs_node,
             _ => true,
         })
         .collect()
@@ -1420,6 +1420,15 @@ mod tests {
             "no protocol number reads as too old"
         );
         assert_eq!(host_problems("node=missing"), [NodeMissing]);
+        assert_eq!(
+            host_problems_for("node=missing", &agent::CODEX),
+            [NodeMissing]
+        );
+        assert!(host_problems_for("node=missing", &agent::COPILOT).is_empty());
+        assert_eq!(
+            host_problems_for("tether=missing\nnode=missing", &agent::OPENCODE),
+            [TetherMissing]
+        );
         assert_eq!(host_problems("  tether=missing \r\n"), [TetherMissing]);
         assert_eq!(
             host_problems(""),

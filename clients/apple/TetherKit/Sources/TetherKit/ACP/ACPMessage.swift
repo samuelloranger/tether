@@ -347,8 +347,10 @@ enum ACPDecoder {
       guard (option["type"] as? String ?? "select") == "select",
         let id = option["id"] as? String, let current = option["currentValue"] as? String
       else { return nil }
+      var seen = Set<String>()
+      // Copilot lists "auto" twice; a value is one choice.
       let choices = (option["options"] as? [JSON] ?? []).compactMap { choice -> ACPConfigChoice? in
-        guard let value = choice["value"] as? String else { return nil }
+        guard let value = choice["value"] as? String, seen.insert(value).inserted else { return nil }
         return ACPConfigChoice(
           value: value, name: choice["name"] as? String ?? value, description: choice["description"] as? String ?? "")
       }

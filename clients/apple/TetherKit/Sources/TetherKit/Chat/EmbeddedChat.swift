@@ -181,6 +181,7 @@ struct NewChatSheet: View {
             HStack(spacing: 6) {
               ChatAgentMark(agent: option, size: 14).opacity(on || !option.tintsIcon ? 1 : 0.7)
               Text(option.label).font(.footnote.weight(on ? .semibold : .regular)).lineLimit(1)
+                .minimumScaleFactor(0.8)
             }
             .foregroundStyle(on ? TetherColors.textPrimary : TetherColors.textSecondary)
             .frame(maxWidth: .infinity).frame(height: 30)
