@@ -297,9 +297,18 @@ pub enum UiEffect {
     PickImages,
     /// A confirmed model, effort or mode change the user made: it becomes the device's default.
     RememberChatOption {
+        agent: String,
         id: String,
         value: String,
     },
+    /// The options an agent's settled session offered, for the next New chat dialog on this host.
+    CacheChatOptions {
+        scope: String,
+        agent: String,
+        options: Vec<tether_core::acp::message::ConfigOption>,
+    },
+    /// The agent the last chat was started with.
+    RememberChatAgent(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

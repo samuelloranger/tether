@@ -3,7 +3,9 @@
 
 use std::time::Duration;
 
+use tether_core::acp::agent::AgentProfile;
 use tether_core::acp::host::{self, SavedSession};
+use tether_core::acp::options::{OptionsDraft, StartOptions};
 use tether_core::connect::ConnectError;
 
 use super::{ChatJob, ExecTag};
@@ -34,6 +36,8 @@ pub enum Next {
         cwd: String,
         load: Option<String>,
         multi: bool,
+        agent: &'static AgentProfile,
+        start: StartOptions,
     },
 }
 
@@ -45,6 +49,8 @@ pub struct NewChat {
     pub error: Option<String>,
     pub listing: Listing,
     pub continuing: Option<String>,
+    pub agent: &'static AgentProfile,
+    pub options: OptionsDraft,
     request: u64,
     list_request: u64,
     reload_at: Option<Duration>,
@@ -66,7 +72,12 @@ fn exec_failure(error: &ConnectError) -> String {
 }
 
 impl NewChat {
-    pub fn open(mode: u8, folder: String) -> Self {
+    pub fn open(
+        mode: u8,
+        folder: String,
+        agent: &'static AgentProfile,
+        options: OptionsDraft,
+    ) -> Self {
         Self {
             mode,
             folder,
@@ -74,6 +85,8 @@ impl NewChat {
             error: None,
             listing: Listing::Loading,
             continuing: None,
+            agent,
+            options,
             request: 0,
             list_request: 0,
             reload_at: None,
@@ -83,6 +96,22 @@ impl NewChat {
 
     pub fn set_mode(&mut self, mode: u8, now: Duration) -> Option<ChatJob> {
         self.mode = mode;
+        self.error = None;
+        self.reload(now)
+    }
+
+    /// Another agent lists other conversations and has its own options.
+    pub fn set_agent(
+        &mut self,
+        agent: &'static AgentProfile,
+        options: OptionsDraft,
+        now: Duration,
+    ) -> Option<ChatJob> {
+        if self.agent == agent || self.busy || self.continuing.is_some() {
+            return None;
+        }
+        self.agent = agent;
+        self.options = options;
         self.error = None;
         self.reload(now)
     }
@@ -125,7 +154,10 @@ impl NewChat {
         exec(
             self.list_request,
             Step::Sessions,
-            format!("{} || true", host::sessions_command(cwd, LIST_LIMIT)),
+            format!(
+                "{} || true",
+                host::sessions_command(cwd, LIST_LIMIT, self.agent)
+            ),
         )
     }
 
@@ -139,6 +171,16 @@ impl NewChat {
         self.error = None;
         self.request += 1;
         Some(exec(self.request, Step::Check, host::host_check_command()))
+    }
+
+    fn open_next(&self, cwd: String) -> Next {
+        Next::Open {
+            cwd,
+            load: self.continuing.clone(),
+            multi: self.multi,
+            agent: self.agent,
+            start: self.options.start_options(),
+        }
     }
 
     fn stop(&mut self, error: String) -> Next {
@@ -170,18 +212,12 @@ impl NewChat {
                 if host::needs_home(&self.folder) {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
                 }
-                Next::Open {
-                    cwd: host::expand_cwd(&self.folder, ""),
-                    load: self.continuing.clone(),
-                    multi: self.multi,
-                }
+                self.open_next(host::expand_cwd(&self.folder, ""))
             }
             Step::Home => match result {
-                Ok(home) if home.trim().starts_with('/') => Next::Open {
-                    cwd: host::expand_cwd(&self.folder, home.trim()),
-                    load: self.continuing.clone(),
-                    multi: self.multi,
-                },
+                Ok(home) if home.trim().starts_with('/') => {
+                    self.open_next(host::expand_cwd(&self.folder, home.trim()))
+                }
                 _ => self.stop("Couldn't read the host's home folder.".into()),
             },
             Step::ListHome => match result {

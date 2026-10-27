@@ -1,6 +1,6 @@
 //! Debug builds only: a canned chat for screenshots, shown without an agent behind it.
 
-use tether_core::acp::message::{AcpId, decode};
+use tether_core::acp::message::{AcpId, ConfigChoice, ConfigOption, decode};
 use tether_core::acp::reducer::{ChatEvent, ChatState, reduce};
 
 fn line(state: &mut ChatState, text: &str) {
@@ -72,4 +72,83 @@ pub fn state() -> ChatState {
         r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
     );
     s
+}
+
+fn option(id: &str, name: &str, current: &str, choices: &[(&str, &str)]) -> ConfigOption {
+    ConfigOption {
+        id: id.into(),
+        name: name.into(),
+        description: String::new(),
+        category: None,
+        current_value: current.into(),
+        choices: choices
+            .iter()
+            .map(|(value, name)| ConfigChoice {
+                value: (*value).into(),
+                name: (*name).into(),
+                description: String::new(),
+            })
+            .collect(),
+    }
+}
+
+/// What each agent offered in its last session, for the New chat dialog's menus.
+pub fn options(agent: &str) -> Vec<ConfigOption> {
+    match agent {
+        "codex" => vec![
+            option(
+                "model",
+                "Model",
+                "gpt-5-codex",
+                &[("gpt-5-codex", "gpt-5-codex"), ("gpt-5", "gpt-5")],
+            ),
+            option(
+                "reasoning_effort",
+                "Reasoning effort",
+                "medium",
+                &[("low", "Low"), ("medium", "Medium"), ("high", "High")],
+            ),
+            option(
+                "mode",
+                "Mode",
+                "agent",
+                &[("read-only", "Read only"), ("agent", "Agent")],
+            ),
+        ],
+        "opencode" => vec![
+            option("model", "Model", "a", &[("a", "Model A"), ("b", "Model B")]),
+            option(
+                "effort",
+                "Effort",
+                "high",
+                &[("low", "Low"), ("high", "High")],
+            ),
+            option(
+                "mode",
+                "Mode",
+                "build",
+                &[("build", "Build"), ("plan", "Plan")],
+            ),
+        ],
+        _ => vec![
+            option(
+                "model",
+                "Model",
+                "opus",
+                &[("opus", "Opus"), ("sonnet", "Sonnet")],
+            ),
+            option(
+                "effort",
+                "Effort",
+                "high",
+                &[("medium", "Medium"), ("high", "High")],
+            ),
+            option(
+                "mode",
+                "Mode",
+                "default",
+                &[("default", "Ask"), ("plan", "Plan")],
+            ),
+        ],
+    }
 }

@@ -7,12 +7,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tether_core::acp::agent::{self, AgentProfile, CLAUDE};
 use tether_core::acp::client::Outbound;
-use tether_core::acp::defaults::{AGENT_CLAUDE, ChatDefaults};
+use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::acp::host::{self, ChatSummary};
 use tether_core::acp::images::ImageAttachment;
-use tether_core::acp::message::AcpId;
+use tether_core::acp::message::{AcpId, ConfigOption};
+use tether_core::acp::options::{OptionsCache, OptionsDraft, StartOptions};
 use tether_core::connect::ConnectError;
 
 #[cfg(debug_assertions)]
@@ -153,7 +155,7 @@ pub enum ChatMsg {
     OpenTool(String),
     /// Debug builds: show the canned chat.
     #[cfg(debug_assertions)]
-    DevSample,
+    DevSample(String),
     OpenLink(String),
     OpenImage(String),
     CloseViewer,
@@ -209,6 +211,14 @@ pub enum ChatMsg {
     NewChatCancel,
     NewChatMode(u8),
     NewChatFolder(String),
+    /// The agent picker: an agent key.
+    NewChatAgent(String),
+    /// The opened Options row: one menu's choice.
+    NewChatPick {
+        id: String,
+        value: String,
+    },
+    NewChatReset,
     NewChatContinue(String),
     NewChatRetry,
     /// Esc with the chat in front: the topmost overlay closes.
@@ -263,13 +273,21 @@ pub struct Out {
     /// The chat left the front: the terminal's own tab comes back.
     pub show_terminal: bool,
     pub toasts: Vec<(String, String, String)>,
-    /// Options the user changed and the agent confirmed: `(option id, value)`.
-    pub remembered: Vec<(String, String)>,
+    /// Options the user changed and the agent confirmed: `(agent key, option id, value)`.
+    pub remembered: Vec<(String, String, String)>,
+    /// The options a settled session offers, per agent key, for the New chat dialog's menus.
+    pub options_seen: Vec<(String, Vec<ConfigOption>)>,
+    /// The agent a chat was just started with: the next dialog opens on it.
+    pub picked_agent: Option<String>,
 }
 
 pub struct Chats {
     files: Option<ChatFiles>,
     defaults: ChatDefaults,
+    options_cache: OptionsCache,
+    /// The host as the options cache and the chat files name it (`host:port`).
+    scope: String,
+    last_agent: String,
     /// The host as messages name it.
     host: String,
     listed: Vec<ChatSummary>,
@@ -311,14 +329,53 @@ impl Chats {
         self.defaults = defaults;
     }
 
-    pub fn remember(&mut self, id: &str, value: &str) {
-        self.defaults.remember(AGENT_CLAUDE, id, value);
+    pub fn set_options_cache(&mut self, cache: OptionsCache, scope: &str, last_agent: &str) {
+        self.options_cache = cache;
+        self.scope = scope.to_string();
+        self.last_agent = last_agent.to_string();
+    }
+
+    pub fn remember(&mut self, agent: &str, id: &str, value: &str) {
+        self.defaults.remember(agent, id, value);
+    }
+
+    /// Keeps the model's copy of the cache current; true when the list changed and is to be saved.
+    pub fn cache_options(&mut self, agent: &str, options: &[ConfigOption]) -> bool {
+        self.options_cache.store(&self.scope, agent, options)
+    }
+
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn draft_for(&self, agent: &AgentProfile) -> OptionsDraft {
+        OptionsDraft::new(
+            agent,
+            &self.defaults,
+            self.options_cache.get(&self.scope, agent.key),
+        )
+    }
+
+    /// Agents of chats this device started.
+    fn local_agents(&self, names: &[String]) -> HashMap<String, String> {
+        self.files
+            .as_ref()
+            .map(|f| f.agents(names))
+            .unwrap_or_default()
+    }
+
+    fn agent_of(&self, chat: &ChatSummary) -> Option<&'static AgentProfile> {
+        let local = self.files.as_ref().and_then(|f| f.agent(&chat.name));
+        agent::resolve(local.as_deref(), &chat.spawn)
     }
 
     pub fn new(files: Option<ChatFiles>, host: &str) -> Self {
         Self {
             files,
             defaults: ChatDefaults::default(),
+            options_cache: OptionsCache::default(),
+            scope: host.to_string(),
+            last_agent: String::new(),
             host: host.to_string(),
             listed: Vec::new(),
             provisional: Vec::new(),
@@ -481,6 +538,13 @@ impl Chats {
             .filter(|n| !self.provisional.iter().any(|p| &p.name == n))
             .collect();
         self.listed = chats;
+        let listed = self.listed.clone();
+        for chat in &listed {
+            let agent = self.agent_of(chat);
+            if let Some(s) = self.sessions.get_mut(&chat.name) {
+                s.set_agent(agent);
+            }
+        }
         for name in gone {
             // Killed from another client: its tab goes, as a session's does.
             if self.active.as_deref() == Some(name.as_str()) {
@@ -495,7 +559,7 @@ impl Chats {
 
     fn title_of(&self, chat: &ChatSummary) -> String {
         let titles = self.stored_titles(std::slice::from_ref(&chat.name));
-        host::drawer_rows(std::slice::from_ref(chat), &titles)
+        host::drawer_rows(std::slice::from_ref(chat), &titles, &HashMap::new())
             .first()
             .map(|r| r.title.clone())
             .unwrap_or_else(|| chat.name.clone())
@@ -540,7 +604,8 @@ impl Chats {
                 chat.multi_client,
                 None,
                 self.files.as_ref(),
-            );
+            )
+            .with_agent(self.agent_of(&chat));
             self.sessions.insert(name.to_string(), session);
         }
         self.active = Some(name.to_string());
@@ -554,15 +619,25 @@ impl Chats {
     }
 
     /// A route from the new-chat dialog: the chat starts and takes the front.
+    #[allow(clippy::too_many_arguments)]
     fn open_route(
         &mut self,
         name: String,
         cwd: String,
         load: Option<String>,
         multi: bool,
+        agent: &'static AgentProfile,
+        start: StartOptions,
         now: Duration,
         out: &mut Out,
     ) {
+        if let Some(files) = &self.files
+            && let Err(e) = files.set_agent(&name, agent.key)
+        {
+            tracing::warn!("chat agent not saved: {e}");
+        }
+        self.last_agent = agent.key.to_string();
+        out.picked_agent = Some(agent.key.to_string());
         let created = self.ordered().iter().map(|c| c.created).max().unwrap_or(0) + 1;
         self.provisional.push(ChatSummary {
             name: name.clone(),
@@ -570,7 +645,7 @@ impl Chats {
             log_bytes: 0,
             cwd: cwd.clone(),
             created,
-            spawn: String::new(),
+            spawn: agent.spawn.to_string(),
             turn: host::HostTurn::Idle,
             host_title: None,
             has_status: false,
@@ -584,13 +659,17 @@ impl Chats {
             multi,
             load,
             self.files.as_ref(),
-        );
+        )
+        .with_agent(Some(agent))
+        .with_start(start);
         self.sessions.insert(name.clone(), session);
         self.select(&name, now, out);
     }
 
+    /// `active` is the agent key of the chat in front; the other two agents get a tab each.
     #[cfg(debug_assertions)]
-    fn dev_sample(&mut self, now: Duration) {
+    fn dev_sample(&mut self, active: &str, now: Duration) {
+        let front = agent::by_key(active).unwrap_or(&CLAUDE);
         let mut sample = Session::new(
             "sample",
             "/srv/app",
@@ -598,16 +677,34 @@ impl Chats {
             false,
             None,
             None,
-        );
+        )
+        .with_agent(Some(front));
         sample.dev_state(devsample::state(), now);
         self.sessions.insert("sample".into(), sample);
-        self.provisional
-            .push(ChatSummary::new("sample", "/srv/app"));
-        let mut other = ChatSummary::new("other", "/srv/docs");
-        other.has_status = true;
-        other.tasks = 2;
-        other.created = 1;
-        self.provisional.push(other);
+        let rows = [
+            ("sample", "/srv/app", front, "Release the new build"),
+            ("other", "/srv/docs", &agent::CODEX, "Fix the pack cleanup"),
+            ("third", "/srv/site", &agent::OPENCODE, "Tidy the README"),
+        ];
+        for (i, (name, cwd, agent, title)) in rows.into_iter().enumerate() {
+            let mut chat = ChatSummary::new(name, cwd);
+            chat.has_status = true;
+            chat.spawn = agent.spawn.to_string();
+            chat.host_title = Some(title.to_string());
+            chat.created = i as i64;
+            if name == "other" {
+                chat.tasks = 2;
+            }
+            if name == "third" {
+                chat.turn = host::HostTurn::Waiting;
+            }
+            self.provisional.push(chat);
+        }
+        // opencode has no chat on this host yet: its dialog shows the first-time note.
+        for a in [&agent::CLAUDE, &agent::CODEX] {
+            self.options_cache
+                .store(&self.scope, a.key, &devsample::options(a.key));
+        }
         self.active = Some("sample".into());
         self.follow_seq += 1;
         self.focus_seq += 1;
@@ -620,7 +717,8 @@ impl Chats {
     /// `folder` is where the dialog starts: the active session's directory when it has one.
     pub fn open_new_chat(&mut self, mode: u8, folder: String, now: Duration, out: &mut Out) {
         self.dirty = true;
-        self.new_chat = Some(NewChat::open(mode, folder));
+        let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
+        self.new_chat = Some(NewChat::open(mode, folder, agent, self.draft_for(agent)));
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
             out.jobs.push(job);
         }
@@ -641,7 +739,7 @@ impl Chats {
         self.dirty = true;
         match msg {
             #[cfg(debug_assertions)]
-            ChatMsg::DevSample => self.dev_sample(now),
+            ChatMsg::DevSample(agent) => self.dev_sample(&agent, now),
             ChatMsg::Select(name) => self.select(&name, now, out),
             ChatMsg::Delete(name) => self.delete_prompt = Some(name),
             ChatMsg::NewChatWhenReady => self.new_chat_when_ready = true,
@@ -663,6 +761,28 @@ impl Chats {
             ChatMsg::NewChatFolder(text) => {
                 if let Some(nc) = self.new_chat.as_mut() {
                     nc.set_folder(text, now);
+                }
+            }
+            ChatMsg::NewChatAgent(key) => {
+                if let Some(agent) = agent::by_key(&key) {
+                    let draft = self.draft_for(agent);
+                    if let Some(job) = self
+                        .new_chat
+                        .as_mut()
+                        .and_then(|n| n.set_agent(agent, draft, now))
+                    {
+                        out.jobs.push(job);
+                    }
+                }
+            }
+            ChatMsg::NewChatPick { id, value } => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.options.pick(&id, &value);
+                }
+            }
+            ChatMsg::NewChatReset => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.options.reset();
                 }
             }
             ChatMsg::NewChatRetry => {
@@ -691,9 +811,24 @@ impl Chats {
                 match nc.on_exec(request, step, result, &host) {
                     newchat::Next::Nothing => {}
                     newchat::Next::Job(job) => out.jobs.push(job),
-                    newchat::Next::Open { cwd, load, multi } => {
+                    newchat::Next::Open {
+                        cwd,
+                        load,
+                        multi,
+                        agent,
+                        start,
+                    } => {
                         self.new_chat = None;
-                        self.open_route(host::new_chat_name(), cwd, load, multi, now, out);
+                        self.open_route(
+                            host::new_chat_name(),
+                            cwd,
+                            load,
+                            multi,
+                            agent,
+                            start,
+                            now,
+                            out,
+                        );
                     }
                 }
             }

@@ -194,6 +194,8 @@ pub struct TabView {
     pub state: i8,
     pub label: String,
     pub active: bool,
+    /// The agent's mark: its place in `agent::ALL`, -1 for an agent this build does not know.
+    pub agent: i8,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -211,6 +213,9 @@ pub struct HeaderView {
     pub stats: String,
     pub context: Option<f32>,
     pub context_text: String,
+    /// The agent's name for a chat that is not Claude's; empty for Claude.
+    pub agent_label: String,
+    pub agent: i8,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -363,7 +368,28 @@ pub enum ListingView {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct OptionChoiceView {
+    pub value: String,
+    pub name: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionMenuView {
+    pub id: String,
+    pub name: String,
+    pub value_name: String,
+    pub changed: bool,
+    pub choices: Vec<OptionChoiceView>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct NewChatView {
+    pub agent: i8,
+    pub summary: String,
+    pub note: String,
+    pub menus: Vec<OptionMenuView>,
+    pub reset: bool,
     pub mode: u8,
     pub folder: String,
     pub busy: bool,

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
+use tether_core::acp::options::OptionsCache;
 use tether_core::osc::Notification;
 use tether_core::throttle::ToastDecision;
 
@@ -18,6 +19,11 @@ impl TerminalModel {
 
     pub fn set_chat_defaults(&mut self, defaults: ChatDefaults) {
         self.chats.set_defaults(defaults);
+    }
+
+    /// `scope` is `host:port`, the key the options cache is stored under.
+    pub fn set_chat_options(&mut self, cache: OptionsCache, scope: &str, last_agent: &str) {
+        self.chats.set_options_cache(cache, scope, last_agent);
     }
 
     pub(crate) fn chat_active(&self) -> bool {
@@ -90,9 +96,25 @@ impl TerminalModel {
         for job in out.jobs {
             fx.push(Effect::Chat(job));
         }
-        for (id, value) in out.remembered {
-            self.chats.remember(&id, &value);
-            fx.push(Effect::Ui(UiEffect::RememberChatOption { id, value }));
+        for (agent, id, value) in out.remembered {
+            self.chats.remember(&agent, &id, &value);
+            fx.push(Effect::Ui(UiEffect::RememberChatOption {
+                agent,
+                id,
+                value,
+            }));
+        }
+        for (agent, options) in out.options_seen {
+            if self.chats.cache_options(&agent, &options) {
+                fx.push(Effect::Ui(UiEffect::CacheChatOptions {
+                    scope: self.chats.scope().to_string(),
+                    agent,
+                    options,
+                }));
+            }
+        }
+        if let Some(agent) = out.picked_agent {
+            fx.push(Effect::Ui(UiEffect::RememberChatAgent(agent)));
         }
         if let Some(url) = out.open_url {
             fx.push(Effect::Ui(UiEffect::OpenUrl(url)));

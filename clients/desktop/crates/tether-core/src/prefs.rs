@@ -4,6 +4,7 @@ use std::ops::RangeInclusive;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::acp::defaults::ChatDefaults;
+use crate::acp::options::OptionsCache;
 use crate::{DataDir, theme_named};
 
 pub const PREFERENCES_FILE: &str = "preferences.json";
@@ -123,6 +124,10 @@ pub struct Preferences {
     pub window: Option<WindowPlacement>,
     pub update_channel: UpdateChannel,
     pub chat_defaults: ChatDefaults,
+    /// The agent the last New chat dialog started; empty until one has.
+    pub chat_agent: String,
+    /// The options each agent offered in its last session, per host.
+    pub chat_options: OptionsCache,
 }
 
 /// What is read from disk: `Preferences` plus the `theme_mode` field it no longer has.
@@ -203,6 +208,28 @@ mod tests {
         assert_eq!(back.chat_defaults.get("claude", "model"), Some("opus"));
         let old: Preferences = serde_json::from_str(r#"{"update_channel":"edge"}"#).unwrap();
         assert_eq!(old.chat_defaults, ChatDefaults::default());
+        assert_eq!(old.chat_agent, "");
+        assert_eq!(old.chat_options, OptionsCache::default());
+    }
+
+    #[test]
+    fn the_last_agent_and_the_options_cache_round_trip() {
+        let mut p = Preferences {
+            chat_agent: "codex".into(),
+            ..Preferences::default()
+        };
+        let option = crate::acp::message::ConfigOption {
+            id: "model".into(),
+            name: "Model".into(),
+            description: String::new(),
+            category: None,
+            current_value: "a".into(),
+            choices: vec![],
+        };
+        p.chat_options.store("h:22", "codex", &[option]);
+        let back: Preferences = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back, p);
+        assert_eq!(back.chat_options.get("h:22", "codex").len(), 1);
     }
 
     #[test]
@@ -332,6 +359,8 @@ mod tests {
             }),
             update_channel: UpdateChannel::Edge,
             chat_defaults: ChatDefaults::default(),
+            chat_agent: String::new(),
+            chat_options: OptionsCache::default(),
         };
         p.save(&data).unwrap();
         assert_eq!(Preferences::load(&data, false).unwrap(), p);
@@ -422,6 +451,8 @@ mod tests {
             }),
             update_channel: UpdateChannel::Stable,
             chat_defaults: ChatDefaults::default(),
+            chat_agent: String::new(),
+            chat_options: OptionsCache::default(),
         };
         assert_eq!(p, expected);
         assert_eq!(

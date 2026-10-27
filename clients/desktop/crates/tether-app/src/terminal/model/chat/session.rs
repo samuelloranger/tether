@@ -5,9 +5,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use tether_core::acp::agent::{self, AgentProfile, CLAUDE};
 use tether_core::acp::auth::matches_auth_error;
 use tether_core::acp::client::{ChatClient, ClientError, Completion, Outbound, RequestKind, Undo};
-use tether_core::acp::defaults::{AGENT_CLAUDE, ChatDefaults, REMEMBERED};
+use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::acp::format::{
     self, AfterLoss, Attempt, LinkTracker, Outbox, Phase as LinkPhase, Resume,
@@ -16,7 +17,8 @@ use tether_core::acp::host;
 use tether_core::acp::images::{ImageAttachment, ImageSink};
 use tether_core::acp::journal::Snapshot;
 use tether_core::acp::mention::{self, FileIndex};
-use tether_core::acp::message::AcpId;
+use tether_core::acp::message::{AcpId, ConfigOption};
+use tether_core::acp::options::StartOptions;
 use tether_core::acp::question::{QuestionAction, QuestionDraft};
 use tether_core::acp::reducer::{ChatState, ItemKind, LinkState, Turn};
 use tether_core::acp::slash;
@@ -98,6 +100,12 @@ pub struct Session {
     applying: Option<AcpId>,
     applied: Vec<String>,
     touched: HashSet<String>,
+    /// The agent the chat runs; `None` is one this build does not know.
+    agent: Option<&'static AgentProfile>,
+    /// What the New chat dialog asked this chat to start with.
+    start: StartOptions,
+    /// The options last reported for the options cache, so an unchanged list is not reported again.
+    published: Vec<ConfigOption>,
     pub files: FileIndex,
     files_loading: bool,
     pub sign_in: SignIn,
@@ -184,6 +192,9 @@ impl Session {
             applying: None,
             applied: Vec::new(),
             touched: HashSet::new(),
+            agent: Some(&CLAUDE),
+            start: StartOptions::Stored,
+            published: Vec::new(),
             files: FileIndex::default(),
             files_loading: false,
             sign_in: SignIn::Idle,
@@ -216,6 +227,44 @@ impl Session {
             shown_rev: 0,
             snapshot_rev: 0,
         }
+    }
+
+    pub fn with_agent(mut self, agent: Option<&'static AgentProfile>) -> Self {
+        self.agent = agent;
+        self
+    }
+
+    pub fn with_start(mut self, start: StartOptions) -> Self {
+        self.start = start;
+        self
+    }
+
+    pub fn agent(&self) -> Option<&'static AgentProfile> {
+        self.agent
+    }
+
+    /// The host's report can say more than the local record did when the chat was opened.
+    pub fn set_agent(&mut self, agent: Option<&'static AgentProfile>) {
+        if self.agent != agent {
+            self.agent = agent;
+            self.touched();
+        }
+    }
+
+    /// The remembered options this agent offers, for the New chat dialog's choices. Only when the
+    /// session is settled, so a replay of an older log never overwrites a newer list.
+    fn publish_options(&mut self, ctx: &mut Ctx<'_>) {
+        let Some(agent) = self.agent else { return };
+        if self.link.phase() != LinkPhase::Live || self.holding {
+            return;
+        }
+        let options = &self.state().config_options;
+        if options.is_empty() || *options == self.published {
+            return;
+        }
+        let options = options.clone();
+        self.published = options.clone();
+        ctx.out.options_seen.push((agent.key.to_string(), options));
     }
 
     #[cfg(debug_assertions)]
@@ -357,7 +406,7 @@ impl Session {
         let command = host::attach_command(
             &self.name,
             &self.cwd,
-            spawn,
+            spawn.then(|| self.agent.unwrap_or(&CLAUDE)),
             offset,
             self.client_id.as_deref(),
         );
@@ -615,20 +664,23 @@ impl Session {
                     }
                     self.applying = None;
                     self.applied.clear();
+                    self.remember_picks_already_set(ctx);
                     self.apply_next_default(ctx);
                 }
                 Err(e) => self.start_failed(e),
             },
-            RequestKind::SetConfig { .. } if self.applying.as_ref() == Some(&c.id) => {
+            RequestKind::SetConfig { id, value } if self.applying.as_ref() == Some(&c.id) => {
                 self.applying = None;
+                // A value the dialog picked that the agent took is the user's choice.
+                if c.outcome.is_ok() && self.start.is_chosen(&id) {
+                    self.remember(id, value, ctx);
+                }
                 self.apply_next_default(ctx);
             }
             RequestKind::SetConfig { id, value } => match c.outcome {
                 Ok(_) => {
                     self.option_changes.remove(&id);
-                    if REMEMBERED.contains(&id.as_str()) {
-                        ctx.out.remembered.push((id, value));
-                    }
+                    self.remember(id, value, ctx);
                 }
                 Err(e) => {
                     self.option_changes
@@ -636,6 +688,35 @@ impl Session {
                 }
             },
             RequestKind::Prompt => {}
+        }
+    }
+
+    fn remember(&self, id: String, value: String, ctx: &mut Ctx<'_>) {
+        if agent::remembered_ids(agent::key(self.agent)).contains(&id.as_str()) {
+            ctx.out
+                .remembered
+                .push((agent::key(self.agent).to_string(), id, value));
+        }
+    }
+
+    /// The dialog's picks the agent already had set need no request, but they are still the
+    /// user's choice.
+    fn remember_picks_already_set(&mut self, ctx: &mut Ctx<'_>) {
+        let StartOptions::Picks { values, .. } = &self.start else {
+            return;
+        };
+        let Some(client) = self.client.as_ref() else {
+            return;
+        };
+        let current: Vec<(String, String)> = client
+            .state()
+            .config_options
+            .iter()
+            .filter(|o| values.get(&o.id) == Some(&o.current_value) && self.start.is_chosen(&o.id))
+            .map(|o| (o.id.clone(), o.current_value.clone()))
+            .collect();
+        for (id, value) in current {
+            self.remember(id, value, ctx);
         }
     }
 
@@ -652,10 +733,12 @@ impl Session {
             .chain(self.touched.iter())
             .cloned()
             .collect();
-        let Some((id, value)) =
-            ctx.defaults
-                .next_apply(AGENT_CLAUDE, &client.state().config_options, &skip)
-        else {
+        let Some((id, value)) = ctx.defaults.next_apply_for(
+            agent::key(self.agent),
+            &client.state().config_options,
+            &skip,
+            &self.start,
+        ) else {
             return;
         };
         self.applied.push(id.clone());
@@ -720,6 +803,7 @@ impl Session {
         if !self.holding {
             self.persist_title(ctx);
         }
+        self.publish_options(ctx);
     }
 
     pub fn tick(&mut self, ctx: &mut Ctx<'_>) -> bool {
@@ -727,6 +811,7 @@ impl Session {
         if self.link.phase() == LinkPhase::CatchingUp && self.link.settle_if_quiet(ctx.now) {
             self.holding = false;
             self.persist_title(ctx);
+            self.publish_options(ctx);
             changed = true;
         }
         if let Some(at) = self.learn_at
