@@ -470,16 +470,19 @@ export component TerminalPage inherits Rectangle {
     property <bool> docked: TerminalVm.sidebar == 0;
     property <length> side-w: root.docked ? 248px : 0px;
     background: Tokens.background;
-    // The docked sidebar and the git panel take or give back their width at once, so the terminal
-    // resizes once; they slide within that width.
-    side := Linger { open: root.docked; duration: Motion.slow; }
-    git := Linger { open: GitVm.open; duration: Motion.slow; }
+    // The docked sidebar and the git panel grow and shrink with the terminal beside them. The grid
+    // redraws each frame, but the PTY only hears the settled size (see `relayout`), so a slide is one
+    // SIGWINCH. A factor, not the width, is animated, so dragging the git panel's edge stays instant.
+    property <float> side-t: root.docked ? 1 : 0;
+    animate side-t { duration: Motion.slow; easing: ease-in-out; }
+    property <float> git-t: GitVm.open ? 1 : 0;
+    animate git-t { duration: Motion.slow; easing: ease-in-out; }
     over := Linger { open: TerminalVm.sidebar == 2; duration: Motion.slow; }
     HorizontalLayout {
-    if side.alive: Rectangle {
-        width: 248px;
+    if root.side-t > 0: Rectangle {
+        width: 248px * root.side-t;
         clip: true;
-        Sidebar { x: side.shown ? 0 : -self.width; animate x { duration: Motion.slow; easing: ease-out; } }
+        Sidebar { x: parent.width - self.width; }
     }
     VerticalLayout {
         horizontal-stretch: 1;
@@ -554,7 +557,11 @@ export component TerminalPage inherits Rectangle {
                 tip := Text { text: TerminalVm.tooltip; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
             }
         }
-        if git.alive: GitSidePanel { shown: git.shown; max-panel-width: (root.width - root.side-w) / 2; }
+        if root.git-t > 0: Rectangle {
+            width: panel.width * root.git-t;
+            clip: true;
+            panel := GitSidePanel { x: 0; max-panel-width: (root.width - root.side-w) / 2; }
+        }
         }
     }
     }
