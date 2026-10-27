@@ -13,7 +13,7 @@ final class ZZDebugStopTests: XCTestCase {
     stream.push(ACPFixture.log(ACPFixture.index(containing: "session/request_permission")))
     try await Task.sleep(nanoseconds: 500_000_000)
     var s = await client.state
-    print("DBG A turn=\(s.turn) inflight=\(s.inFlight.count) items=\(s.items.map { "\($0.kind)".prefix(20) })")
+    print("DBG A turn=\(s.turn) items=\(s.items.map { "\($0.kind)".prefix(20) })")
     try await client.prompt(text: "tidy")
     s = await client.state
     print("DBG B turn=\(s.turn) queued=\(s.queuedTexts)")
