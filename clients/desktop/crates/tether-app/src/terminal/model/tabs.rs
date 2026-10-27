@@ -1,4 +1,6 @@
+use super::chat::ChatMsg;
 use super::*;
+use tether_core::sidebar;
 use tether_core::tabs::CreateOutcome;
 use tether_core::zmx::valid_session_name;
 
@@ -87,19 +89,36 @@ impl TerminalModel {
         }
     }
 
-    pub(crate) fn on_jump(&mut self, jump: TabJump, fx: &mut Vec<Effect>) {
-        let Some(strip) = self.strip.as_ref() else {
-            return;
-        };
-        let target = match jump {
-            TabJump::Next => strip.next(),
-            TabJump::Prev => strip.prev(),
-            TabJump::Position(n) => strip.at_position(n as usize),
-            TabJump::Last => strip.last(),
+    pub(crate) fn sidebar_rows(&self) -> Vec<Row> {
+        let terminals: Vec<String> = self
+            .strip
+            .as_ref()
+            .map(|s| s.tabs.iter().map(|t| t.name.clone()).collect())
+            .unwrap_or_default();
+        sidebar::rows(&terminals, &self.chats.tab_names())
+    }
+
+    pub(crate) fn active_row(&self) -> Option<Row> {
+        match self.chats.active() {
+            Some(chat) => Some(Row::Chat(chat.to_string())),
+            None => self.active_name().map(|n| Row::Terminal(n.to_string())),
         }
-        .map(str::to_string);
-        if let Some(name) = target {
-            self.activate(&name, fx);
+    }
+
+    /// What a click on the row does.
+    pub(crate) fn select_row(&mut self, row: Row, now: Duration, fx: &mut Vec<Effect>) {
+        match row {
+            Row::Chat(name) => self.on_chat(ChatMsg::Select(name), now, fx),
+            Row::Terminal(name) => {
+                self.chat_leave(now, fx);
+                self.activate(&name, fx);
+            }
+        }
+    }
+
+    pub(crate) fn on_jump(&mut self, jump: TabJump, now: Duration, fx: &mut Vec<Effect>) {
+        if let Some(row) = sidebar::jump(&self.sidebar_rows(), self.active_row().as_ref(), jump) {
+            self.select_row(row, now, fx);
         }
     }
 
@@ -109,7 +128,7 @@ impl TerminalModel {
         }
     }
 
-    pub(crate) fn on_new_commit(&mut self, raw: &str, _now: Duration, fx: &mut Vec<Effect>) {
+    pub(crate) fn on_new_commit(&mut self, raw: &str, now: Duration, fx: &mut Vec<Effect>) {
         self.naming = None;
         let name = raw.trim();
         if name.is_empty() || self.strip.is_none() {
@@ -122,6 +141,7 @@ impl TerminalModel {
             ))));
             return;
         }
+        self.chat_leave(now, fx);
         if self.strip.as_ref().is_some_and(|s| s.tab(name).is_some()) {
             return self.activate(name, fx);
         }
@@ -174,6 +194,8 @@ mod tests {
     use super::super::tests::{has_attach, live, t};
     use super::*;
     use crate::terminal::testkit::session;
+    use tether_core::keymap::TetherCommand;
+    use tether_core::sidebar::Shown;
 
     #[test]
     fn refresh_runs_every_10s_only_while_focused() {
@@ -324,6 +346,113 @@ mod tests {
         assert_eq!(m.view().header.session, "b");
         m.handle(Msg::TabShortcut(TabJump::Last), t(5));
         assert_eq!(m.view().header.session, "c");
+    }
+
+    #[test]
+    fn ctrl_tab_walks_into_the_chats_and_back() {
+        let (mut m, _dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1), session("b", 2)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(Msg::SelectTab("b".into()), t(10));
+        m.handle(Msg::TabShortcut(TabJump::Next), t(11));
+        assert!(m.chat_active());
+        assert_eq!(m.chats.active(), Some("chat-c"));
+        m.handle(Msg::TabShortcut(TabJump::Next), t(12));
+        assert!(!m.chat_active());
+        assert_eq!(m.view().header.session, "a");
+        m.handle(Msg::TabShortcut(TabJump::Position(3)), t(13));
+        assert_eq!(m.chats.active(), Some("chat-c"));
+    }
+
+    fn sidebar_effects(fx: &[Effect]) -> (Option<Shown>, Option<bool>) {
+        let mut shown = None;
+        let mut saved = None;
+        for e in fx {
+            match e {
+                Effect::Ui(UiEffect::Sidebar(s)) => shown = Some(*s),
+                Effect::Ui(UiEffect::RememberSidebar { closed }) => saved = Some(*closed),
+                _ => {}
+            }
+        }
+        (shown, saved)
+    }
+
+    #[test]
+    fn narrowing_hides_without_saving_and_widening_restores() {
+        let mut m = live(vec![session("a", 1)]);
+        let fx = m.handle(Msg::WindowWidth(1200.0), t(10));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), None));
+        let fx = m.handle(Msg::WindowWidth(600.0), t(11));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+        let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(12));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Overlay), None));
+        let fx = m.handle(Msg::SidebarDismiss, t(13));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+        let fx = m.handle(Msg::WindowWidth(1200.0), t(14));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), None));
+    }
+
+    #[test]
+    fn the_toggle_closes_and_reopens_and_saves_when_wide() {
+        let mut m = live(vec![session("a", 1)]);
+        m.handle(Msg::WindowWidth(1200.0), t(10));
+        let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(11));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), Some(true)));
+        let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(12));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), Some(false)));
+    }
+
+    #[test]
+    fn naming_a_session_shows_a_hidden_sidebar_until_it_is_done() {
+        let mut m = live(vec![session("a", 1)]);
+        m.set_sidebar_closed(true);
+        m.handle(Msg::WindowWidth(1200.0), t(10));
+        let fx = m.handle(Msg::NewSessionBegin, t(11));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Overlay), None));
+        let fx = m.handle(Msg::NewSessionCancel, t(12));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+        m.handle(Msg::NewSessionBegin, t(13));
+        let fx = m.handle(Msg::NewSessionCommit("b".into()), t(14));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+    }
+
+    #[test]
+    fn dismissing_the_overlay_while_naming_cancels_the_name() {
+        let mut m = live(vec![session("a", 1)]);
+        m.set_sidebar_closed(true);
+        m.handle(Msg::WindowWidth(1200.0), t(10));
+        m.handle(Msg::NewSessionBegin, t(11));
+        m.handle(Msg::SidebarDismiss, t(12));
+        assert_eq!(m.view().naming, None);
+        m.handle(Msg::NewSessionBegin, t(13));
+        m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(14));
+        assert_eq!(m.view().naming, None);
+    }
+
+    #[test]
+    fn a_new_session_from_a_chat_brings_the_terminal_to_the_front() {
+        let (mut m, _dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(
+            Msg::Chat(super::super::chat::ChatMsg::Select("chat-c".into())),
+            t(10),
+        );
+        assert!(m.chat_active());
+        m.handle(Msg::NewSessionBegin, t(11));
+        m.handle(Msg::NewSessionCommit("b".into()), t(12));
+        assert!(!m.chat_active());
+        assert_eq!(m.view().header.session, "b");
+    }
+
+    #[test]
+    fn a_saved_closed_sidebar_starts_hidden() {
+        let mut m = live(vec![session("a", 1)]);
+        m.set_sidebar_closed(true);
+        let fx = m.handle(Msg::WindowWidth(1200.0), t(10));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
     }
 
     #[test]

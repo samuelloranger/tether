@@ -10,6 +10,7 @@ use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
 use tether_core::profiles::Machine;
 use tether_core::resize::{GridSize, ResizeDebouncer};
+use tether_core::sidebar::Row;
 use tether_core::tabs::TabStrip;
 use tether_core::throttle::{BellThrottle, ToastThrottle};
 use tether_core::zmx::ZmxSession;
@@ -29,6 +30,8 @@ mod pointer;
 mod reconnect;
 mod search;
 pub(crate) mod send;
+use send::is_attachable;
+mod sidebar;
 mod tabs;
 
 pub use agents::{AgentBadge, AgentView, QuestionView, SheetPhase};
@@ -46,13 +49,7 @@ pub enum Screen {
     Failed { sentence: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TabJump {
-    Next,
-    Prev,
-    Position(u8),
-    Last,
-}
+pub use tether_core::sidebar::TabJump;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FontStep {
@@ -175,6 +172,11 @@ pub enum Msg {
     },
     CopySelection,
     PasteClipboard,
+    /// A window shortcut read before the focused widget saw it.
+    Command(TetherCommand),
+    WindowWidth(f32),
+    /// Esc, or a pick, closes the sidebar shown over a narrow window.
+    SidebarDismiss,
     HistoryOpen,
     HistoryClose,
     HistoryCopy,
@@ -309,6 +311,10 @@ pub enum UiEffect {
     },
     /// The agent the last chat was started with.
     RememberChatAgent(String),
+    Sidebar(tether_core::sidebar::Shown),
+    RememberSidebar {
+        closed: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -412,6 +418,7 @@ pub struct TerminalModel {
     agents: agents::AgentsState,
     git: GitPanel,
     git_shown: GitView,
+    sidebar: sidebar::SidebarState,
     session_pids: HashMap<String, i64>,
     chats: chat::Chats,
 }
@@ -458,6 +465,7 @@ impl TerminalModel {
             agents: agents::AgentsState::default(),
             git: GitPanel::default(),
             git_shown: GitView::default(),
+            sidebar: sidebar::SidebarState::default(),
             session_pids: HashMap::new(),
             chats: chat::Chats::new(None, ""),
         };
@@ -499,14 +507,20 @@ impl TerminalModel {
                 self.chats_focus(f, now, &mut fx);
             }
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
-            Msg::SelectTab(name) => {
-                self.chat_leave(now, &mut fx);
-                self.activate(&name, &mut fx);
+            Msg::SelectTab(name) => self.select_row(Row::Terminal(name), now, &mut fx),
+            Msg::TabShortcut(jump) => self.on_jump(jump, now, &mut fx),
+            Msg::NewSessionBegin => {
+                self.on_new_begin();
+                self.sidebar_for_naming(self.naming.is_some(), &mut fx);
             }
-            Msg::TabShortcut(jump) => self.on_jump(jump, &mut fx),
-            Msg::NewSessionBegin => self.on_new_begin(),
-            Msg::NewSessionCommit(name) => self.on_new_commit(&name, now, &mut fx),
-            Msg::NewSessionCancel => self.naming = None,
+            Msg::NewSessionCommit(name) => {
+                self.on_new_commit(&name, now, &mut fx);
+                self.sidebar_for_naming(self.naming.is_some(), &mut fx);
+            }
+            Msg::NewSessionCancel => {
+                self.naming = None;
+                self.sidebar_for_naming(false, &mut fx);
+            }
             Msg::KillRequested(name) => self.kill_prompt = Some(name),
             Msg::KillConfirmed => self.on_kill_confirmed(&mut fx),
             Msg::KillCancelled => self.kill_prompt = None,
@@ -559,7 +573,12 @@ impl TerminalModel {
             }
             Msg::RedialDue { generation } => self.on_redial_due(generation, &mut fx),
             Msg::DroppedFiles(paths) | Msg::SendFiles(paths) if self.chat_active() => {
-                self.on_chat(chat::ChatMsg::AttachFiles(paths), now, &mut fx);
+                let (images, files): (Vec<_>, Vec<_>) =
+                    paths.into_iter().partition(|p| is_attachable(p));
+                if !images.is_empty() {
+                    self.on_chat(chat::ChatMsg::AttachFiles(images), now, &mut fx);
+                }
+                self.on_send_files(files, &mut fx);
             }
             Msg::DroppedFiles(paths) | Msg::SendFiles(paths) => self.on_send_files(paths, &mut fx),
             Msg::SendStarted { names } => self.on_send_started(names),
@@ -573,8 +592,12 @@ impl TerminalModel {
                     alt: false,
                     ctrl: true,
                 },
+                now,
                 &mut fx,
             ),
+            Msg::Command(cmd) => self.on_command(cmd, self.mods, now, &mut fx),
+            Msg::WindowWidth(width) => self.on_window_width(width, &mut fx),
+            Msg::SidebarDismiss => self.on_sidebar_dismiss(&mut fx),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
             Msg::SearchOpen => self.on_search_open(&mut fx),
             Msg::SearchQuery(q) => self.on_search_query(q, now, &mut fx),
@@ -982,6 +1005,52 @@ pub(crate) mod tests {
         }
         m
     }
+
+    /// `live` on `sessions`, with the host's `acp status` listing `chats` (one JSON line each).
+    pub fn live_with_chats(
+        sessions: Vec<ZmxSession>,
+        chats: &str,
+    ) -> (TerminalModel, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
+        m.set_chat_files(tether_core::acp::files::ChatFiles::new(
+            dir.path().to_path_buf(),
+            "devbox:22",
+        ));
+        let mut fx = m.handle(Msg::Opened, t(0));
+        fx.extend(m.handle(Msg::Tick, t(1)));
+        let tag = fx
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::Chat(chat::ChatJob::Exec { tag, .. }) if tag == chat::ExecTag::Status => {
+                    Some(tag)
+                }
+                _ => None,
+            })
+            .expect("a status read");
+        m.handle(
+            Msg::Chat(chat::ChatMsg::ExecDone {
+                tag,
+                result: Ok(chats.to_string()),
+            }),
+            t(2),
+        );
+        let fx = m.handle(
+            Msg::Ls {
+                id: 1,
+                result: Ok(sessions),
+            },
+            t(3),
+        );
+        for e in fx {
+            if let Effect::Attach { name, .. } = e {
+                m.handle(Msg::Attached { name }, t(4));
+            }
+        }
+        (m, dir)
+    }
+
+    pub const ONE_CHAT: &str = r#"{"name":"chat-c","state":"running","logBytes":10,"cwd":"/srv/api","created":100,"turn":"idle","title":"Fix login","multiClient":true}"#;
 
     #[test]
     fn a_tab_label_follows_osc_7_after_cd() {

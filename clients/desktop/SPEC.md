@@ -35,7 +35,7 @@ One window with the platform title bar, caption "Tether". Slint draws everything
 
 Window size persists everywhere. Position persists on Windows and X11; Wayland cannot set or read it, so only the size is restored (see Wayland). Minimum client size is 640 × 420.
 
-Opening a machine replaces Home with the terminal. Back returns to Home and drops the SSH connection and every tab's channel; the remote `zmx` sessions keep running. Closing the window does the same. Settings is the same page from a gear on Home and from a gear in the terminal header. iOS only puts the gear on the terminal. On the desktop, Home is where you are before any machine exists, and appearance applies there too.
+Opening a machine replaces Home with the terminal. Back returns to Home and drops the SSH connection and every tab's channel; the remote `zmx` sessions keep running. Closing the window does the same. Settings is the same page from a gear on Home and from Settings in the terminal's sidebar (the header's gear while the sidebar is closed). iOS only puts the gear on the terminal. On the desktop, Home is where you are before any machine exists, and appearance applies there too.
 
 Destructive confirms (remove a machine, delete a key, kill a session) are dialogs. Every other form is a page in the window, with Back. Esc is Back on every page except the terminal, where Esc belongs to the PTY.
 
@@ -200,16 +200,27 @@ Glyphs the chosen face lacks fall back to the bundled Symbols Nerd Font Mono (pr
 
 ## Terminal
 
-The header is a surface bar:
+The window is a sidebar on the left and, beside it, one header over the active terminal or chat. There is no tab strip and no top bar.
 
-- **Back**, to Home.
-- A lamp and a status word. The word is always present; the lamp is not the only signal.
-- The machine name, and under it the active session name, a midpoint, and the status word in the lamp color.
-- **Snippets** and **History** (see those sections).
-- **Send file…**
-- **Settings** (the gear).
+**Sidebar** (248 px, the surface colour, a hairline on its right edge), top to bottom:
 
-Under the header, a tab strip: one tab per `zmx` session on the host (see Sessions).
+- The host block: a lamp, the machine name, and under it the status word in the lamp colour. The word is always present; the lamp is not the only signal. On the right, the sidebar toggle.
+- **New chat** (Ctrl+Shift+N) and **New terminal** (Ctrl+Shift+T), each with its shortcut in faint text.
+- **TERMINALS**, with a `+` that starts a new session, then one row per `zmx` session (see Sessions), or "No terminals running".
+- **CHATS**, with a `+` that opens **New session**, **New chat…** and **Continue a chat…**, then one row per chat (see Chats), or "No chats on this host yet".
+- At the bottom, past a hairline: **Hosts** (back to Home) and **Settings**.
+
+Only the two sections scroll. The active row has the raised background and semibold text.
+
+**Closing it.** The sidebar toggle, or Ctrl+Shift+B, closes the sidebar and opens it again; the choice is kept in `preferences.json` (`sidebar_closed`). While it is closed, the header starts with the same toggle and the lamp, prefixes its subtitle with the machine name (`devbox · ~/sites/api`), and shows the Settings gear. A window too narrow to dock it (the content would be under 420 px) hides the sidebar without changing the saved choice; the toggle then shows it over the content, and a pick, a click outside or Esc closes it. Widening the window docks it again.
+
+**Header** (52 px, the same for a terminal and a chat):
+
+- The title and, under it, a subtitle. A terminal: the session name; the cwd in mono, then the agent line in its heat colour (see Agents). A chat: its title; its folder in mono (a click copies it), then the agent's name when it is not Claude.
+- A chat's status line and phase (see Chats).
+- A terminal's **Find**, **Snippets** and **History** (see those sections); a chat's **Attach images**.
+- **Send file…** and **Git**, on both.
+- Under it, a hairline; a chat's context in use draws a 3 px accent rule there instead.
 
 The lamp follows the iOS connection lamp, not the agent heat ramp. Agent state is out of scope, and `waiting` red must not mean two things.
 
@@ -285,15 +296,15 @@ Ctrl and Alt on everything else follow iOS `TerminalKeyMap`: Ctrl folds `@`–`_
 
 **Kept by the system.** Windows: Alt+Tab, Alt+F4 (closes the window, same as the close button), the Windows key and its combos, Ctrl+Alt+Del, Print Screen. Linux: a key pressed with Super held is never typed, because the desktop owns those shortcuts (the compositor takes the rest, such as Alt+Tab, before the app sees it).
 
-**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (tabs); Ctrl+Shift+F (find); Ctrl+Shift+P (snippets); Ctrl+Shift+H (history); Ctrl+click (open link). Ctrl+P and Ctrl+H still reach the PTY; only the Shift forms are taken. Everything else goes to the PTY, including Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc.
+**Kept by Tether:** Ctrl+V, Ctrl+Shift+V, Shift+Insert (paste); Ctrl+Shift+C, and Ctrl+C with a selection (copy); Ctrl+=, Ctrl+-, Ctrl+0 (font size); Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+1…9, Ctrl+Shift+T (switching and new terminal); Ctrl+Shift+N (new chat); Ctrl+Shift+B (sidebar); Ctrl+Shift+F (find); Ctrl+Shift+P (snippets); Ctrl+Shift+H (history); Ctrl+click (open link). Ctrl+P and Ctrl+H still reach the PTY; only the Shift forms are taken. Everything else goes to the PTY, including Ctrl+B (tmux's prefix), Ctrl+W, Ctrl+T, Ctrl+PageUp/PageDown, Ctrl+Alt+digits (AltGr symbols), and Esc. The switching keys, Ctrl+Shift+T, Ctrl+Shift+N and Ctrl+Shift+B also work while a chat's composer has the keyboard; nothing else is taken from it.
 
 Key repeat sends repeats. Dead keys and IME go through text composition, never through this table. The kitty keyboard protocol and `modifyOtherKeys` are not advertised in v1.
 
 ### Sessions
 
-Tether is the client for `zmx`, so its sessions are the window's tabs. iOS shows them in a drawer and moves one PTY between them; a desktop has the room to keep them all in view.
+Tether is the client for `zmx`, so its sessions are the sidebar's Terminals section. iOS shows them in a drawer and moves one PTY between them; a desktop has the room to keep them all in view. A session is still called a tab below: it is the row and the channel behind it.
 
-**The strip.** One tab per session in `zmx ls`, ordered by `created`, oldest left. A tab shows the session name and, when its directory is known, the last path component of its cwd in mono. A `+` at the end adds a session. The strip scrolls sideways when it overflows; it never wraps.
+**The rows.** One row per session in `zmx ls`, ordered by `created`, oldest first. A row shows a terminal glyph, the session name and, when its directory is known and is not `~`, the last path component of its cwd in faint text. Hovering shows a close mark (Kill session). A background session's progress is a 2 px bar under its row.
 
 The list is refreshed on the control connection when the machine opens, after every create or kill, every 10 s while the window is focused, and on focus. A session that appears on the host (created from the phone or a shell) gets a tab at its place. A session that disappears loses its tab, and its channel closes; when it was the active tab, the neighbor to the left becomes active, else the right one, else the empty state.
 
@@ -303,13 +314,13 @@ Typing the detach key and a second attach into one PTY, as iOS does, is not used
 
 All attached channels are resized together when the window size settles.
 
-**Choosing the first tab.** On open, the iOS rule picks the active tab: `default` if it exists, else the newest by `created`. With no sessions, the strip is just `+` and the well shows the iOS empty state: "No session on devbox", "Nothing runs until you start one.", and **New session**. Keystrokes do not reach a bare shell.
+**Choosing the first tab.** On open, the iOS rule picks the active tab: `default` if it exists, else the newest by `created`. With no sessions, the section reads "No terminals running" and the well shows the iOS empty state: "No session on devbox", "Nothing runs until you start one.", and **New session**. Keystrokes do not reach a bare shell.
 
-**New session.** `+`, Ctrl+Shift+T, or New session adds a tab with an inline name field, prefilled with the iOS rule: `default` on an empty host, else the first free `session-N`, counting from the number of sessions plus one. Enter attaches it, which makes `zmx` create it. Esc cancels. A name already in use selects that tab instead.
+**New session.** The section's `+`, New terminal, Ctrl+Shift+T, or New session adds a row with an inline name field, prefilled with the iOS rule: `default` on an empty host, else the first free `session-N`, counting from the number of sessions plus one. Enter attaches it, which makes `zmx` create it. Esc cancels. A name already in use selects that tab instead.
 
-**Switching.** Click a tab, Ctrl+Tab and Ctrl+Shift+Tab (next, previous, wrapping), Ctrl+Shift+1…8 (that position), Ctrl+Shift+9 (the last tab). Middle-click does nothing: closing a tab would only detach, and the tab would come back on the next refresh.
+**Switching.** Click a row, Ctrl+Tab and Ctrl+Shift+Tab (next, previous, wrapping), Ctrl+Shift+1…8 (that position), Ctrl+Shift+9 (the last row). The keys walk the whole sidebar: the terminals, then the chats. Middle-click does nothing: closing a row would only detach, and the row would come back on the next refresh.
 
-**Kill.** Right-click a tab: **Kill session**. Confirm:
+**Kill.** Right-click a row, or its close mark: **Kill session**. Confirm:
 
 > Kill session build?
 >
@@ -373,7 +384,7 @@ The host's `tether` knows each zmx session's agent: `working`, `waiting` or `don
 - A **permission** shows the agent's message with **Approve** (Return), **Deny** (Esc) and a one-line reply (typed, then submitted), through `answer --input <base64>` and `--submit`. A reply is one line, at most 2000 characters.
 - Every argument is shell-quoted; typed text only ever travels as base64.
 
-Not now closes the sheet and leaves a bar under the tab strip ("The agent is asking a question" with Answer). Opening a tab again surfaces its held prompt even if it was closed. A prompt answered from another client, or replaced by a newer one, updates or closes the sheet on the next read. A refused answer (exit 3, "the agent has moved on") keeps the sheet open and says so. Keys do not reach the terminal while the sheet is up.
+Not now closes the sheet and leaves a bar under the header ("The agent is asking a question" with Answer). Opening a tab again surfaces its held prompt even if it was closed. A prompt answered from another client, or replaced by a newer one, updates or closes the sheet on the next read. A refused answer (exit 3, "the agent has moved on") keeps the sheet open and says so. Keys do not reach the terminal while the sheet is up.
 
 A held prompt on a tab that is not active shows only its `needs you` pill and the toast; it opens when that tab does.
 
@@ -390,7 +401,7 @@ Opening a card:
 3. Nothing pinned for this host and port: pin it and continue. Pinning happens before auth, as on iOS.
 4. Pinned and different: stop. Do not offer a way to replace the pin.
 5. Authenticate with the machine's key, the agent, or its password. The secret is loaded for the attempt and not kept in the profile JSON or in memory afterwards. Agent auth offers the agent's identities in the agent's order. On Windows it connects to `\\.\pipe\openssh-ssh-agent`, and when that pipe does not exist it tries Pageant instead. On Linux it connects to the socket named by `SSH_AUTH_SOCK`, read once at launch, and has no second agent to try. The private key never leaves the agent. Agent forwarding is never requested. Keepalive is set after auth, every 15 s; set before the handshake it breaks strict KEX on modern OpenSSH.
-6. Run `~/.local/bin/zmx ls` on a control connection (see below) to build the tab strip and choose the first tab (see Sessions). The binary path is `~/.local/bin/zmx`, same as iOS.
+6. Run `~/.local/bin/zmx ls` on a control connection (see below) to build the Terminals section and choose the first session (see Sessions). The binary path is `~/.local/bin/zmx`, same as iOS.
 7. For the chosen tab, open a PTY channel sized to the grid on the terminal connection, start the login shell, and push the current size.
 8. Type `~/.local/bin/zmx attach '<name>'` plus newline into that shell, name shell-quoted. Tether attaches by typing into the login shell, not by exec, exactly as iOS does, so the user lands in their shell if they detach.
 
@@ -442,7 +453,9 @@ Same chrome. One sentence, then **Retry** and **Back to Home**.
 
 The iOS ACP chat, on the desktop: a conversation with an agent on the host (Claude Code through the pinned `claude-agent-acp` adapter, Codex through `codex-acp`, opencode, or GitHub Copilot through `copilot --acp`; `tether-core::acp::agent` holds the profiles), kept alive by the host's `tether acp` holder across disconnects. The protocol client, transcript reducer, journal, resume snapshots, host commands and composer rules are `tether-core::acp`, ported from `TetherKit/ACP` and `Chat/` with their test cases; the session model is `tether-app/src/terminal/model/chat`.
 
-**Where.** Chats are tabs after the session tabs, past a hairline: a chat glyph, the title (the host's title, else the agent's last title stored here, else the folder name) and its state in words (`working` in the session heat amber, `needs you` in coral, then `idle`, `running` or `ended` in faint text). Selecting one swaps the grid for the chat; selecting a session tab brings the grid back. The header then reads `chat` and hides Find, Snippets, History, Git and Send file; an image button attaches pictures instead. The `+` at the end of the strip opens **New session**, **New chat…** and **Continue a chat…**. A machine card on Home has a **Chat** capsule (and a Chat item in its menu) that opens the machine with the New chat dialog up.
+**Where.** Chats are the sidebar's Chats section: the agent's mark, the title (the host's title, else the agent's last title stored here, else the folder name) and its state in words (`working` in the session heat amber, `needs you` in coral, then `idle`, `running` or `ended` in faint text). Hovering shows a close mark (Delete chat). Selecting one swaps the grid for the chat; selecting a terminal brings the grid back. The header is the same one a terminal has: Find, Snippets and History give way to an image button that attaches pictures, and **Git** and **Send file…** stay. The section's `+` opens **New session**, **New chat…** and **Continue a chat…**.
+
+**Git and files in a chat.** Git opens the side panel on the chat's folder (the folder `acp status` reports, which is absolute), beside the conversation; switching between chats and terminals reloads it for that one. Send file, or a drop on the chat, splits the files: images attach to the message as before, and any other file is sent to `~/.tether/uploads` on the host (never into the chat's folder, which is usually a repository) and its absolute path goes into that chat's draft at the caret, followed by a space, even when another tab is in front by the time it lands. A machine card on Home has a **Chat** capsule (and a Chat item in its menu) that opens the machine with the New chat dialog up.
 
 **Listing.** `tether acp status` on the control connection, first on the tick after a connect, then every 5 s while the host has chats (10 s otherwise). A host whose tether predates `status` falls back to `acp ls`. A failed read changes nothing. A chat that starts waiting while it is not the focused, active tab raises the usual notification (5 s per-chat throttle, same click: window forward, that chat selected); the first read after a connect is a baseline and never toasts.
 
@@ -468,7 +481,7 @@ The iOS ACP chat, on the desktop: a conversation with an agent on the host (Clau
 
 A tab attached late shows only what arrives after the attach: `zmx` runs the program on an alternate screen, so the local scrollback never holds the session's earlier output. iOS reads it with `zmx history` into a read-only, selectable text view. The desktop does the same, and for the same reason it does not try to prefill the live grid: replaying a transcript into the terminal would put text where the program's own screen is about to be redrawn, and the two would interleave.
 
-**History** (header button, or Ctrl+Shift+H) opens a read-only page over the terminal area, tab strip included, so the session it shows cannot change underneath it. The title names the session. The text is monospaced in the terminal theme's foreground on its background, wraps, opens scrolled to the newest line, and is selectable with the mouse; Ctrl+C copies a selection. **Copy all** puts the whole text on the clipboard. **Reload** asks again. **Done** or Esc closes it. Keys do not reach the PTY while it is open.
+**History** (header button, or Ctrl+Shift+H) opens a read-only page over the whole window, sidebar included, so the session it shows cannot change underneath it. The title names the session. The text is monospaced in the terminal theme's foreground on its background, wraps, opens scrolled to the newest line, and is selectable with the mouse; Ctrl+C copies a selection. **Copy all** puts the whole text on the clipboard. **Reload** asks again. **Done** or Esc closes it. Keys do not reach the PTY while it is open.
 
 The command is `~/.local/bin/zmx history '<session>'` (the iOS binary path, no flags), run with `exec` on the control connection, so a slow answer never holds up PTY output. The session name goes through `valid_session_name` and `shell_quote`; an invalid name runs nothing. Only the newest answer is used: a reply for an older request is dropped.
 
@@ -554,7 +567,7 @@ While a send is in flight the header stays, and a capsule at the bottom of the g
 
 ## Repository and documents
 
-A **Git** button in the terminal header opens a side panel next to the grid (the grid resizes to what is left; the panel is at most 440 px or half the window). It follows the active tab: switching tabs reloads it for that session. There is no iOS sheet here because a desktop window has the room, and the terminal stays usable beside it.
+A **Git** button in the header opens a side panel next to the grid or the chat (which resize to what is left; the panel is at most 440 px or half the space beside the sidebar). It follows the active terminal or chat: switching reloads it for that one, and a chat's panel reads the chat's folder (see Chats). There is no iOS sheet here because a desktop window has the room, and the terminal stays usable beside it.
 
 The directory is the session shell's live cwd, `readlink /proc/<pid>/cwd` on the control connection, with the OSC 7 report and then the `zmx ls` cwd as fallbacks (the iOS order, plus OSC 7). Nothing else is read from the host than what these commands print; there is no server component.
 
@@ -696,7 +709,8 @@ The window is a native Wayland client on GNOME and KDE (winit's Wayland backend 
 - Clipboard paste: text pastes text; image-only becomes `paste-<ts>.png`; `CF_HDROP` becomes a drop; text wins over an image; Ctrl+V and Ctrl+Shift+V behave the same; Ctrl+C copies with a selection and sends `0x03` without one; Ctrl+Q sends `0x11`.
 - Host key: first seen is pinned before auth, match continues, mismatch is the refused error, does not write, and is never retried.
 - Session choice: `default` wins, else newest by `created`, else none; `zmx ls` failure opens `default`.
-- Tabs: strip order by `created`; refresh adds and removes tabs and picks the neighbor when the active one vanishes; new-session name (`default`, then first free `session-N`); an existing name selects its tab; kill switches away first and leaves the empty state on the last one; the 11th attach detaches the least recently viewed; tab shortcuts wrap and Ctrl+Shift+9 is the last tab.
+- Sidebar: terminal rows by `created`; refresh adds and removes rows and picks the neighbor when the active one vanishes; new-session name (`default`, then first free `session-N`); an existing name selects its row; kill switches away first and leaves the empty state on the last one; the 11th attach detaches the least recently viewed; the switching keys walk terminals then chats, wrap, and Ctrl+Shift+9 is the last row; the window shortcuts are read from a chat's composer and only those; the sidebar is docked, hidden or shown over the content from the saved choice and the window width, and an automatic hide is never saved.
+- Chats: git targets the active chat's folder and follows the active row; a chat's send splits images from other files, and a path lands in the chat that started the send, at its caret.
 - Attach command: name is shell-quoted; nothing is typed on an empty host; each tab gets its own channel and grid; reconnect re-attaches every attached tab, active first.
 - Lock: detach after the 15 s grace, not before; unlock re-attaches; minimize does nothing.
 - Links: OSC 8 wins over detected text; a URL wrapped across rows and one cut by `│ ┃ ⎿` resolve to the whole URL; only `http`, `https`, `mailto` open; Ctrl+click is never reported to the program.

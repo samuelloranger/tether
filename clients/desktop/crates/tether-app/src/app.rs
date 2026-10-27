@@ -163,6 +163,9 @@ impl App {
             if matches!(app.router.current(), Page::ServerForm { .. }) {
                 app.forget_form_secrets();
             }
+            if app.router.current() == Page::Terminal && crate::terminal::glue::dismiss_sidebar() {
+                return true;
+            }
             if app.router.current() == Page::Terminal
                 && crate::terminal::chatview::close_add_menu(&app.ui)
             {

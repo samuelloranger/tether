@@ -1,3 +1,4 @@
+use super::chat::ChatMsg;
 use super::send::SendSource;
 use super::*;
 use crate::terminal::geometry::{TermStyle, layout};
@@ -39,12 +40,18 @@ impl TerminalModel {
                 fx.push(Effect::Ui(UiEffect::AllowIme));
                 fx.push(Effect::Redraw);
             }
-            KeyAction::Tether(cmd) => self.on_command(cmd, mods, fx),
+            KeyAction::Tether(cmd) => self.on_command(cmd, mods, now, fx),
             KeyAction::Ignore => {}
         }
     }
 
-    pub(crate) fn on_command(&mut self, cmd: TetherCommand, mods: Mods, fx: &mut Vec<Effect>) {
+    pub(crate) fn on_command(
+        &mut self,
+        cmd: TetherCommand,
+        mods: Mods,
+        now: Duration,
+        fx: &mut Vec<Effect>,
+    ) {
         let active = self.active_name().map(str::to_string);
         match cmd {
             TetherCommand::Paste => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
@@ -65,11 +72,16 @@ impl TerminalModel {
                 fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Smaller)))
             }
             TetherCommand::FontReset => fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Reset))),
-            TetherCommand::NextTab => self.on_jump(TabJump::Next, fx),
-            TetherCommand::PrevTab => self.on_jump(TabJump::Prev, fx),
-            TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), fx),
-            TetherCommand::LastTab => self.on_jump(TabJump::Last, fx),
-            TetherCommand::NewTab => self.on_new_begin(),
+            TetherCommand::NextTab => self.on_jump(TabJump::Next, now, fx),
+            TetherCommand::PrevTab => self.on_jump(TabJump::Prev, now, fx),
+            TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), now, fx),
+            TetherCommand::LastTab => self.on_jump(TabJump::Last, now, fx),
+            TetherCommand::NewTab => {
+                self.on_new_begin();
+                self.sidebar_for_naming(self.naming.is_some(), fx);
+            }
+            TetherCommand::NewChat => self.on_chat(ChatMsg::NewChat(0), now, fx),
+            TetherCommand::ToggleSidebar => self.toggle_sidebar(fx),
             TetherCommand::Find => self.on_search_open(fx),
             TetherCommand::Snippets => self.on_palette_open(),
             TetherCommand::History => self.on_history_open(fx),
@@ -317,6 +329,24 @@ mod resize_tests {
 mod key_tests {
     use super::super::tests::{live, t};
     use super::*;
+
+    fn new_chat_shown(fx: &[Effect]) -> bool {
+        fx.iter()
+            .any(|e| matches!(e, Effect::Ui(UiEffect::Chat(screen)) if screen.new_chat.is_some()))
+    }
+
+    #[test]
+    fn new_chat_shortcut_opens_the_new_chat_sheet() {
+        let mut m = live(vec![crate::terminal::testkit::session("a", 1)]);
+        let fx = m.handle(Msg::Command(TetherCommand::NewChat), t(10));
+        assert!(new_chat_shown(&fx));
+        let mut menu = live(vec![crate::terminal::testkit::session("a", 1)]);
+        let fx = menu.handle(Msg::Chat(super::super::chat::ChatMsg::NewChat(0)), t(10));
+        assert!(
+            new_chat_shown(&fx),
+            "the + menu's New chat shows the same sheet"
+        );
+    }
     use crate::terminal::testkit::session;
     use tether_core::keymap::{KeyInput, Mods, NamedKey};
     use tether_term::{Cell, SelectKind};

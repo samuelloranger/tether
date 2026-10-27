@@ -174,6 +174,11 @@ pub enum ChatMsg {
     Send,
     Stop,
     AttachFiles(Vec<PathBuf>),
+    /// Text for a chat's draft at its caret, such as a sent file's path; that chat need not be in front.
+    InsertText {
+        name: String,
+        text: String,
+    },
     AttachBytes(Vec<u8>),
     RemoveAttachment(String),
     DismissAttachError,
@@ -413,11 +418,26 @@ impl Chats {
         self.active.as_deref()
     }
 
+    #[cfg(test)]
+    pub(crate) fn draft_of(&self, name: &str) -> Option<(String, usize)> {
+        self.sessions.get(name).map(|s| (s.draft.clone(), s.cursor))
+    }
+
+    /// The active chat's folder, when the host reported an absolute one.
+    pub fn active_cwd(&self) -> Option<&str> {
+        let active = self.active.as_deref()?;
+        self.ordered()
+            .into_iter()
+            .find(|c| c.name == active)
+            .map(|c| c.cwd.as_str())
+            .filter(|cwd| cwd.starts_with('/'))
+    }
+
     pub fn is_chat(&self, name: &str) -> bool {
         self.tab_names().iter().any(|n| n == name)
     }
 
-    fn tab_names(&self) -> Vec<String> {
+    pub fn tab_names(&self) -> Vec<String> {
         self.ordered().into_iter().map(|c| c.name.clone()).collect()
     }
 
@@ -956,6 +976,14 @@ impl Chats {
                             s.attach(ImageSource::File(p), ctx);
                         }
                     });
+                }
+            }
+            ChatMsg::InsertText { name, text } => {
+                let inserted = self
+                    .with_session(&name, now, out, |s, _| s.insert_text(&text))
+                    .unwrap_or(false);
+                if inserted && self.active.as_deref() == Some(name.as_str()) {
+                    self.draft_seq += 1;
                 }
             }
             ChatMsg::AttachBytes(bytes) => {

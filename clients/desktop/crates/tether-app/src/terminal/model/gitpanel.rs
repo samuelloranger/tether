@@ -5,6 +5,12 @@ impl TerminalModel {
     /// Where the active session's shell is, as far as this window knows. The exec side prefers
     /// the live `/proc` answer; these are what it falls back to.
     fn git_target(&self) -> Option<GitTarget> {
+        if self.chat_active() {
+            return self.chats.active_cwd().map(|cwd| GitTarget {
+                pid: 0,
+                fallback: Some(cwd.to_string()),
+            });
+        }
         let name = self.active_name()?;
         let fallback = self
             .tabs
@@ -22,7 +28,11 @@ impl TerminalModel {
     }
 
     pub(crate) fn on_git(&mut self, msg: GitMsg, now: Duration, fx: &mut Vec<Effect>) {
-        let session = self.active_name().map(str::to_string);
+        // A chat and a session may share a name; the panel must still see a new target.
+        let session = match self.chats.active() {
+            Some(chat) => Some(format!("chat:{chat}")),
+            None => self.active_name().map(str::to_string),
+        };
         let target = self.git_target();
         let out = self
             .git
@@ -76,6 +86,80 @@ mod tests {
             Effect::Ui(UiEffect::Git(v)) => Some((**v).clone()),
             _ => None,
         })
+    }
+
+    fn git_targets(fx: &[Effect]) -> Vec<GitTarget> {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::Git {
+                    target,
+                    job: GitJob::Workspace { .. },
+                } => Some(target.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Lets the chats re-read the host's listing, which now says `listing`.
+    fn relist(m: &mut TerminalModel, listing: &str, at: u64) {
+        let fx = m.handle(Msg::Tick, t(at));
+        let tag = fx
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::Chat(super::super::chat::ChatJob::Exec { tag, .. })
+                    if tag == super::super::chat::ExecTag::Status =>
+                {
+                    Some(tag)
+                }
+                _ => None,
+            })
+            .expect("a status read");
+        m.handle(
+            Msg::Chat(super::super::chat::ChatMsg::ExecDone {
+                tag,
+                result: Ok(listing.to_string()),
+            }),
+            t(at + 1),
+        );
+    }
+
+    #[test]
+    fn a_chat_points_git_at_its_folder() {
+        let (mut m, _dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(
+            Msg::Chat(super::super::chat::ChatMsg::Select("chat-c".into())),
+            t(10),
+        );
+        let fx = m.handle(Msg::Git(GitMsg::Toggle), t(11));
+        assert_eq!(
+            git_targets(&fx),
+            [GitTarget {
+                pid: 0,
+                fallback: Some("/srv/api".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn git_follows_the_active_item_when_a_chat_goes_away() {
+        let (mut m, _dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(
+            Msg::Chat(super::super::chat::ChatMsg::Select("chat-c".into())),
+            t(10),
+        );
+        m.handle(Msg::Git(GitMsg::Toggle), t(11));
+        relist(&mut m, "", 60_000);
+        assert!(!m.chat_active());
+        let fx = m.handle(Msg::Tick, t(120_000));
+        let targets = git_targets(&fx);
+        assert_eq!(targets.len(), 1, "{fx:?}");
+        assert_eq!(targets[0].pid, 1);
     }
 
     #[test]

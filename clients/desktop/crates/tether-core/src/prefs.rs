@@ -128,6 +128,8 @@ pub struct Preferences {
     pub chat_agent: String,
     /// The options each agent offered in its last session, per host.
     pub chat_options: OptionsCache,
+    /// The window's sidebar was closed with its toggle; open by default.
+    pub sidebar_closed: bool,
 }
 
 /// What is read from disk: `Preferences` plus the `theme_mode` field it no longer has.
@@ -210,6 +212,19 @@ mod tests {
         assert_eq!(old.chat_defaults, ChatDefaults::default());
         assert_eq!(old.chat_agent, "");
         assert_eq!(old.chat_options, OptionsCache::default());
+    }
+
+    #[test]
+    fn a_file_without_the_sidebar_reads_as_open() {
+        let p: Preferences = serde_json::from_str("{}").unwrap();
+        assert!(!p.sidebar_closed);
+        let closed = Preferences {
+            sidebar_closed: true,
+            ..Preferences::default()
+        };
+        let back: Preferences =
+            serde_json::from_str(&serde_json::to_string(&closed).unwrap()).unwrap();
+        assert!(back.sidebar_closed);
     }
 
     #[test]
@@ -361,6 +376,7 @@ mod tests {
             chat_defaults: ChatDefaults::default(),
             chat_agent: String::new(),
             chat_options: OptionsCache::default(),
+            sidebar_closed: false,
         };
         p.save(&data).unwrap();
         assert_eq!(Preferences::load(&data, false).unwrap(), p);
@@ -453,6 +469,7 @@ mod tests {
             chat_defaults: ChatDefaults::default(),
             chat_agent: String::new(),
             chat_options: OptionsCache::default(),
+            sidebar_closed: false,
         };
         assert_eq!(p, expected);
         assert_eq!(

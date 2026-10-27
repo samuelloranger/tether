@@ -26,6 +26,7 @@ thread_local! {
     static APP: RefCell<Weak<App>> = const { RefCell::new(Weak::new()) };
     static PLATFORM: RefCell<Option<Arc<dyn Platform>>> = const { RefCell::new(None) };
     static WIRED: Cell<bool> = const { Cell::new(false) };
+    static SIDEBAR_OVER: Cell<bool> = const { Cell::new(false) };
     static MODS: Cell<tether_core::keymap::Mods> = Cell::new(tether_core::keymap::Mods::default());
     #[cfg(target_os = "linux")]
     static SUPER: Cell<bool> = const { Cell::new(false) };
@@ -142,6 +143,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     ));
     model.set_chat_defaults(chat_defaults);
     model.set_chat_options(chat_options, &chat_scope, &chat_agent);
+    model.set_sidebar_closed(app.state.borrow().prefs.sidebar_closed);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
@@ -149,6 +151,8 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
     #[cfg(target_os = "linux")]
     crate::platform::linux::network::watch(network_target.0, network_target.1);
     CURRENT.with(|c| *c.borrow_mut() = Some(sink));
+    SIDEBAR_OVER.set(false);
+    send_window_width(app);
     dev_chat();
     crate::extras::send_snippets();
     if !WIRED.replace(true) {
@@ -214,6 +218,12 @@ fn wire_callbacks(ui: &AppWindow) {
     vm.on_select_tab(|n| send(Msg::SelectTab(n.into())));
     vm.on_kill_tab(|n| send(Msg::KillRequested(n.into())));
     vm.on_new_session(|| send(Msg::NewSessionBegin));
+    vm.on_toggle_sidebar(|| {
+        send(Msg::Command(
+            tether_core::keymap::TetherCommand::ToggleSidebar,
+        ))
+    });
+    vm.on_sidebar_dismiss(|| send(Msg::SidebarDismiss));
     vm.on_commit_name(|n| send(Msg::NewSessionCommit(n.into())));
     vm.on_cancel_name(|| send(Msg::NewSessionCancel));
     vm.on_find(|| send(Msg::SearchOpen));
@@ -371,18 +381,51 @@ fn wire_callbacks(ui: &AppWindow) {
 
 /// Keys go to the PTY only on the terminal page, with no name field, dialog, or menu open.
 fn keys_to_pty(app: &App) -> bool {
+    key_gate(app).pty()
+}
+
+fn window_keys(app: &App) -> bool {
+    key_gate(app).window()
+}
+
+fn key_gate(app: &App) -> KeyGate {
+    KeyGate {
+        page: page_takes_keys(app),
+        chat_dialog: crate::terminal::chatview::dialog_open(&app.ui),
+        composer: app.ui.global::<crate::ChatVm>().get_active(),
+        search: app.ui.global::<TerminalVm>().get_search_focused(),
+        sidebar_over: SIDEBAR_OVER.get(),
+    }
+}
+
+/// The terminal page with nothing of its own modal over it.
+fn page_takes_keys(app: &App) -> bool {
     let vm = app.ui.global::<TerminalVm>();
     current().is_some()
         && app.router.current() == Page::Terminal
         && !vm.get_naming()
-        && !vm.get_search_focused()
         && vm.get_kill_name().is_empty()
         && vm.get_menu_tab().is_empty()
         && vm.get_menu_link().is_empty()
         && !crate::extras::overlay_open(&app.ui)
         && !app.ui.global::<AgentVm>().get_open()
         && !app.ui.global::<crate::GitVm>().get_modal()
-        && !crate::terminal::chatview::takes_keys(&app.ui)
+}
+
+fn send_window_width(app: &App) {
+    let window = app.ui.window();
+    send(Msg::WindowWidth(
+        window.size().to_logical(window.scale_factor()).width,
+    ));
+}
+
+/// Esc closes the sidebar shown over a narrow window before anything else.
+pub fn dismiss_sidebar() -> bool {
+    if !SIDEBAR_OVER.get() {
+        return false;
+    }
+    send(Msg::SidebarDismiss);
+    true
 }
 
 /// Slint learns modifiers from key events, and the terminal consumes those before Slint sees
@@ -400,6 +443,27 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
             SUPER.set(m.state().super_key());
             send(Msg::Modifiers(mods));
             EventResult::Propagate
+        }
+        WindowEvent::KeyboardInput { event, .. }
+            if !keys_to_pty(app) && window_keys(app) && event.state == ElementState::Pressed =>
+        {
+            let shortcut = crate::terminal::keys::translate(
+                &event.logical_key,
+                &event.key_without_modifiers(),
+                event.text_with_all_modifiers(),
+                event.physical_key,
+                event.location,
+                MODS.get(),
+                crate::terminal::keys::app_keypad(),
+            )
+            .and_then(|input| tether_core::keymap::window_shortcut(&input, MODS.get()));
+            match shortcut {
+                Some(cmd) => {
+                    send(Msg::Command(cmd));
+                    EventResult::PreventDefault
+                }
+                None => EventResult::Propagate,
+            }
         }
         WindowEvent::KeyboardInput { event, .. } if keys_to_pty(app) => {
             // Super combos belong to the desktop; one that still reaches the window must not type its letter.
@@ -470,6 +534,13 @@ pub fn on_winit_event(app: &Rc<App>, event: &WindowEvent) -> EventResult {
         }
         WindowEvent::ScaleFactorChanged { .. } => {
             remeasure_well(&app.ui);
+            send_window_width(app);
+            EventResult::Propagate
+        }
+        // Slint takes the new size after this event, so the event's own size is the one to read.
+        WindowEvent::Resized(size) => {
+            let scale = app.ui.window().scale_factor();
+            send(Msg::WindowWidth(size.width as f32 / scale));
             EventResult::Propagate
         }
         _ => EventResult::Propagate,
@@ -562,6 +633,22 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
                 s.save_prefs();
             }
         }
+        UiEffect::RememberSidebar { closed } => {
+            let mut s = app.state.borrow_mut();
+            if s.prefs.sidebar_closed != closed {
+                s.prefs.sidebar_closed = closed;
+                s.save_prefs();
+            }
+        }
+        UiEffect::Sidebar(shown) => {
+            use tether_core::sidebar::Shown;
+            SIDEBAR_OVER.set(shown == Shown::Overlay);
+            vm.set_sidebar(match shown {
+                Shown::Docked => 0,
+                Shown::Hidden => 1,
+                Shown::Overlay => 2,
+            });
+        }
         UiEffect::RememberChatAgent(agent) => {
             let mut s = app.state.borrow_mut();
             if s.prefs.chat_agent != agent {
@@ -602,4 +689,88 @@ fn set_well_color(ui: &AppWindow, rgb: u32) {
             (rgb >> 8) as u8,
             rgb as u8,
         ));
+}
+
+/// Where a key goes on the terminal page: the window shortcuts, the PTY, or neither.
+#[derive(Debug, Default, Clone, Copy)]
+struct KeyGate {
+    /// The terminal page with nothing modal of its own over it.
+    page: bool,
+    chat_dialog: bool,
+    composer: bool,
+    search: bool,
+    sidebar_over: bool,
+}
+
+impl KeyGate {
+    fn window(self) -> bool {
+        self.page && !self.chat_dialog
+    }
+
+    fn pty(self) -> bool {
+        self.window() && !self.composer && !self.search && !self.sidebar_over
+    }
+}
+
+#[cfg(test)]
+mod key_gate_tests {
+    use super::KeyGate;
+
+    const OPEN: KeyGate = KeyGate {
+        page: true,
+        chat_dialog: false,
+        composer: false,
+        search: false,
+        sidebar_over: false,
+    };
+
+    #[test]
+    fn a_bare_terminal_takes_keys_and_the_window_shortcuts() {
+        assert!(OPEN.pty() && OPEN.window());
+    }
+
+    #[test]
+    fn a_chat_composer_or_the_find_field_keeps_keys_from_the_pty_and_the_shortcuts_still_work() {
+        for gate in [
+            KeyGate {
+                composer: true,
+                ..OPEN
+            },
+            KeyGate {
+                search: true,
+                ..OPEN
+            },
+        ] {
+            assert!(!gate.pty());
+            assert!(gate.window());
+        }
+    }
+
+    #[test]
+    fn a_chat_dialog_takes_everything() {
+        let gate = KeyGate {
+            chat_dialog: true,
+            ..OPEN
+        };
+        assert!(!gate.pty() && !gate.window());
+    }
+
+    #[test]
+    fn the_sidebar_over_the_content_keeps_keys_from_the_shell() {
+        let gate = KeyGate {
+            sidebar_over: true,
+            ..OPEN
+        };
+        assert!(!gate.pty());
+        assert!(gate.window(), "Ctrl+Shift+B still closes it");
+    }
+
+    #[test]
+    fn off_the_page_nothing_is_routed() {
+        let gate = KeyGate {
+            page: false,
+            ..OPEN
+        };
+        assert!(!gate.pty() && !gate.window());
+    }
 }

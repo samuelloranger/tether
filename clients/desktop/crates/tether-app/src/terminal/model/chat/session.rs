@@ -1370,6 +1370,22 @@ impl Session {
         true
     }
 
+    /// Puts `text` at the caret and moves the caret past it.
+    pub fn insert_text(&mut self, text: &str) -> bool {
+        if self.read_only || self.has_ended() {
+            return false;
+        }
+        let at = self
+            .draft
+            .char_indices()
+            .nth(self.cursor)
+            .map_or(self.draft.len(), |(i, _)| i);
+        self.draft.insert_str(at, text);
+        self.cursor += text.chars().count();
+        self.touched();
+        true
+    }
+
     fn first_question_key(&self) -> Option<String> {
         self.state()
             .pending_questions()
