@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use tether_core::acp::auth::matches_auth_error;
 use tether_core::acp::client::{ChatClient, ClientError, Completion, Outbound, RequestKind, Undo};
+use tether_core::acp::defaults::{AGENT_CLAUDE, ChatDefaults, REMEMBERED};
 use tether_core::acp::files::ChatFiles;
 use tether_core::acp::format::{
     self, AfterLoss, Attempt, LinkTracker, Outbox, Phase as LinkPhase, Resume,
@@ -29,6 +30,7 @@ pub struct Ctx<'a> {
     pub out: &'a mut Out,
     pub files: Option<&'a ChatFiles>,
     pub connected: bool,
+    pub defaults: &'a ChatDefaults,
 }
 
 const SNAPSHOT_EVERY: Duration = Duration::from_secs(3);
@@ -91,6 +93,11 @@ pub struct Session {
     pub answer_failures: HashSet<AcpId>,
     pub notice: Option<String>,
     pub option_changes: HashMap<String, OptionChange>,
+    /// The request of the stored default being set on a chat this device just started, the ids
+    /// already tried, and the ids the user changed since (those are never set from a default).
+    applying: Option<AcpId>,
+    applied: Vec<String>,
+    touched: HashSet<String>,
     pub files: FileIndex,
     files_loading: bool,
     pub sign_in: SignIn,
@@ -174,6 +181,9 @@ impl Session {
             answer_failures: HashSet::new(),
             notice: None,
             option_changes: HashMap::new(),
+            applying: None,
+            applied: Vec::new(),
+            touched: HashSet::new(),
             files: FileIndex::default(),
             files_loading: false,
             sign_in: SignIn::Idle,
@@ -351,6 +361,7 @@ impl Session {
             offset,
             self.client_id.as_deref(),
         );
+        self.applying = None;
         self.chan = Chan::Opening(self.generation);
         ctx.out.jobs.push(ChatJob::Dial {
             name: self.name.clone(),
@@ -602,12 +613,22 @@ impl Session {
                     if self.sign_in == SignIn::Checking {
                         self.sign_in = SignIn::Idle;
                     }
+                    self.applying = None;
+                    self.applied.clear();
+                    self.apply_next_default(ctx);
                 }
                 Err(e) => self.start_failed(e),
             },
+            RequestKind::SetConfig { .. } if self.applying.as_ref() == Some(&c.id) => {
+                self.applying = None;
+                self.apply_next_default(ctx);
+            }
             RequestKind::SetConfig { id, value } => match c.outcome {
                 Ok(_) => {
                     self.option_changes.remove(&id);
+                    if REMEMBERED.contains(&id.as_str()) {
+                        ctx.out.remembered.push((id, value));
+                    }
                 }
                 Err(e) => {
                     self.option_changes
@@ -616,6 +637,38 @@ impl Session {
             },
             RequestKind::Prompt => {}
         }
+    }
+
+    /// Sets the next stored default on a chat this device started. Each answer carries the options
+    /// as they now stand, so a model's effort levels are checked after the model took. A failure
+    /// shows nothing and keeps the stored value.
+    fn apply_next_default(&mut self, ctx: &mut Ctx<'_>) {
+        let Some(client) = self.client.as_mut() else {
+            return;
+        };
+        let skip: Vec<String> = self
+            .applied
+            .iter()
+            .chain(self.touched.iter())
+            .cloned()
+            .collect();
+        let Some((id, value)) =
+            ctx.defaults
+                .next_apply(AGENT_CLAUDE, &client.state().config_options, &skip)
+        else {
+            return;
+        };
+        self.applied.push(id.clone());
+        let Ok(out) = client.set_config_option(&id, &value) else {
+            return;
+        };
+        self.applying = out.id.clone();
+        self.persist_journal(ctx);
+        self.write(
+            out.line.clone(),
+            Some(WriteTag::Config { out, id, value }),
+            ctx,
+        );
     }
 
     fn start_failed(&mut self, error: ClientError) {
@@ -905,10 +958,14 @@ impl Session {
             }
             WriteTag::Config { out, id, value } => {
                 undo(self, &out, ctx);
-                self.option_changes.insert(
-                    id,
-                    OptionChange::Failed(value, "The change didn't reach the agent.".into()),
-                );
+                if out.id.is_some() && self.applying == out.id {
+                    self.applying = None;
+                } else {
+                    self.option_changes.insert(
+                        id,
+                        OptionChange::Failed(value, "The change didn't reach the agent.".into()),
+                    );
+                }
             }
         }
         self.persist_journal(ctx);
@@ -1030,6 +1087,7 @@ impl Session {
         if !self.can_interact() || self.client.is_none() {
             return;
         }
+        self.touched.insert(id.to_string());
         if matches!(self.option_changes.get(id), Some(OptionChange::Pending(_))) {
             return;
         }

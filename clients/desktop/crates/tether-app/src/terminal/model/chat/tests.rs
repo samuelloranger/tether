@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use tether_core::acp::defaults::{AGENT_CLAUDE, ChatDefaults};
 use tether_core::acp::files::ChatFiles;
 use tether_core::connect::ConnectError;
 
@@ -17,6 +18,7 @@ struct Harness {
     now: u64,
     jobs: Vec<ChatJob>,
     toasts: Vec<(String, String, String)>,
+    remembered: Vec<(String, String)>,
 }
 
 const CHECK_OK: &str = "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n";
@@ -35,6 +37,7 @@ impl Harness {
             now: 0,
             jobs: Vec::new(),
             toasts: Vec::new(),
+            remembered: Vec::new(),
         };
         h.run(|c, now, out| c.on_connected(now, out));
         h.run(|c, now, out| c.on_tick(now, out));
@@ -47,6 +50,7 @@ impl Harness {
         f(&mut self.chats, t(self.now), &mut out);
         self.jobs.extend(out.jobs);
         self.toasts.extend(out.toasts);
+        self.remembered.extend(out.remembered);
     }
 
     fn msg(&mut self, m: ChatMsg) {
@@ -1229,4 +1233,272 @@ fn background_commands_notices_and_compaction_reach_the_screen() {
         &r.body,
         RowBody::Tools(entries) if entries.iter().any(|e| matches!(e.body, EntryBody::Tool { open: true, .. }))
     )));
+}
+
+fn options_json(model: &str, effort: &str) -> String {
+    let select = |id: &str, current: &str, values: &[&str]| {
+        let choices: Vec<String> = values
+            .iter()
+            .map(|v| format!(r#"{{"value":"{v}","name":"{v}"}}"#))
+            .collect();
+        format!(
+            r#"{{"id":"{id}","name":"{id}","type":"select","currentValue":"{current}","options":[{}]}}"#,
+            choices.join(",")
+        )
+    };
+    format!(
+        "[{},{},{}]",
+        select("mode", "default", &["default", "plan"]),
+        select("model", model, &["default", "opus", "sonnet"]),
+        select("effort", effort, &["low", "medium", "high"]),
+    )
+}
+
+#[test]
+fn a_new_chat_sets_the_stored_defaults_one_after_the_other_and_shows_no_error() {
+    let mut h = Harness::new();
+    let mut defaults = ChatDefaults::default();
+    defaults.remember(AGENT_CLAUDE, "model", "opus");
+    defaults.remember(AGENT_CLAUDE, "effort", "high");
+    defaults.remember(AGENT_CLAUDE, "mode", "plan");
+    h.chats.set_defaults(defaults);
+    let name = h.new_chat();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            options_json("default", "medium")
+        ),
+    );
+    let sets = |w: &[String]| -> Vec<String> {
+        w.iter()
+            .filter(|l| l.contains("session/set_config_option"))
+            .cloned()
+            .collect()
+    };
+    let first = sets(&h.writes());
+    assert_eq!(first.len(), 1, "one at a time");
+    assert!(first[0].contains(r#""configId":"model""#) && first[0].contains(r#""value":"opus""#));
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"result":{{"configOptions":{}}}}}"#,
+            options_json("opus", "medium")
+        ),
+    );
+    let second = sets(&h.writes());
+    assert!(
+        second[0].contains(r#""configId":"effort""#) && second[0].contains(r#""value":"high""#)
+    );
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":4,"result":{{"configOptions":{}}}}}"#,
+            options_json("opus", "high")
+        ),
+    );
+    let third = sets(&h.writes());
+    assert!(third[0].contains(r#""configId":"mode""#) && third[0].contains(r#""value":"plan""#));
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32602,"message":"nope"}}"#,
+    );
+    h.settle();
+    assert!(sets(&h.writes()).is_empty());
+    assert!(
+        h.remembered.is_empty(),
+        "applying a default is not a user choice"
+    );
+    assert_eq!(h.screen().composer.banner, "");
+}
+
+fn start_with_defaults(h: &mut Harness, stored: &[(&str, &str)]) -> (String, u64) {
+    let mut defaults = ChatDefaults::default();
+    for (id, value) in stored {
+        defaults.remember(AGENT_CLAUDE, id, value);
+    }
+    h.chats.set_defaults(defaults);
+    let name = h.new_chat();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            options_json("default", "medium")
+        ),
+    );
+    h.settle();
+    (name, generation)
+}
+
+#[test]
+fn a_user_change_of_the_option_being_applied_is_not_taken_for_the_default() {
+    let mut h = Harness::new();
+    let (name, generation) = start_with_defaults(&mut h, &[("model", "opus")]);
+    assert!(h.writes()[0].contains(r#""value":"opus""#));
+    h.msg(ChatMsg::ControlsChoose {
+        id: "model".into(),
+        value: "sonnet".into(),
+    });
+    assert!(h.writes()[0].contains(r#""value":"sonnet""#));
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"result":{{"configOptions":{}}}}}"#,
+            options_json("opus", "medium")
+        ),
+    );
+    assert!(
+        h.remembered.is_empty(),
+        "the default is not a user choice: {:?}",
+        h.remembered
+    );
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":4,"result":{{"configOptions":{}}}}}"#,
+            options_json("sonnet", "medium")
+        ),
+    );
+    assert_eq!(
+        h.remembered,
+        vec![("model".to_string(), "sonnet".to_string())]
+    );
+    assert_eq!(h.screen().composer.banner, "");
+}
+
+#[test]
+fn a_default_is_not_sent_over_an_option_the_user_changed_during_the_chain() {
+    let mut h = Harness::new();
+    let (name, generation) = start_with_defaults(&mut h, &[("model", "opus"), ("effort", "high")]);
+    h.writes();
+    h.msg(ChatMsg::ControlsChoose {
+        id: "effort".into(),
+        value: "low".into(),
+    });
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"result":{{"configOptions":{}}}}}"#,
+            options_json("opus", "medium")
+        ),
+    );
+    let after = h.writes();
+    assert!(
+        after
+            .iter()
+            .all(|l| !l.contains("session/set_config_option")),
+        "{after:?}"
+    );
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":4,"result":{{"configOptions":{}}}}}"#,
+            options_json("opus", "low")
+        ),
+    );
+    assert_eq!(
+        h.remembered,
+        vec![("effort".to_string(), "low".to_string())]
+    );
+}
+
+#[test]
+fn a_confirmed_user_change_is_remembered_but_an_unconfirmed_one_is_not() {
+    let mut h = Harness::new();
+    let name = h.new_chat();
+    let (_, generation, _) = h.open_stream();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#,
+    );
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            options_json("default", "medium")
+        ),
+    );
+    h.settle();
+    assert!(h.writes().is_empty());
+    h.msg(ChatMsg::ControlsChoose {
+        id: "model".into(),
+        value: "sonnet".into(),
+    });
+    assert!(h.writes()[0].contains("session/set_config_option"));
+    assert!(h.remembered.is_empty(), "not before the agent confirms");
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"result":{{"configOptions":{}}}}}"#,
+            options_json("sonnet", "medium")
+        ),
+    );
+    assert_eq!(
+        h.remembered,
+        vec![("model".to_string(), "sonnet".to_string())]
+    );
+    h.msg(ChatMsg::ControlsChoose {
+        id: "effort".into(),
+        value: "low".into(),
+    });
+    h.writes();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"no"}}"#,
+    );
+    assert_eq!(h.remembered.len(), 1);
+}
+
+#[test]
+fn joining_or_resuming_a_chat_sets_no_defaults() {
+    let mut h = Harness::new();
+    let mut defaults = ChatDefaults::default();
+    defaults.remember(AGENT_CLAUDE, "model", "opus");
+    h.chats.set_defaults(defaults);
+    h.exec(
+        |t| *t == ExecTag::Status,
+        r#"{"name":"chat-a","state":"running","logBytes":10,"cwd":"/home/sam/web","created":100,"turn":"idle","multiClient":true}"#,
+    );
+    h.msg(ChatMsg::Select("chat-a".into()));
+    let (name, generation, writes) = h.open_stream();
+    assert!(writes.is_empty(), "{writes:?}");
+    h.feed(
+        &name,
+        generation,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":"other-2","result":{{"sessionId":"s1","configOptions":{}}}}}"#,
+            options_json("default", "medium")
+        ),
+    );
+    h.settle();
+    assert!(h.writes().is_empty(), "a joined chat keeps its own options");
 }

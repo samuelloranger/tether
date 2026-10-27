@@ -86,7 +86,7 @@ pub(crate) fn platform() -> Arc<dyn Platform> {
 
 /// The body of M5's `open_machine::on_open_machine`.
 pub fn open_machine(app: &Rc<App>, machine: Machine) {
-    let (style, hostkeys, secrets, jumps, chats_root) = {
+    let (style, hostkeys, secrets, jumps, chats_root, chat_defaults) = {
         let s = app.state.borrow();
         (
             TermStyle::from_prefs(&s.prefs.terminal),
@@ -94,6 +94,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
             s.secrets.clone(),
             tether_core::connect::jump_chain(&s.profiles.machines, &machine),
             s.data.root().join("chats"),
+            s.prefs.chat_defaults.clone(),
         )
     };
     let chat_scope = format!("{}:{}", machine.host, machine.port);
@@ -137,6 +138,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         chats_root,
         &chat_scope,
     ));
+    model.set_chat_defaults(chat_defaults);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
     #[cfg(windows)]
@@ -529,6 +531,15 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
         UiEffect::FocusSearch => vm.set_search_focus_seq(vm.get_search_focus_seq() + 1),
         UiEffect::Git(view) => crate::terminal::gitview::apply(w, *view),
         UiEffect::Chat(screen) => crate::terminal::chatview::apply(w, *screen),
+        UiEffect::RememberChatOption { id, value } => {
+            let mut s = app.state.borrow_mut();
+            if s.prefs
+                .chat_defaults
+                .remember(tether_core::acp::defaults::AGENT_CLAUDE, &id, &value)
+            {
+                s.save_prefs();
+            }
+        }
         UiEffect::PickImages => platform().pick_files(Box::new(|files| {
             if !files.is_empty() {
                 send(Msg::Chat(

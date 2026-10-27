@@ -7,6 +7,8 @@ enum ACPHostCommand {
   static let adapterPackage = "@agentclientprotocol/claude-agent-acp"
   static let adapterVersion = "0.95.0"
   static let spawnCommand = "npx -y \(adapterPackage)@\(adapterVersion)"
+  /// Names this spawn command in the stored option defaults.
+  static let agentKey = "claude"
   private static let prefix = "PATH=\"$HOME/.local/bin:$PATH\" tether acp"
 
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
