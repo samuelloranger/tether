@@ -37,10 +37,10 @@ export global PaletteVm {
 export component HistoryOverlay inherits Rectangle {
     in property <color> well: #1e1e2e;
     background: root.well;
-    property <bool> shown;
+    // Set by a Linger where it is used, so it fades out as well as in.
+    in property <bool> shown: true;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Motion.base; easing: ease-out; }
-    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     scope := FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) { HistoryVm.close(); return accept; }
@@ -170,10 +170,10 @@ export component PaletteOverlay inherits Rectangle {
         if (-list.content-y > sel * 44px) { list.content-y = -sel * 44px; }
         else if ((sel + 1) * 44px > -list.content-y + list.height) { list.content-y = -((sel + 1) * 44px - list.height); }
     }
-    property <bool> shown;
+    // Set by a Linger where it is used, so it fades out as well as in.
+    in property <bool> shown: true;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Motion.base; easing: ease-out; }
-    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     TouchArea { clicked => { PaletteVm.close(); } }
     card := Rectangle {
         width: min(560px, root.width - 48px);
