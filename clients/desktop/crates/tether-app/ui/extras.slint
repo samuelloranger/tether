@@ -180,7 +180,7 @@ export component PaletteOverlay inherits Rectangle {
         height: 46px + (PaletteVm.rows.length == 0 ? 76px : root.list-height);
         x: (parent.width - self.width) / 2;
         y: 56px + (root.shown ? 0 : Motion.rise);
-        animate y, height { duration: Motion.base; easing: ease-out; }
+        animate y { duration: Motion.base; easing: ease-out; }
         background: Tokens.surface;
         border-radius: 14px;
         border-width: 1px;

@@ -570,10 +570,12 @@ export component TerminalPage inherits Rectangle {
     if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
         clicked => { TerminalVm.close-menu(); }
         menu := Rectangle {
-            x: TerminalVm.menu-x; y: TerminalVm.menu-y - (menu.shown ? 0 : 4px); width: 180px; height: items.preferred-height;
+            x: TerminalVm.menu-x; y: TerminalVm.menu-y - self.lift; width: 180px; height: items.preferred-height;
             property <bool> shown;
+            // Only the entrance glides; a menu reopened elsewhere jumps there.
+            property <length> lift: menu.shown ? 0 : 4px;
             opacity: menu.shown ? 1 : 0;
-            animate opacity, y { duration: Motion.fast; easing: ease-out; }
+            animate opacity, lift { duration: Motion.fast; easing: ease-out; }
             Timer { interval: 30ms; running: !menu.shown; triggered => { menu.shown = true; } }
             background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
             drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
@@ -589,10 +591,12 @@ export component TerminalPage inherits Rectangle {
         clicked => { ChatVm.add-menu = false; }
         add := Rectangle {
             x: min(ChatVm.add-menu-x, root.width - self.width - 8px);
-            y: ChatVm.add-menu-y - (add.shown ? 0 : 4px);
+            y: ChatVm.add-menu-y - self.lift;
             property <bool> shown;
+            // Only the entrance glides; a menu reopened elsewhere jumps there.
+            property <length> lift: add.shown ? 0 : 4px;
             opacity: add.shown ? 1 : 0;
-            animate opacity, y { duration: Motion.fast; easing: ease-out; }
+            animate opacity, lift { duration: Motion.fast; easing: ease-out; }
             Timer { interval: 30ms; running: !add.shown; triggered => { add.shown = true; } }
             width: 190px;
             height: add-items.preferred-height;

@@ -996,8 +996,7 @@ component Row inherits VerticalLayout {
     if root.r.kind == 12: HorizontalLayout {
         spacing: 8px;
         padding-top: 2px;
-        // Breathes while the agent works, so a long turn still reads as alive.
-        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; opacity: 0.6 + 0.4 * sin(animation-tick() / 1400ms * 360deg); } }
+        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; } }
         Text { text: root.r.text; font-size: 12.5px; font-weight: 550; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
     }
     if root.r.kind == 13: Pressable {
