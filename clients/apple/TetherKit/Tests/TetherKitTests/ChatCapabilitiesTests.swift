@@ -40,6 +40,11 @@ final class ChatCapabilitiesTests: XCTestCase {
     ChatReducer.reduce(state, .message(update(body)))
   }
 
+  /// A chat past its `session/new` answer, where agent output with no prompt is a live turn.
+  private func established() -> ChatState {
+    ChatReducer.reduce(ChatState(), .message(decode(#"{"jsonrpc":"2.0","id":1,"result":{"sessionId":"s","modes":{}}}"#)))
+  }
+
   func test_a_background_command_runs_after_the_prompt_ends_and_stops_at_terminal_exit() throws {
     var afterResponse: ChatState?
     var afterExit: ChatState?
@@ -73,7 +78,7 @@ final class ChatCapabilitiesTests: XCTestCase {
 
   func test_a_cost_update_inside_a_prompt_does_not_end_anything_and_stop_ends_an_agent_started_turn() {
     var state = reduce(
-      ChatState(), #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"messageId":"m"}"#)
+      established(), #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"messageId":"m"}"#)
     XCTAssertEqual(state.turn, .working)
     state = ChatReducer.reduce(state, .cancelRequested)
     XCTAssertEqual(state.turn, .idle)
@@ -88,7 +93,7 @@ final class ChatCapabilitiesTests: XCTestCase {
   }
 
   func test_a_tool_call_update_alone_does_not_start_a_turn_but_a_new_tool_call_does() {
-    var state = reduce(ChatState(), #"{"sessionUpdate":"tool_call_update","toolCallId":"x","status":"completed"}"#)
+    var state = reduce(established(), #"{"sessionUpdate":"tool_call_update","toolCallId":"x","status":"completed"}"#)
     XCTAssertEqual(state.turn, .idle)
     state = reduce(state, #"{"sessionUpdate":"tool_call","toolCallId":"y","title":"ls","kind":"execute","status":"pending"}"#)
     XCTAssertEqual(state.turn, .working)
@@ -106,6 +111,22 @@ final class ChatCapabilitiesTests: XCTestCase {
       state, .message(decode(#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s","modes":{}}}"#)))
     XCTAssertTrue(state.backgroundCommands.isEmpty)
     XCTAssertFalse(state.loading)
+  }
+
+  func test_history_replayed_before_any_session_answer_is_not_a_live_turn() {
+    // A device joining a chat another device loaded replays the history before the load answer.
+    let state = reduce(ChatState(), #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old"},"messageId":"m"}"#)
+    XCTAssertEqual(state.turn, .idle)
+    XCTAssertFalse(state.agentStarted)
+  }
+
+  func test_a_failed_load_ends_the_wait_so_later_output_is_live() {
+    var state = ChatReducer.reduce(ChatState(), .loadRequested)
+    state = ChatReducer.reduce(
+      state, .message(decode(#"{"jsonrpc":"2.0","id":2,"error":{"code":-32002,"message":"Resource not found"}}"#)))
+    XCTAssertFalse(state.loading)
+    state = reduce(state, #"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"messageId":"m"}"#)
+    XCTAssertEqual(state.turn, .working)
   }
 
   func test_a_task_id_without_a_terminal_never_shows_a_running_command() {

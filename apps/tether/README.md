@@ -133,7 +133,7 @@ over `working`), else `idle`; an ended session is always `idle`. `title` is the 
 attach (see below); a holder started by an older tether leaves it out. `tasks`, when present,
 counts the background commands still running: Bash calls with a display terminal (the client
 declared `_meta.terminal_output`) whose result named a `backgroundTaskId`, until their
-`terminal_exit`. A running session with tasks is never stopped for being idle, and the end of a
+`terminal_exit`. Tasks do not keep a session from being stopped for being idle. The end of a
 turn the agent started itself sends the same quiet done push as a prompt's end. The daemon
 refreshes `title`, `turn` and `tasks` in `meta.json` as the stream moves, writing only when one of
 them changes. `acp ls` is unchanged.

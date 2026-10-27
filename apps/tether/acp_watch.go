@@ -235,11 +235,18 @@ type acpUpdateLine struct {
 		TerminalInfo json.RawMessage `json:"terminal_info"`
 		TerminalExit json.RawMessage `json:"terminal_exit"`
 		ClaudeCode   struct {
-			ToolResponse struct {
-				BackgroundTaskID string `json:"backgroundTaskId"`
-			} `json:"toolResponse"`
+			// Raw: an MCP tool's response is an array, which a struct would refuse with the whole line.
+			ToolResponse json.RawMessage `json:"toolResponse"`
 		} `json:"claudeCode"`
 	} `json:"_meta"`
+}
+
+func (u acpUpdateLine) backgroundTaskID() string {
+	var r struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+	}
+	_ = json.Unmarshal(u.Meta.ClaudeCode.ToolResponse, &r)
+	return r.BackgroundTaskID
 }
 
 // updateLocked follows background commands and the turns Claude Code starts by itself. Such a turn
@@ -252,7 +259,7 @@ func (t *acpTracker) updateLocked(u acpUpdateLine) acpEvent {
 			t.st.Terminals = append(t.st.Terminals, id)
 			changed = true
 		}
-		if u.Meta.ClaudeCode.ToolResponse.BackgroundTaskID != "" && slices.Contains(t.st.Terminals, id) && !slices.Contains(t.st.Tasks, id) {
+		if u.backgroundTaskID() != "" && slices.Contains(t.st.Terminals, id) && !slices.Contains(t.st.Tasks, id) {
 			t.st.Tasks = append(t.st.Tasks, id)
 			changed = true
 		}

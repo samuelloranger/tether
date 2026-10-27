@@ -198,8 +198,9 @@ struct ChatState: Codable, Equatable, Sendable {
   fileprivate var lastUserMessageId: String?
   /// The turn was started by the agent itself (a finished background command), not by a prompt.
   fileprivate(set) var agentStarted = false
-  /// A `session/load` was sent and its answer has not arrived: replayed history is not a live turn.
-  fileprivate(set) var loading = false
+  /// Until the answer to `session/new` or `session/load`, agent output is replayed history, not a
+  /// live turn. A snapshot from before this field was taken after that answer, so it decodes false.
+  fileprivate(set) var loading = true
 
   struct InFlightPrompt: Codable, Equatable, Sendable {
     var itemId: Int
@@ -444,6 +445,8 @@ enum ChatReducer {
         endPendingQuestions(in: &state)
       }
     case let .errorResponse(id, code, text):
+      // A failed session/load is the session answer too: what follows is live, not history.
+      if let id, !state.inFlight.contains(where: { $0.requestId == id }) { state.loading = false }
       if let id, state.silentRequestIds.contains(id) { return }
       if let id { finishPrompt(id, in: &state) } else { state.turn = state.inFlight.isEmpty ? .idle : .working }
       if ChatAuthError.matches(code: code, message: text) {

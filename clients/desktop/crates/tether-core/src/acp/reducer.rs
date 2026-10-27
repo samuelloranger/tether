@@ -735,6 +735,15 @@ fn apply(message: &Inbound, state: &mut ChatState) {
             }
         }
         Inbound::ErrorResponse { id, code, message } => {
+            // A failed session/load is the session answer too: what follows is live, not history.
+            if let Some(id) = id
+                && !state
+                    .in_flight
+                    .iter()
+                    .any(|p| p.request_id.as_ref() == Some(id))
+            {
+                state.awaiting_session = false;
+            }
             if let Some(id) = id
                 && state.silent_request_ids.contains(id)
             {

@@ -129,6 +129,20 @@ fn replayed_history_does_not_start_a_turn_and_the_load_answer_ends_every_command
 }
 
 #[test]
+fn a_failed_load_ends_the_wait_so_later_output_is_live() {
+    let mut state = ChatState::default();
+    line(
+        &mut state,
+        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32002,"message":"Resource not found"}}"#,
+    );
+    update(
+        &mut state,
+        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}),
+    );
+    assert_eq!(state.turn, Turn::Working);
+}
+
+#[test]
 fn a_command_without_terminal_metadata_never_shows_as_running() {
     let mut state = ChatState::default();
     update(

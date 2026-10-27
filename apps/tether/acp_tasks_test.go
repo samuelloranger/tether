@@ -107,3 +107,13 @@ func TestACPStatusReportsTasks(t *testing.T) {
 		t.Fatalf("status %+v", l)
 	}
 }
+
+func TestACPToolResponseArrayDoesNotDropTheLine(t *testing.T) {
+	acpEnv(t)
+	_ = os.MkdirAll(acpDir("mcp"), 0o700)
+	tr := loadACPTracker("mcp")
+	tr.agentLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"x","update":{"sessionUpdate":"tool_call","toolCallId":"m","_meta":{"claudeCode":{"toolResponse":[{"type":"text","text":"r"}]}}}}}`))
+	if _, turn, _ := tr.snapshot(); turn != "working" {
+		t.Fatalf("an MCP result line was dropped: turn %s", turn)
+	}
+}
