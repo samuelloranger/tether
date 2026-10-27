@@ -169,8 +169,9 @@ public final class SSHTerminalController {
   @ObservationIgnored private var gitCwd: String?
   /// Where the Git screen reads; an open chat points it at its folder while the sheet is up.
   @ObservationIgnored private var gitTarget: GitTarget = .session
-  /// Bumped with the target: a load that started under the old one drops what it read.
-  @ObservationIgnored private var gitGeneration = 0
+  /// Bumped with the target: a load that started under the old one drops what it read, and the
+  /// Git screen's poll restarts on the new one.
+  private(set) var gitGeneration = 0
   /// Paths of files uploaded from chats, held until the chat that asked for them is on screen.
   @ObservationIgnored let chatUploads = ChatUploadInbox()
   @ObservationIgnored private var commitPatches: [String: GitPatch] = [:]
