@@ -572,7 +572,7 @@ final class ChatSessionModel {
   private func fail(_ error: Error) {
     link.dialFailed()
     flushHeld()
-    notice = "Couldn't reach the host: \(error.localizedDescription)"
+    notice = ACPClientError.hostFailureText(error)
   }
 
   private func detachClient() {

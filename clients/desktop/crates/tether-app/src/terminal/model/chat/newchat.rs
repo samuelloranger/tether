@@ -203,8 +203,10 @@ impl NewChat {
             // A host that cannot be checked is left to the chat's own dial to report.
             Step::Check => {
                 if let Ok(output) = &result
-                    && let Some(message) =
-                        host::host_problem_message(&host::host_problems(output), host_name)
+                    && let Some(message) = host::host_problem_message(
+                        &host::host_problems_for(output, self.agent),
+                        host_name,
+                    )
                 {
                     return self.stop(message);
                 }

@@ -20,9 +20,9 @@ use super::reducer::{ChatEvent, ChatState, LinkState, Turn};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientError {
-    #[error("connection lost")]
+    #[error("The connection to the agent was lost.")]
     ConnectionLost,
-    #[error("no session")]
+    #[error("The agent stopped before the chat started.")]
     NoSession,
     #[error("agent error {code}: {message}")]
     Agent { code: i64, message: String },

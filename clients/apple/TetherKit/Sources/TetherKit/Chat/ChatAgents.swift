@@ -31,7 +31,7 @@ enum ChatAgents {
     rememberedIds: ["model", "reasoning_effort", "mode"], iconAsset: "agent-codex", tintsIcon: true,
     signInCommand: "codex login")
   static let opencode = ChatAgentProfile(
-    key: "opencode", label: "opencode", spawn: "opencode acp", marker: "opencode acp",
+    key: "opencode", label: "opencode", spawn: "PATH=\"$HOME/.opencode/bin:$PATH\" opencode acp", marker: "opencode acp",
     rememberedIds: ["model", "effort", "mode"], iconAsset: "agent-opencode", tintsIcon: true,
     signInCommand: "opencode auth login")
 

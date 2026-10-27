@@ -41,7 +41,7 @@ pub const CODEX: AgentProfile = AgentProfile {
 pub const OPENCODE: AgentProfile = AgentProfile {
     key: "opencode",
     label: "opencode",
-    spawn: "opencode acp",
+    spawn: "PATH=\"$HOME/.opencode/bin:$PATH\" opencode acp",
     marker: "opencode acp",
     remembered: ["model", "effort", "mode"],
     sign_in_command: "opencode auth login",
@@ -130,6 +130,11 @@ mod tests {
     fn a_spawn_command_finds_its_profile_exactly_or_by_marker() {
         assert_eq!(for_spawn(CODEX.spawn), Some(&CODEX));
         assert_eq!(for_spawn(OPENCODE.spawn), Some(&OPENCODE));
+        assert_eq!(
+            OPENCODE.spawn,
+            r#"PATH="$HOME/.opencode/bin:$PATH" opencode acp"#
+        );
+        assert_eq!(for_spawn("opencode acp"), Some(&OPENCODE));
         assert_eq!(
             for_spawn("npx -y @agentclientprotocol/codex-acp@9.9.9"),
             Some(&CODEX)

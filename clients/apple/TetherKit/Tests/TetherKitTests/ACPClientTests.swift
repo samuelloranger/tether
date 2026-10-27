@@ -207,6 +207,15 @@ final class ACPClientTests: XCTestCase {
     XCTAssertEqual(live, replayed, "a replay must not surface the refusal either")
   }
 
+  func test_client_errors_read_in_plain_words() {
+    XCTAssertEqual(ACPClientError.noSession.localizedDescription, "The agent stopped before the chat started.")
+    XCTAssertEqual(ACPClientError.connectionLost.localizedDescription, "The connection to the agent was lost.")
+    XCTAssertEqual(ACPClientError.agent(code: 1, message: "bad value").localizedDescription, "bad value")
+    XCTAssertEqual(ACPClientError.hostFailureText(ACPClientError.noSession), "The agent stopped before the chat started.")
+    XCTAssertEqual(
+      ACPClientError.hostFailureText(SSHConnectError.transport("down")).hasPrefix("Couldn't reach the host: "), true)
+  }
+
   func test_set_config_option_fails_without_a_session_or_on_a_dead_connection() async throws {
     let none = ACPClient(stream: ScriptedByteStream())
     do {

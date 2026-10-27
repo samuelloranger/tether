@@ -5,6 +5,33 @@ import XCTest
 final class ACPHostCheckTests: XCTestCase {
   private static let ours = "tether=found\nversion={\"name\":\"tether\",\"version\":\"v6.1.0\",\"protocol\":1}\nnode=ok\n"
 
+  func test_the_report_judges_only_what_the_picked_agent_needs() {
+    let missing = ACPHostCheck.problems(in: Self.ours + "opencode=missing\n")
+    XCTAssertEqual(missing, [.opencodeMissing])
+    XCTAssertEqual(ACPHostCheck.relevant(missing, for: ChatAgents.opencode), [.opencodeMissing])
+    XCTAssertEqual(ACPHostCheck.relevant(missing, for: ChatAgents.claude), [])
+    XCTAssertEqual(ACPHostCheck.relevant(missing, for: ChatAgents.codex), [])
+    let noNode = ACPHostCheck.problems(in: "node=missing\nopencode=ok\n")
+    XCTAssertEqual(ACPHostCheck.relevant(noNode, for: ChatAgents.codex), [.nodeMissing])
+    XCTAssertEqual(ACPHostCheck.relevant(noNode, for: ChatAgents.opencode), [])
+    XCTAssertEqual(ACPHostCheck.problems(in: Self.ours + "opencode=ok\n"), [])
+    XCTAssertEqual(
+      ACPHostCheck.message(for: [.opencodeMissing], host: "box"),
+      "Install opencode on box (opencode.ai), or check it is on the PATH of a login shell.")
+    XCTAssertTrue(ACPHostCheck.script.contains("$HOME/.opencode/bin/opencode"))
+  }
+
+  func test_starting_an_opencode_chat_stops_when_opencode_is_missing() async {
+    let report = Self.ours + "opencode=missing\n"
+    let opencode = await ChatRoute.start(cwdText: "/srv", host: "box", agent: ChatAgents.opencode) { _ in report }
+    XCTAssertEqual(
+      opencode, .failed("Install opencode on box (opencode.ai), or check it is on the PATH of a login shell."))
+    let claude = await ChatRoute.start(cwdText: "/srv", host: "box") { command in
+      command == ACPHostCheck.command ? report : "/home/dev"
+    }
+    guard case .ready = claude else { return XCTFail("\(claude)") }
+  }
+
   func test_the_command_runs_a_quoted_posix_script_whatever_the_login_shell() {
     XCTAssertFalse(ACPHostCheck.script.contains("'"), "the script must survive single-quote wrapping")
     XCTAssertEqual(ACPHostCheck.command, "sh -c " + shellQuote(ACPHostCheck.script))

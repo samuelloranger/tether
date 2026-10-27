@@ -518,6 +518,20 @@ fn leaving_hangs_up_and_coming_back_resumes_from_the_snapshot() {
 }
 
 #[test]
+fn an_agent_that_stops_before_the_chat_starts_is_not_a_host_problem() {
+    let mut h = Harness::new();
+    let name = h.new_chat();
+    let jobs = h.take();
+    let (dialed, generation, _) = h.dial_of(&jobs).expect("a dial");
+    assert_eq!(name, dialed);
+    h.msg(ChatMsg::Closed { name, generation });
+    assert_eq!(
+        h.screen().notice,
+        "The agent stopped before the chat started."
+    );
+}
+
+#[test]
 fn a_stream_that_ends_on_an_ended_chat_reads_ended() {
     let mut h = Harness::new();
     let (name, generation) = h.live_chat();
@@ -1603,7 +1617,10 @@ fn continuing_lists_the_picked_agents_conversations_and_reloads_on_a_change() {
     assert!(first.contains("sessions '/srv/app'") && !first.contains("--agent-cmd"));
     h.msg(ChatMsg::NewChatAgent("opencode".into()));
     let second = command(h.take()).expect("a reload");
-    assert!(second.contains("--agent-cmd 'opencode acp'"), "{second}");
+    assert!(
+        second.contains(r#"--agent-cmd 'PATH="$HOME/.opencode/bin:$PATH" opencode acp'"#),
+        "{second}"
+    );
     h.msg(ChatMsg::NewChatAgent("opencode".into()));
     assert!(
         command(h.take()).is_none(),

@@ -13,6 +13,7 @@ enum ACPHostCheck {
     case tetherForeign
     case tetherOutdated
     case nodeMissing
+    case opencodeMissing
   }
 
   /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter. It
@@ -25,6 +26,8 @@ enum ACPHostCheck {
       + "echo \"version=$($T tether version --json </dev/null 2>/dev/null | head -n 1)\"; "
       + "else echo tether=missing; fi",
     "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
+    "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ]; "
+      + "then echo opencode=ok; else echo opencode=missing; fi",
   ].joined(separator: "; ")
 
   static var command: String { "sh -c \(shellQuote(script))" }
@@ -54,6 +57,7 @@ enum ACPHostCheck {
       }
     }
     if lines.contains("node=missing") { found.append(.nodeMissing) }
+    if lines.contains("opencode=missing") { found.append(.opencodeMissing) }
     return found
   }
 
@@ -65,6 +69,12 @@ enum ACPHostCheck {
       .compactMap { Data($0.dropFirst("version=".count).utf8) }
       .compactMap { try? JSONDecoder().decode(Version.self, from: $0) }
       .contains { $0.name == "tether" && ($0.protocolNumber ?? 0) >= multiClientProtocol }
+  }
+
+  /// Node serves the npx-run agents; opencode is its own binary.
+  static func relevant(_ problems: [Problem], for agent: ChatAgentProfile) -> [Problem] {
+    let opencode = agent.key == ChatAgents.opencode.key
+    return problems.filter { $0 == .opencodeMissing ? opencode : ($0 != .nodeMissing || !opencode) }
   }
 
   static func message(for problems: [Problem], host: String) -> String? {
@@ -81,17 +91,20 @@ enum ACPHostCheck {
     if problems.contains(.nodeMissing) {
       parts.append("Node.js is required on \(host).")
     }
+    if problems.contains(.opencodeMissing) {
+      parts.append("Install opencode on \(host) (opencode.ai), or check it is on the PATH of a login shell.")
+    }
     return parts.joined(separator: " ")
   }
 
   /// `problem` is nil when the host is ready or cannot be checked: a failed connection is reported
   /// by the chat's own dial.
-  /// `needsNode` is false for an agent that is not run through npx.
+  /// Only what the picked agent needs is judged.
   static func verify(
-    host: String, needsNode: Bool = true, exec: (String) async throws -> String
+    host: String, agent: ChatAgentProfile = ChatAgents.claude, exec: (String) async throws -> String
   ) async -> (problem: String?, multiClient: Bool) {
     guard let output = try? await exec(command) else { return (nil, false) }
-    let found = problems(in: output).filter { needsNode || $0 != .nodeMissing }
+    let found = relevant(problems(in: output), for: agent)
     return (message(for: found, host: host), multiClient(in: output))
   }
 }
@@ -107,7 +120,7 @@ extension ChatRoute {
     cwdText: String, host: String, agent: ChatAgentProfile = ChatAgents.claude, picks: [String: String]? = nil,
     changed: Set<String> = [], exec: (String) async throws -> String
   ) async -> ChatStart {
-    let check = await ACPHostCheck.verify(host: host, needsNode: agent.key != ChatAgents.opencode.key, exec: exec)
+    let check = await ACPHostCheck.verify(host: host, agent: agent, exec: exec)
     if let message = check.problem { return .failed(message) }
     guard var route = await fresh(cwdText: cwdText, exec: exec) else {
       return .failed("Couldn't read the host's home folder.")

@@ -628,7 +628,7 @@ impl Session {
             self.receive(ctx);
         } else {
             self.dialing = false;
-            self.fail("the host closed the chat".into());
+            self.agent_stopped();
         }
         self.touched();
     }
@@ -780,7 +780,9 @@ impl Session {
             return;
         }
         // The transcript already carries the sign-in row; the link itself is fine.
-        if !is_auth(&error) {
+        if error == ClientError::NoSession {
+            self.agent_stopped();
+        } else if !is_auth(&error) {
             self.fail(describe(&error));
         }
     }
@@ -883,6 +885,13 @@ impl Session {
             }
             self.last_title = title;
         }
+    }
+
+    /// The agent ended before the chat started: not a problem of reaching the host.
+    fn agent_stopped(&mut self) {
+        self.link.dial_failed();
+        self.holding = false;
+        self.notice = Some(ClientError::NoSession.to_string());
     }
 
     fn fail(&mut self, reason: String) {

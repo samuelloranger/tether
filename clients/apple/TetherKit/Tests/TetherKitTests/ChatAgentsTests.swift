@@ -29,7 +29,9 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertNil(ChatAgents.profile(forSpawn: "gemini --acp"))
     XCTAssertNil(ChatAgents.profile(forSpawn: ""))
     XCTAssertEqual(ChatAgents.codex.spawn, "npx -y @agentclientprotocol/codex-acp@2.3.0")
-    XCTAssertEqual(ChatAgents.opencode.spawn, "opencode acp")
+    XCTAssertEqual(ChatAgents.opencode.spawn, #"PATH="$HOME/.opencode/bin:$PATH" opencode acp"#)
+    XCTAssertEqual(ChatAgents.profile(forSpawn: "opencode acp")?.key, "opencode", "a chat started with the old spawn still resolves")
+    XCTAssertEqual(ChatAgents.profile(forSpawn: ChatAgents.opencode.spawn)?.key, "opencode")
   }
 
   func test_a_chat_resolves_to_the_local_record_then_the_host_spawn_then_claude() {
@@ -101,7 +103,8 @@ final class ChatAgentsTests: XCTestCase {
     let codex = ACPHostCommand.sessions(cwd: "/p", limit: 20, agent: ChatAgents.codex)
     XCTAssertTrue(codex.contains(" --limit 20 --agent-cmd 'npx -y @agentclientprotocol/codex-acp@2.3.0'"))
     XCTAssertTrue(codex.hasSuffix("2>&1"))
-    XCTAssertTrue(ACPHostCommand.sessions(cwd: "/p", limit: 5, agent: ChatAgents.opencode).contains("--agent-cmd 'opencode acp'"))
+    XCTAssertTrue(ACPHostCommand.sessions(cwd: "/p", limit: 5, agent: ChatAgents.opencode).contains(
+        #"--agent-cmd 'PATH="$HOME/.opencode/bin:$PATH" opencode acp'"#))
   }
 
   func test_the_sign_in_text_names_each_agents_login() {
