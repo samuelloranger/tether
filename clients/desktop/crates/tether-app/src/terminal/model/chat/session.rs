@@ -93,9 +93,11 @@ pub struct Session {
     pub answer_failures: HashSet<AcpId>,
     pub notice: Option<String>,
     pub option_changes: HashMap<String, OptionChange>,
-    /// The stored default being set on a chat this device just started, and the ids already tried.
-    applying: Option<String>,
+    /// The request of the stored default being set on a chat this device just started, the ids
+    /// already tried, and the ids the user changed since (those are never set from a default).
+    applying: Option<AcpId>,
     applied: Vec<String>,
+    touched: HashSet<String>,
     pub files: FileIndex,
     files_loading: bool,
     pub sign_in: SignIn,
@@ -181,6 +183,7 @@ impl Session {
             option_changes: HashMap::new(),
             applying: None,
             applied: Vec::new(),
+            touched: HashSet::new(),
             files: FileIndex::default(),
             files_loading: false,
             sign_in: SignIn::Idle,
@@ -616,7 +619,7 @@ impl Session {
                 }
                 Err(e) => self.start_failed(e),
             },
-            RequestKind::SetConfig { id, .. } if self.applying.as_deref() == Some(&id) => {
+            RequestKind::SetConfig { .. } if self.applying.as_ref() == Some(&c.id) => {
                 self.applying = None;
                 self.apply_next_default(ctx);
             }
@@ -643,9 +646,15 @@ impl Session {
         let Some(client) = self.client.as_mut() else {
             return;
         };
+        let skip: Vec<String> = self
+            .applied
+            .iter()
+            .chain(self.touched.iter())
+            .cloned()
+            .collect();
         let Some((id, value)) =
             ctx.defaults
-                .next_apply(AGENT_CLAUDE, &client.state().config_options, &self.applied)
+                .next_apply(AGENT_CLAUDE, &client.state().config_options, &skip)
         else {
             return;
         };
@@ -653,7 +662,7 @@ impl Session {
         let Ok(out) = client.set_config_option(&id, &value) else {
             return;
         };
-        self.applying = Some(id.clone());
+        self.applying = out.id.clone();
         self.persist_journal(ctx);
         self.write(
             out.line.clone(),
@@ -949,7 +958,7 @@ impl Session {
             }
             WriteTag::Config { out, id, value } => {
                 undo(self, &out, ctx);
-                if self.applying.as_deref() == Some(&id) {
+                if out.id.is_some() && self.applying == out.id {
                     self.applying = None;
                 } else {
                     self.option_changes.insert(
@@ -1078,6 +1087,7 @@ impl Session {
         if !self.can_interact() || self.client.is_none() {
             return;
         }
+        self.touched.insert(id.to_string());
         if matches!(self.option_changes.get(id), Some(OptionChange::Pending(_))) {
             return;
         }

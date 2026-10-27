@@ -7,15 +7,20 @@ enum ChatOptionDefaults {
 
   static func remembers(_ id: String) -> Bool { rememberedIds.contains(id) }
 
-  /// The `set_config_option` calls for a session just created, in a fixed order. A stored value the
-  /// agent does not offer, or that already is the current one, is skipped.
-  static func plan(stored: [String: String], offered: [ACPConfigOption]) -> [(id: String, value: String)] {
-    rememberedIds.compactMap { id in
+  /// The next `set_config_option` for a session just created, given the options as they stand now:
+  /// the effort choices depend on the model, so this is asked again after every answer. `skipping`
+  /// holds the ids already tried or changed by the user. A stored value the agent does not offer,
+  /// or that already is the current one, is skipped.
+  static func next(
+    stored: [String: String], offered: [ACPConfigOption], skipping: Set<String>
+  ) -> (id: String, value: String)? {
+    for id in rememberedIds where !skipping.contains(id) {
       guard let value = stored[id], let option = offered.first(where: { $0.id == id }),
         option.currentValue != value, option.choices.contains(where: { $0.value == value })
-      else { return nil }
+      else { continue }
       return (id, value)
     }
+    return nil
   }
 }
 

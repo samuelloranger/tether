@@ -449,6 +449,55 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  private func optionsResult(id: Int, model: String, effort: String, efforts: [String], mode: String = "default") -> Data {
+    func select(_ id: String, _ current: String, _ values: [String]) -> String {
+      let choices = values.map { "{\"value\":\"\($0)\",\"name\":\"\($0)\"}" }.joined(separator: ",")
+      return "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"type\":\"select\",\"currentValue\":\"\(current)\",\"options\":[\(choices)]}"
+    }
+    let options = [
+      select("mode", mode, ["default", "acceptEdits", "plan"]), select("model", model, ["sonnet", "opus"]),
+      select("effort", effort, efforts),
+    ].joined(separator: ",")
+    return Data("{\"jsonrpc\":\"2.0\",\"id\":\(id),\"result\":{\"configOptions\":[\(options)]}}\n".utf8)
+  }
+
+  func test_effort_is_chosen_from_the_options_the_new_model_offers() async throws {
+    let stream = ScriptedByteStream()
+    let defaults = defaultsStore(["model": "opus", "effort": "xhigh"])
+    let model = optionModel(stream, journal: ChatJournal(), defaults: defaults)
+    Task { await model.connect() }
+    await handshake(stream)
+    _ = await eventually { setCalls(stream) == 1 }
+    XCTAssertEqual(setCalls(stream), 1)
+    stream.push(optionsResult(id: 3, model: "opus", effort: "medium", efforts: ["low", "medium", "xhigh"]))
+    let second = await eventually { setCalls(stream) == 2 }
+    XCTAssertTrue(second)
+    XCTAssertTrue(stream.writtenText.contains("\"configId\":\"effort\""))
+    XCTAssertTrue(stream.writtenText.contains("\"value\":\"xhigh\""))
+    model.leave()
+  }
+
+  func test_a_choice_made_during_the_chain_is_not_overwritten_by_a_default() async throws {
+    let stream = ScriptedByteStream()
+    let defaults = defaultsStore(["model": "opus", "mode": "plan"])
+    let model = optionModel(stream, journal: ChatJournal(), defaults: defaults)
+    Task { await model.connect() }
+    await handshake(stream)
+    _ = await eventually { setCalls(stream) == 1 }
+    let interactive = await settled(model)
+    XCTAssertTrue(interactive)
+    model.setOption(id: "mode", value: "acceptEdits")
+    _ = await eventually { setCalls(stream) == 2 }
+    stream.push(optionsResult(id: 3, model: "opus", effort: "medium", efforts: ["low", "medium"]))
+    stream.push(optionsResult(id: 4, model: "opus", effort: "medium", efforts: ["low", "medium"], mode: "acceptEdits"))
+    let done = await eventually { model.state.currentChoice(of: "mode") == "acceptEdits" && model.optionChanges.isEmpty }
+    XCTAssertTrue(done)
+    try await Task.sleep(nanoseconds: 300_000_000)
+    XCTAssertEqual(setCalls(stream), 2)
+    XCTAssertFalse(stream.writtenText.contains("\"value\":\"plan\""))
+    model.leave()
+  }
+
   func test_a_resumed_or_joined_chat_sends_no_defaults() async throws {
     let defaults = defaultsStore(["model": "haiku"])
     let resumed = ScriptedByteStream()

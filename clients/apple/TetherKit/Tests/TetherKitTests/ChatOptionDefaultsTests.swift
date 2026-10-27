@@ -8,28 +8,29 @@ final class ChatOptionDefaultsTests: XCTestCase {
       choices: values.map { .init(value: $0, name: $0, description: "") })
   }
 
-  func test_plan_skips_missing_options_unoffered_values_and_equal_values() {
+  func test_next_skips_missing_options_unoffered_values_and_equal_values() {
     let offered = [
       option("mode", current: "default", ["default", "plan"]),
       option("model", current: "opus", ["opus", "haiku"]),
       option("agent", current: "default", ["default", "other"]),
     ]
-    let calls = ChatOptionDefaults.plan(
-      stored: ["mode": "default", "model": "haiku", "effort": "high", "agent": "other"], offered: offered)
-    XCTAssertEqual(calls.map(\.id), ["model"])
-    XCTAssertEqual(calls.map(\.value), ["haiku"])
-    XCTAssertTrue(ChatOptionDefaults.plan(stored: ["model": "gone"], offered: offered).isEmpty)
-    XCTAssertTrue(ChatOptionDefaults.plan(stored: [:], offered: offered).isEmpty)
+    let stored = ["mode": "default", "model": "haiku", "effort": "high", "agent": "other"]
+    XCTAssertEqual(ChatOptionDefaults.next(stored: stored, offered: offered, skipping: [])?.id, "model")
+    XCTAssertNil(ChatOptionDefaults.next(stored: stored, offered: offered, skipping: ["model"]))
+    XCTAssertNil(ChatOptionDefaults.next(stored: ["model": "gone"], offered: offered, skipping: []))
+    XCTAssertNil(ChatOptionDefaults.next(stored: [:], offered: offered, skipping: []))
   }
 
-  func test_plan_runs_in_a_fixed_order() {
+  func test_next_follows_a_fixed_order() {
     let offered = [
       option("effort", current: "low", ["low", "high"]),
       option("mode", current: "default", ["default", "plan"]),
       option("model", current: "opus", ["opus", "haiku"]),
     ]
-    let calls = ChatOptionDefaults.plan(stored: ["mode": "plan", "effort": "high", "model": "haiku"], offered: offered)
-    XCTAssertEqual(calls.map(\.id), ["model", "effort", "mode"])
+    let stored = ["mode": "plan", "effort": "high", "model": "haiku"]
+    XCTAssertEqual(ChatOptionDefaults.next(stored: stored, offered: offered, skipping: [])?.id, "model")
+    XCTAssertEqual(ChatOptionDefaults.next(stored: stored, offered: offered, skipping: ["model"])?.id, "effort")
+    XCTAssertEqual(ChatOptionDefaults.next(stored: stored, offered: offered, skipping: ["model", "effort"])?.id, "mode")
   }
 
   func test_only_model_effort_and_mode_are_remembered_per_agent() {

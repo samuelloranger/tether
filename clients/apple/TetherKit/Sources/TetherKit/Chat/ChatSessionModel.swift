@@ -77,6 +77,7 @@ final class ChatSessionModel {
   private var skipSnapshot = false
   private var stopping: Task<Void, Never>?
   private let optionDefaults: ChatOptionDefaultsStore?
+  private var userTouchedOptions = Set<String>()
 
   init(
     chatName: String, cwd: String, readOnly: Bool, join: Bool = false, store: any ChatJournalStore,
@@ -321,20 +322,25 @@ final class ChatSessionModel {
     Task { await deliver(entry.text, entry.images, imagesLost: entry.imagesLost) }
   }
 
-  /// One after the other; a refusal is dropped quietly and keeps the stored value.
+  /// One after the other, each picked from the options as the last answer left them; a refusal is
+  /// dropped quietly and keeps the stored value. An option the user touched is left alone.
   private func applyStoredDefaults(_ client: ACPClient, generation mine: Int) async {
     guard let optionDefaults else { return }
-    let calls = ChatOptionDefaults.plan(
-      stored: optionDefaults.stored(agent: ACPHostCommand.agentKey), offered: await client.state.configOptions)
-    for call in calls {
-      guard mine == generation else { return }
+    let stored = optionDefaults.stored(agent: ACPHostCommand.agentKey)
+    var tried = Set<String>()
+    while mine == generation,
+      let call = ChatOptionDefaults.next(
+        stored: stored, offered: await client.state.configOptions, skipping: tried.union(userTouchedOptions))
+    {
+      tried.insert(call.id)
       try? await client.setConfigOption(id: call.id, value: call.value)
     }
-    if !calls.isEmpty, mine == generation { receive(await client.state, generation: mine) }
+    if !tried.isEmpty, mine == generation { receive(await client.state, generation: mine) }
   }
 
   func setOption(id: String, value: String) {
     guard canInteract, let client else { return }
+    userTouchedOptions.insert(id)
     if case .pending = optionChanges[id] { return }
     guard state.option(id: id)?.currentValue != value else {
       optionChanges[id] = nil
