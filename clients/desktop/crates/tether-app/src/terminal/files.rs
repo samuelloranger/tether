@@ -320,6 +320,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_chat_send_without_an_uploads_folder_is_refused() {
+        let remote = Arc::new(FakeRemote::default());
+        *remote.uploads_dir.lock().unwrap() = None;
+        let (sink, log) = recorder();
+        let job = SendJob {
+            sources: vec![SendSource::Bytes {
+                name: "notes.txt".into(),
+                data: vec![1],
+            }],
+            fallback_dir: None,
+            needs_dir: true,
+        };
+        run_send_with(remote.clone(), job, sink, Arc::new(NoCodec)).await;
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                "started notes.txt",
+                "file 0",
+                "failed Couldn't find the uploads folder on the host."
+            ]
+        );
+        assert!(!remote.log().iter().any(|l| l.starts_with("upload")));
+    }
+
+    #[tokio::test]
     async fn a_failure_stops_the_queue() {
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("a.png");
