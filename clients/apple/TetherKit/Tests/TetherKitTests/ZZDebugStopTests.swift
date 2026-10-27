@@ -20,5 +20,8 @@ final class ZZDebugStopTests: XCTestCase {
     _ = try await client.cancel()
     s = await client.state
     print("DBG C turn=\(s.turn) items=\(s.items.map { "\($0.kind)".prefix(20) })")
+    try await client.prompt(text: "tidy")
+    s = await client.state
+    print("DBG D turn=\(s.turn) items=\(s.items.map { "\($0.kind)".prefix(20) }) queued=\(s.queuedTexts)")
   }
 }
