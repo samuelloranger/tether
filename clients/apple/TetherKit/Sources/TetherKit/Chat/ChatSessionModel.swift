@@ -378,7 +378,8 @@ final class ChatSessionModel {
         notice = "Stop didn't reach the agent. Try again."
         return
       }
-      if !waiting.text.isEmpty { _ = send(waiting.text) }
+      // Not through `send`: the composer's gate is for what the user types, and this was sent already.
+      if !waiting.text.isEmpty { await deliver(waiting.text, []) }
       if waiting.images > 0 {
         notice = "The waiting messages went out again without their \(ChatComposerRule.imageLabel(waiting.images))."
       }
