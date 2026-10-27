@@ -22,3 +22,6 @@ pub mod verbs;
 
 #[cfg(test)]
 pub(crate) mod fixture;
+
+#[cfg(test)]
+mod capabilities;

@@ -12,6 +12,8 @@ pub struct Fixture(&'static str);
 pub static TURN: Fixture = Fixture(include_str!("fixtures/acp-turn-write.log"));
 pub static CONTROLS: Fixture = Fixture(include_str!("fixtures/acp-controls.log"));
 pub static LOAD: Fixture = Fixture(include_str!("fixtures/acp-load.log"));
+pub static BG: Fixture = Fixture(include_str!("fixtures/acp-bg.log"));
+pub static COMPACT: Fixture = Fixture(include_str!("fixtures/acp-compact.log"));
 pub static ELICITATION: Fixture = Fixture(include_str!("fixtures/acp-elicitation.log"));
 
 impl Fixture {

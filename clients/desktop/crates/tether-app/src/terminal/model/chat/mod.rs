@@ -555,6 +555,7 @@ impl Chats {
             host_title: None,
             has_status: false,
             multi_client: multi,
+            tasks: 0,
         });
         let session = Session::new(
             &name,
