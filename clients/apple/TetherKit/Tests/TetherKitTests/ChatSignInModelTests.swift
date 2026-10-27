@@ -88,7 +88,8 @@ final class ChatSignInModelTests: XCTestCase {
     let resent = await eventually { stream.writtenText.components(separatedBy: "and then tidy up").count == 3 }
     XCTAssertTrue(resent, "Stop sends the waiting message again")
     print("DBG notice=\(String(describing: model.notice)) queued=\(model.state.queuedTexts) turn=\(model.state.turn)")
-    print("DBG written=\(stream.writtenText.suffix(600))")
+    print("DBG written=\(stream.writtenText.replacingOccurrences(of: "\n", with: " || "))")
+    print("DBG items=\(model.state.items.suffix(5).map { "\($0.kind)".prefix(60) })")
     let waiting = await eventually { model.state.queuedTexts == ["and then tidy up"] }
     XCTAssertTrue(waiting, "it waits for the stopped turn to end")
     XCTAssertTrue(model.state.items.contains { $0.kind == .notice("Stopped") })
