@@ -62,6 +62,35 @@ final class GitRepositoryModelTests: XCTestCase {
     XCTAssertEqual(GitWorkspaceScript.capped("small\n").1, false)
   }
 
+  func test_the_upstream_and_its_counts_follow_the_branch() {
+    guard case let .repository(sections) = GitWorkspaceScript.parse(cwd: "/r", "main\norigin/main\n2\t1\u{1D}\u{1D}=\u{1D}") else {
+      return XCTFail("expected a repository")
+    }
+    XCTAssertEqual(sections.branch, "main")
+    XCTAssertEqual(sections.upstream, GitBranchStatus(upstream: "origin/main", ahead: 2, behind: 1))
+    XCTAssertEqual(sections.upstream?.counts, "↑2 ↓1")
+  }
+
+  func test_no_upstream_or_older_output_has_no_branch_status() {
+    for first in ["main\n\n", "main\n", "main", "abc1234\n\n"] {
+      guard case let .repository(sections) = GitWorkspaceScript.parse(cwd: "/r", "\(first)\u{1D}\u{1D}=\u{1D}") else {
+        return XCTFail("expected a repository")
+      }
+      XCTAssertNil(sections.upstream, first)
+      XCTAssertFalse(sections.branch.contains("\n"), first)
+    }
+    XCTAssertNil(GitRepositoryModel.branchStatus(upstream: "origin/main", counts: "garbage"))
+    XCTAssertEqual(GitRepositoryModel.branchStatus(upstream: "origin/main", counts: "0\t0")?.counts, "")
+    XCTAssertEqual(GitRepositoryModel.branchStatus(upstream: "origin/main", counts: "0\t3")?.counts, "↓3")
+  }
+
+  func test_the_workspace_script_reads_the_upstream_without_failing_when_there_is_none() {
+    let script = GitWorkspaceScript.workspace(diff: true, commits: true, knownHead: nil)
+    XCTAssertTrue(script.contains("--symbolic-full-name '@{u}'"), script)
+    XCTAssertTrue(script.contains("--left-right --count 'HEAD...@{u}'"), script)
+    XCTAssertTrue(script.contains("|| { u=; c=; }"), script)
+  }
+
   func test_the_workspace_poll_never_takes_optional_locks() {
     for (diff, commits) in [(true, true), (true, false), (false, true)] {
       let script = GitWorkspaceScript.workspace(diff: diff, commits: commits, knownHead: nil)
