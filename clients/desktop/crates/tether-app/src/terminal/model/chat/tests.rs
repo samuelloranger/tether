@@ -1929,4 +1929,10 @@ fn a_dialog_opening_on_an_agent_the_host_lacks_says_why() {
         "{}",
         dialog.error
     );
+    h.msg(ChatMsg::NewChatMode(1));
+    h.msg(ChatMsg::NewChatMode(0));
+    assert!(
+        h.dialog().error.contains("Install opencode"),
+        "a mode change keeps the reason"
+    );
 }

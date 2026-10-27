@@ -159,7 +159,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             mode: nc.mode,
             folder: nc.folder.clone(),
             busy: nc.busy,
-            error: nc.error.clone().unwrap_or_default(),
+            error: nc.shown_error().unwrap_or_default().to_string(),
             listing: match &nc.listing {
                 Listing::Loading => ListingView::Loading,
                 Listing::Failed(m) => ListingView::Failed(m.clone()),

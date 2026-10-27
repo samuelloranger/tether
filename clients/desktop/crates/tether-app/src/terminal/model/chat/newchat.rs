@@ -116,9 +116,13 @@ impl NewChat {
             .iter()
             .filter_map(|a| host::agent_unavailable(output, a, host_name).map(|m| (a.key, m)))
             .collect();
-        if self.error.is_none() && !self.busy && self.continuing.is_none() {
-            self.error = self.unavailable(self.agent).map(str::to_string);
-        }
+    }
+
+    /// The last failure, else why the picked agent can't run here; derived so a mode change keeps it.
+    pub fn shown_error(&self) -> Option<&str> {
+        self.error
+            .as_deref()
+            .or_else(|| self.unavailable(self.agent))
     }
 
     pub fn set_mode(&mut self, mode: u8, now: Duration) -> Option<ChatJob> {
