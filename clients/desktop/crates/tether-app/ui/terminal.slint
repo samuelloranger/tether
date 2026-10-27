@@ -574,11 +574,10 @@ export component TerminalPage inherits Rectangle {
             }
         }
     }
+    // Over the sidebar too, so the session it shows cannot change underneath it.
     if HistoryVm.open: HistoryOverlay {
-        x: root.side-w;
-        y: 52px;
-        width: parent.width - root.side-w;
-        height: parent.height - 52px;
+        width: parent.width;
+        height: parent.height;
         well: TerminalVm.well-color;
     }
     if PaletteVm.open: PaletteOverlay {
