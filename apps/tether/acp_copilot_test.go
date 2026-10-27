@@ -174,12 +174,11 @@ func TestCopilotPromptHeldPastIdleIsEndedAndCancelled(t *testing.T) {
 	if h.turn() != "working" {
 		t.Fatalf("turn %q right after idle", h.turn())
 	}
-	waitFor(t, "the held prompt ended", func() bool { return h.turn() == "idle" })
-
+	// The turn goes idle a moment before the answer is written, so wait for both.
 	ended := `{"jsonrpc":"2.0","id":10,"result":{"stopReason":"end_turn"}}` + "\n"
-	if !strings.HasSuffix(h.log(), ended) {
-		t.Fatalf("log %q", h.log())
-	}
+	waitFor(t, "the held prompt ended", func() bool {
+		return h.turn() == "idle" && strings.HasSuffix(h.log(), ended)
+	})
 	if want := copilotPrompt + "\n" + `{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"s1"}}` + "\n"; h.stdin.String() != want {
 		t.Fatalf("agent stdin %q", h.stdin.String())
 	}
