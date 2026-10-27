@@ -380,15 +380,10 @@ export component GitSidePanel inherits Rectangle {
     in property <length> max-panel-width;
     property <length> min-panel-width: 300px;
     width: clamp(GitVm.panel-width, root.min-panel-width, max(root.min-panel-width, root.max-panel-width));
-    // The width is taken at once (one terminal resize); the panel slides within it.
-    in property <bool> shown: true;
-    clip: true;
     Rectangle {
-        x: root.shown ? 0 : root.width;
         width: root.width;
         height: root.height;
         background: Tokens.surface;
-        animate x { duration: Motion.slow; easing: ease-out; }
         Rectangle { x: 0; width: 1px; background: resize.has-hover || resize.pressed ? Tokens.accent : Tokens.border; }
         VerticalLayout {
             Rectangle {
