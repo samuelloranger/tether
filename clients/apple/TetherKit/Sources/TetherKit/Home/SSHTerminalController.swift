@@ -169,6 +169,8 @@ public final class SSHTerminalController {
   @ObservationIgnored private var gitCwd: String?
   /// Where the Git screen reads; an open chat points it at its folder while the sheet is up.
   @ObservationIgnored private var gitTarget: GitTarget = .session
+  /// Bumped with the target: a load that started under the old one drops what it read.
+  @ObservationIgnored private var gitGeneration = 0
   /// Paths of files uploaded from chats, held until the chat that asked for them is on screen.
   @ObservationIgnored let chatUploads = ChatUploadInbox()
   @ObservationIgnored private var commitPatches: [String: GitPatch] = [:]
@@ -569,6 +571,8 @@ public final class SSHTerminalController {
   func setGitTarget(_ target: GitTarget) {
     guard target != gitTarget else { return }
     gitTarget = target
+    gitGeneration += 1
+    gitLoads.removeAll()
     clearGitWorkspace()
     gitCwd = nil
     pullRequestsCwd = nil
@@ -622,20 +626,23 @@ public final class SSHTerminalController {
   /// A failed refresh keeps what is on screen and says why: clearing it made a dropped
   /// connection read as "no uncommitted changes".
   private func loadLocalGit(diff: Bool, commits: Bool) async {
+    let generation = gitGeneration
     let knownHead = gitCommits.isEmpty ? nil : gitHead
     let read: GitWorkspaceRead
     do {
-      guard let result = try await execInSessionCwd(
+      let result = try await execInSessionCwd(
         GitWorkspaceScript.workspace(diff: diff, commits: commits, knownHead: knownHead))
-      else {
+      guard generation == gitGeneration else { return }
+      guard let result else {
         setGitError(gitTarget == .session ? "No working directory for this session." : "That folder is not on the host.")
         return
       }
       read = await Task.detached { GitWorkspaceScript.parse(cwd: result.cwd, result.output) }.value
     } catch {
-      setGitError(Self.describe(error))
+      if generation == gitGeneration { setGitError(Self.describe(error)) }
       return
     }
+    guard generation == gitGeneration else { return }
     switch read {
     case .unreadable:
       setGitError("Could not read the git workspace.")
@@ -658,6 +665,7 @@ public final class SSHTerminalController {
           gitRawDiff = sections.diff
           let raw = sections.diff
           let files = await Task.detached { DiffFile.group(GitDiffModel.classify(raw)) }.value
+          guard generation == gitGeneration else { return }
           if gitFiles != files { gitFiles = files }
         }
         if gitUntracked != sections.untracked { gitUntracked = sections.untracked }
@@ -672,9 +680,11 @@ public final class SSHTerminalController {
   }
 
   private func loadPullRequests() async {
+    let generation = gitGeneration
     let result: GitRepositoryModel.PullRequestResult
     do {
-      guard let read = try await execInSessionCwd(GitWorkspaceScript.pullRequests, on: ghControl) else { return }
+      let read = try await execInSessionCwd(GitWorkspaceScript.pullRequests, on: ghControl)
+      guard generation == gitGeneration, let read else { return }
       // Another repository's list must not stand in for this one's, even when this one fails.
       if pullRequestsCwd != read.cwd {
         pullRequestsCwd = read.cwd
@@ -682,6 +692,7 @@ public final class SSHTerminalController {
       }
       result = GitRepositoryModel.pullRequestResult(from: read.output)
     } catch {
+      guard generation == gitGeneration else { return }
       result = .failed(Self.describe(error))
     }
     switch result {

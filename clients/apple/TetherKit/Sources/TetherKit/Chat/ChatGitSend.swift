@@ -27,6 +27,30 @@ enum ChatFileSend {
     return type.conforms(to: .image) && !type.conforms(to: .svg)
   }
 
+  /// Reads picked files, measuring each first: `scpSend` holds a whole file in memory, so one over
+  /// the transfer limit is turned away unread. Each file skipped comes back as a sentence.
+  static func read(_ urls: [URL]) -> (files: [ChatPickedFile], problems: [String]) {
+    var files: [ChatPickedFile] = []
+    var problems: [String] = []
+    for url in urls {
+      let scoped = url.startAccessingSecurityScopedResource()
+      defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+      let name = url.lastPathComponent
+      if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+        let reason = MediaTransfer.rejectionReason(byteCount: size)
+      {
+        problems.append("\(name): \(reason)")
+        continue
+      }
+      guard let data = try? Data(contentsOf: url) else {
+        problems.append("Could not read \(name).")
+        continue
+      }
+      files.append(ChatPickedFile(name: name, data: data))
+    }
+    return (files, problems)
+  }
+
   static func split(_ files: [ChatPickedFile]) -> (images: [ChatPickedFile], uploads: [ChatPickedFile]) {
     (files.filter { isImage(name: $0.name) }, files.filter { !isImage(name: $0.name) })
   }

@@ -58,4 +58,25 @@ final class ChatGitSendTests: XCTestCase {
     XCTAssertEqual(inbox.take(chat: "one"), ["/u/a", "/u/b"])
     XCTAssertTrue(inbox.take(chat: "one").isEmpty)
   }
+
+  func test_picked_files_are_read_and_a_missing_or_oversized_one_says_why() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let notes = dir.appendingPathComponent("notes.txt")
+    try Data("hi".utf8).write(to: notes)
+    let big = dir.appendingPathComponent("big.bin")
+    FileManager.default.createFile(atPath: big.path, contents: nil)
+    let handle = try FileHandle(forWritingTo: big)
+    try handle.truncate(atOffset: UInt64(MediaTransfer.byteLimit + 1))
+    try handle.close()
+    let missing = dir.appendingPathComponent("gone.txt")
+
+    let read = ChatFileSend.read([notes, big, missing])
+
+    XCTAssertEqual(read.files, [ChatPickedFile(name: "notes.txt", data: Data("hi".utf8))])
+    XCTAssertEqual(read.problems.count, 2)
+    XCTAssertTrue(read.problems[0].hasPrefix("big.bin: "), read.problems[0])
+    XCTAssertEqual(read.problems[1], "Could not read gone.txt.")
+  }
 }

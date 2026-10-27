@@ -740,26 +740,27 @@ struct ChatView: View {
   /// Images attach like a photo from the library; any other file is uploaded and its path joins the
   /// draft of this chat, even when the upload lands after another chat is on screen.
   private func attach(files urls: [URL]) {
-    let picked = urls.compactMap { url -> ChatPickedFile? in
-      let stop = url.startAccessingSecurityScopedResource()
-      defer { if stop { url.stopAccessingSecurityScopedResource() } }
-      guard let data = try? Data(contentsOf: url) else { return nil }
-      return ChatPickedFile(name: url.lastPathComponent, data: data)
-    }
-    let split = ChatFileSend.split(picked)
-    for image in split.images.prefix(attachments.room) { attachments.add(data: image.data) }
-    guard let onUpload, !split.uploads.isEmpty else { return }
     let chat = model.chatName
     let inbox = uploads
     let attachments = attachments
+    let onUpload = onUpload
     Task {
-      for file in split.uploads {
-        if let path = await onUpload(file.data, file.name) {
-          inbox?.add([path], chat: chat)
-        } else {
-          attachments.error = "Could not upload \(file.name)."
+      let read = await Task.detached { ChatFileSend.read(urls) }.value
+      var problems = read.problems
+      let split = ChatFileSend.split(read.files)
+      let room = attachments.room
+      for image in split.images.prefix(room) { attachments.add(data: image.data) }
+      if split.images.count > room { problems.append("Only \(room) more pictures fit in this message.") }
+      if let onUpload {
+        for file in split.uploads {
+          if let path = await onUpload(file.data, file.name) {
+            inbox?.add([path], chat: chat)
+          } else {
+            problems.append("Could not upload \(file.name).")
+          }
         }
       }
+      if let first = problems.first { attachments.error = first }
     }
   }
 
