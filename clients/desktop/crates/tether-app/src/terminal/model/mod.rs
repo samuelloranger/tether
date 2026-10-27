@@ -10,6 +10,7 @@ use tether_core::osc::Progress;
 use tether_core::paste::ClipboardSnapshot;
 use tether_core::profiles::Machine;
 use tether_core::resize::{GridSize, ResizeDebouncer};
+use tether_core::sidebar::Row;
 use tether_core::tabs::TabStrip;
 use tether_core::throttle::{BellThrottle, ToastThrottle};
 use tether_core::zmx::ZmxSession;
@@ -46,13 +47,7 @@ pub enum Screen {
     Failed { sentence: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TabJump {
-    Next,
-    Prev,
-    Position(u8),
-    Last,
-}
+pub use tether_core::sidebar::TabJump;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FontStep {
@@ -499,11 +494,8 @@ impl TerminalModel {
                 self.chats_focus(f, now, &mut fx);
             }
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
-            Msg::SelectTab(name) => {
-                self.chat_leave(now, &mut fx);
-                self.activate(&name, &mut fx);
-            }
-            Msg::TabShortcut(jump) => self.on_jump(jump, &mut fx),
+            Msg::SelectTab(name) => self.select_row(Row::Terminal(name), now, &mut fx),
+            Msg::TabShortcut(jump) => self.on_jump(jump, now, &mut fx),
             Msg::NewSessionBegin => self.on_new_begin(),
             Msg::NewSessionCommit(name) => self.on_new_commit(&name, now, &mut fx),
             Msg::NewSessionCancel => self.naming = None,
@@ -573,6 +565,7 @@ impl TerminalModel {
                     alt: false,
                     ctrl: true,
                 },
+                now,
                 &mut fx,
             ),
             Msg::PasteClipboard => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
@@ -982,6 +975,52 @@ pub(crate) mod tests {
         }
         m
     }
+
+    /// `live` on `sessions`, with the host's `acp status` listing `chats` (one JSON line each).
+    pub fn live_with_chats(
+        sessions: Vec<ZmxSession>,
+        chats: &str,
+    ) -> (TerminalModel, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut m, _) = TerminalModel::new(machine(), TermStyle::default(), grid());
+        m.set_chat_files(tether_core::acp::files::ChatFiles::new(
+            dir.path().to_path_buf(),
+            "devbox:22",
+        ));
+        let mut fx = m.handle(Msg::Opened, t(0));
+        fx.extend(m.handle(Msg::Tick, t(1)));
+        let tag = fx
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::Chat(chat::ChatJob::Exec { tag, .. }) if tag == chat::ExecTag::Status => {
+                    Some(tag)
+                }
+                _ => None,
+            })
+            .expect("a status read");
+        m.handle(
+            Msg::Chat(chat::ChatMsg::ExecDone {
+                tag,
+                result: Ok(chats.to_string()),
+            }),
+            t(2),
+        );
+        let fx = m.handle(
+            Msg::Ls {
+                id: 1,
+                result: Ok(sessions),
+            },
+            t(3),
+        );
+        for e in fx {
+            if let Effect::Attach { name, .. } = e {
+                m.handle(Msg::Attached { name }, t(4));
+            }
+        }
+        (m, dir)
+    }
+
+    pub const ONE_CHAT: &str = r#"{"name":"chat-c","state":"running","logBytes":10,"cwd":"/srv/api","created":100,"turn":"idle","title":"Fix login"}"#;
 
     #[test]
     fn a_tab_label_follows_osc_7_after_cd() {

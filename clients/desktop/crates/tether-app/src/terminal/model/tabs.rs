@@ -1,4 +1,6 @@
+use super::chat::ChatMsg;
 use super::*;
+use tether_core::sidebar;
 use tether_core::tabs::CreateOutcome;
 use tether_core::zmx::valid_session_name;
 
@@ -87,19 +89,36 @@ impl TerminalModel {
         }
     }
 
-    pub(crate) fn on_jump(&mut self, jump: TabJump, fx: &mut Vec<Effect>) {
-        let Some(strip) = self.strip.as_ref() else {
-            return;
-        };
-        let target = match jump {
-            TabJump::Next => strip.next(),
-            TabJump::Prev => strip.prev(),
-            TabJump::Position(n) => strip.at_position(n as usize),
-            TabJump::Last => strip.last(),
+    pub(crate) fn sidebar_rows(&self) -> Vec<Row> {
+        let terminals: Vec<String> = self
+            .strip
+            .as_ref()
+            .map(|s| s.tabs.iter().map(|t| t.name.clone()).collect())
+            .unwrap_or_default();
+        sidebar::rows(&terminals, &self.chats.tab_names())
+    }
+
+    pub(crate) fn active_row(&self) -> Option<Row> {
+        match self.chats.active() {
+            Some(chat) => Some(Row::Chat(chat.to_string())),
+            None => self.active_name().map(|n| Row::Terminal(n.to_string())),
         }
-        .map(str::to_string);
-        if let Some(name) = target {
-            self.activate(&name, fx);
+    }
+
+    /// What a click on the row does.
+    pub(crate) fn select_row(&mut self, row: Row, now: Duration, fx: &mut Vec<Effect>) {
+        match row {
+            Row::Chat(name) => self.on_chat(ChatMsg::Select(name), now, fx),
+            Row::Terminal(name) => {
+                self.chat_leave(now, fx);
+                self.activate(&name, fx);
+            }
+        }
+    }
+
+    pub(crate) fn on_jump(&mut self, jump: TabJump, now: Duration, fx: &mut Vec<Effect>) {
+        if let Some(row) = sidebar::jump(&self.sidebar_rows(), self.active_row().as_ref(), jump) {
+            self.select_row(row, now, fx);
         }
     }
 
@@ -324,6 +343,23 @@ mod tests {
         assert_eq!(m.view().header.session, "b");
         m.handle(Msg::TabShortcut(TabJump::Last), t(5));
         assert_eq!(m.view().header.session, "c");
+    }
+
+    #[test]
+    fn ctrl_tab_walks_into_the_chats_and_back() {
+        let (mut m, _dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1), session("b", 2)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(Msg::SelectTab("b".into()), t(10));
+        m.handle(Msg::TabShortcut(TabJump::Next), t(11));
+        assert!(m.chat_active());
+        assert_eq!(m.chats.active(), Some("chat-c"));
+        m.handle(Msg::TabShortcut(TabJump::Next), t(12));
+        assert!(!m.chat_active());
+        assert_eq!(m.view().header.session, "a");
+        m.handle(Msg::TabShortcut(TabJump::Position(3)), t(13));
+        assert_eq!(m.chats.active(), Some("chat-c"));
     }
 
     #[test]

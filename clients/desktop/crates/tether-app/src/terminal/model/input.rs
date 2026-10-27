@@ -39,12 +39,18 @@ impl TerminalModel {
                 fx.push(Effect::Ui(UiEffect::AllowIme));
                 fx.push(Effect::Redraw);
             }
-            KeyAction::Tether(cmd) => self.on_command(cmd, mods, fx),
+            KeyAction::Tether(cmd) => self.on_command(cmd, mods, now, fx),
             KeyAction::Ignore => {}
         }
     }
 
-    pub(crate) fn on_command(&mut self, cmd: TetherCommand, mods: Mods, fx: &mut Vec<Effect>) {
+    pub(crate) fn on_command(
+        &mut self,
+        cmd: TetherCommand,
+        mods: Mods,
+        now: Duration,
+        fx: &mut Vec<Effect>,
+    ) {
         let active = self.active_name().map(str::to_string);
         match cmd {
             TetherCommand::Paste => fx.push(Effect::Ui(UiEffect::ReadClipboard)),
@@ -65,10 +71,10 @@ impl TerminalModel {
                 fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Smaller)))
             }
             TetherCommand::FontReset => fx.push(Effect::Ui(UiEffect::FontStep(FontStep::Reset))),
-            TetherCommand::NextTab => self.on_jump(TabJump::Next, fx),
-            TetherCommand::PrevTab => self.on_jump(TabJump::Prev, fx),
-            TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), fx),
-            TetherCommand::LastTab => self.on_jump(TabJump::Last, fx),
+            TetherCommand::NextTab => self.on_jump(TabJump::Next, now, fx),
+            TetherCommand::PrevTab => self.on_jump(TabJump::Prev, now, fx),
+            TetherCommand::TabAt(n) => self.on_jump(TabJump::Position(n), now, fx),
+            TetherCommand::LastTab => self.on_jump(TabJump::Last, now, fx),
             TetherCommand::NewTab => self.on_new_begin(),
             TetherCommand::Find => self.on_search_open(fx),
             TetherCommand::Snippets => self.on_palette_open(),

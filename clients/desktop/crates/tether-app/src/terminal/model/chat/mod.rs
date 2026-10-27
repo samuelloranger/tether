@@ -417,7 +417,7 @@ impl Chats {
         self.tab_names().iter().any(|n| n == name)
     }
 
-    fn tab_names(&self) -> Vec<String> {
+    pub fn tab_names(&self) -> Vec<String> {
         self.ordered().into_iter().map(|c| c.name.clone()).collect()
     }
 
