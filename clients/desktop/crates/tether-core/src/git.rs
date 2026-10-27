@@ -535,39 +535,155 @@ pub enum LineKind {
     Added,
     Removed,
     Context,
+    /// Inside a file but not a line of code: `\ No newline at end of file`, `Binary files … differ`.
+    Note,
 }
 
-pub fn classify(diff: &str) -> Vec<(LineKind, &str)> {
+/// A classified line and how many marker columns precede its code: one in a plain diff, one per
+/// parent in a combined (merge) diff.
+pub type ClassifiedLine<'a> = (LineKind, &'a str, usize);
+
+/// A line's prefix only means something in the right place: inside a hunk the first column is the
+/// marker (so a removed `-- comment` is a removal, not a `--- ` header), and the hunk's own line
+/// counts say where it ends. Mirrors iOS `GitDiffModel.classify`.
+pub fn classify(diff: &str) -> Vec<ClassifiedLine<'_>> {
+    use LineKind::*;
     if diff.is_empty() {
         return Vec::new();
     }
-    diff.split('\n').map(|raw| (line_kind(raw), raw)).collect()
+    let mut raw: Vec<&str> = diff.split('\n').collect();
+    if raw.last() == Some(&"") {
+        raw.pop();
+    }
+    let mut lines = Vec::with_capacity(raw.len());
+    let (mut in_file, mut in_hunk) = (false, false);
+    // A hunk has started in this file: a +/-/context line after one whose counts ran out is still
+    // code (a miscounted header), unless it reads as the next file's header.
+    let mut after_hunk = false;
+    let mut parents = 1usize;
+    let (mut old_left, mut new_left) = (0i64, 0i64);
+
+    for text in raw {
+        let first = text.as_bytes().first().copied();
+        if in_hunk {
+            if parents == 1 {
+                let kind = match first {
+                    Some(b'+') => {
+                        new_left -= 1;
+                        Some(Added)
+                    }
+                    Some(b'-') => {
+                        old_left -= 1;
+                        Some(Removed)
+                    }
+                    Some(b' ') | None => {
+                        old_left -= 1;
+                        new_left -= 1;
+                        Some(Context)
+                    }
+                    Some(b'\\') => Some(Note),
+                    // A stray line is shown, not allowed to end the hunk and take the rest of its
+                    // lines with it.
+                    _ => (!leaves_hunk(text)).then_some(Note),
+                };
+                if let Some(kind) = kind {
+                    lines.push((kind, text, 1));
+                    if old_left <= 0 && new_left <= 0 {
+                        in_hunk = false;
+                    }
+                    continue;
+                }
+                in_hunk = false;
+            } else if let Some(kind) = combined_kind(text, parents) {
+                lines.push((kind, text, parents));
+                continue;
+            } else if !leaves_hunk(text) {
+                lines.push((Note, text, 1));
+                continue;
+            } else {
+                in_hunk = false;
+            }
+        }
+
+        let kind =
+            if text.starts_with("diff ") || text.starts_with("--- ") || text.starts_with("+++ ") {
+                in_file = true;
+                after_hunk = false;
+                FileHeader
+            } else if after_hunk && parents == 1 && matches!(first, Some(b'+' | b'-' | b' ')) {
+                match first {
+                    Some(b'+') => Added,
+                    Some(b'-') => Removed,
+                    _ => Context,
+                }
+            } else if in_file && first == Some(b'@') {
+                let ats = text.bytes().take_while(|&b| b == b'@').count();
+                parents = ats.saturating_sub(1).max(1);
+                (old_left, new_left) = hunk_counts(text);
+                in_hunk = parents > 1 || old_left > 0 || new_left > 0;
+                after_hunk = true;
+                Hunk
+            } else if text.starts_with("Binary files ") || first == Some(b'\\') {
+                Note
+            } else if in_file {
+                FileHeader
+            } else {
+                Context
+            };
+        lines.push((kind, text, 1));
+    }
+    lines
 }
 
-fn line_kind(line: &str) -> LineKind {
-    const HEADERS: [&str; 10] = [
-        "diff ",
-        "index ",
-        "--- ",
-        "+++ ",
-        "new file",
-        "deleted file",
-        "rename ",
-        "similarity ",
-        "old mode ",
-        "new mode ",
-    ];
-    if HEADERS.iter().any(|h| line.starts_with(h)) {
-        LineKind::FileHeader
-    } else if line.starts_with("@@") {
-        LineKind::Hunk
-    } else if line.starts_with('+') {
+/// Only the next file or the next hunk ends a hunk early.
+fn leaves_hunk(line: &str) -> bool {
+    line.starts_with('@') || line.starts_with("diff ")
+}
+
+/// `@@ -a,b +c,d @@`: the lines the hunk spans on each side (a missing count means one).
+fn hunk_counts(header: &str) -> (i64, i64) {
+    let (mut old, mut new) = (0, 0);
+    for token in header.split(' ').filter(|t| !t.is_empty()).skip(1) {
+        let sign = match token.as_bytes()[0] {
+            b'-' => '-',
+            b'+' => '+',
+            _ => break,
+        };
+        let mut parts = token[1..].split(',');
+        parts.next();
+        let count = parts.next().map_or(1, |c| c.parse().unwrap_or(0));
+        if sign == '-' {
+            old = count;
+        } else {
+            new = count;
+        }
+    }
+    (old, new)
+}
+
+/// A combined diff marks each parent in its own column; a line added against any parent reads as
+/// an addition. Anything without a marker in every column has left the hunk.
+fn combined_kind(line: &str, parents: usize) -> Option<LineKind> {
+    let markers = &line.as_bytes()[..parents.min(line.len())];
+    if markers.len() < parents {
+        return line.is_empty().then_some(LineKind::Context);
+    }
+    let (mut added, mut removed) = (false, false);
+    for marker in markers {
+        match marker {
+            b'+' => added = true,
+            b'-' => removed = true,
+            b' ' => {}
+            _ => return None,
+        }
+    }
+    Some(if added {
         LineKind::Added
-    } else if line.starts_with('-') {
+    } else if removed {
         LineKind::Removed
     } else {
         LineKind::Context
-    }
+    })
 }
 
 /// Splits `git show --format=%b%x1e` into message and patch. Without the marker git separates
@@ -616,8 +732,9 @@ impl DiffFile {
     }
 }
 
-fn drop_first(s: &str) -> &str {
-    s.chars().next().map_or("", |c| &s[c.len_utf8()..])
+/// Markers are ASCII, so `n` bytes are `n` characters.
+fn drop_markers(s: &str, n: usize) -> &str {
+    s.get(n.min(s.len())..).unwrap_or("")
 }
 
 pub fn group_diff(patch: &str) -> Vec<DiffFile> {
@@ -644,13 +761,12 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
         *removed = 0;
     };
 
-    for (kind, text) in classify(patch) {
-        if text.starts_with("diff --git ") {
-            flush(&mut files, &path, &mut rows, &mut added, &mut removed);
-            path = new_path(text);
-            continue;
-        }
+    for (kind, text, markers) in classify(patch) {
         if kind == LineKind::FileHeader {
+            if is_file_start(text) {
+                flush(&mut files, &path, &mut rows, &mut added, &mut removed);
+                path = new_path(text);
+            }
             continue;
         }
         let row = |kind, old_line, new_line, text: &str| DiffRow {
@@ -660,11 +776,6 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
             new_line,
             text: text.to_owned(),
         };
-        // Neither is a line of either file: they take no number and keep their words.
-        if !path.is_empty() && (text.starts_with("Binary files ") || text.starts_with('\\')) {
-            rows.push(row(RowKind::Plain, None, None, text));
-            continue;
-        }
         match kind {
             LineKind::Hunk => {
                 (old_line, new_line) = hunk_start(text);
@@ -674,7 +785,12 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
             }
             LineKind::Added => {
                 added += 1;
-                rows.push(row(RowKind::Added, None, Some(new_line), drop_first(text)));
+                rows.push(row(
+                    RowKind::Added,
+                    None,
+                    Some(new_line),
+                    drop_markers(text, markers),
+                ));
                 new_line += 1;
             }
             LineKind::Removed => {
@@ -683,7 +799,7 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
                     RowKind::Removed,
                     Some(old_line),
                     None,
-                    drop_first(text),
+                    drop_markers(text, markers),
                 ));
                 old_line += 1;
             }
@@ -692,11 +808,12 @@ pub fn group_diff(patch: &str) -> Vec<DiffFile> {
                     RowKind::Context,
                     Some(old_line),
                     Some(new_line),
-                    drop_first(text),
+                    drop_markers(text, markers),
                 ));
                 old_line += 1;
                 new_line += 1;
             }
+            // A note is no line of either file: it takes no number and keeps its words.
             _ => rows.push(row(RowKind::Plain, None, None, text)),
         }
     }
@@ -711,10 +828,20 @@ pub fn diff_stat(files: &[DiffFile]) -> (u32, u32) {
         .fold((0, 0), |(a, r), f| (a + f.added, r + f.removed))
 }
 
+fn is_file_start(header: &str) -> bool {
+    ["diff --git ", "diff --cc ", "diff --combined "]
+        .iter()
+        .any(|p| header.starts_with(p))
+}
+
 fn new_path(header: &str) -> String {
+    if let Some(at) = header.find(" b/") {
+        return header[at + 3..].to_owned();
+    }
     header
-        .find(" b/")
-        .map_or(header, |at| &header[at + 3..])
+        .strip_prefix("diff --cc ")
+        .or_else(|| header.strip_prefix("diff --combined "))
+        .unwrap_or(header)
         .to_owned()
 }
 
@@ -868,6 +995,77 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
     fn plus_minus_file_headers_are_not_added_or_removed() {
         let kinds: Vec<_> = classify("--- a/x\n+++ b/x").iter().map(|l| l.0).collect();
         assert_eq!(kinds, [LineKind::FileHeader, LineKind::FileHeader]);
+    }
+
+    #[test]
+    fn a_removed_double_dash_line_inside_a_hunk_is_a_removal() {
+        let patch = "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,1 @@\n--- comment\n select 1;\n";
+        let kinds: Vec<_> = classify(patch).iter().map(|l| l.0).collect();
+        use LineKind::*;
+        assert_eq!(
+            kinds,
+            [FileHeader, FileHeader, FileHeader, Hunk, Removed, Context]
+        );
+        let files = group_diff(patch);
+        assert_eq!((files[0].added, files[0].removed), (0, 1));
+        assert_eq!(files[0].rows[1].text, "-- comment");
+        assert_eq!(files[0].rows[1].old_line, Some(1));
+    }
+
+    #[test]
+    fn an_added_double_plus_line_inside_a_hunk_is_an_addition() {
+        let patch = "diff --git a/a.c b/a.c\n--- a/a.c\n+++ b/a.c\n@@ -1 +1,2 @@\n x;\n+++x;\n";
+        let files = group_diff(patch);
+        assert_eq!((files[0].added, files[0].removed), (1, 0));
+        let added = files[0]
+            .rows
+            .iter()
+            .find(|r| r.kind == RowKind::Added)
+            .unwrap();
+        assert_eq!(added.text, "++x;");
+        assert_eq!(added.new_line, Some(2));
+    }
+
+    #[test]
+    fn the_next_files_headers_follow_a_hunk_whose_counts_ran_out() {
+        let patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+z\n";
+        let files = group_diff(patch);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[1].path, "b");
+        assert_eq!((files[1].added, files[1].removed), (1, 0));
+    }
+
+    #[test]
+    fn hunk_counts_default_to_one_when_omitted() {
+        assert_eq!(hunk_counts("@@ -3 +4,0 @@ fn x"), (1, 0));
+        assert_eq!(hunk_counts("@@ -0,0 +1,12 @@"), (0, 12));
+    }
+
+    #[test]
+    fn a_combined_diff_reads_one_marker_per_parent() {
+        let patch = "diff --cc m.txt\nindex 1,2..3\n--- a/m.txt\n+++ b/m.txt\n@@@ -1,1 -1,1 +1,2 @@@\n  kept\n++both\n- gone\n";
+        let files = group_diff(patch);
+        assert_eq!(files[0].path, "m.txt");
+        let rows: Vec<_> = files[0]
+            .rows
+            .iter()
+            .skip(1)
+            .map(|r| (r.kind, r.text.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (RowKind::Context, "kept"),
+                (RowKind::Added, "both"),
+                (RowKind::Removed, "gone")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_trailing_newline_of_a_patch_adds_no_row() {
+        let files = group_diff("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n");
+        assert_eq!(files[0].rows.len(), 3);
     }
 
     #[test]
