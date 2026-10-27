@@ -1,4 +1,4 @@
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { Field, GhostButton, PrimaryButton, SecondaryButton, DangerButton } from "components.slint";
 
 export struct AgentOption { label: string, description: string, selected: bool }
@@ -72,6 +72,7 @@ component OptionRow inherits Rectangle {
     border-width: 1px;
     border-color: root.option.selected ? Tokens.accent : Tokens.border;
     background: root.option.selected ? Tokens.accent.with-alpha(0.12) : touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
         padding: 7px;
         padding-left: 12px;

@@ -1,4 +1,4 @@
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { IconButton, Segment } from "components.slint";
 import { ListView, ScrollView } from "std-widgets.slint";
 
@@ -133,6 +133,7 @@ component SmallButton inherits Rectangle {
     border-width: primary ? 0px : 1px;
     border-color: Tokens.border;
     background: !enabled ? Tokens.raised : primary ? (touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent) : (touch.has-hover ? Tokens.surface-hover : transparent);
+    animate background { duration: Motion.fast; easing: ease-out; }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
@@ -174,6 +175,7 @@ component GitRowItem inherits Rectangle {
     in property <int> index;
     height: 52px;
     background: touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
     touch := TouchArea { mouse-cursor: pointer; clicked => { GitVm.row(root.index); } }
     HorizontalLayout {
@@ -316,6 +318,7 @@ component PrPage inherits ScrollView {
                 for check[i] in GitVm.checks: Rectangle {
                     height: 22px;
                     background: check-touch.has-hover && check.linked ? Tokens.surface-hover : transparent;
+                    animate background { duration: Motion.fast; easing: ease-out; }
                     HorizontalLayout {
                         spacing: 8px;
                         VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: GitStyle.tone(check.tone); } }
@@ -378,6 +381,10 @@ export component GitSidePanel inherits Rectangle {
     property <length> min-panel-width: 300px;
     width: clamp(GitVm.panel-width, root.min-panel-width, max(root.min-panel-width, root.max-panel-width));
     background: Tokens.surface;
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     Rectangle { x: 0; width: 1px; background: resize.has-hover || resize.pressed ? Tokens.accent : Tokens.border; }
     VerticalLayout {
         Rectangle {
@@ -560,6 +567,7 @@ component MdBlock inherits VerticalLayout {
             width: min(380px, link-label.preferred-width + 16px);
             border-radius: 11px;
             background: link-touch.has-hover ? Tokens.accent.with-alpha(0.2) : Tokens.accent.with-alpha(0.1);
+            animate background { duration: Motion.fast; easing: ease-out; }
             link-label := Text {
                 x: 8px;
                 width: parent.width - 16px;
@@ -576,10 +584,14 @@ component MdBlock inherits VerticalLayout {
 
 export component GitOverlays inherits Rectangle {
     // Covers the grid under the terminal header (DESIGN.md: overlays cover the grid).
-    if GitVm.md-open: Rectangle {
+    if GitVm.md-open: md := Rectangle {
         y: 52px;
         height: parent.height - 52px;
         background: Tokens.background;
+        property <bool> shown;
+        opacity: md.shown ? 1 : 0;
+        animate opacity { duration: Motion.base; easing: ease-out; }
+        Timer { interval: 30ms; running: !md.shown; triggered => { md.shown = true; } }
         TouchArea { }
         VerticalLayout {
             Rectangle {
@@ -621,14 +633,19 @@ export component GitOverlays inherits Rectangle {
             }
         }
     }
-    if GitVm.dialog-open: Rectangle {
+    if GitVm.dialog-open: gd := Rectangle {
         background: Tokens.background.with-alpha(0.62);
+        property <bool> shown;
+        opacity: gd.shown ? 1 : 0;
+        animate opacity { duration: Motion.base; easing: ease-out; }
+        Timer { interval: 30ms; running: !gd.shown; triggered => { gd.shown = true; } }
         TouchArea { }
         Rectangle {
             width: min(420px, parent.width - 48px);
             height: dialog-col.preferred-height;
             x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
+            y: (parent.height - self.height) / 2 + (gd.shown ? 0 : Motion.rise);
+            animate y { duration: Motion.base; easing: ease-out; }
             background: Tokens.surface;
             border-radius: 16px;
             border-width: 1px;
@@ -644,6 +661,7 @@ export component GitOverlays inherits Rectangle {
                     border-width: 1px;
                     border-color: method.selected ? Tokens.accent : Tokens.border;
                     background: method.selected ? Tokens.accent.with-alpha(0.12) : (method-touch.has-hover ? Tokens.surface-hover : transparent);
+                    animate background { duration: Motion.fast; easing: ease-out; }
                     Text {
                         x: 12px;
                         width: parent.width - 24px;

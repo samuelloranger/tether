@@ -1,4 +1,4 @@
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { IconButton, Segment, ConfirmDialog } from "components.slint";
 import { MdLinkVm, MdItemVm, MdTable, DiffLineVm } from "git.slint";
 import { Heat, TextDot } from "agents.slint";
@@ -411,6 +411,7 @@ component Pressable inherits Rectangle {
     callback clicked();
     out property <bool> hovered: touch.has-hover;
     background: root.hover-fill && touch.has-hover && root.enabled ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
@@ -549,6 +550,7 @@ component Md inherits VerticalLayout {
             width: min(360px, link-label.preferred-width + 16px);
             border-radius: 11px;
             background: link-touch.has-hover ? Tokens.accent.with-alpha(0.2) : Tokens.accent.with-alpha(0.1);
+            animate background { duration: Motion.fast; easing: ease-out; }
             link-label := Text {
                 x: 8px;
                 width: parent.width - 16px;
@@ -994,7 +996,8 @@ component Row inherits VerticalLayout {
     if root.r.kind == 12: HorizontalLayout {
         spacing: 8px;
         padding-top: 2px;
-        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; } }
+        // Breathes while the agent works, so a long turn still reads as alive.
+        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; opacity: 0.6 + 0.4 * sin(animation-tick() / 1400ms * 360deg); } }
         Text { text: root.r.text; font-size: 12.5px; font-weight: 550; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
     }
     if root.r.kind == 13: Pressable {
@@ -1103,6 +1106,7 @@ component PaletteList inherits Rectangle {
                 height: 32px;
                 border-radius: 8px;
                 background: i == ChatVm.palette-index ? Tokens.raised : row-touch.has-hover ? Tokens.surface-hover : transparent;
+                animate background { duration: Motion.fast; easing: ease-out; }
                 HorizontalLayout {
                     padding-left: 10px;
                     padding-right: 10px;
@@ -1305,6 +1309,7 @@ component QField inherits Rectangle {
     background: Tokens.raised;
     border-width: 1px;
     border-color: input.has-focus ? Tokens.accent.with-alpha(0.55) : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     init => { if (root.focus-on-open) { input.focus(); } }
     input := TextInput {
         x: 12px;
@@ -1497,6 +1502,7 @@ component Composer inherits VerticalLayout {
                 border-radius: 15px;
                 opacity: ChatVm.can-attach && !ChatVm.dimmed ? 1 : 0.45;
                 background: attach-touch.has-hover && ChatVm.can-attach ? Tokens.surface-hover : Tokens.raised;
+                animate background { duration: Motion.fast; easing: ease-out; }
                 Image { source: @image-url("icons/plus.svg"); colorize: Tokens.text-secondary; width: 13px; height: 13px; x: 8.5px; y: 8.5px; }
                 attach-touch := TouchArea {
                     enabled: ChatVm.can-attach && !ChatVm.dimmed;
@@ -1513,6 +1519,7 @@ component Composer inherits VerticalLayout {
             border-width: 1px;
             border-color: input.has-focus ? Tokens.accent.with-alpha(0.6) : Tokens.border;
             opacity: ChatVm.dimmed ? 0.55 : 1;
+            animate border-color, opacity { duration: Motion.base; easing: ease-out; }
             clip: true;
             scroller := Flickable {
                 x: 16px;
@@ -1566,6 +1573,7 @@ component Composer inherits VerticalLayout {
                 height: 32px;
                 border-radius: 16px;
                 background: ChatVm.stopping ? Tokens.danger.with-alpha(0.2) : ChatVm.action-enabled ? (action-touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent) : Tokens.text-faint.with-alpha(0.25);
+                animate background { duration: Motion.fast; easing: ease-out; }
                 accessible-role: button;
                 accessible-label: ChatVm.action-label;
                 if ChatVm.stopping: Image { source: @image-url("icons/stop.svg"); colorize: Tokens.danger; width: 14px; height: 14px; x: 9px; y: 9px; }
@@ -1730,6 +1738,7 @@ export component ChatPane inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 border-radius: 14px;
                 background: jump-touch.has-hover ? Tokens.surface-hover : Tokens.raised;
+                animate background { duration: Motion.fast; easing: ease-out; }
                 border-width: 1px;
                 border-color: Tokens.border;
                 jump-row := HorizontalLayout {
@@ -1987,6 +1996,10 @@ export component ChatReview inherits Rectangle {
 
 export component ChatViewer inherits Rectangle {
     background: #000000e0;
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     TouchArea { clicked => { ChatVm.close-viewer(); } }
     // At most the picture's own size: a small screenshot is not blown up to the window.
     if !ChatVm.viewer-missing: Image {
@@ -2060,6 +2073,7 @@ component NcMenu inherits Rectangle {
                         height: 30px;
                         border-radius: 7px;
                         background: row-touch.has-hover ? Tokens.raised : transparent;
+                        animate background { duration: Motion.fast; easing: ease-out; }
                         Text {
                             x: 8px;
                             width: parent.width - 30px;
@@ -2088,12 +2102,17 @@ component NcMenu inherits Rectangle {
 
 export component NewChatDialog inherits Rectangle {
     background: Tokens.background.with-alpha(0.62);
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     TouchArea { }
     Rectangle {
         width: min(480px, parent.width - 48px);
         height: min(dialog.preferred-height, parent.height - 48px);
         x: (parent.width - self.width) / 2;
-        y: max(24px, (parent.height - self.height) / 2 - 40px);
+        y: max(24px, (parent.height - self.height) / 2 - 40px) + (root.shown ? 0 : Motion.rise);
+        animate y, height { duration: Motion.base; easing: ease-out; }
         background: Tokens.surface;
         border-radius: 16px;
         border-width: 1px;
@@ -2128,6 +2147,7 @@ export component NewChatDialog inherits Rectangle {
                             opacity: ChatVm.nc-unavailable[i] ? 0.4 : 1;
                             border-radius: 8px;
                             background: i == ChatVm.nc-agent ? Tokens.raised : agent-touch.has-hover ? Tokens.surface-hover : transparent;
+                            animate background { duration: Motion.fast; easing: ease-out; }
                             HorizontalLayout {
                                 alignment: center;
                                 spacing: 6px;
@@ -2148,6 +2168,7 @@ export component NewChatDialog inherits Rectangle {
                     border-radius: Tokens.radius-control;
                     border-width: 1px;
                     border-color: folder-input.has-focus ? Tokens.accent : Tokens.border;
+                    animate border-color { duration: Motion.fast; easing: ease-out; }
                     folder-input := TextInput {
                         x: 12px;
                         width: parent.width - 24px;
@@ -2285,6 +2306,7 @@ export component ChatSidebarRow inherits Rectangle {
     height: 30px;
     border-radius: 8px;
     background: root.tab.active ? Tokens.raised : touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
@@ -2298,6 +2320,7 @@ export component ChatSidebarRow inherits Rectangle {
             text: root.tab.title;
             overflow: elide;
             color: root.tab.active || touch.has-hover ? Tokens.text : Tokens.text-secondary;
+            animate color { duration: Motion.fast; easing: ease-out; }
             font-size: 12.5px;
             font-weight: root.tab.active ? 600 : 500;
             vertical-alignment: center;
@@ -2326,9 +2349,11 @@ export component ChatSidebarRow inherits Rectangle {
         height: 16px;
         border-radius: 5px;
         background: close-touch.has-hover ? Tokens.border : transparent;
+        animate background { duration: Motion.fast; easing: ease-out; }
         Image {
             source: @image-url("icons/close.svg");
             colorize: close-touch.has-hover ? Tokens.text : Tokens.text-secondary;
+            animate colorize { duration: Motion.fast; easing: ease-out; }
             width: 10px;
             height: 10px;
             x: (parent.width - self.width) / 2;

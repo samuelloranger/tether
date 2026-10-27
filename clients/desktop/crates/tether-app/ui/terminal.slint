@@ -1,4 +1,4 @@
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton } from "components.slint";
 import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
 import { AgentVm, AgentChip, AgentBanner, AgentSheet, Heat, TextDot } from "agents.slint";
@@ -91,6 +91,7 @@ component SearchBar inherits Rectangle {
     border-radius: 10px;
     border-width: 1px;
     border-color: field.has-focus ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     drop-shadow-blur: 18px;
     drop-shadow-color: #00000080;
     drop-shadow-offset-y: 4px;
@@ -129,6 +130,7 @@ component MenuItem inherits Rectangle {
     height: 32px;
     border-radius: 7px;
     background: touch.has-hover ? (root.danger ? Tokens.danger.with-alpha(0.12) : Tokens.raised) : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     Text {
         x: 10px;
         text: root.text;
@@ -170,9 +172,11 @@ component SideIcon inherits Rectangle {
     height: 28px;
     border-radius: 7px;
     background: touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     Image {
         source: root.icon;
         colorize: touch.has-hover ? Tokens.text : Tokens.text-secondary;
+        animate colorize { duration: Motion.fast; easing: ease-out; }
         width: 15px;
         height: 15px;
         x: (parent.width - self.width) / 2;
@@ -189,6 +193,7 @@ component SidebarAction inherits Rectangle {
     height: 30px;
     border-radius: 8px;
     background: touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
@@ -211,6 +216,7 @@ component SectionHeader inherits HorizontalLayout {
         width: 22px;
         border-radius: 6px;
         background: plus-touch.has-hover ? Tokens.surface-hover : transparent;
+        animate background { duration: Motion.fast; easing: ease-out; }
         Image { source: @image-url("icons/plus.svg"); colorize: plus-touch.has-hover ? Tokens.text : Tokens.text-faint; width: 12px; height: 12px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
         plus-touch := TouchArea {
             mouse-cursor: pointer;
@@ -226,6 +232,7 @@ component TermRow inherits Rectangle {
     height: 30px;
     border-radius: 8px;
     background: root.tab.active ? Tokens.raised : touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
@@ -236,6 +243,7 @@ component TermRow inherits Rectangle {
             text: root.tab.name;
             overflow: elide;
             color: root.tab.active || touch.has-hover ? Tokens.text : Tokens.text-secondary;
+            animate color { duration: Motion.fast; easing: ease-out; }
             font-size: 12.5px;
             font-weight: root.tab.active ? 600 : 500;
             vertical-alignment: center;
@@ -276,6 +284,7 @@ component TermRow inherits Rectangle {
         height: 16px;
         border-radius: 5px;
         background: close-touch.has-hover ? Tokens.border : transparent;
+        animate background { duration: Motion.fast; easing: ease-out; }
         Image { source: @image-url("icons/close.svg"); colorize: close-touch.has-hover ? Tokens.text : Tokens.text-secondary; width: 10px; height: 10px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
     }
     // After the row's own TouchArea so it receives the click on the close mark.
@@ -540,21 +549,32 @@ export component TerminalPage inherits Rectangle {
         }
     }
     }
-    if TerminalVm.sidebar == 2: Rectangle {
-        background: #00000066;
-        TouchArea { clicked => { TerminalVm.sidebar-dismiss(); } }
-    }
-    if TerminalVm.sidebar == 2: Sidebar {
-        x: 0;
-        height: parent.height;
-        drop-shadow-blur: 24px;
-        drop-shadow-color: #00000099;
-        picked => { TerminalVm.sidebar-dismiss(); }
+    if TerminalVm.sidebar == 2: over := Rectangle {
+        property <bool> shown;
+        Timer { interval: 30ms; running: !over.shown; triggered => { over.shown = true; } }
+        Rectangle {
+            background: #00000066;
+            opacity: over.shown ? 1 : 0;
+            animate opacity { duration: Motion.base; easing: ease-out; }
+            TouchArea { clicked => { TerminalVm.sidebar-dismiss(); } }
+        }
+        Sidebar {
+            x: over.shown ? 0 : -self.width;
+            animate x { duration: Motion.slow; easing: ease-out; }
+            height: parent.height;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000099;
+            picked => { TerminalVm.sidebar-dismiss(); }
+        }
     }
     if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
         clicked => { TerminalVm.close-menu(); }
-        Rectangle {
-            x: TerminalVm.menu-x; y: TerminalVm.menu-y; width: 180px; height: items.preferred-height;
+        menu := Rectangle {
+            x: TerminalVm.menu-x; y: TerminalVm.menu-y - (menu.shown ? 0 : 4px); width: 180px; height: items.preferred-height;
+            property <bool> shown;
+            opacity: menu.shown ? 1 : 0;
+            animate opacity, y { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 30ms; running: !menu.shown; triggered => { menu.shown = true; } }
             background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
             drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
             items := VerticalLayout {
@@ -567,9 +587,13 @@ export component TerminalPage inherits Rectangle {
     }
     if ChatVm.add-menu: TouchArea {
         clicked => { ChatVm.add-menu = false; }
-        Rectangle {
+        add := Rectangle {
             x: min(ChatVm.add-menu-x, root.width - self.width - 8px);
-            y: ChatVm.add-menu-y;
+            y: ChatVm.add-menu-y - (add.shown ? 0 : 4px);
+            property <bool> shown;
+            opacity: add.shown ? 1 : 0;
+            animate opacity, y { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 30ms; running: !add.shown; triggered => { add.shown = true; } }
             width: 190px;
             height: add-items.preferred-height;
             background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;

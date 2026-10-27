@@ -1,4 +1,4 @@
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { Field, PrimaryButton, SecondaryButton } from "components.slint";
 import { GoogleFontRow, GoogleFontsBridge } from "extras_bridge.slint";
 
@@ -11,6 +11,7 @@ component Chip inherits Rectangle {
     border-width: 1px;
     border-color: Tokens.border;
     background: touch.has-hover ? Tokens.surface-hover : Tokens.raised;
+    animate background { duration: Motion.fast; easing: ease-out; }
     touch := TouchArea { enabled: !GoogleFontsBridge.busy; mouse-cursor: pointer; clicked => { root.clicked(); } }
     label := Text {
         width: 100%;
@@ -41,6 +42,7 @@ component InstalledRow inherits Rectangle {
                 height: 28px;
                 border-radius: 8px;
                 background: remove-touch.has-hover ? Tokens.danger.with-alpha(0.12) : transparent;
+                animate background { duration: Motion.fast; easing: ease-out; }
                 remove-touch := TouchArea { mouse-cursor: pointer; clicked => { GoogleFontsBridge.remove(root.entry.id); } }
                 remove-label := Text {
                     width: 100%;

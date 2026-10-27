@@ -23,3 +23,12 @@ export global Tokens {
     out property <length> radius-control: 11px;
     out property <length> radius-button: 12px;
 }
+
+// One timing scale for every transition: hover and press colours, then panels and dialogs.
+export global Motion {
+    out property <duration> fast: 110ms;
+    out property <duration> base: 170ms;
+    out property <duration> slow: 240ms;
+    // How far a dialog or panel travels as it arrives.
+    out property <length> rise: 8px;
+}
