@@ -29,7 +29,11 @@ impl TerminalModel {
 
     pub(crate) fn toggle_sidebar(&mut self, fx: &mut Vec<Effect>) {
         match self.sidebar.visibility() {
-            Shown::Overlay => self.sidebar.overlay = false,
+            // The name field lives in the sidebar: closing it over a name being typed cancels the name.
+            Shown::Overlay => {
+                self.sidebar.overlay = false;
+                self.naming = None;
+            }
             Shown::Hidden if self.sidebar_narrow() => self.sidebar.overlay = true,
             _ => {
                 self.sidebar.closed = !self.sidebar.closed;
@@ -62,6 +66,7 @@ impl TerminalModel {
 
     pub(crate) fn on_sidebar_dismiss(&mut self, fx: &mut Vec<Effect>) {
         self.sidebar.overlay = false;
+        self.naming = None;
         self.publish_sidebar(fx);
     }
 

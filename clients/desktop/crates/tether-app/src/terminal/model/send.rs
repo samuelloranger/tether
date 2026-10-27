@@ -21,6 +21,9 @@ pub enum SendSource {
 pub struct SendJob {
     pub sources: Vec<SendSource>,
     pub fallback_dir: Option<String>,
+    /// For a chat: its draft gets the path, so a bare name the agent would resolve against
+    /// its own folder is refused when the host has no uploads folder.
+    pub needs_dir: bool,
 }
 
 pub(crate) struct SendState {
@@ -72,6 +75,7 @@ impl TerminalModel {
         fx.push(Effect::StartSend(SendJob {
             sources,
             fallback_dir,
+            needs_dir: chat.is_some(),
         }));
     }
 

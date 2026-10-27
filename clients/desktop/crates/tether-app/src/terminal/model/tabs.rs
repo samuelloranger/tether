@@ -418,6 +418,19 @@ mod tests {
     }
 
     #[test]
+    fn dismissing_the_overlay_while_naming_cancels_the_name() {
+        let mut m = live(vec![session("a", 1)]);
+        m.set_sidebar_closed(true);
+        m.handle(Msg::WindowWidth(1200.0), t(10));
+        m.handle(Msg::NewSessionBegin, t(11));
+        m.handle(Msg::SidebarDismiss, t(12));
+        assert_eq!(m.view().naming, None);
+        m.handle(Msg::NewSessionBegin, t(13));
+        m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(14));
+        assert_eq!(m.view().naming, None);
+    }
+
+    #[test]
     fn a_new_session_from_a_chat_brings_the_terminal_to_the_front() {
         let (mut m, _dir) = super::super::tests::live_with_chats(
             vec![session("a", 1)],

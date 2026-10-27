@@ -121,6 +121,12 @@ pub async fn run_send_with<R: Remote>(
         .collect();
     send(Msg::SendStarted { names });
     let dir = remote.uploads_dir().await.or(job.fallback_dir.clone());
+    if job.needs_dir && dir.is_none() {
+        send(Msg::SendFileStarted { index: 0 });
+        return send(Msg::SendFileFailed {
+            reason: "Couldn't find the uploads folder on the host.".into(),
+        });
+    }
     for (index, (src, planned)) in job.sources.into_iter().zip(plans).enumerate() {
         send(Msg::SendFileStarted { index });
         if let Err((_, reason)) = planned {
@@ -265,6 +271,7 @@ mod tests {
         let job = SendJob {
             sources: vec![SendSource::Path(a), SendSource::Path(b)],
             fallback_dir: Some("/srv/proj".into()),
+            needs_dir: false,
         };
         run_send_with(remote.clone(), job, sink, Arc::new(NoCodec)).await;
         assert_eq!(
@@ -302,6 +309,7 @@ mod tests {
                 data: vec![1],
             }],
             fallback_dir: Some("/srv/proj".into()),
+            needs_dir: false,
         };
         run_send_with(remote, job, sink, Arc::new(NoCodec)).await;
         assert!(
@@ -335,6 +343,7 @@ mod tests {
                 SendSource::Path(c),
             ],
             fallback_dir: None,
+            needs_dir: false,
         };
         run_send_with(remote.clone(), job, sink, Arc::new(NoCodec)).await;
         let log = log.lock().unwrap().clone();
@@ -367,6 +376,7 @@ mod tests {
         let job = SendJob {
             sources: vec![SendSource::Path(a), SendSource::Path(sub)],
             fallback_dir: None,
+            needs_dir: false,
         };
         run_send_with(remote, job, sink, Arc::new(NoCodec)).await;
         assert_eq!(
