@@ -405,6 +405,13 @@ final class ChatSessionModelTests: XCTestCase {
     ) { _, _ in stream }
   }
 
+  private func handshake(_ stream: ScriptedByteStream) async {
+    _ = await eventually { stream.writtenText.contains("\"method\":\"initialize\"") }
+    stream.push(ACPFixture.Controls.log(0..<1))
+    _ = await eventually { stream.writtenText.contains("session/new") }
+    stream.push(ACPFixture.Controls.log(1..<2))
+  }
+
   private func setCalls(_ stream: ScriptedByteStream) -> Int {
     stream.writtenText.components(separatedBy: "session/set_config_option").count - 1
   }
@@ -414,7 +421,7 @@ final class ChatSessionModelTests: XCTestCase {
     let defaults = defaultsStore(["model": "haiku", "effort": "medium", "mode": "gone"])
     let model = optionModel(stream, journal: ChatJournal(), defaults: defaults)
     Task { await model.connect() }
-    stream.push(ACPFixture.Controls.log(0..<2))
+    await handshake(stream)
     let sent = await eventually { stream.writtenText.contains("session/set_config_option") }
     XCTAssertTrue(sent)
     XCTAssertTrue(stream.writtenText.contains("\"configId\":\"model\""))
@@ -431,7 +438,7 @@ final class ChatSessionModelTests: XCTestCase {
     let defaults = defaultsStore(["model": "haiku"])
     let model = optionModel(stream, journal: ChatJournal(), defaults: defaults)
     Task { await model.connect() }
-    stream.push(ACPFixture.Controls.log(0..<2))
+    await handshake(stream)
     _ = await eventually { stream.writtenText.contains("session/set_config_option") }
     stream.push(Data("{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32602,\"message\":\"no\"}}\n".utf8))
     let live = await settled(model)
@@ -459,7 +466,7 @@ final class ChatSessionModelTests: XCTestCase {
     let joined = ScriptedByteStream()
     let joinedModel = optionModel(joined, journal: ChatJournal(), join: true, defaults: defaults)
     Task { await joinedModel.connect() }
-    joined.push(ACPFixture.Controls.log(0..<2))
+    joined.push(ACPFixture.Controls.log(1..<2))
     let joinedLive = await eventually { joinedModel.state.currentChoice(of: "model") == "Sonnet 5.5" }
     XCTAssertTrue(joinedLive)
     XCTAssertEqual(setCalls(joined), 0)
