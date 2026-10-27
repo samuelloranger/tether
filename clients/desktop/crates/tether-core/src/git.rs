@@ -62,8 +62,11 @@ pub fn join_repo_path(top: &str, relative: &str) -> Option<String> {
 
 /// The exec channel reports a non-zero exit as a failure and drops stdout with it. Running the
 /// script in `sh -c` also keeps it independent of the login shell (fish rejects `{ }`).
+/// `GIT_OPTIONAL_LOCKS=0`: the panel's polling must never take the index lock from a git command
+/// the user is running in the terminal.
 pub fn wrap(script: &str) -> String {
-    let inner = format!("{{ {script}\n}}; printf '\\n__TETHER_RC__%s' \"$?\"");
+    let inner =
+        format!("export GIT_OPTIONAL_LOCKS=0; {{ {script}\n}}; printf '\\n__TETHER_RC__%s' \"$?\"");
     format!("sh -c {}", shell_quote(&inner))
 }
 
@@ -1566,7 +1569,8 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
     #[test]
     fn a_wrapped_command_reports_its_exit_status_even_when_it_fails() {
         let command = wrap("echo hi; exit 3");
-        assert!(command.starts_with("sh -c '"));
+        assert!(command.starts_with("sh -c 'export GIT_OPTIONAL_LOCKS=0; "));
+        assert!(workspace_command(&RepoDir::new("/r").unwrap()).contains("GIT_OPTIONAL_LOCKS=0"));
         assert_eq!(
             unwrap_output("hi\n\n__TETHER_RC__3"),
             ("hi\n".to_owned(), Some(3))

@@ -62,6 +62,13 @@ final class GitRepositoryModelTests: XCTestCase {
     XCTAssertEqual(GitWorkspaceScript.capped("small\n").1, false)
   }
 
+  func test_the_workspace_poll_never_takes_optional_locks() {
+    for (diff, commits) in [(true, true), (true, false), (false, true)] {
+      let script = GitWorkspaceScript.workspace(diff: diff, commits: commits, knownHead: nil)
+      XCTAssertTrue(script.hasPrefix("export GIT_OPTIONAL_LOCKS=0; "), script)
+    }
+  }
+
   func test_the_cwd_announcement_is_split_from_the_output() {
     let live = GitWorkspaceScript.splitCwd("P/home/me/repo\u{1C}rest")
     XCTAssertEqual(live?.cwd, "/home/me/repo")

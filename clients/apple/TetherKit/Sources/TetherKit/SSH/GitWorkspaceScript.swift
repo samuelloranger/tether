@@ -104,8 +104,9 @@ enum GitWorkspaceScript {
     } else {
       log = "printf ''"
     }
-    // A detached HEAD has no branch name; its short hash stands in.
-    return "if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
+    // A detached HEAD has no branch name; its short hash stands in. GIT_OPTIONAL_LOCKS=0: the
+    // poll must never take the index lock from a git command the user runs in the terminal.
+    return "export GIT_OPTIONAL_LOCKS=0; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
       + "b=$(git branch --show-current 2>/dev/null); [ -n \"$b\" ] || b=$(git rev-parse --short HEAD 2>/dev/null); "
       + "printf '%s\\035' \"$b\"; "
       + "\(untracked); printf '\\035'; "
