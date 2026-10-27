@@ -41,13 +41,16 @@ enum ACPChatStatusListing {
       created: Date(timeIntervalSince1970: (object["created"] as? NSNumber)?.doubleValue ?? 0), spawn: "",
       turn: (object["turn"] as? String).flatMap(ChatHostTurn.init(rawValue:)) ?? .idle,
       hostTitle: title.flatMap { $0.isEmpty ? nil : $0 }, hasStatus: true,
-      multiClient: object["multiClient"] as? Bool == true)
+      multiClient: object["multiClient"] as? Bool == true,
+      tasks: max(0, (object["tasks"] as? NSNumber)?.intValue ?? 0))
   }
 }
 
 /// The state a drawer row shows. `running` is what a host without `acp status` can say.
 enum DrawerChatState: Equatable {
   case working, waiting, idle, running, ended
+  /// Idle with background commands still running.
+  case tasks(Int)
 
   init(_ chat: ACPChatSummary) {
     if !chat.isRunning {
@@ -58,7 +61,7 @@ enum DrawerChatState: Equatable {
       switch chat.turn {
       case .working: self = .working
       case .waiting: self = .waiting
-      case .idle: self = .idle
+      case .idle: self = chat.tasks > 0 ? .tasks(chat.tasks) : .idle
       }
     }
   }
@@ -70,6 +73,7 @@ enum DrawerChatState: Equatable {
     case .idle: "idle"
     case .running: "running"
     case .ended: "ended"
+    case let .tasks(count): count == 1 ? "1 task" : "\(count) tasks"
     }
   }
 }

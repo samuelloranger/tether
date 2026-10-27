@@ -65,6 +65,16 @@ struct ACPToolFields: Equatable, Sendable {
   var parentId: String?
   /// Scalar fields of `rawInput`, stringified; a subagent launch fills them in progressively.
   var input: [String: String]?
+  /// `_meta.terminal_info.terminal_id`: the call runs in a terminal the adapter owns.
+  var terminalId: String?
+  /// `_meta.claudeCode.toolResponse.backgroundTaskId`: the command went to the background.
+  var backgroundTaskId: String?
+  /// `_meta.terminal_exit` arrived.
+  var terminalExited: Bool?
+  /// `_meta.terminal_output.data`: the whole output so far.
+  var terminalOutput: String?
+  /// `_meta.terminal_output_delta.data`: more output to append.
+  var terminalDelta: String?
 }
 
 struct ACPPlanEntry: Codable, Equatable, Sendable {
@@ -126,6 +136,9 @@ enum ACPUpdate: Equatable, Sendable {
   case usage(used: Int, size: Int, cost: ChatCost?, modelId: String?)
   case configOptions([ACPConfigOption])
   case commands([ACPCommand])
+  case notice(severity: String?, title: String, description: String?)
+  case compactionUpdate(id: String, status: String, summary: String?, error: String?)
+  case compactionSummaryChunk(id: String, text: String)
   case unknown(kind: String)
 }
 
@@ -302,9 +315,31 @@ enum ACPDecoder {
         let hint = (command["input"] as? JSON)?["hint"] as? String
         return ACPCommand(name: name, description: command["description"] as? String ?? "", hint: hint)
       })
+    case "notice":
+      guard let title = update["title"] as? String else { return .unknown(kind: kind) }
+      return .notice(
+        severity: update["severity"] as? String, title: title, description: update["description"] as? String)
+    case "compaction_update":
+      guard let id = update["compactionId"] as? String, let status = update["status"] as? String else {
+        return .unknown(kind: kind)
+      }
+      let summary = (update["summary"] as? [JSON]).map { blocks in
+        blocks.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
+      }
+      return .compactionUpdate(id: id, status: status, summary: summary, error: errorText(update["error"]))
+    case "compaction_summary_chunk":
+      guard let id = update["compactionId"] as? String, let text = contentText(update["content"]) else {
+        return .unknown(kind: kind)
+      }
+      return .compactionSummaryChunk(id: id, text: text)
     default:
       return .unknown(kind: kind)
     }
+  }
+
+  private static func errorText(_ value: Any?) -> String? {
+    if let text = value as? String { return text }
+    return (value as? JSON)?["message"] as? String
   }
 
   private static func configOptions(_ raw: [JSON]) -> [ACPConfigOption] {
@@ -349,9 +384,15 @@ enum ACPDecoder {
     guard let id = object["toolCallId"] as? String else { return nil }
     var fields = ACPToolFields(id: id)
     fields.title = object["title"] as? String
-    let meta = (object["_meta"] as? JSON)?["claudeCode"] as? JSON
+    let allMeta = object["_meta"] as? JSON
+    let meta = allMeta?["claudeCode"] as? JSON
     fields.toolName = meta?["toolName"] as? String
     fields.parentId = meta?["parentToolUseId"] as? String
+    fields.terminalId = (allMeta?["terminal_info"] as? JSON)?["terminal_id"] as? String
+    fields.backgroundTaskId = (meta?["toolResponse"] as? JSON)?["backgroundTaskId"] as? String
+    if allMeta?["terminal_exit"] != nil { fields.terminalExited = true }
+    fields.terminalOutput = (allMeta?["terminal_output"] as? JSON)?["data"] as? String
+    fields.terminalDelta = (allMeta?["terminal_output_delta"] as? JSON)?["data"] as? String
     if let input = object["rawInput"] as? JSON {
       var scalars: [String: String] = [:]
       for (key, value) in input {

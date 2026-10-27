@@ -216,6 +216,7 @@ struct ChatTranscriptBuilder {
   init(journal: ChatJournal = ChatJournal(), images: (any ChatImageSink)? = nil) {
     self.images = images
     clientId = journal.clientId
+    if journal.loadedSessionId != nil { state = ChatReducer.reduce(state, .loadRequested) }
     pending = journal.entries.enumerated()
       .sorted { ($0.element.offset, $0.offset) < ($1.element.offset, $1.offset) }
       .map(\.element)

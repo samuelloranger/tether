@@ -35,6 +35,12 @@ struct ChatToolCall: Codable, Equatable, Sendable {
   var subagent: ChatSubagent?
   /// A launch row's own tool calls, in arrival order.
   var children: [ChatToolCall] = []
+  /// Set when the adapter runs the call in a terminal; optional so snapshots from before decode.
+  var terminalId: String?
+  var backgroundTaskId: String?
+  var terminalEnded: Bool?
+  /// The terminal's output as the adapter sent it; `text` is its fenced form.
+  var terminalData: String?
 
   init(_ fields: ACPToolFields) {
     id = fields.id
@@ -54,6 +60,19 @@ struct ChatToolCall: Codable, Equatable, Sendable {
     if let value = fields.diff { diff = value }
     if let value = fields.parentId { parentId = value }
     if let value = fields.rawOutput { rawOutput = value }
+    if let value = fields.terminalId { terminalId = value }
+    if let value = fields.backgroundTaskId { backgroundTaskId = value }
+    if fields.terminalExited == true { terminalEnded = true }
+    if let value = fields.terminalOutput {
+      terminalData = value
+    } else if let value = fields.terminalDelta {
+      terminalData = (terminalData ?? "") + value
+    }
+    if let data = terminalData, !data.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      fields.terminalOutput != nil || fields.terminalDelta != nil
+    {
+      text = "```console\n" + data.trimmingTrailingWhitespace() + "\n```"
+    }
     if let value = fields.images, !value.isEmpty { images = value }
     if subagent != nil {
       if let input = fields.input { subagent?.merge(input) }
@@ -68,6 +87,10 @@ struct ChatToolCall: Codable, Equatable, Sendable {
   }
 
   var isRunning: Bool { status == .pending || status == .inProgress }
+
+  /// A command that went to the background and whose terminal has not ended. A chat whose agent
+  /// predates terminal output sends the task id but never the terminal, and so never shows one.
+  var isBackgroundRunning: Bool { backgroundTaskId != nil && terminalId != nil && terminalEnded != true }
 
   /// Whether the row should show a spinner: its own call, or a background run still making calls.
   var isActive: Bool {
@@ -92,6 +115,29 @@ struct ChatPermission: Codable, Equatable, Sendable {
   var resolvedOptionId: String?
 }
 
+struct ChatAgentNotice: Codable, Equatable, Sendable {
+  enum Severity: String, Codable, Equatable, Sendable { case info, warning, error }
+  var severity: Severity?
+  var title: String
+  var detail: String?
+}
+
+struct ChatCompaction: Codable, Equatable, Sendable {
+  enum Status: String, Codable, Equatable, Sendable { case inProgress, completed, failed, cancelled }
+  var id: String
+  var status: Status
+  var summary: String?
+  var error: String?
+}
+
+extension String {
+  fileprivate func trimmingTrailingWhitespace() -> String {
+    var end = endIndex
+    while end > startIndex, self[index(before: end)].isWhitespace { end = index(before: end) }
+    return String(self[..<end])
+  }
+}
+
 struct ChatItem: Codable, Equatable, Identifiable, Sendable {
   enum Kind: Codable, Equatable, Sendable {
     case user(text: String, imageCount: Int = 0, offset: Int, images: [ChatImageRef] = [])
@@ -104,6 +150,9 @@ struct ChatItem: Codable, Equatable, Identifiable, Sendable {
     case question(ChatQuestion)
     case plan([ACPPlanEntry])
     case notice(String)
+    /// A notice the agent sent (`notice` update): shown as its own row, never as assistant text.
+    case agentNotice(ChatAgentNotice)
+    case compaction(ChatCompaction)
     case error(String)
     /// A quiet rule in the transcript, such as where the agent's context was cleared.
     case divider(String)
@@ -147,6 +196,11 @@ struct ChatState: Codable, Equatable, Sendable {
   fileprivate var questionToolIds: Set<String> = []
   /// The id of the replayed user message the last user row came from, so two messages in a row stay two rows.
   fileprivate var lastUserMessageId: String?
+  /// The turn was started by the agent itself (a finished background command), not by a prompt.
+  fileprivate(set) var agentStarted = false
+  /// Until the answer to `session/new` or `session/load`, agent output is replayed history, not a
+  /// live turn. A snapshot from before this field was taken after that answer, so it decodes false.
+  fileprivate(set) var loading = true
 
   struct InFlightPrompt: Codable, Equatable, Sendable {
     var itemId: Int
@@ -196,6 +250,17 @@ struct ChatState: Codable, Equatable, Sendable {
     return nil
   }
 
+  /// Background commands still running, oldest first, including a subagent's.
+  var backgroundCommands: [ChatToolCall] {
+    var found: [ChatToolCall] = []
+    for item in items {
+      guard case let .tool(call) = item.kind else { continue }
+      if call.isBackgroundRunning { found.append(call) }
+      found.append(contentsOf: call.children.filter(\.isBackgroundRunning))
+    }
+    return found
+  }
+
   var pendingPermissions: [ChatPermission] {
     items.compactMap {
       if case let .permission(permission) = $0.kind, permission.resolvedOptionId == nil { return permission }
@@ -205,6 +270,35 @@ struct ChatState: Codable, Equatable, Sendable {
 }
 
 extension ChatState {
+  /// Snapshots written before the agent-started fields decode as they were.
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    items = try c.decode([ChatItem].self, forKey: .items)
+    turn = try c.decode(Turn.self, forKey: .turn)
+    connection = try c.decode(Connection.self, forKey: .connection)
+    sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
+    title = try c.decodeIfPresent(String.self, forKey: .title)
+    modeId = try c.decodeIfPresent(String.self, forKey: .modeId)
+    configOptions = try c.decode([ACPConfigOption].self, forKey: .configOptions)
+    commands = try c.decode([ACPCommand].self, forKey: .commands)
+    cost = try c.decodeIfPresent(ChatCost.self, forKey: .cost)
+    modelId = try c.decodeIfPresent(String.self, forKey: .modelId)
+    contextUsed = try c.decodeIfPresent(Int.self, forKey: .contextUsed)
+    contextSize = try c.decodeIfPresent(Int.self, forKey: .contextSize)
+    lastStopReason = try c.decodeIfPresent(String.self, forKey: .lastStopReason)
+    loadSession = try c.decodeIfPresent(Bool.self, forKey: .loadSession)
+    queuedItemIds = try c.decode([Int].self, forKey: .queuedItemIds)
+    inFlight = try c.decode([InFlightPrompt].self, forKey: .inFlight)
+    startPending = try c.decode(Bool.self, forKey: .startPending)
+    nextItemId = try c.decode(Int.self, forKey: .nextItemId)
+    silentRequestIds = try c.decode(Set<ACPID>.self, forKey: .silentRequestIds)
+    hostAnswers = try c.decode([ACPID: String].self, forKey: .hostAnswers)
+    questionToolIds = try c.decode(Set<String>.self, forKey: .questionToolIds)
+    lastUserMessageId = try c.decodeIfPresent(String.self, forKey: .lastUserMessageId)
+    agentStarted = try c.decodeIfPresent(Bool.self, forKey: .agentStarted) ?? false
+    loading = try c.decodeIfPresent(Bool.self, forKey: .loading) ?? false
+  }
+
   var pendingQuestions: [ChatQuestion] {
     items.compactMap {
       if case let .question(question) = $0.kind, question.isPending { return question }
@@ -218,6 +312,8 @@ enum ChatEvent: Equatable, Sendable {
   case userPrompt(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil, images: [ChatImageRef] = [])
   /// The user pressed Stop: messages still waiting to start are no longer shown as queued.
   case cancelRequested
+  /// `session/load` was sent: the history that follows is replayed, not live.
+  case loadRequested
   /// A request whose error response must not surface as a transcript row.
   case silentRequest(requestId: ACPID)
   case permissionAnswered(requestId: ACPID, optionId: String)
@@ -249,6 +345,7 @@ enum ChatReducer {
         moveToEnd(itemId, in: &next)
       }
       next.inFlight.append(.init(itemId: itemId, requestId: requestId))
+      next.agentStarted = false
       next.turn = .working
     case .cancelRequested:
       // The agent drops every prompt that has not started, so they leave the transcript; the
@@ -259,6 +356,12 @@ enum ChatReducer {
       next.inFlight.removeAll { queued.contains($0.itemId) }
       next.startPending = false
       if next.turn == .working { append(.notice("Stopped"), to: &next) }
+      if next.agentStarted {
+        next.agentStarted = false
+        if next.inFlight.isEmpty { next.turn = .idle }
+      }
+    case .loadRequested:
+      next.loading = true
     case let .silentRequest(requestId):
       next.silentRequestIds.insert(requestId)
     case let .permissionAnswered(requestId, optionId):
@@ -329,7 +432,10 @@ enum ChatReducer {
   private static func apply(_ message: ACPInbound, to state: inout ChatState) {
     switch message {
     case let .response(responseId, result):
-      if let id = result.sessionId { state.sessionId = id }
+      if let id = result.sessionId {
+        state.sessionId = id
+        endSession(in: &state)
+      }
       if let load = result.loadSession { state.loadSession = load }
       if let options = result.configOptions { setConfigOptions(options, in: &state) }
       if let reason = result.stopReason {
@@ -339,6 +445,8 @@ enum ChatReducer {
         endPendingQuestions(in: &state)
       }
     case let .errorResponse(id, code, text):
+      // A failed session/load is the session answer too: what follows is live, not history.
+      if let id, !state.inFlight.contains(where: { $0.requestId == id }) { state.loading = false }
       if let id, state.silentRequestIds.contains(id) { return }
       if let id { finishPrompt(id, in: &state) } else { state.turn = state.inFlight.isEmpty ? .idle : .working }
       if ChatAuthError.matches(code: code, message: text) {
@@ -389,6 +497,7 @@ enum ChatReducer {
     switch update {
     case let .agentMessage(text, messageId):
       startQueued(in: &state)
+      startAgentTurn(in: &state)
       if let last = lastOpen(state),
         case let .assistant(existing, existingId) = state.items[last].kind, existingId == messageId
       {
@@ -407,6 +516,7 @@ enum ChatReducer {
       }
     case let .agentThought(text):
       startQueued(in: &state)
+      startAgentTurn(in: &state)
       if let last = lastOpen(state), case let .thought(existing) = state.items[last].kind {
         state.items[last].kind = .thought(text: existing + text)
       } else {
@@ -430,11 +540,38 @@ enum ChatReducer {
         append(.user(text: text, offset: 0), to: &state)
       }
       state.lastUserMessageId = messageId
-    case let .toolCall(fields), let .toolCallUpdate(fields):
+    case let .toolCall(fields):
+      startQueued(in: &state)
+      if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }
+      if state.questionToolIds.contains(fields.id) { return }
+      startAgentTurn(in: &state)
+      mergeTool(fields, creating: true, into: &state)
+    case let .toolCallUpdate(fields):
       startQueued(in: &state)
       if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }
       if state.questionToolIds.contains(fields.id) { return }
       mergeTool(fields, creating: true, into: &state)
+    case let .notice(severity, title, detail):
+      append(
+        .agentNotice(ChatAgentNotice(
+          severity: severity.flatMap(ChatAgentNotice.Severity.init(rawValue:)), title: title, detail: detail)),
+        to: &state)
+    case let .compactionUpdate(id, status, summary, error):
+      let mapped: ChatCompaction.Status
+      switch status {
+      case "in_progress": mapped = .inProgress
+      case "completed": mapped = .completed
+      case "failed": mapped = .failed
+      case "cancelled": mapped = .cancelled
+      default: return
+      }
+      updateCompaction(id, in: &state) { compaction in
+        compaction.status = mapped
+        if let summary, !summary.isEmpty { compaction.summary = summary }
+        if let error { compaction.error = error }
+      }
+    case let .compactionSummaryChunk(id, text):
+      updateCompaction(id, in: &state) { $0.summary = ($0.summary ?? "") + text }
     case let .plan(entries):
       startQueued(in: &state)
       var replaced = false
@@ -461,11 +598,53 @@ enum ChatReducer {
     case let .usage(used, size, cost, modelId):
       state.contextUsed = used
       state.contextSize = size
-      if let cost { state.cost = cost }
+      if let cost {
+        state.cost = cost
+        if state.agentStarted, state.inFlight.isEmpty {
+          state.agentStarted = false
+          state.turn = .idle
+        }
+      }
       if let modelId { state.modelId = modelId }
     case .unknown:
       break
     }
+  }
+
+  /// Output with no prompt in flight is the agent's own turn, such as the one a finished background command starts.
+  private static func startAgentTurn(in state: inout ChatState) {
+    guard state.inFlight.isEmpty, !state.loading, state.turn == .idle else { return }
+    state.agentStarted = true
+    state.turn = .working
+  }
+
+  /// A `session/new` or `session/load` answer: nothing of an earlier conversation still runs.
+  private static func endSession(in state: inout ChatState) {
+    state.loading = false
+    state.agentStarted = false
+    if state.inFlight.isEmpty { state.turn = .idle }
+    func end(_ call: inout ChatToolCall) {
+      if call.isBackgroundRunning { call.terminalEnded = true }
+    }
+    for index in state.items.indices {
+      guard case var .tool(call) = state.items[index].kind else { continue }
+      end(&call)
+      for child in call.children.indices { end(&call.children[child]) }
+      state.items[index].kind = .tool(call)
+    }
+  }
+
+  private static func updateCompaction(_ id: String, in state: inout ChatState, _ change: (inout ChatCompaction) -> Void) {
+    for index in state.items.indices.reversed() {
+      if case var .compaction(compaction) = state.items[index].kind, compaction.id == id {
+        change(&compaction)
+        state.items[index].kind = .compaction(compaction)
+        return
+      }
+    }
+    var compaction = ChatCompaction(id: id, status: .inProgress)
+    change(&compaction)
+    append(.compaction(compaction), to: &state)
   }
 
   private static func markSignedOut(in state: inout ChatState) {
@@ -508,6 +687,11 @@ enum ChatReducer {
     switch text.trimmingCharacters(in: .whitespacesAndNewlines) {
     case "/clear": label = "Context cleared"
     case "/compact":
+      let compacted = state.items[(start + 1)...].contains {
+        if case .compaction = $0.kind { return true }
+        return false
+      }
+      guard !compacted else { return }
       let announced = state.items[(start + 1)...].contains {
         if case let .assistant(reply, _) = $0.kind { return reply.lowercased().contains("compact") }
         return false

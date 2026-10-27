@@ -224,6 +224,10 @@ impl ChatClient {
                     "terminal": false,
                     // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
                     "elicitation": {"form": {}},
+                    // Notices and compaction updates stream only to a client that declares them; terminal_output
+                    // moves Bash output into _meta. Not `_meta.jetbrains.air`: that switches the adapter's dialect.
+                    "session": {"notices": {}, "compaction": {}},
+                    "_meta": {"terminal_output": true},
                 },
             }),
             RequestKind::Initialize,
@@ -911,6 +915,16 @@ mod tests {
             json!({"readTextFile": false, "writeTextFile": false})
         );
         assert_eq!(v["params"]["protocolVersion"], json!(1));
+    }
+
+    #[test]
+    fn initialize_declares_notices_compaction_and_terminal_output_but_not_air() {
+        let mut c = client(Journal::default());
+        let v = parse(&c.initialize().line);
+        let caps = &v["params"]["clientCapabilities"];
+        assert_eq!(caps["session"], json!({"notices": {}, "compaction": {}}));
+        assert_eq!(caps["_meta"], json!({"terminal_output": true}));
+        assert!(!String::from_utf8_lossy(&c.initialize().line).contains("jetbrains"));
     }
 
     #[test]

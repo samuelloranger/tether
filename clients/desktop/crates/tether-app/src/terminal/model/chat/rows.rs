@@ -11,12 +11,14 @@ use tether_core::acp::grouping::{self, Block};
 use tether_core::acp::images::ImageRef;
 use tether_core::acp::message::{ToolKind, ToolStatus};
 use tether_core::acp::question::QuestionState;
-use tether_core::acp::reducer::{ChatState, Item, ItemKind, ToolCall, Turn};
+use tether_core::acp::reducer::{ChatState, CompactionStatus, Item, ItemKind, ToolCall, Turn};
 use tether_core::acp::tooldetail;
 use tether_core::acp::verbs;
 
 use super::session::{Session, SignIn};
-use super::view::{DiffKind, Entry, EntryBody, Icon, Picture, Pixels, Row, RowBody, ToolState};
+use super::view::{
+    DiffKind, Entry, EntryBody, Icon, Picture, Pixels, Row, RowBody, TaskView, ToolState,
+};
 
 pub struct RowCtx<'a> {
     pub host: &'a str,
@@ -131,6 +133,30 @@ pub fn queued(s: &Session) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// The background commands still running, each with the key of the row that opens it.
+pub fn tasks(s: &Session) -> Vec<TaskView> {
+    let mut out = Vec::new();
+    for item in &s.state().items {
+        let ItemKind::Tool(call) = &item.kind else {
+            continue;
+        };
+        let key = format!("item:{}", item.id);
+        if call.is_background_running() {
+            out.push(TaskView {
+                key: key.clone(),
+                title: call.title.clone(),
+            });
+        }
+        for child in call.children.iter().filter(|c| c.is_background_running()) {
+            out.push(TaskView {
+                key: format!("child:{key}:{}", child.id),
+                title: child.title.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// Changes when a new prompt starts a turn, so a turn keeps one word.
@@ -301,6 +327,39 @@ fn item_rows(
             }
         }
         ItemKind::Notice(text) => RowBody::Notice(text.clone()),
+        ItemKind::AgentNotice {
+            severity,
+            title,
+            description,
+        } => RowBody::AgentNotice {
+            severity: match severity.as_deref() {
+                Some("info") => 1,
+                Some("warning") => 2,
+                Some("error") => 3,
+                _ => 0,
+            },
+            title: title.clone(),
+            description: description.clone().unwrap_or_default(),
+        },
+        ItemKind::Compaction {
+            status, summary, ..
+        } => RowBody::Compaction {
+            state: match status {
+                CompactionStatus::InProgress => 0,
+                CompactionStatus::Completed => 1,
+                CompactionStatus::Failed => 2,
+                CompactionStatus::Cancelled => 3,
+            },
+            label: match status {
+                CompactionStatus::InProgress => "Compacting context\u{2026}",
+                CompactionStatus::Completed => "Context compacted",
+                CompactionStatus::Failed => "Compaction failed",
+                CompactionStatus::Cancelled => "Compaction cancelled",
+            }
+            .into(),
+            summary: summary.trim().to_string(),
+            open: s.expanded.contains(&key) && !summary.trim().is_empty(),
+        },
         ItemKind::Error(text) => RowBody::Error(text.clone()),
         ItemKind::Divider(text) => RowBody::Divider(text.clone()),
         ItemKind::SignedOut => RowBody::SignedOut {
@@ -402,11 +461,12 @@ fn tool(
                 .filter(|_| !open)
                 .unwrap_or_else(|| call.title.clone()),
             subtitle: String::new(),
-            state: status(call, call.is_running()),
+            state: status(call, call.is_running() || call.is_background_running()),
             added: file.as_ref().map_or(0, |f| f.added),
             removed: file.as_ref().map_or(0, |f| f.removed),
             expandable,
             open,
+            background: call.is_background_running(),
         },
     });
     if !open {
@@ -492,6 +552,7 @@ fn subagent(
             removed: 0,
             expandable,
             open,
+            background: false,
         },
     });
     if !open {

@@ -67,6 +67,8 @@ pub enum EntryBody {
         removed: usize,
         expandable: bool,
         open: bool,
+        /// A command the agent sent to the background that is still running.
+        background: bool,
     },
     Resolved {
         allowed: bool,
@@ -140,6 +142,19 @@ pub enum RowBody {
         steps: Vec<Entry>,
     },
     Notice(String),
+    /// `severity`: 0 unsaid, 1 info, 2 warning, 3 error.
+    AgentNotice {
+        severity: u8,
+        title: String,
+        description: String,
+    },
+    /// `state`: 0 compacting, 1 done, 2 failed, 3 cancelled; a summary makes the rule open.
+    Compaction {
+        state: u8,
+        label: String,
+        summary: String,
+        open: bool,
+    },
     Error(String),
     Divider(String),
     /// `retry`: none while there is a session; 0 idle, 1 checking, 2 still signed out.
@@ -175,7 +190,7 @@ pub struct Row {
 pub struct TabView {
     pub name: String,
     pub title: String,
-    /// -1 nothing, 0 working, 1 needs you, 2 idle, 3 running, 4 ended.
+    /// -1 nothing, 0 working, 1 needs you, 2 idle, 3 running, 4 ended, 5 idle with background commands.
     pub state: i8,
     pub label: String,
     pub active: bool,
@@ -357,6 +372,14 @@ pub struct NewChatView {
     pub continuing: bool,
 }
 
+/// A background command still running, as the strip above the composer lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskView {
+    /// The key of the tool row it belongs to.
+    pub key: String,
+    pub title: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChatScreen {
     pub active: bool,
@@ -365,6 +388,7 @@ pub struct ChatScreen {
     pub rows: Vec<Row>,
     /// Sent while a turn runs and not started yet; shown above the composer, not in the transcript.
     pub queued: Vec<String>,
+    pub tasks: Vec<TaskView>,
     pub follow_seq: u64,
     pub notice: String,
     pub draft: Option<String>,

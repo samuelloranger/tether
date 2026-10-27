@@ -107,11 +107,12 @@ func (s *acpDaemonState) idleLoop(window time.Duration, stop <-chan struct{}) {
 	}
 }
 
-// working reports a request waiting for an answer or a session/prompt turn in flight.
+// working reports a request waiting for an answer or a turn in flight. A background command does
+// not count: its end may never be reported, and the idle window already outlasts most of them.
 func (t *acpTracker) working() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return len(t.st.Requests) > 0 || len(t.st.Prompts) > 0
+	return len(t.st.Requests) > 0 || len(t.st.Prompts) > 0 || t.st.Autonomous
 }
 
 // pruneEnded removes sessions that ended longer than keep ago and have no live daemon.

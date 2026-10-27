@@ -1174,3 +1174,59 @@ fn stop_sends_the_queued_messages_as_the_next_prompt() {
     assert!(s.queued.is_empty());
     assert_eq!(users(&s), ["one", "two\n\nthree"]);
 }
+
+#[cfg(debug_assertions)]
+#[test]
+fn background_commands_notices_and_compaction_reach_the_screen() {
+    use super::view::EntryBody;
+    let mut h = Harness::new();
+    h.chats.dev_sample(t(h.now));
+    let s = h.screen();
+
+    assert_eq!(s.tasks.len(), 2);
+    assert_eq!(s.tasks[0].title, "bun run dev --port 3000");
+    let sample = s.tabs.iter().find(|t| t.name == "sample").unwrap();
+    assert_eq!((sample.state, sample.label.as_str()), (5, "2 tasks"));
+    let other = s.tabs.iter().find(|t| t.name == "other").unwrap();
+    assert_eq!((other.state, other.label.as_str()), (5, "2 tasks"));
+
+    let badges = s
+        .rows
+        .iter()
+        .filter_map(|r| match &r.body {
+            RowBody::Tools(entries) => Some(entries),
+            _ => None,
+        })
+        .flatten()
+        .filter(|e| {
+            matches!(
+                e.body,
+                EntryBody::Tool {
+                    background: true,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(badges, 2);
+    let severities: Vec<u8> = s
+        .rows
+        .iter()
+        .filter_map(|r| match &r.body {
+            RowBody::AgentNotice { severity, .. } => Some(*severity),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(severities, [2, 1]);
+    assert!(s.rows.iter().any(|r| matches!(
+        &r.body,
+        RowBody::Compaction { state: 1, summary, open: false, .. } if summary.starts_with("1. Primary")
+    )));
+
+    let key = s.tasks[0].key.clone();
+    h.msg(ChatMsg::OpenTool(key));
+    assert!(h.screen().rows.iter().any(|r| matches!(
+        &r.body,
+        RowBody::Tools(entries) if entries.iter().any(|e| matches!(e.body, EntryBody::Tool { open: true, .. }))
+    )));
+}

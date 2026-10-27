@@ -141,6 +141,8 @@ pub struct ChatSummary {
     pub has_status: bool,
     /// The chat's holder lets several clients attach at once.
     pub multi_client: bool,
+    /// Background commands the holder counts as running, from `acp status`.
+    pub tasks: u32,
 }
 
 impl ChatSummary {
@@ -156,6 +158,7 @@ impl ChatSummary {
             host_title: None,
             has_status: false,
             multi_client: false,
+            tasks: 0,
         }
     }
 
@@ -208,6 +211,7 @@ pub fn parse_listing(output: &str) -> Listing {
                 host_title: None,
                 has_status: false,
                 multi_client: false,
+                tasks: 0,
             })
         })();
         match parsed {
@@ -284,6 +288,9 @@ fn status_chat(line: &str) -> Option<ChatSummary> {
         host_title: title,
         has_status: true,
         multi_client: object.get("multiClient").and_then(Value::as_bool) == Some(true),
+        tasks: number_int(object.get("tasks"))
+            .unwrap_or(0)
+            .clamp(0, u32::MAX as i64) as u32,
     })
 }
 
@@ -292,6 +299,8 @@ fn status_chat(line: &str) -> Option<ChatSummary> {
 pub enum DrawerChatState {
     Working,
     Waiting,
+    /// Idle, with background commands still running: the tag counts them.
+    Tasks,
     Idle,
     Running,
     Ended,
@@ -307,6 +316,7 @@ impl DrawerChatState {
             match chat.turn {
                 HostTurn::Working => Self::Working,
                 HostTurn::Waiting => Self::Waiting,
+                HostTurn::Idle if chat.tasks > 0 => Self::Tasks,
                 HostTurn::Idle => Self::Idle,
             }
         }
@@ -316,6 +326,7 @@ impl DrawerChatState {
         match self {
             Self::Working => "working",
             Self::Waiting => "needs you",
+            Self::Tasks => "tasks",
             Self::Idle => "idle",
             Self::Running => "running",
             Self::Ended => "ended",
@@ -331,9 +342,19 @@ pub struct DrawerChatRow {
     pub subtitle: String,
     pub state: DrawerChatState,
     pub cwd: String,
+    pub tasks: u32,
 }
 
 impl DrawerChatRow {
+    /// The word the row shows: the state, or the count of running background commands.
+    pub fn tag(&self) -> String {
+        match (self.state, self.tasks) {
+            (DrawerChatState::Tasks, 1) => "1 task".into(),
+            (DrawerChatState::Tasks, n) => format!("{n} tasks"),
+            (state, _) => state.label().into(),
+        }
+    }
+
     pub fn is_running(&self) -> bool {
         self.state != DrawerChatState::Ended
     }
@@ -367,6 +388,7 @@ pub fn drawer_rows(chats: &[ChatSummary], titles: &HashMap<String, String>) -> V
                 subtitle,
                 state: DrawerChatState::of(chat),
                 cwd: chat.cwd.clone(),
+                tasks: chat.tasks,
             }
         })
         .collect()
@@ -886,6 +908,20 @@ mod tests {
 
     fn all_status() -> Vec<ChatSummary> {
         parse_status(&[ENDED, WORKING, WAITING].join("\n")).chats
+    }
+
+    #[test]
+    fn status_tasks_default_to_zero_and_an_idle_chat_with_tasks_is_tagged() {
+        let idle = r#"{"name":"chat-d","state":"running","turn":"idle","title":"","cwd":"/srv/x","created":50,"logBytes":1,"tasks":2}"#;
+        let one = r#"{"name":"chat-e","state":"running","turn":"idle","title":"","cwd":"/srv/y","created":40,"logBytes":1,"tasks":1}"#;
+        let busy = r#"{"name":"chat-f","state":"running","turn":"working","title":"","cwd":"/srv/z","created":30,"logBytes":1,"tasks":3}"#;
+        let chats = parse_status(&[WORKING, idle, one, busy].join("\n")).chats;
+        let tasks: Vec<_> = chats.iter().map(|c| c.tasks).collect();
+        assert_eq!(tasks, [0, 2, 1, 3]);
+        let rows = drawer_rows(&chats, &HashMap::new());
+        let tags: Vec<_> = rows.iter().map(DrawerChatRow::tag).collect();
+        assert_eq!(tags, ["working", "2 tasks", "1 task", "working"]);
+        assert!(!others_waiting(&chats, None));
     }
 
     #[test]

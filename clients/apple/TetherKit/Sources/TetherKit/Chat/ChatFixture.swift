@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
 enum ChatFixture {
   static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
@@ -251,6 +251,52 @@ enum ChatFixture {
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
+  private static func backgroundCommand(_ id: String, _ command: String) -> [String] {
+    var start = tool(id, "Terminal", kind: "execute", status: "pending", toolName: "Bash", input: [:])
+    start["_meta"] = ["claudeCode": ["toolName": "Bash"], "terminal_info": ["terminal_id": id]]
+    return [
+      update(start),
+      update(tool(id, command, kind: "execute", status: "pending", update: true, toolName: "Bash", input: ["command": command, "run_in_background": true])),
+      update([
+        "sessionUpdate": "tool_call_update", "toolCallId": id,
+        "_meta": ["claudeCode": ["toolName": "Bash", "toolResponse": ["backgroundTaskId": "task-\(id)"]]],
+      ]),
+      update([
+        "sessionUpdate": "tool_call_update", "toolCallId": id,
+        "_meta": ["terminal_output": ["terminal_id": id, "data": "Command running in background with ID: task-\(id)."]],
+      ]),
+      update(tool(id, command, kind: "execute", status: "completed", update: true, toolName: "Bash")),
+    ]
+  }
+
+  /// Two background commands running, a warning and an info notice, and a finished compaction with its summary.
+  @MainActor
+  static func tasksModel() -> ChatSessionModel {
+    var lines = [update(["sessionUpdate": "session_info_update", "title": "Dev server and log tail"])]
+    lines += backgroundCommand("bg1", "npm run dev -- --port 5173")
+    lines += backgroundCommand("bg2", "tail -f logs/app.log")
+    lines += [
+      message("Both are running in the background. I'll tell you if either one stops."),
+      json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]),
+      update(["sessionUpdate": "notice", "severity": "warning", "title": "Rate limit close", "description": "80% of the five hour window is used"]),
+      update(["sessionUpdate": "notice", "severity": "info", "title": "Model switched", "description": "now using the faster model"]),
+      update(["sessionUpdate": "compaction_update", "compactionId": "c1", "status": "in_progress"]),
+      update([
+        "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "completed",
+        "summary": [["type": "text", "text": "1. Primary Request and Intent:\n   Start the dev server and tail the application log.\n\n2. Current Work:\n   Both commands run in the background; nothing else is pending."]],
+      ]),
+      update(["sessionUpdate": "usage_update", "used": 12_000, "size": 1_000_000]),
+    ]
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: "Start the dev server and tail the log, both in the background.", requestId: .int(3))]
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal)
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
   /// Set by the debug root so the Read of an image opens already expanded.
   nonisolated(unsafe) static var openImages = false
 
@@ -336,6 +382,7 @@ enum ChatFixture {
 
   /// Set by the debug root so the subagent rows open already expanded.
   nonisolated(unsafe) static var openSubagents = false
+  nonisolated(unsafe) static var openTasks = false
 
   private static let subagentBrief = """
   Check that the migration is safe to run twice.
@@ -882,6 +929,33 @@ final class AnswerOnPromptStream: TerminalByteStream, @unchecked Sendable {
   }
 }
 
+/// The drawer's chat rows for `acp status` lines, one idle chat with background commands among them.
+private struct TasksDrawerFixture: View {
+  private let rows = DrawerChatRows.rows(
+    chats: ACPChatStatusListing.parse([
+      #"{"name":"a","state":"running","turn":"working","cwd":"/work/api","created":4,"logBytes":10}"#,
+      #"{"name":"b","state":"running","turn":"idle","cwd":"/work/web","created":3,"logBytes":10,"tasks":2}"#,
+      #"{"name":"c","state":"running","turn":"idle","cwd":"/work/docs","created":2,"logBytes":10,"tasks":1}"#,
+      #"{"name":"d","state":"running","turn":"waiting","cwd":"/work/app","created":1,"logBytes":10,"tasks":1}"#,
+    ].joined(separator: "\n")).chats, titles: [:])
+
+  var body: some View {
+    VStack(spacing: 0) {
+      ForEach(rows) { row in
+        HStack {
+          Text(row.title).font(.subheadline).foregroundStyle(TetherColors.textPrimary)
+          Spacer()
+          ChatStateTag(state: row.state)
+        }
+        .padding(.horizontal, 16).frame(minHeight: 48)
+      }
+      Spacer()
+    }
+    .padding(.top, 24)
+    .background(TetherColors.background.ignoresSafeArea())
+  }
+}
+
 /// DEBUG root for screenshots: the chat screen alone, over the fixture.
 public struct ChatFixtureRoot: View {
   @State private var model: ChatSessionModel
@@ -903,6 +977,7 @@ public struct ChatFixtureRoot: View {
     self.mode = mode
     ChatFixture.openQuestionOther = mode == "question-other"
     ChatFixture.planMode = mode
+    ChatFixture.openTasks = mode == "tasks-open"
     listMode = mode == "list"
     let initial: ChatSessionModel
     switch mode {
@@ -919,6 +994,7 @@ public struct ChatFixtureRoot: View {
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
+    case "tasks", "tasks-open", "tasks-drawer": initial = ChatFixture.tasksModel()
     case "images", "images-top", "image-viewer": initial = ChatFixture.imagesModel()
     case "controls", "controls-sheet", "slash", "attach", "mention", "mention-all": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
@@ -928,7 +1004,9 @@ public struct ChatFixtureRoot: View {
 
   public var body: some View {
     NavigationStack {
-      if listMode {
+      if mode == "tasks-drawer" {
+        TasksDrawerFixture()
+      } else if listMode {
         ChatListView(model: listModel, onOpen: { _ in }, onClose: {})
           .task { await listModel.refresh() }
       } else {

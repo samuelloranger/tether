@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,14 @@ type acpTrackerState struct {
 	Title    string                 `json:"title,omitempty"`
 	Requests map[string]*acpRequest `json:"requests"`
 	Prompts  []string               `json:"prompts,omitempty"`
+	// Terminals are tool calls with a display terminal not yet exited; Tasks are those that went to
+	// the background, which run until their terminal_exit arrives after the turn.
+	Terminals []string `json:"terminals,omitempty"`
+	Tasks     []string `json:"tasks,omitempty"`
+	// Loads are session/load requests not yet answered: the history they replay is no turn.
+	Loads []string `json:"loads,omitempty"`
+	// Autonomous is a turn Claude Code started without a prompt, after a background task ended.
+	Autonomous bool `json:"autonomous,omitempty"`
 }
 
 // acpTracker follows the ACP stream just enough to know which permission requests
@@ -178,16 +187,25 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 		return acpEvent{permission: req, key: key}
 	case m.Method == "session/update":
 		var p struct {
-			Update struct {
-				Kind  string  `json:"sessionUpdate"`
-				Title *string `json:"title"`
-			} `json:"update"`
+			Update acpUpdateLine `json:"update"`
 		}
-		if json.Unmarshal(m.Params, &p) == nil && p.Update.Kind == "session_info_update" && p.Update.Title != nil && *p.Update.Title != t.st.Title {
-			t.st.Title = *p.Update.Title
+		if json.Unmarshal(m.Params, &p) != nil {
+			return acpEvent{}
+		}
+		u := p.Update
+		if u.Kind == "session_info_update" && u.Title != nil && *u.Title != t.st.Title {
+			t.st.Title = *u.Title
 			t.saveLocked()
 		}
+		return t.updateLocked(u)
 	case m.Method == "" && key != "":
+		if i := slices.Index(t.st.Loads, key); i >= 0 {
+			// A loaded conversation's background tasks died with the agent that ran them.
+			t.st.Loads = slices.Delete(t.st.Loads, i, i+1)
+			t.st.Terminals, t.st.Tasks, t.st.Autonomous = nil, nil, false
+			t.saveLocked()
+			return acpEvent{}
+		}
 		for i, k := range t.st.Prompts {
 			if k != key {
 				continue
@@ -206,6 +224,67 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 		}
 	}
 	return acpEvent{}
+}
+
+type acpUpdateLine struct {
+	Kind       string          `json:"sessionUpdate"`
+	Title      *string         `json:"title"`
+	ToolCallID string          `json:"toolCallId"`
+	Cost       json.RawMessage `json:"cost"`
+	Meta       struct {
+		TerminalInfo json.RawMessage `json:"terminal_info"`
+		TerminalExit json.RawMessage `json:"terminal_exit"`
+		ClaudeCode   struct {
+			// Raw: an MCP tool's response is an array, which a struct would refuse with the whole line.
+			ToolResponse json.RawMessage `json:"toolResponse"`
+		} `json:"claudeCode"`
+	} `json:"_meta"`
+}
+
+func (u acpUpdateLine) backgroundTaskID() string {
+	var r struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+	}
+	_ = json.Unmarshal(u.Meta.ClaudeCode.ToolResponse, &r)
+	return r.BackgroundTaskID
+}
+
+// updateLocked follows background commands and the turns Claude Code starts by itself. Such a turn
+// has no prompt to answer: it starts with agent output while nothing is in flight and ends at the
+// usage report that carries the turn's cost.
+func (t *acpTracker) updateLocked(u acpUpdateLine) acpEvent {
+	changed := false
+	if id := u.ToolCallID; id != "" {
+		if len(u.Meta.TerminalInfo) > 0 && !slices.Contains(t.st.Terminals, id) {
+			t.st.Terminals = append(t.st.Terminals, id)
+			changed = true
+		}
+		if u.backgroundTaskID() != "" && slices.Contains(t.st.Terminals, id) && !slices.Contains(t.st.Tasks, id) {
+			t.st.Tasks = append(t.st.Tasks, id)
+			changed = true
+		}
+		if len(u.Meta.TerminalExit) > 0 {
+			before := len(t.st.Terminals) + len(t.st.Tasks)
+			t.st.Terminals = slices.DeleteFunc(t.st.Terminals, func(s string) bool { return s == id })
+			t.st.Tasks = slices.DeleteFunc(t.st.Tasks, func(s string) bool { return s == id })
+			changed = changed || before != len(t.st.Terminals)+len(t.st.Tasks)
+		}
+	}
+	idle := len(t.st.Prompts) == 0 && len(t.st.Loads) == 0
+	var ev acpEvent
+	switch {
+	case idle && !t.st.Autonomous && (u.Kind == "agent_message_chunk" || u.Kind == "agent_thought_chunk" || u.Kind == "tool_call"):
+		t.st.Autonomous = true
+		changed = true
+	case idle && t.st.Autonomous && u.Kind == "usage_update" && len(u.Cost) > 0 && string(u.Cost) != "null":
+		t.st.Autonomous = false
+		changed = true
+		ev = acpEvent{turnEnded: true, stopReason: "end_turn"}
+	}
+	if changed {
+		t.saveLocked()
+	}
+	return ev
 }
 
 // parseElicitation keeps the message and, when the form's first property is a single-select string
@@ -278,6 +357,12 @@ func (t *acpTracker) clientLine(line []byte) (forward, echo bool) {
 		return true, false
 	}
 	if m.Method == "session/cancel" {
+		t.mu.Lock()
+		if t.st.Autonomous {
+			t.st.Autonomous = false
+			t.saveLocked()
+		}
+		t.mu.Unlock()
 		return true, true
 	}
 	if key == "" {
@@ -287,10 +372,15 @@ func (t *acpTracker) clientLine(line []byte) (forward, echo bool) {
 	defer t.mu.Unlock()
 	switch {
 	case m.Method == "session/new" || m.Method == "session/load":
+		if m.Method == "session/load" {
+			t.st.Loads = append(t.st.Loads, key)
+			t.saveLocked()
+		}
 		// A client joining later learns the session from these when no prompt names it yet.
 		return true, true
 	case m.Method == "session/prompt":
 		t.st.Prompts = append(t.st.Prompts, key)
+		t.st.Autonomous = false
 		t.saveLocked()
 		return true, true
 	case m.Method == "":
@@ -322,18 +412,19 @@ func (t *acpTracker) claimNotify(key string) bool {
 	return true
 }
 
-// snapshot is the chat title and the turn: waiting while a request is outstanding, else working
-// while a session/prompt is in flight, else idle.
-func (t *acpTracker) snapshot() (string, string) {
+// snapshot is the chat title, the turn (waiting while a request is outstanding, else working
+// while a session/prompt or a turn the agent started is running, else idle) and the number of
+// background commands still running.
+func (t *acpTracker) snapshot() (string, string, int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	switch {
 	case len(t.st.Requests) > 0:
-		return t.st.Title, "waiting"
-	case len(t.st.Prompts) > 0:
-		return t.st.Title, "working"
+		return t.st.Title, "waiting", len(t.st.Tasks)
+	case len(t.st.Prompts) > 0 || t.st.Autonomous:
+		return t.st.Title, "working", len(t.st.Tasks)
 	}
-	return t.st.Title, "idle"
+	return t.st.Title, "idle", len(t.st.Tasks)
 }
 
 func (t *acpTracker) chatName() string {

@@ -63,6 +63,15 @@ pub struct ToolCall {
     /// A launch row's own tool calls, in arrival order.
     #[serde(default)]
     pub children: Vec<ToolCall>,
+    #[serde(default)]
+    pub has_terminal: bool,
+    #[serde(default)]
+    pub background_task_id: Option<String>,
+    #[serde(default)]
+    pub terminal_exited: bool,
+    /// The command's raw output, kept so a delta can be appended before the text is fenced again.
+    #[serde(default)]
+    pub terminal_data: String,
 }
 
 impl ToolCall {
@@ -79,6 +88,10 @@ impl ToolCall {
             parent_id: fields.parent_id.clone(),
             subagent: None,
             children: Vec::new(),
+            has_terminal: false,
+            background_task_id: None,
+            terminal_exited: false,
+            terminal_data: String::new(),
         };
         if let Some(name) = &fields.tool_name
             && LAUNCH_TOOL_NAMES.contains(&name.as_str())
@@ -113,6 +126,20 @@ impl ToolCall {
         {
             self.images = v.clone();
         }
+        self.has_terminal |= fields.has_terminal;
+        self.terminal_exited |= fields.terminal_exit;
+        if let Some(id) = &fields.background_task_id {
+            self.background_task_id = Some(id.clone());
+        }
+        let mut terminal_text = None;
+        if let Some(data) = &fields.terminal_data {
+            self.terminal_data = data.clone();
+            terminal_text = Some(console_fence(&self.terminal_data));
+        }
+        if let Some(delta) = &fields.terminal_delta {
+            self.terminal_data.push_str(delta);
+            terminal_text = Some(console_fence(&self.terminal_data));
+        }
         if let Some(sub) = self.subagent.as_mut() {
             if let Some(input) = &fields.input {
                 sub.merge(input);
@@ -122,9 +149,15 @@ impl ToolCall {
                 Some(v) => self.text = Some(v.clone()),
                 None => {}
             }
-        } else if let Some(v) = &fields.text {
+        } else if let Some(v) = terminal_text.as_ref().or(fields.text.as_ref()) {
             self.text = Some(v.clone());
         }
+    }
+
+    /// A command the agent sent to the background that has not ended. A chat whose agent
+    /// predates the terminal metadata never reports an end, so one without a terminal does not count.
+    pub fn is_background_running(&self) -> bool {
+        self.background_task_id.is_some() && self.has_terminal && !self.terminal_exited
     }
 
     pub fn is_running(&self) -> bool {
@@ -149,6 +182,32 @@ impl ToolCall {
         } else {
             self.title.clone()
         }
+    }
+}
+
+/// The text a Bash row and its detail show for output, as older adapters sent it.
+fn console_fence(data: &str) -> String {
+    format!("```console\n{}\n```", data.trim_end())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompactionStatus {
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl CompactionStatus {
+    fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            _ => return None,
+        })
     }
 }
 
@@ -196,6 +255,18 @@ pub enum ItemKind {
     Question(Question),
     Plan(Vec<PlanEntry>),
     Notice(String),
+    /// A notice the agent raised, with its severity (`info`, `warning`, `error`; absent when unsaid).
+    AgentNotice {
+        severity: Option<String>,
+        title: String,
+        description: Option<String>,
+    },
+    /// One context compaction; the summary may arrive in chunks before the final status.
+    Compaction {
+        compaction_id: String,
+        status: CompactionStatus,
+        summary: String,
+    },
     Error(String),
     /// A quiet rule in the transcript, such as where the agent's context was cleared.
     Divider(String),
@@ -267,6 +338,13 @@ pub struct ChatState {
     question_tool_ids: BTreeSet<String>,
     /// The id of the replayed user message the last user row came from, so two messages in a row stay two rows.
     last_user_message_id: Option<String>,
+    /// The turn running now was started by the agent itself (a finished background command), so no prompt is in flight.
+    #[serde(default)]
+    agent_started: bool,
+    /// Until the answer to `session/new` or `session/load` arrives, agent output is history, not a turn.
+    /// A snapshot from before this field was taken after that answer, hence the false default on decode.
+    #[serde(default)]
+    awaiting_session: bool,
 }
 
 impl Default for ChatState {
@@ -294,6 +372,8 @@ impl Default for ChatState {
             host_answers: Vec::new(),
             question_tool_ids: BTreeSet::new(),
             last_user_message_id: None,
+            agent_started: false,
+            awaiting_session: true,
         }
     }
 }
@@ -368,6 +448,20 @@ impl ChatState {
             });
         }
         None
+    }
+
+    /// The background commands still running, oldest first, with the row each one belongs to.
+    pub fn background_commands(&self) -> Vec<&ToolCall> {
+        let mut out = Vec::new();
+        for item in &self.items {
+            if let ItemKind::Tool(call) = &item.kind {
+                if call.is_background_running() {
+                    out.push(call);
+                }
+                out.extend(call.children.iter().filter(|c| c.is_background_running()));
+            }
+        }
+        out
     }
 
     pub fn pending_permissions(&self) -> Vec<&Permission> {
@@ -486,6 +580,7 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
                 item_id,
                 request_id,
             });
+            state.agent_started = false;
             state.turn = Turn::Working;
         }
         ChatEvent::CancelRequested => {
@@ -498,6 +593,8 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
             if state.turn == Turn::Working {
                 append(ItemKind::Notice("Stopped".into()), state);
             }
+            state.agent_started = false;
+            state.turn = turn_for(state);
         }
         ChatEvent::SilentRequest { request_id } => {
             state.silent_request_ids.insert(request_id);
@@ -578,7 +675,7 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
 }
 
 fn turn_for(state: &ChatState) -> Turn {
-    if state.in_flight.is_empty() {
+    if state.in_flight.is_empty() && !state.agent_started {
         Turn::Idle
     } else {
         Turn::Working
@@ -624,6 +721,10 @@ fn apply(message: &Inbound, state: &mut ChatState) {
             if let Some(options) = &result.config_options {
                 set_config_options(options, state);
             }
+            if result.session_established {
+                state.awaiting_session = false;
+                end_background_commands(state);
+            }
             if let Some(reason) = &result.stop_reason {
                 let finished = finish_prompt(id, state);
                 state.last_stop_reason = Some(reason.clone());
@@ -634,6 +735,15 @@ fn apply(message: &Inbound, state: &mut ChatState) {
             }
         }
         Inbound::ErrorResponse { id, code, message } => {
+            // A failed session/load is the session answer too: what follows is live, not history.
+            if let Some(id) = id
+                && !state
+                    .in_flight
+                    .iter()
+                    .any(|p| p.request_id.as_ref() == Some(id))
+            {
+                state.awaiting_session = false;
+            }
             if let Some(id) = id
                 && state.silent_request_ids.contains(id)
             {
@@ -731,6 +841,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
     match update {
         Update::AgentMessage { text, message_id } => {
             start_queued(state);
+            begin_agent_turn(state);
             if let Some(last) = last_open(state)
                 && let ItemKind::Assistant {
                     text: existing,
@@ -751,6 +862,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         }
         Update::AgentImage { image, message_id } => {
             start_queued(state);
+            begin_agent_turn(state);
             if let Some(last) = last_open(state)
                 && let ItemKind::Images {
                     refs,
@@ -771,6 +883,7 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         }
         Update::AgentThought { text } => {
             start_queued(state);
+            begin_agent_turn(state);
             if let Some(last) = last_open(state)
                 && let ItemKind::Thought { text: existing } = &mut last.kind
             {
@@ -816,6 +929,9 @@ fn apply_update(update: &Update, state: &mut ChatState) {
             if state.question_tool_ids.contains(&fields.id) {
                 return;
             }
+            if matches!(update, Update::ToolCall(_)) {
+                begin_agent_turn(state);
+            }
             merge_tool(fields, true, state);
         }
         Update::Plan(entries) => {
@@ -859,12 +975,101 @@ fn apply_update(update: &Update, state: &mut ChatState) {
             state.context_size = Some(*size);
             if let Some(cost) = cost {
                 state.cost = Some(cost.clone());
+                if state.agent_started && state.in_flight.is_empty() {
+                    state.agent_started = false;
+                    state.turn = turn_for(state);
+                }
             }
             if let Some(model) = model_id {
                 state.model_id = Some(model.clone());
             }
         }
+        Update::Notice {
+            severity,
+            title,
+            description,
+        } => append(
+            ItemKind::AgentNotice {
+                severity: severity.clone(),
+                title: title.clone(),
+                description: description.clone(),
+            },
+            state,
+        ),
+        Update::Compaction {
+            id,
+            status,
+            summary,
+        } => {
+            let status = CompactionStatus::parse(status);
+            match compaction_index(id, state) {
+                Some(index) => {
+                    if let ItemKind::Compaction {
+                        status: current,
+                        summary: text,
+                        ..
+                    } = &mut state.items[index].kind
+                    {
+                        if let Some(status) = status {
+                            *current = status;
+                        }
+                        if let Some(summary) = summary {
+                            *text = summary.clone();
+                        }
+                    }
+                }
+                None => append(
+                    ItemKind::Compaction {
+                        compaction_id: id.clone(),
+                        status: status.unwrap_or(CompactionStatus::InProgress),
+                        summary: summary.clone().unwrap_or_default(),
+                    },
+                    state,
+                ),
+            }
+        }
+        Update::CompactionChunk { id, text } => match compaction_index(id, state) {
+            Some(index) => {
+                if let ItemKind::Compaction { summary, .. } = &mut state.items[index].kind {
+                    summary.push_str(text);
+                }
+            }
+            None => append(
+                ItemKind::Compaction {
+                    compaction_id: id.clone(),
+                    status: CompactionStatus::InProgress,
+                    summary: text.clone(),
+                },
+                state,
+            ),
+        },
         Update::Unknown { .. } => {}
+    }
+}
+
+fn compaction_index(id: &str, state: &ChatState) -> Option<usize> {
+    state.items.iter().rposition(
+        |i| matches!(&i.kind, ItemKind::Compaction { compaction_id, .. } if compaction_id == id),
+    )
+}
+
+/// Agent output with no prompt in flight and no history being replayed is a turn the agent began
+/// on its own, such as the report after a background command ended.
+fn begin_agent_turn(state: &mut ChatState) {
+    if state.in_flight.is_empty() && !state.awaiting_session && !state.agent_started {
+        state.agent_started = true;
+        state.turn = Turn::Working;
+    }
+}
+
+fn end_background_commands(state: &mut ChatState) {
+    for item in &mut state.items {
+        if let ItemKind::Tool(call) = &mut item.kind {
+            call.terminal_exited = true;
+            for child in &mut call.children {
+                child.terminal_exited = true;
+            }
+        }
     }
 }
 
@@ -940,6 +1145,12 @@ fn mark_end(prompt_item: i64, reason: &str, state: &mut ChatState) {
     let label = match text.trim() {
         "/clear" => "Context cleared",
         "/compact" => {
+            if state.items[start + 1..]
+                .iter()
+                .any(|i| matches!(i.kind, ItemKind::Compaction { .. }))
+            {
+                return;
+            }
             let announced = state.items[start + 1..].iter().any(|i| match &i.kind {
                 ItemKind::Assistant { text, .. } => text.to_lowercase().contains("compact"),
                 _ => false,

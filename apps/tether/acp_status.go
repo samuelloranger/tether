@@ -31,6 +31,8 @@ type acpStatusLine struct {
 	Created     int64  `json:"created"`
 	LogBytes    int64  `json:"logBytes"`
 	EndedReason string `json:"endedReason"`
+	// Tasks counts the background commands still running (absent when none, and from older holders).
+	Tasks int `json:"tasks,omitempty"`
 	// MultiClient: the session's holder lets several clients attach at once (absent from older ones).
 	MultiClient bool `json:"multiClient,omitempty"`
 }
@@ -46,6 +48,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 		if m.Turn == "working" || m.Turn == "waiting" {
 			l.Turn = m.Turn
 		}
+		l.Tasks = m.Tasks
 	}
 	if st, err := os.Stat(filepath.Join(acpDir(name), "out.log")); err == nil {
 		l.LogBytes = st.Size()

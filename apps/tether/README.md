@@ -126,11 +126,17 @@ JSON line per named session, or per session when no name is given (exit 3 for an
     {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":"","multiClient":true}
 
 `state` is `running` or `ended`. `turn` is `working` between a client's `session/prompt` and
-its response, `waiting` while a permission or elicitation request is outstanding (this wins
+its response, and during a turn Claude Code starts by itself (agent output while no prompt is in
+flight, until the usage report that carries its cost), `waiting` while a permission or elicitation request is outstanding (this wins
 over `working`), else `idle`; an ended session is always `idle`. `title` is the latest
 `session_info_update` title. `multiClient` is true when the session's holder lets several clients
-attach (see below); a holder started by an older tether leaves it out. The daemon refreshes `title` and `turn` in `meta.json` as the
-stream moves, writing only when one of them changes. `acp ls` is unchanged.
+attach (see below); a holder started by an older tether leaves it out. `tasks`, when present,
+counts the background commands still running: Bash calls with a display terminal (the client
+declared `_meta.terminal_output`) whose result named a `backgroundTaskId`, until their
+`terminal_exit`. Tasks do not keep a session from being stopped for being idle. The end of a
+turn the agent started itself sends the same quiet done push as a prompt's end. The daemon
+refreshes `title`, `turn` and `tasks` in `meta.json` as the stream moves, writing only when one of
+them changes. `acp ls` is unchanged.
 
 `acp sessions <cwd> [--limit N]` starts the agent itself for a moment (not a holder session):
 the same `$SHELL -lc` path as the holder, `initialize`, then `session/list` with `{cwd}`

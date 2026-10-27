@@ -27,6 +27,7 @@ export struct ChatEntryVm {
     removed: int,
     expandable: bool,
     open: bool,
+    background: bool,
     md-kind: int,
     level: int,
     text: string,
@@ -39,7 +40,8 @@ export struct ChatEntryVm {
 
 // kind: 0 user, 1 assistant markdown block, 2 assistant images, 3 thinking, 4 tool group, 5 plan,
 // 6 notice, 7 error, 8 divider, 9 signed out, 10 answered question, 11 not sent, 12 working,
-// 13 earlier messages, 14 empty state.
+// 13 earlier messages, 14 empty state, 15 agent notice (state = severity), 16 compaction
+// (state: 0 compacting, 1 done, 2 failed, 3 cancelled; flag = has a summary; open = summary shown).
 export struct ChatRowVm {
     kind: int,
     key: string,
@@ -56,13 +58,18 @@ export struct ChatRowVm {
     entries: [ChatEntryVm],
 }
 
-// state: -1 nothing to say, 0 working, 1 needs you, 2 idle, 3 running, 4 ended.
+// state: -1 nothing to say, 0 working, 1 needs you, 2 idle, 3 running, 4 ended, 5 idle with background commands.
 export struct ChatTabVm {
     name: string,
     title: string,
     state: int,
     label: string,
     active: bool,
+}
+
+export struct ChatTaskVm {
+    key: string,
+    title: string,
 }
 
 export struct PaletteItemVm {
@@ -155,6 +162,7 @@ export global ChatVm {
     in property <string> context-text;
     in property <[ChatRowVm]> rows;
     in property <[string]> queued;
+    in property <[ChatTaskVm]> tasks;
     in property <int> follow-seq;
     in property <string> notice;
     // Composer.
@@ -242,6 +250,7 @@ export global ChatVm {
     callback delete-cancelled();
     callback new-chat(int);
     callback toggle(string);
+    callback task-open(string);
     callback open-link(string);
     callback open-image(string);
     callback close-viewer();
@@ -323,6 +332,10 @@ export global ChatStyle {
     // Chats use the session heat words: working is amber, needs you is coral, the rest is quiet.
     public pure function tab-heat(s: int) -> int {
         return s == 0 ? 0 : s == 1 ? 1 : -1;
+    }
+    // Info is accent, a warning amber, an error coral; a notice with no severity is quiet.
+    public pure function severity-ink(s: int) -> color {
+        return s == 1 ? Tokens.accent : s == 2 ? Tokens.warning : s == 3 ? Tokens.danger : Tokens.text-faint;
     }
     out property <length> column: 760px;
     out property <length> row-height: 34px;
@@ -635,6 +648,17 @@ component Entry inherits Rectangle {
                     }
                     if root.e.subtitle != "": Text { text: root.e.subtitle; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
                 }
+                if root.e.background: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        border-width: 1px;
+                        border-color: Tokens.accent;
+                        border-radius: 4px;
+                        width: badge-text.preferred-width + 10px;
+                        height: badge-text.preferred-height + 2px;
+                        badge-text := Text { x: 5px; y: 1px; text: "background"; font-family: Tokens.mono-font; font-size: 10.5px; color: Tokens.accent; }
+                    }
+                }
                 if root.e.added + root.e.removed > 0: HorizontalLayout {
                     spacing: 5px;
                     alignment: center;
@@ -820,6 +844,54 @@ component Row inherits VerticalLayout {
     }
     if root.r.kind == 6: QuietRow { icon: 15; text: root.r.text; }
     if root.r.kind == 7: QuietRow { icon: 16; text: root.r.text; ink: Tokens.danger; text-ink: Tokens.danger; }
+    if root.r.kind == 15: HorizontalLayout {
+        spacing: 10px;
+        Rectangle { width: 2px; background: ChatStyle.severity-ink(root.r.state); }
+        Para {
+            text: root.r.detail == "" ? root.r.text : root.r.text + "  \u{00B7}  " + root.r.detail;
+            font-size: 12px;
+            ink: Tokens.text-secondary;
+        }
+    }
+    if root.r.kind == 16: VerticalLayout {
+        spacing: 6px;
+        Pressable {
+            enabled: root.r.flag;
+            hover-fill: false;
+            height: 26px;
+            clicked => { ChatVm.toggle(root.r.key); }
+            HorizontalLayout {
+                spacing: 10px;
+                VerticalLayout { alignment: center; horizontal-stretch: 1; Rectangle { height: 1px; background: Tokens.border; } }
+                HorizontalLayout {
+                    spacing: 6px;
+                    if root.r.state == 0: VerticalLayout { alignment: center; TextDot { ink: Tokens.accent; line-height: 14px; } }
+                    Text { text: root.r.text; font-size: 11.5px; color: root.r.state == 2 ? Tokens.danger : Tokens.text-faint; vertical-alignment: center; }
+                    if root.r.flag: VerticalLayout { alignment: center; Chevron { open: root.r.open; } }
+                }
+                VerticalLayout { alignment: center; horizontal-stretch: 1; Rectangle { height: 1px; background: Tokens.border; } }
+            }
+        }
+        if root.r.open: Rectangle {
+            background: Tokens.surface;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            clip: true;
+            height: min(summary-text.preferred-height + 20px, 240px);
+            ScrollView {
+                summary-text := Text {
+                    x: 10px;
+                    y: 10px;
+                    width: parent.width - 20px;
+                    text: root.r.detail;
+                    wrap: word-wrap;
+                    font-size: 12px;
+                    color: Tokens.text-secondary;
+                }
+            }
+        }
+    }
     if root.r.kind == 8: HorizontalLayout {
         spacing: 10px;
         padding-top: 4px;
@@ -1505,6 +1577,44 @@ component QueuedChip inherits Rectangle {
     }
 }
 
+// The background commands still running, above the composer; two or more fold under a count.
+component TaskStrip inherits Rectangle {
+    property <bool> open: true;
+    background: Tokens.surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    height: strip.preferred-height + 2px;
+    strip := VerticalLayout {
+        padding-top: 1px;
+        padding-bottom: 1px;
+        if ChatVm.tasks.length > 1: Pressable {
+            height: 28px;
+            clicked => { root.open = !root.open; }
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                VerticalLayout { alignment: center; Chevron { open: root.open; } }
+                Text { text: ChatVm.tasks.length + " running"; font-size: 12px; color: Tokens.accent; vertical-alignment: center; }
+            }
+        }
+        if ChatVm.tasks.length == 1 || root.open: VerticalLayout {
+            for t in ChatVm.tasks: Pressable {
+                height: 28px;
+                clicked => { ChatVm.task-open(t.key); }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    task-dot := VerticalLayout { alignment: center; width: 6px; TextDot { ink: Tokens.accent; line-height: 14px; } }
+                    Text { horizontal-stretch: 1; text: t.title; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}
+
 component BottomBar inherits Rectangle {
     background: Tokens.background;
     height: col.preferred-height;
@@ -1549,6 +1659,7 @@ component BottomBar inherits Rectangle {
             VerticalLayout { alignment: center; Glyph { which: ChatVm.banner-icon; size: 13px; ink: Tokens.text-secondary; } }
             Text { text: ChatVm.banner; font-size: 12.5px; color: Tokens.text-secondary; }
         }
+        if ChatVm.tasks.length > 0: TaskStrip { }
         if ChatVm.banner == "" && ChatVm.composer-shown: Composer { }
     }
 }
@@ -2005,7 +2116,12 @@ export component ChatTab inherits Rectangle {
             TextDot { ink: Heat.ink(ChatStyle.tab-heat(root.tab.state)); line-height: word.preferred-height; }
             word := Text { text: root.tab.label; color: Heat.ink(ChatStyle.tab-heat(root.tab.state)); font-size: 11.5px; vertical-alignment: center; }
         }
-        if ChatStyle.tab-heat(root.tab.state) < 0 && root.tab.label != "": Text { text: root.tab.label; color: Tokens.text-faint; font-size: 11.5px; vertical-alignment: center; }
+        if root.tab.state == 5: HorizontalLayout {
+            spacing: 5px;
+            TextDot { ink: Tokens.accent; line-height: task-word.preferred-height; }
+            task-word := Text { text: root.tab.label; color: Tokens.accent; font-size: 11.5px; vertical-alignment: center; }
+        }
+        if ChatStyle.tab-heat(root.tab.state) < 0 && root.tab.state != 5 && root.tab.label != "": Text { text: root.tab.label; color: Tokens.text-faint; font-size: 11.5px; vertical-alignment: center; }
         VerticalLayout {
             alignment: center;
             Rectangle {

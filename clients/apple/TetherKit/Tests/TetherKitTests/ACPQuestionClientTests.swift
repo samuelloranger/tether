@@ -49,6 +49,20 @@ final class ACPQuestionClientTests: XCTestCase {
     XCTAssertEqual(capabilities["terminal"] as? Bool, false)
   }
 
+  func test_new_chats_advertise_notices_compaction_and_terminal_output_but_not_air() async throws {
+    let stream = ScriptedByteStream()
+    let client = ACPClient(stream: stream)
+    await client.startReading()
+    Task { _ = try? await client.initialize() }
+    let sent = await eventually { stream.writtenText.contains("\"method\":\"initialize\"") }
+    XCTAssertTrue(sent)
+    let params = try XCTUnwrap(written(stream).first?["params"] as? NSDictionary)
+    let capabilities = try XCTUnwrap(params["clientCapabilities"] as? NSDictionary)
+    XCTAssertEqual(capabilities["session"] as? NSDictionary, ["notices": [:], "compaction": [:]] as NSDictionary)
+    XCTAssertEqual(capabilities["_meta"] as? NSDictionary, ["terminal_output": true] as NSDictionary)
+    XCTAssertFalse(stream.writtenText.contains("jetbrains"))
+  }
+
   func test_an_accepted_answer_is_written_journaled_and_equals_a_replay() async throws {
     let (client, stream, store) = try await pending()
     try await client.answerQuestion(requestId: .int(0), action: .accept, content: answer)

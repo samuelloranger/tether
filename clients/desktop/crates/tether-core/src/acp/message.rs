@@ -113,6 +113,21 @@ pub struct ToolFields {
     pub parent_id: Option<String>,
     /// Scalar fields of `rawInput`, stringified; a subagent launch fills them in progressively.
     pub input: Option<BTreeMap<String, String>>,
+    /// `_meta.terminal_info` is present: the call runs in a terminal the agent can keep after the turn.
+    #[serde(default)]
+    pub has_terminal: bool,
+    /// `_meta.claudeCode.toolResponse.backgroundTaskId`: the command was sent to the background.
+    #[serde(default)]
+    pub background_task_id: Option<String>,
+    /// `_meta.terminal_exit` arrived.
+    #[serde(default)]
+    pub terminal_exit: bool,
+    /// `_meta.terminal_output.data`: the whole output so far.
+    #[serde(default)]
+    pub terminal_data: Option<String>,
+    /// `_meta.terminal_output_delta.data`: appended to what the call has.
+    #[serde(default)]
+    pub terminal_delta: Option<String>,
 }
 
 impl ToolFields {
@@ -208,6 +223,20 @@ pub enum Update {
     },
     ConfigOptions(Vec<ConfigOption>),
     Commands(Vec<Command>),
+    Notice {
+        severity: Option<String>,
+        title: String,
+        description: Option<String>,
+    },
+    Compaction {
+        id: String,
+        status: String,
+        summary: Option<String>,
+    },
+    CompactionChunk {
+        id: String,
+        text: String,
+    },
     Unknown {
         kind: String,
     },
@@ -220,6 +249,8 @@ pub struct AcpResult {
     pub session_id: Option<String>,
     pub stop_reason: Option<String>,
     pub config_options: Option<Vec<ConfigOption>>,
+    /// The answer carries `modes`: it is a `session/new` or `session/load` answer.
+    pub session_established: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -387,6 +418,7 @@ fn decode_result(result: &Json) -> AcpResult {
         session_id: string(result.get("sessionId")),
         stop_reason: string(result.get("stopReason")),
         config_options: objects(result.get("configOptions")).map(|o| config_options(&o)),
+        session_established: result.contains_key("modes") || result.contains_key("sessionId"),
     }
 }
 
@@ -494,8 +526,46 @@ fn decode_update(update: &Json, images: Option<&dyn ImageSink>) -> Update {
             ),
             None => unknown(),
         },
+        "notice" => match string(update.get("title")) {
+            Some(title) => Update::Notice {
+                severity: string(update.get("severity")),
+                title,
+                description: string(update.get("description")).filter(|d| !d.is_empty()),
+            },
+            None => unknown(),
+        },
+        "compaction_update" => match string(update.get("compactionId")) {
+            Some(id) => {
+                let summary = objects(update.get("summary")).map(|blocks| {
+                    blocks
+                        .into_iter()
+                        .filter_map(content_block_text)
+                        .collect::<String>()
+                });
+                Update::Compaction {
+                    id,
+                    status: string(update.get("status")).unwrap_or_default(),
+                    summary: summary.filter(|s| !s.is_empty()),
+                }
+            }
+            None => unknown(),
+        },
+        "compaction_summary_chunk" => match (
+            string(update.get("compactionId")),
+            content_text(update.get("content")),
+        ) {
+            (Some(id), Some(text)) => Update::CompactionChunk { id, text },
+            _ => unknown(),
+        },
         _ => unknown(),
     }
+}
+
+fn content_block_text(block: &Json) -> Option<String> {
+    if block.get("type").and_then(Value::as_str) != Some("text") {
+        return None;
+    }
+    string(block.get("text"))
 }
 
 fn config_options(raw: &[&Json]) -> Vec<ConfigOption> {
@@ -534,11 +604,7 @@ fn config_options(raw: &[&Json]) -> Vec<ConfigOption> {
 }
 
 fn content_text(value: Option<&Value>) -> Option<String> {
-    let block = object(value)?;
-    if block.get("type").and_then(Value::as_str) != Some("text") {
-        return None;
-    }
-    string(block.get("text"))
+    content_block_text(object(value)?)
 }
 
 /// A block that is not an image, not base64, or too large is skipped; the stream carries on.
@@ -582,9 +648,23 @@ fn tool_fields(
 ) -> Option<ToolFields> {
     let mut fields = ToolFields::new(object_.get("toolCallId")?.as_str()?);
     fields.title = string(object_.get("title"));
-    let meta = object(object_.get("_meta")).and_then(|m| object(m.get("claudeCode")));
+    let outer_meta = object(object_.get("_meta"));
+    let meta = outer_meta.and_then(|m| object(m.get("claudeCode")));
     fields.tool_name = meta.and_then(|m| string(m.get("toolName")));
     fields.parent_id = meta.and_then(|m| string(m.get("parentToolUseId")));
+    fields.background_task_id = meta
+        .and_then(|m| object(m.get("toolResponse")))
+        .and_then(|r| string(r.get("backgroundTaskId")));
+    fields.has_terminal = outer_meta.is_some_and(|m| m.contains_key("terminal_info"));
+    fields.terminal_exit = outer_meta.is_some_and(|m| m.contains_key("terminal_exit"));
+    let terminal_data = |key: &str| {
+        outer_meta
+            .and_then(|m| object(m.get(key)))
+            .and_then(|o| string(o.get("data")))
+            .filter(|d| !d.trim().is_empty())
+    };
+    fields.terminal_data = terminal_data("terminal_output");
+    fields.terminal_delta = terminal_data("terminal_output_delta");
     if let Some(input) = object(object_.get("rawInput")) {
         let scalars: BTreeMap<String, String> = input
             .iter()
