@@ -259,4 +259,48 @@ final class SSHTerminalControllerSessionSwitchTests: XCTestCase {
     XCTAssertEqual(controller.sessionSwitches, 1)
     await controller.leave()
   }
+
+  func test_a_host_that_cannot_be_listed_gets_no_default_session_and_the_next_listing_attaches_one() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    let lock = NSLock()
+    var lsCalls = 0
+    ops.execResult = { command in
+      guard command.contains("zmx ls") else { return "" }
+      lock.lock(); lsCalls += 1; let n = lsCalls; lock.unlock()
+      if n <= 3 { throw SSHConnectError.commandTimedOut }
+      return "name=work\tpid=1\tclients=0\tcreated=5\tcwd=x\n"
+    }
+    let store = InMemoryHostKeyStore()
+    let controller = SSHTerminalController(
+      title: "test", config: config, hostKeyStore: store,
+      dial: { _, _ in stream },
+      control: ControlConnection(config: config, store: store) { ops })
+
+    await controller.connect()
+    let attached = await eventually(timeout: 5) { stream.writtenText.contains("attach 'work'") }
+
+    XCTAssertTrue(attached, stream.writtenText)
+    XCTAssertFalse(stream.writtenText.contains("attach 'default'"), stream.writtenText)
+    XCTAssertEqual(controller.attach, "work")
+    await controller.leave()
+  }
+
+  func test_an_empty_host_creates_nothing() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    ops.execResult = { command in command.contains("zmx ls") ? "no sessions found in /tmp/zmx-1000\n" : "" }
+    let store = InMemoryHostKeyStore()
+    let controller = SSHTerminalController(
+      title: "test", config: config, hostKeyStore: store,
+      dial: { _, _ in stream },
+      control: ControlConnection(config: config, store: store) { ops })
+
+    await controller.connect()
+    try? await Task.sleep(nanoseconds: 300_000_000)
+
+    XCTAssertFalse(stream.writtenText.contains("zmx attach"), stream.writtenText)
+    XCTAssertFalse(controller.hasSession)
+    await controller.leave()
+  }
 }
