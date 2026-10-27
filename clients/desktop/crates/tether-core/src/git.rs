@@ -99,7 +99,7 @@ pub fn workspace_command(dir: &RepoDir) -> String {
          u=$(git -C {q} rev-parse --abbrev-ref --symbolic-full-name '@{{u}}' 2>/dev/null) && c=$(git -C {q} rev-list --left-right --count 'HEAD...@{{u}}' 2>/dev/null) || {{ u=; c=; }}; \
          printf '%s\\n%s\\n\\035' \"$u\" \"$c\"; \
          git -C {q} --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e' 2>/dev/null; printf '\\035'; \
-         git -C {q} -c core.quotepath=off ls-files --others --exclude-standard 2>/dev/null | head -n 200; printf '\\035'; \
+         git -C {q} -c core.quotepath=off ls-files --others --exclude-standard --full-name -- ':/' 2>/dev/null | head -n 200; printf '\\035'; \
          if command -v gh >/dev/null 2>&1; then (cd {q} && gh pr list --state all --limit 50 --json {PR_LIST_FIELDS} 2>&1); else printf '%s' {missing}; fi; \
          else printf '%s\\035\\035\\035\\035' {nr}; fi",
         nr = shell_quote(NOT_A_REPO),
@@ -120,6 +120,19 @@ pub fn commit_command(dir: &RepoDir, id: &str) -> Option<String> {
             "git -C {} --no-pager show {} --patch {PATCH_OPTIONS} --format=%b%x1e 2>&1 | head -c {}",
             dir.q(),
             shell_quote(id),
+            PATCH_BYTE_CAP + 1
+        ))
+    })
+}
+
+/// An untracked file's contents as an all-added patch. `relative` is from the top of the
+/// repository, as `ls-files --full-name` gave it.
+pub fn untracked_diff_command(top: &RepoDir, relative: &str) -> Option<String> {
+    valid_repo_relative(relative).then(|| {
+        wrap(&format!(
+            "cd {} && git -c core.quotepath=off --no-pager diff --no-index {PATCH_OPTIONS} -- /dev/null {} 2>/dev/null | head -c {}",
+            top.q(),
+            shell_quote(relative),
             PATCH_BYTE_CAP + 1
         ))
     })
@@ -1280,6 +1293,23 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         assert!(command.contains("--symbolic-full-name"), "{command}");
         assert!(command.contains("--left-right --count"), "{command}");
         assert!(command.contains("|| { u=; c=; }"), "{command}");
+    }
+
+    #[test]
+    fn an_untracked_file_is_diffed_against_nothing_from_the_top_of_the_repository() {
+        let top = RepoDir::new("/r").unwrap();
+        let command = untracked_diff_command(&top, "docs/it's new.txt").unwrap();
+        assert!(command.contains("diff --no-index"), "{command}");
+        assert!(
+            command.contains("--src-prefix=a/ --dst-prefix=b/"),
+            "{command}"
+        );
+        assert!(command.contains("-- /dev/null "), "{command}");
+        assert!(command.contains("head -c 2097153"), "{command}");
+        assert!(!command.contains("it's new"), "{command}");
+        assert!(untracked_diff_command(&top, "../etc/passwd").is_none());
+        assert!(untracked_diff_command(&top, "/etc/passwd").is_none());
+        assert!(workspace_command(&top).contains("--full-name -- "));
     }
 
     #[test]

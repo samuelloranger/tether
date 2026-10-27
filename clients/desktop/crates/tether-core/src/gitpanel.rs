@@ -64,6 +64,12 @@ pub enum GitJob {
         req: u64,
         path: String,
     },
+    /// `path` is relative to `top`.
+    Untracked {
+        req: u64,
+        top: String,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +122,10 @@ pub enum GitDone {
     Markdown {
         req: u64,
         result: Result<(String, bool), String>,
+    },
+    Untracked {
+        req: u64,
+        result: Result<Patch, String>,
     },
 }
 
@@ -454,10 +464,12 @@ impl GitPanel {
                     } else if is_markdown(&file.path) {
                         self.open_markdown(&file.path, fx);
                     }
-                } else if let Some(path) = ws.untracked.get(index - ws.files.len()).cloned()
-                    && is_markdown(&path)
-                {
-                    self.open_markdown(&path, fx);
+                } else if let Some(path) = ws.untracked.get(index - ws.files.len()).cloned() {
+                    if !alt {
+                        self.open_untracked(&path, fx);
+                    } else if is_markdown(&path) {
+                        self.open_markdown(&path, fx);
+                    }
                 }
             }
             GitTab::Commits => {
@@ -497,6 +509,22 @@ impl GitPanel {
                 }
             }
         }
+    }
+
+    fn open_untracked(&mut self, relative: &str, fx: &mut Vec<GitFx>) {
+        let top = self.workspace.as_ref().map_or("", |w| w.top.as_str());
+        if git::join_repo_path(top, relative).is_none() {
+            self.toast = Some("That path can't be opened.".into());
+            return;
+        }
+        let (top, req) = (top.to_owned(), self.req());
+        self.stack
+            .push(Page::Diff(DiffPage::loading(relative.to_owned(), req)));
+        fx.push(GitFx::Run(GitJob::Untracked {
+            req,
+            top,
+            path: relative.to_owned(),
+        }));
     }
 
     fn open_markdown(&mut self, relative: &str, fx: &mut Vec<GitFx>) {
@@ -608,7 +636,9 @@ impl GitPanel {
                     Err(message) => self.docs_error = Some(message),
                 }
             }
-            GitDone::Commit { req, result } | GitDone::PrDiff { req, result } => {
+            GitDone::Commit { req, result }
+            | GitDone::PrDiff { req, result }
+            | GitDone::Untracked { req, result } => {
                 if let Some(Page::Diff(page)) = self.stack.last_mut() {
                     page.fill(req, result);
                 }
@@ -1175,8 +1205,21 @@ pub fn commit_result(raw: Result<String, String>) -> Result<Patch, String> {
     })
 }
 
+/// `diff --no-index` exits 1 when the files differ, which for an untracked file is always.
+pub fn untracked_result(raw: Result<String, String>) -> Result<Patch, String> {
+    let output = raw?;
+    if let (text, Some(1)) = git::unwrap_output(&output) {
+        return patch_result(Ok(text));
+    }
+    patch_result(failure(Ok(output)))
+}
+
 pub fn pr_diff_result(raw: Result<String, String>) -> Result<Patch, String> {
-    let text = failure(raw)?;
+    patch_result(failure(raw))
+}
+
+fn patch_result(text: Result<String, String>) -> Result<Patch, String> {
+    let text = text?;
     let (patch, truncated) = git::capped_patch(&text);
     Ok(Patch {
         files: git::group_diff(patch),
@@ -1380,7 +1423,7 @@ mod tests {
     }
 
     #[test]
-    fn a_markdown_file_previews_from_the_alt_action_or_when_new() {
+    fn a_markdown_file_previews_from_the_alt_action() {
         let mut p = opened();
         let fx = run(&mut p, GitMsg::RowAlt(1), T0);
         assert_eq!(
@@ -1392,14 +1435,71 @@ mod tests {
         );
         assert!(p.modal());
         run(&mut p, GitMsg::CloseMarkdown, T0);
-        let fx = run(&mut p, GitMsg::Row(2), T0);
+        let fx = run(&mut p, GitMsg::RowAlt(2), T0);
         assert!(matches!(
             &fx[0],
             GitFx::Run(GitJob::Markdown { path, .. }) if path == "/repo/notes.md"
         ));
         // A new file that is not markdown has nothing to preview.
         run(&mut p, GitMsg::CloseMarkdown, T0);
-        assert!(run(&mut p, GitMsg::Row(3), T0).is_empty());
+        assert!(run(&mut p, GitMsg::RowAlt(3), T0).is_empty());
+    }
+
+    #[test]
+    fn a_new_file_opens_as_an_all_added_diff() {
+        let mut p = opened();
+        let fx = run(&mut p, GitMsg::Row(3), T0);
+        let GitFx::Run(GitJob::Untracked { req, top, path }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        assert_eq!((top.as_str(), path.as_str()), ("/repo", "scratch.txt"));
+        assert!(p.view().loading);
+        assert_eq!(p.view().title, "scratch.txt");
+        let out = "diff --git a/scratch.txt b/scratch.txt\nnew file mode 100644\n--- /dev/null\n+++ b/scratch.txt\n@@ -0,0 +1,2 @@\n+-- one\n+++ two\n\n__TETHER_RC__1";
+        run(
+            &mut p,
+            GitMsg::Done(GitDone::Untracked {
+                req,
+                result: untracked_result(Ok(out.into())),
+            }),
+            T0,
+        );
+        let v = p.view();
+        assert!(!v.loading);
+        assert_eq!(v.stat, Some((2, 0)));
+        let added: Vec<_> = v
+            .diff
+            .iter()
+            .filter(|l| l.kind == DiffLineKind::Added)
+            .map(|l| l.text.as_str())
+            .collect();
+        assert_eq!(added, ["-- one", "++ two"]);
+        // A new markdown file opens as a diff too; the eye button previews it.
+        run(&mut p, GitMsg::Back, T0);
+        let fx = run(&mut p, GitMsg::Row(2), T0);
+        assert!(matches!(&fx[0], GitFx::Run(GitJob::Untracked { path, .. }) if path == "notes.md"));
+    }
+
+    #[test]
+    fn an_untracked_diff_that_could_not_run_says_why() {
+        assert_eq!(
+            untracked_result(Ok("sh: cd: can't cd\n__TETHER_RC__2".into())),
+            Err("sh: cd: can't cd".into())
+        );
+        assert!(
+            untracked_result(Ok("\n__TETHER_RC__0".into()))
+                .unwrap()
+                .files
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_new_file_outside_the_repository_is_never_opened() {
+        let mut p = opened();
+        p.workspace.as_mut().unwrap().untracked = vec!["../escape".into()];
+        assert!(run(&mut p, GitMsg::Row(2), T0).is_empty());
+        assert_eq!(p.view().toast, "That path can't be opened.");
     }
 
     #[test]
