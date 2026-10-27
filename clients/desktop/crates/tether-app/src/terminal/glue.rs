@@ -381,13 +381,25 @@ fn wire_callbacks(ui: &AppWindow) {
 
 /// Keys go to the PTY only on the terminal page, with no name field, dialog, or menu open.
 fn keys_to_pty(app: &App) -> bool {
-    window_keys(app)
-        && !app.ui.global::<TerminalVm>().get_search_focused()
-        && !crate::terminal::chatview::takes_keys(&app.ui)
+    key_gate(app).pty()
 }
 
-/// The terminal page with nothing modal over it: the window shortcuts apply, whoever has focus.
 fn window_keys(app: &App) -> bool {
+    key_gate(app).window()
+}
+
+fn key_gate(app: &App) -> KeyGate {
+    KeyGate {
+        page: page_takes_keys(app),
+        chat_dialog: crate::terminal::chatview::dialog_open(&app.ui),
+        composer: app.ui.global::<crate::ChatVm>().get_active(),
+        search: app.ui.global::<TerminalVm>().get_search_focused(),
+        sidebar_over: SIDEBAR_OVER.get(),
+    }
+}
+
+/// The terminal page with nothing of its own modal over it.
+fn page_takes_keys(app: &App) -> bool {
     let vm = app.ui.global::<TerminalVm>();
     current().is_some()
         && app.router.current() == Page::Terminal
@@ -677,4 +689,88 @@ fn set_well_color(ui: &AppWindow, rgb: u32) {
             (rgb >> 8) as u8,
             rgb as u8,
         ));
+}
+
+/// Where a key goes on the terminal page: the window shortcuts, the PTY, or neither.
+#[derive(Debug, Default, Clone, Copy)]
+struct KeyGate {
+    /// The terminal page with nothing modal of its own over it.
+    page: bool,
+    chat_dialog: bool,
+    composer: bool,
+    search: bool,
+    sidebar_over: bool,
+}
+
+impl KeyGate {
+    fn window(self) -> bool {
+        self.page && !self.chat_dialog
+    }
+
+    fn pty(self) -> bool {
+        self.window() && !self.composer && !self.search && !self.sidebar_over
+    }
+}
+
+#[cfg(test)]
+mod key_gate_tests {
+    use super::KeyGate;
+
+    const OPEN: KeyGate = KeyGate {
+        page: true,
+        chat_dialog: false,
+        composer: false,
+        search: false,
+        sidebar_over: false,
+    };
+
+    #[test]
+    fn a_bare_terminal_takes_keys_and_the_window_shortcuts() {
+        assert!(OPEN.pty() && OPEN.window());
+    }
+
+    #[test]
+    fn a_chat_composer_or_the_find_field_keeps_keys_from_the_pty_and_the_shortcuts_still_work() {
+        for gate in [
+            KeyGate {
+                composer: true,
+                ..OPEN
+            },
+            KeyGate {
+                search: true,
+                ..OPEN
+            },
+        ] {
+            assert!(!gate.pty());
+            assert!(gate.window());
+        }
+    }
+
+    #[test]
+    fn a_chat_dialog_takes_everything() {
+        let gate = KeyGate {
+            chat_dialog: true,
+            ..OPEN
+        };
+        assert!(!gate.pty() && !gate.window());
+    }
+
+    #[test]
+    fn the_sidebar_over_the_content_keeps_keys_from_the_shell() {
+        let gate = KeyGate {
+            sidebar_over: true,
+            ..OPEN
+        };
+        assert!(!gate.pty());
+        assert!(gate.window(), "Ctrl+Shift+B still closes it");
+    }
+
+    #[test]
+    fn off_the_page_nothing_is_routed() {
+        let gate = KeyGate {
+            page: false,
+            ..OPEN
+        };
+        assert!(!gate.pty() && !gate.window());
+    }
 }

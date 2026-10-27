@@ -404,6 +404,13 @@ component PaneHeader inherits Rectangle {
         spacing: 8px;
         if !root.docked: SideIcon { icon: @image-url("icons/sidebar.svg"); tooltip: "Show sidebar · Ctrl+Shift+B"; clicked => { TerminalVm.toggle-sidebar(); } }
         if !root.docked: VerticalLayout { alignment: center; Lamp { lamp: TerminalVm.lamp; flashing: root.flashing; } }
+        // The lamp is never the only signal: the word the sidebar shows comes here while it is closed.
+        if !root.docked: Text {
+            text: TerminalVm.word;
+            font-size: 11.5px;
+            color: TerminalVm.lamp == 0 ? Tokens.warning : TerminalVm.lamp == 1 ? Tokens.success : Tokens.danger;
+            vertical-alignment: center;
+        }
         if ChatVm.active: ChatTitleBlock { horizontal-stretch: 1; prefix: root.prefix; }
         if !ChatVm.active: VerticalLayout {
             horizontal-stretch: 1;
@@ -510,17 +517,18 @@ export component TerminalPage inherits Rectangle {
                     SecondaryButton { text: "Back to Home"; clicked => { TerminalVm.home(); } }
                 }
             }
-            if TerminalVm.send-capsule != "" && !TerminalVm.disconnected: Rectangle {
-                y: parent.height - 56px; height: 32px; width: send-text.preferred-width + 32px; x: (parent.width - self.width) / 2;
-                background: Tokens.surface; border-radius: 16px; border-width: 1px; border-color: Tokens.border;
-                send-text := Text { text: TerminalVm.send-capsule; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
-            }
             search := SearchBar {
                 visible: TerminalVm.search-open;
                 x: parent.width - self.width - 12px;
                 y: 10px;
             }
             if ChatVm.active: ChatPane { }
+            // After the chat pane, so a send started from a chat shows its progress and failure.
+            if TerminalVm.send-capsule != "" && !TerminalVm.disconnected: Rectangle {
+                y: parent.height - 56px; height: 32px; width: send-text.preferred-width + 32px; x: (parent.width - self.width) / 2;
+                background: Tokens.surface; border-radius: 16px; border-width: 1px; border-color: Tokens.border;
+                send-text := Text { text: TerminalVm.send-capsule; color: Tokens.text; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
+            }
             if TerminalVm.tooltip != "" && !ChatVm.active: Rectangle {
                 x: TerminalVm.pointer-x + 12px; y: TerminalVm.pointer-y + 16px;
                 width: tip.preferred-width + 16px; height: 24px;

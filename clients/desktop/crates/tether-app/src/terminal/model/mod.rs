@@ -509,9 +509,18 @@ impl TerminalModel {
             Msg::Modifiers(mods) => self.on_modifiers(mods, &mut fx),
             Msg::SelectTab(name) => self.select_row(Row::Terminal(name), now, &mut fx),
             Msg::TabShortcut(jump) => self.on_jump(jump, now, &mut fx),
-            Msg::NewSessionBegin => self.on_new_begin(),
-            Msg::NewSessionCommit(name) => self.on_new_commit(&name, now, &mut fx),
-            Msg::NewSessionCancel => self.naming = None,
+            Msg::NewSessionBegin => {
+                self.on_new_begin();
+                self.sidebar_for_naming(self.naming.is_some(), &mut fx);
+            }
+            Msg::NewSessionCommit(name) => {
+                self.on_new_commit(&name, now, &mut fx);
+                self.sidebar_for_naming(self.naming.is_some(), &mut fx);
+            }
+            Msg::NewSessionCancel => {
+                self.naming = None;
+                self.sidebar_for_naming(false, &mut fx);
+            }
             Msg::KillRequested(name) => self.kill_prompt = Some(name),
             Msg::KillConfirmed => self.on_kill_confirmed(&mut fx),
             Msg::KillCancelled => self.kill_prompt = None,

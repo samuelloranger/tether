@@ -23,7 +23,7 @@ pub fn visibility(pref_open: bool, overlay_requested: bool, window_width: f32) -
     let narrow = window_width - SIDEBAR_WIDTH < MIN_CONTENT_WIDTH;
     match (narrow, pref_open, overlay_requested) {
         (false, true, _) => Shown::Docked,
-        (true, _, true) => Shown::Overlay,
+        (_, _, true) => Shown::Overlay,
         _ => Shown::Hidden,
     }
 }
@@ -82,7 +82,7 @@ mod tests {
             (true, false, 640.0, Shown::Hidden),
             (true, true, 640.0, Shown::Overlay),
             (false, true, 640.0, Shown::Overlay),
-            (false, true, 1200.0, Shown::Hidden),
+            (false, true, 1200.0, Shown::Overlay),
             (true, false, 668.0, Shown::Docked),
             (true, false, 667.0, Shown::Hidden),
         ] {

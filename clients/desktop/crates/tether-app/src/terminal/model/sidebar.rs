@@ -49,6 +49,17 @@ impl TerminalModel {
         self.publish_sidebar(fx);
     }
 
+    /// The new-session name field lives in the sidebar: a hidden one shows over the content
+    /// until the name is committed or cancelled.
+    pub(crate) fn sidebar_for_naming(&mut self, naming: bool, fx: &mut Vec<Effect>) {
+        if naming && self.sidebar.visibility() == Shown::Hidden {
+            self.sidebar.overlay = true;
+        } else if !naming {
+            self.sidebar.overlay = false;
+        }
+        self.publish_sidebar(fx);
+    }
+
     pub(crate) fn on_sidebar_dismiss(&mut self, fx: &mut Vec<Effect>) {
         self.sidebar.overlay = false;
         self.publish_sidebar(fx);

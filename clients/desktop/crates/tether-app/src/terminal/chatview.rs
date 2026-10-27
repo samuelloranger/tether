@@ -862,9 +862,13 @@ pub fn reset(ui: &crate::AppWindow) {
 
 /// Something of the chat's sits in front of the terminal: keys belong to it, not the PTY.
 pub fn takes_keys(ui: &crate::AppWindow) -> bool {
+    ui.global::<ChatVm>().get_active() || dialog_open(ui)
+}
+
+/// A chat dialog or menu is up: the window shortcuts would act behind it.
+pub fn dialog_open(ui: &crate::AppWindow) -> bool {
     let vm = ui.global::<ChatVm>();
-    vm.get_active()
-        || vm.get_add_menu()
+    vm.get_add_menu()
         || vm.get_nc_open()
         || !vm.get_delete_title().is_empty()
         || vm.get_viewer_open()

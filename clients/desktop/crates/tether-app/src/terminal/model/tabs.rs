@@ -128,7 +128,7 @@ impl TerminalModel {
         }
     }
 
-    pub(crate) fn on_new_commit(&mut self, raw: &str, _now: Duration, fx: &mut Vec<Effect>) {
+    pub(crate) fn on_new_commit(&mut self, raw: &str, now: Duration, fx: &mut Vec<Effect>) {
         self.naming = None;
         let name = raw.trim();
         if name.is_empty() || self.strip.is_none() {
@@ -141,6 +141,7 @@ impl TerminalModel {
             ))));
             return;
         }
+        self.chat_leave(now, fx);
         if self.strip.as_ref().is_some_and(|s| s.tab(name).is_some()) {
             return self.activate(name, fx);
         }
@@ -400,6 +401,37 @@ mod tests {
         assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), Some(true)));
         let fx = m.handle(Msg::Command(TetherCommand::ToggleSidebar), t(12));
         assert_eq!(sidebar_effects(&fx), (Some(Shown::Docked), Some(false)));
+    }
+
+    #[test]
+    fn naming_a_session_shows_a_hidden_sidebar_until_it_is_done() {
+        let mut m = live(vec![session("a", 1)]);
+        m.set_sidebar_closed(true);
+        m.handle(Msg::WindowWidth(1200.0), t(10));
+        let fx = m.handle(Msg::NewSessionBegin, t(11));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Overlay), None));
+        let fx = m.handle(Msg::NewSessionCancel, t(12));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+        m.handle(Msg::NewSessionBegin, t(13));
+        let fx = m.handle(Msg::NewSessionCommit("b".into()), t(14));
+        assert_eq!(sidebar_effects(&fx), (Some(Shown::Hidden), None));
+    }
+
+    #[test]
+    fn a_new_session_from_a_chat_brings_the_terminal_to_the_front() {
+        let (mut m, _dir) = super::super::tests::live_with_chats(
+            vec![session("a", 1)],
+            super::super::tests::ONE_CHAT,
+        );
+        m.handle(
+            Msg::Chat(super::super::chat::ChatMsg::Select("chat-c".into())),
+            t(10),
+        );
+        assert!(m.chat_active());
+        m.handle(Msg::NewSessionBegin, t(11));
+        m.handle(Msg::NewSessionCommit("b".into()), t(12));
+        assert!(!m.chat_active());
+        assert_eq!(m.view().header.session, "b");
     }
 
     #[test]
