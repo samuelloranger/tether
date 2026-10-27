@@ -33,6 +33,9 @@ public struct SSHTerminalView: View {
   @State private var content = DrawerContent()
   @State private var showNewChat = false
   @State private var newChatMode: NewChatSheet.Mode = .new
+  @State private var newChatAgent: ChatAgentProfile?
+  @State private var newChatOptionsOpen = false
+  @State private var newChatChanges: [String: String] = [:]
   @State private var showFileImporter = false
   @State private var showHistory = false
   @State private var showPhotoPicker = false
@@ -200,7 +203,8 @@ public struct SSHTerminalView: View {
       guard let name else { return }
       controller.requestedChat = nil
       openChat(ChatRoute.opening(
-        name: name, chats: controller.chats, journal: UserDefaultsChatJournalStore(name: name).load()))
+        name: name, chats: controller.chats, journal: UserDefaultsChatJournalStore(name: name).load(),
+        localAgent: controller.chatTitles.agent(for: name)))
     }
     .onChange(of: controller.sessionSwitches) { _, _ in
       if content.showsChat { showTerminal() }
@@ -226,8 +230,14 @@ public struct SSHTerminalView: View {
       NewChatSheet(
         initialFolder: controller.activeSessionCwd ?? "~",
         initialMode: newChatMode,
-        onStart: { folder in
-          switch await controller.newChat(cwdText: folder) {
+        initialAgent: newChatAgent,
+        initiallyOpenOptions: newChatOptionsOpen,
+        initialChanges: newChatChanges,
+        storedDefaults: { ChatOptionDefaultsStore().stored(agent: $0.key) },
+        cachedOptions: { controller.cachedOptions(agent: $0) },
+        onAgentPicked: { ChatLastAgentStore().set($0) },
+        onStart: { folder, request in
+          switch await controller.newChat(cwdText: folder, request: request) {
           case let .failed(message): return message
           case let .ready(route):
             showNewChat = false
@@ -235,9 +245,9 @@ public struct SSHTerminalView: View {
             return nil
           }
         },
-        loadSessions: { await controller.savedSessions(folderText: $0) },
-        onContinue: { folder, session in
-          switch await controller.continueChat(session: session, folderText: folder) {
+        loadSessions: { await controller.savedSessions(folderText: $0, agent: $1) },
+        onContinue: { folder, session, request in
+          switch await controller.continueChat(session: session, folderText: folder, request: request) {
           case let .failed(message): return message
           case let .ready(route):
             showNewChat = false
@@ -504,7 +514,8 @@ public struct SSHTerminalView: View {
               .foregroundStyle(TetherColors.textFaint).padding(.top, 12)
           }
           let chatRows = DrawerChatRows.rows(
-            chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)))
+            chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)),
+            agents: controller.chatTitles.agents(for: controller.chats.map(\.name)))
           if !chatRows.isEmpty {
             Text("Chats").font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
               .foregroundStyle(TetherColors.textFaint)
@@ -606,29 +617,46 @@ public struct SSHTerminalView: View {
     }
   }
 
+  private func chatSubtitle(_ row: DrawerChatRow, agentLabel: String?, folder: Bool) -> some View {
+    HStack(spacing: 4) {
+      if let agentLabel {
+        Text(agentLabel).foregroundStyle(TetherColors.textFaint).lineLimit(1).fixedSize()
+        Text("·").foregroundStyle(TetherColors.textFaint)
+      }
+      if folder {
+        Text(row.subtitle).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+        Text("·").foregroundStyle(TetherColors.textFaint)
+      }
+      ChatStateTag(state: row.state)
+    }
+  }
+
   private func chatRow(_ row: DrawerChatRow) -> some View {
     let isSelected = content.isSelected(chat: row.name)
-    let tint = row.state.tint
     let needsYou = row.state == .waiting
     return HStack(spacing: 6) {
       Button {
         openChat(controller.chatRoute(for: row))
       } label: {
         HStack(spacing: 10) {
-          Image(systemName: "bubble.left").font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(tint)
+          ChatAgentMark(agent: row.agent, size: glyphSlot + 2)
+            .opacity(row.state == .ended ? 0.55 : 1)
             .frame(width: glyphSlot)
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 2) {
             Text(row.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
               .lineLimit(1)
-            HStack(spacing: 4) {
-              if DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
-                Text(row.subtitle).foregroundStyle(TetherColors.textFaint)
-                  .lineLimit(1).truncationMode(.head)
-                Text("·").foregroundStyle(TetherColors.textFaint)
+            Group {
+              if let agentLabel = row.agentLabel, DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
+                // The logo already names the agent, so a narrow row gives up the label, then the folder.
+                ViewThatFits(in: .horizontal) {
+                  chatSubtitle(row, agentLabel: agentLabel, folder: true).fixedSize(horizontal: true, vertical: false)
+                  chatSubtitle(row, agentLabel: agentLabel, folder: false).fixedSize(horizontal: true, vertical: false)
+                  chatSubtitle(row, agentLabel: nil, folder: true)
+                }
+              } else {
+                chatSubtitle(row, agentLabel: nil, folder: DynamicTypeLayout.showsDetail(for: dynamicTypeSize))
               }
-              ChatStateTag(state: row.state)
             }
             .font(.caption2.monospaced())
             .accessibilityHidden(true)
@@ -639,7 +667,7 @@ public struct SSHTerminalView: View {
       }
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("chatRow_\(row.name)")
-      .accessibilityLabel("Chat \(row.title), \(row.stateLabel), \(row.subtitle)")
+      .accessibilityLabel("Chat \(row.title), \(row.agentLabel.map { "\($0), " } ?? "")\(row.stateLabel), \(row.subtitle)")
       .accessibilityHint(isSelected ? "Already open" : "Opens this chat")
       Button { pendingChatKill = row } label: {
         Image(systemName: "xmark.circle.fill").font(.body)
@@ -780,12 +808,17 @@ public struct SSHTerminalView: View {
     guard let mode = ProcessInfo.processInfo.environment["TETHER_DEBUG_DRAWER"] else { return }
     try? await Task.sleep(nanoseconds: 600_000_000)
     await controller.refreshSessions()
-    let row = DrawerChatRows.rows(chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name))).first
+    let row = DrawerChatRows.rows(chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)), agents: controller.chatTitles.agents(for: controller.chats.map(\.name))).first
     switch mode {
     case "chat", "chat-open":
       if let row { content.open(controller.chatRoute(for: row)) }
       if mode == "chat-open" { try? await Task.sleep(nanoseconds: 700_000_000); drawerOpen = true }
     case "newchat": showNewChat = true
+    case "newchat-claude", "newchat-codex-open", "newchat-opencode-first":
+      newChatAgent = mode == "newchat-claude" ? ChatAgents.claude : mode == "newchat-codex-open" ? ChatAgents.codex : ChatAgents.opencode
+      newChatOptionsOpen = mode != "newchat-claude"
+      if mode == "newchat-codex-open" { newChatChanges = ["reasoning_effort": "high"] }
+      showNewChat = true
     case "newchat-continue", "newchat-continue-empty", "newchat-continue-error", "newchat-continue-recent":
       newChatMode = .resume
       showNewChat = true

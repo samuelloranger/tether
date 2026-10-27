@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
 enum ChatFixture {
   static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
@@ -733,6 +733,49 @@ enum ChatFixture {
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
+  /// A Codex chat: its options, a finished search, a message and a command waiting on the user.
+  @MainActor
+  static func codexModel() -> ChatSessionModel {
+    let options: [[String: Any]] = [
+      option("model", "Model", "The model for this session", current: "gpt-6-sol", [
+        ("gpt-6-sol", "gpt-6-sol", "Most capable"), ("gpt-6-mini", "gpt-6-mini", "Fast and light"),
+      ]),
+      option("reasoning_effort", "Reasoning effort", "How hard the agent thinks", current: "high", [
+        ("low", "Low", ""), ("medium", "Medium", ""), ("high", "High", ""),
+      ]),
+      option("mode", "Mode", "What the agent may do", current: "agent", [
+        ("read-only", "Read only", ""), ("agent", "Agent", ""), ("agent-full-access", "Full access", ""),
+      ]),
+    ]
+    let lines: [String] = [
+      update(["sessionUpdate": "session_info_update", "title": "Fix the season-pack cleanup"]),
+      update(["sessionUpdate": "config_option_update", "configOptions": options]),
+      update(tool("t1", "rg -n \"unlink\" apps/api/src/post-process", kind: "execute", status: "completed", text: "post-process/single.ts:41")),
+      message("The single-file path already removes the old file after an upgrade; the season-pack path doesn't. I'll mirror it per episode."),
+      json([
+        "jsonrpc": "2.0", "id": permissionRequestId, "method": "session/request_permission",
+        "params": [
+          "sessionId": "sess-1",
+          "toolCall": tool("t2", "bun test post-process", kind: "execute", status: "pending"),
+          "options": [
+            ["optionId": "allow-once", "name": "Allow", "kind": "allow_once"],
+            ["optionId": "allow-always", "name": "Always", "kind": "allow_always"],
+            ["optionId": "reject", "name": "Deny", "kind": "reject_once"],
+          ],
+        ],
+      ]),
+    ]
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: "Clean up the old files when a season pack upgrade lands at new paths.")]
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/api", readOnly: false, store: InMemoryChatJournalStore(journal),
+      agent: ChatAgents.codex
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
   @MainActor
   static func streamModel() -> ChatSessionModel {
     var journal = ChatJournal()
@@ -964,9 +1007,9 @@ public struct ChatFixtureRoot: View {
   @State private var listModel = ChatListModel(hostName: "devbox", exec: { _ in
     let now = Int(Date().timeIntervalSince1970)
     return [
-      "chat-a\trunning\t48213\t/home/dev/projects/api-server\t\(now - 600)\tclaude",
-      "chat-b\tended\t9120\t/home/dev/projects/mobile-app\t\(now - 86400)\tclaude",
-      "chat-c\tended\t1840\t~\t\(now - 259200)\tcodex",
+      "chat-a\trunning\t48213\t/home/dev/projects/api-server\t\(now - 600)\t\(ChatAgents.claude.spawn)",
+      "chat-b\tended\t9120\t/home/dev/projects/mobile-app\t\(now - 86400)\t\(ChatAgents.claude.spawn)",
+      "chat-c\tended\t1840\t~\t\(now - 259200)\t\(ChatAgents.codex.spawn)",
     ].joined(separator: "\n")
   })
 
@@ -975,6 +1018,9 @@ public struct ChatFixtureRoot: View {
 
   public init(mode: String) {
     self.mode = mode
+    if let theme = ProcessInfo.processInfo.environment["TETHER_DEBUG_THEME"] {
+      MainActor.assumeIsolated { ChromeTheme.shared.apply(TerminalTheme.named(theme)) }
+    }
     ChatFixture.openQuestionOther = mode == "question-other"
     ChatFixture.planMode = mode
     ChatFixture.openTasks = mode == "tasks-open"
@@ -994,6 +1040,7 @@ public struct ChatFixtureRoot: View {
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
+    case "codex": initial = ChatFixture.codexModel()
     case "tasks", "tasks-open", "tasks-drawer": initial = ChatFixture.tasksModel()
     case "images", "images-top", "image-viewer": initial = ChatFixture.imagesModel()
     case "controls", "controls-sheet", "slash", "attach", "mention", "mention-all": initial = ChatFixture.controlsModel()
