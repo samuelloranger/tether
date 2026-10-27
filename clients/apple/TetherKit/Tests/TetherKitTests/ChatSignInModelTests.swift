@@ -63,7 +63,7 @@ final class ChatSignInModelTests: XCTestCase {
     model.leave()
   }
 
-  func test_a_message_can_be_sent_while_the_agent_works_and_shows_as_queued() async throws {
+  func test_a_message_sent_while_the_agent_works_is_queued_and_stop_sends_it_again() async throws {
     var journal = ChatJournal()
     journal.sessionId = "sess-1"
     journal.nextRequestId = 4
@@ -85,9 +85,13 @@ final class ChatSignInModelTests: XCTestCase {
     model.cancel()
     let stopped = await eventually { stream.writtenText.contains("session/cancel") }
     XCTAssertTrue(stopped)
-    let cleared = await eventually { model.state.queuedItemIds.isEmpty }
-    XCTAssertTrue(cleared)
-    XCTAssertEqual(model.state.items.last?.kind, .notice("Stopped"))
+    let resent = await eventually { stream.writtenText.components(separatedBy: "and then tidy up").count == 3 }
+    XCTAssertTrue(resent, "Stop sends the waiting message again")
+    let waiting = await eventually { model.state.queuedTexts == ["and then tidy up"] }
+    XCTAssertTrue(waiting, "it waits for the stopped turn to end")
+    XCTAssertTrue(model.state.items.contains { $0.kind == .notice("Stopped") })
+    let copies = model.state.items.filter { if case let .user(text, _, _, _) = $0.kind { text == "and then tidy up" } else { false } }
+    XCTAssertEqual(copies.count, 1, "the dropped copy left the transcript")
     model.leave()
   }
 }
