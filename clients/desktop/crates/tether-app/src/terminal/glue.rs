@@ -161,6 +161,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
 /// and `TETHER_DEV_CHAT_SEND` sends its `|`-separated prompts a few seconds apart.
 fn dev_chat() {
     use crate::terminal::model::chat::ChatMsg;
+    #[cfg(debug_assertions)]
     if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some() {
         slint::Timer::single_shot(std::time::Duration::from_secs(3), || {
             send(Msg::Chat(ChatMsg::DevSample));

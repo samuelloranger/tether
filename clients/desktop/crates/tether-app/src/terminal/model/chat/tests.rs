@@ -3,7 +3,7 @@ use std::time::Duration;
 use tether_core::acp::files::ChatFiles;
 use tether_core::connect::ConnectError;
 
-use super::view::{ChatScreen, EntryBody, RowBody};
+use super::view::{ChatScreen, RowBody};
 use super::*;
 
 fn t(ms: u64) -> Duration {
@@ -1175,8 +1175,10 @@ fn stop_sends_the_queued_messages_as_the_next_prompt() {
     assert_eq!(users(&s), ["one", "two\n\nthree"]);
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn background_commands_notices_and_compaction_reach_the_screen() {
+    use super::view::EntryBody;
     let mut h = Harness::new();
     h.chats.dev_sample(t(h.now));
     let s = h.screen();
