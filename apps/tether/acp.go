@@ -50,6 +50,7 @@ type acpMeta struct {
 	// Title and Turn mirror the stream tracker so `acp status` can answer without the daemon.
 	Title string `json:"title,omitempty"`
 	Turn  string `json:"turn,omitempty"`
+	Tasks int    `json:"tasks,omitempty"`
 	// MultiClient is set by a daemon that lets several clients attach and echoes named ones.
 	MultiClient bool `json:"multiClient,omitempty"`
 }
@@ -383,21 +384,21 @@ func acpShell() string {
 	return shell
 }
 
-// syncStream publishes the tracker's title and turn into meta.json when either changed.
+// syncStream publishes the tracker's title, turn and task count into meta.json when either changed.
 func (s *acpDaemonState) syncStream() {
 	if s.meta == nil {
 		return
 	}
-	title, turn := s.tr.snapshot()
+	title, turn, tasks := s.tr.snapshot()
 	s.metaMu.Lock()
 	defer s.metaMu.Unlock()
 	if s.meta.State == "ended" {
 		return
 	}
-	if s.meta.Title == title && s.meta.Turn == turn {
+	if s.meta.Title == title && s.meta.Turn == turn && s.meta.Tasks == tasks {
 		return
 	}
-	s.meta.Title, s.meta.Turn = title, turn
+	s.meta.Title, s.meta.Turn, s.meta.Tasks = title, turn, tasks
 	_ = writeACPMeta(s.meta)
 }
 

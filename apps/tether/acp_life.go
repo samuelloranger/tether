@@ -107,11 +107,11 @@ func (s *acpDaemonState) idleLoop(window time.Duration, stop <-chan struct{}) {
 	}
 }
 
-// working reports a request waiting for an answer or a session/prompt turn in flight.
+// working reports a request waiting for an answer, a turn in flight or a background command running.
 func (t *acpTracker) working() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return len(t.st.Requests) > 0 || len(t.st.Prompts) > 0
+	return len(t.st.Requests) > 0 || len(t.st.Prompts) > 0 || t.st.Autonomous || len(t.st.Tasks) > 0
 }
 
 // pruneEnded removes sessions that ended longer than keep ago and have no live daemon.
