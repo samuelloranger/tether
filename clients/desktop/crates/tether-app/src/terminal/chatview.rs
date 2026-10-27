@@ -57,6 +57,7 @@ fn md_kind(k: ItemKind) -> i32 {
         ItemKind::Code => 4,
         ItemKind::Quote => 5,
         ItemKind::Rule => 6,
+        ItemKind::Table => 7,
     }
 }
 
