@@ -114,6 +114,7 @@ mod tests {
             untracked: vec!["n.md".into()],
             commits: vec![],
             prs: PrList::List(vec![]),
+            diff_truncated: false,
         };
         let fx = m.handle(
             Msg::Git(GitMsg::Done(GitDone::Workspace {

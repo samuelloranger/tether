@@ -16,6 +16,7 @@ pub const REFRESH_PULL_REQUEST_PAGE: Duration = Duration::from_secs(10);
 pub const MARKDOWN_CAP: usize = 512 * 1024;
 /// A longer diff is cut: every row is a widget.
 pub const DIFF_ROW_CAP: usize = 20_000;
+pub const DIFF_TRUNCATED: &str = "\u{2026} diff truncated: it is too large to show in full";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GitTab {
@@ -73,6 +74,16 @@ pub struct Workspace {
     pub untracked: Vec<String>,
     pub commits: Vec<GitCommit>,
     pub prs: PrList,
+    /// The host cut the patch: the last file in `files` may be partial.
+    pub diff_truncated: bool,
+}
+
+/// A patch as a diff page shows it (iOS `GitPatch`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Patch {
+    pub body: String,
+    pub files: Vec<DiffFile>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +98,7 @@ pub enum GitDone {
     },
     Commit {
         req: u64,
-        result: Result<(String, Vec<DiffFile>), String>,
+        result: Result<Patch, String>,
     },
     PrDetail {
         req: u64,
@@ -95,7 +106,7 @@ pub enum GitDone {
     },
     PrDiff {
         req: u64,
-        result: Result<Vec<DiffFile>, String>,
+        result: Result<Patch, String>,
     },
     Merge {
         req: u64,
@@ -150,6 +161,35 @@ struct DiffPage {
     files: Vec<DiffFile>,
     loading: Option<u64>,
     error: Option<String>,
+    truncated: bool,
+}
+
+impl DiffPage {
+    fn loading(title: String, req: u64) -> Self {
+        Self {
+            title,
+            note: String::new(),
+            files: Vec::new(),
+            loading: Some(req),
+            error: None,
+            truncated: false,
+        }
+    }
+
+    fn fill(&mut self, req: u64, result: Result<Patch, String>) {
+        if self.loading != Some(req) {
+            return;
+        }
+        self.loading = None;
+        match result {
+            Ok(patch) => {
+                self.note = patch.body;
+                self.files = patch.files;
+                self.truncated = patch.truncated;
+            }
+            Err(message) => self.error = Some(message),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -401,12 +441,14 @@ impl GitPanel {
                 };
                 if let Some(file) = ws.files.get(index).cloned() {
                     if !alt {
+                        let truncated = ws.diff_truncated && index + 1 == ws.files.len();
                         self.stack.push(Page::Diff(DiffPage {
                             title: file.path.clone(),
                             note: String::new(),
                             files: vec![file],
                             loading: None,
                             error: None,
+                            truncated,
                         }));
                     } else if is_markdown(&file.path) {
                         self.open_markdown(&file.path, fx);
@@ -427,13 +469,8 @@ impl GitPanel {
                     return;
                 };
                 let req = self.req();
-                self.stack.push(Page::Diff(DiffPage {
-                    title: commit.subject.clone(),
-                    note: String::new(),
-                    files: Vec::new(),
-                    loading: Some(req),
-                    error: None,
-                }));
+                self.stack
+                    .push(Page::Diff(DiffPage::loading(commit.subject.clone(), req)));
                 fx.push(GitFx::Run(GitJob::Commit { req, id: commit.id }));
             }
             GitTab::PullRequests => {
@@ -493,13 +530,7 @@ impl GitPanel {
             page.pr.number,
             format!("#{} {}", page.pr.number, page.pr.title),
         );
-        self.stack.push(Page::Diff(DiffPage {
-            title,
-            note: String::new(),
-            files: Vec::new(),
-            loading: Some(req),
-            error: None,
-        }));
+        self.stack.push(Page::Diff(DiffPage::loading(title, req)));
         fx.push(GitFx::Run(GitJob::PrDiff { req, number }));
     }
 
@@ -576,33 +607,9 @@ impl GitPanel {
                     Err(message) => self.docs_error = Some(message),
                 }
             }
-            GitDone::Commit { req, result } => {
-                let Some(Page::Diff(page)) = self.stack.last_mut() else {
-                    return;
-                };
-                if page.loading != Some(req) {
-                    return;
-                }
-                page.loading = None;
-                match result {
-                    Ok((body, files)) => {
-                        page.note = body;
-                        page.files = files;
-                    }
-                    Err(message) => page.error = Some(message),
-                }
-            }
-            GitDone::PrDiff { req, result } => {
-                let Some(Page::Diff(page)) = self.stack.last_mut() else {
-                    return;
-                };
-                if page.loading != Some(req) {
-                    return;
-                }
-                page.loading = None;
-                match result {
-                    Ok(files) => page.files = files,
-                    Err(message) => page.error = Some(message),
+            GitDone::Commit { req, result } | GitDone::PrDiff { req, result } => {
+                if let Some(Page::Diff(page)) = self.stack.last_mut() {
+                    page.fill(req, result);
                 }
             }
             GitDone::PrDetail { req, detail } => {
@@ -719,6 +726,9 @@ impl GitPanel {
                 view.diff.push(DiffLine::from_row(row));
             }
         }
+        if page.truncated {
+            view.diff.push(DiffLine::plain(DIFF_TRUNCATED));
+        }
         if let Some(message) = &page.error {
             view.notice.clone_from(message);
         } else if page.files.is_empty() && page.loading.is_none() {
@@ -767,6 +777,9 @@ impl GitPanel {
                 }
                 if view.rows.is_empty() {
                     view.notice = "No uncommitted changes.".into();
+                }
+                if ws.diff_truncated && view.toast.is_empty() {
+                    view.toast = "Diff truncated: it is too large to show in full.".into();
                 }
             }
             GitTab::Commits => {
@@ -1129,13 +1142,15 @@ pub fn workspace_result(raw: Result<String, String>) -> Result<Workspace, String
         return Err("This session's directory is not a git repository.".into());
     }
     let (top, branch) = git::parse_location(sections.location);
+    let (diff, diff_truncated) = git::capped_patch(sections.diff);
     Ok(Workspace {
         top,
         branch,
-        files: git::group_diff(sections.diff),
+        files: git::group_diff(diff),
         untracked: git::parse_untracked(sections.untracked),
         commits: git::parse_commits(sections.commits),
         prs: git::pull_request_result(sections.pull_requests),
+        diff_truncated,
     })
 }
 
@@ -1143,14 +1158,25 @@ pub fn docs_result(raw: Result<String, String>) -> Result<Vec<String>, String> {
     Ok(git::parse_untracked(&failure(raw)?))
 }
 
-pub fn commit_result(raw: Result<String, String>) -> Result<(String, Vec<DiffFile>), String> {
+pub fn commit_result(raw: Result<String, String>) -> Result<Patch, String> {
     let text = failure(raw)?;
-    let (body, patch) = git::commit_show(&text);
-    Ok((body, git::group_diff(&patch)))
+    let (capped, truncated) = git::capped_patch(&text);
+    let (body, patch) = git::commit_show(capped);
+    Ok(Patch {
+        body,
+        files: git::group_diff(&patch),
+        truncated,
+    })
 }
 
-pub fn pr_diff_result(raw: Result<String, String>) -> Result<Vec<DiffFile>, String> {
-    Ok(git::group_diff(&failure(raw)?))
+pub fn pr_diff_result(raw: Result<String, String>) -> Result<Patch, String> {
+    let text = failure(raw)?;
+    let (patch, truncated) = git::capped_patch(&text);
+    Ok(Patch {
+        files: git::group_diff(patch),
+        truncated,
+        ..Patch::default()
+    })
 }
 
 pub fn pr_detail_result(raw: Result<String, String>) -> Option<PrDetail> {
@@ -1219,6 +1245,7 @@ mod tests {
                 timestamp: 1,
             }],
             prs: PrList::List(vec![pr(7, false, "OPEN"), pr(8, false, "MERGED")]),
+            diff_truncated: false,
         }
     }
 
@@ -1505,7 +1532,11 @@ mod tests {
             &mut p,
             GitMsg::Done(GitDone::Commit {
                 req,
-                result: Ok(("Why it changed.".into(), vec![file("src/a.rs")])),
+                result: Ok(Patch {
+                    body: "Why it changed.".into(),
+                    files: vec![file("src/a.rs")],
+                    truncated: false,
+                }),
             }),
             T0,
         );
@@ -1680,7 +1711,11 @@ mod tests {
             &mut p,
             GitMsg::Done(GitDone::PrDiff {
                 req,
-                result: Ok(vec![file("a.rs"), file("b.rs")]),
+                result: Ok(Patch {
+                    files: vec![file("a.rs"), file("b.rs")],
+                    truncated: true,
+                    ..Patch::default()
+                }),
             }),
             T0,
         );
@@ -1693,8 +1728,48 @@ mod tests {
                 .count(),
             2
         );
+        assert_eq!(v.diff.last().unwrap().text, DIFF_TRUNCATED);
         run(&mut p, GitMsg::Back, T0);
         assert!(p.view().pr.is_some());
+    }
+
+    #[test]
+    fn a_truncated_working_tree_diff_says_so_on_the_list_and_its_last_file() {
+        let mut p = GitPanel::default();
+        let fx = run(&mut p, GitMsg::Toggle, T0);
+        let GitFx::Run(GitJob::Workspace { req }) = fx[0].clone() else {
+            panic!();
+        };
+        let ws = Workspace {
+            diff_truncated: true,
+            ..workspace()
+        };
+        run(
+            &mut p,
+            GitMsg::Done(GitDone::Workspace {
+                req,
+                result: Ok(ws),
+            }),
+            T0,
+        );
+        assert!(p.view().toast.contains("truncated"));
+        run(&mut p, GitMsg::Row(0), T0);
+        assert!(p.view().diff.iter().all(|l| l.text != DIFF_TRUNCATED));
+        run(&mut p, GitMsg::Back, T0);
+        run(&mut p, GitMsg::Row(1), T0);
+        assert_eq!(p.view().diff.last().unwrap().text, DIFF_TRUNCATED);
+    }
+
+    #[test]
+    fn a_patch_past_the_cap_is_marked_truncated() {
+        let big = format!(
+            "diff --git a/x b/x\n@@ -0,0 +1,999999 @@\n{}\n__TETHER_RC__0",
+            "+line\n".repeat(git::PATCH_BYTE_CAP / 6 + 10)
+        );
+        let patch = pr_diff_result(Ok(big)).unwrap();
+        assert!(patch.truncated);
+        let small = pr_diff_result(Ok("diff --git a/x b/x\n__TETHER_RC__0".into())).unwrap();
+        assert!(!small.truncated);
     }
 
     #[test]
@@ -1831,7 +1906,7 @@ mod tests {
     #[test]
     fn commit_output_splits_into_message_and_files() {
         let out = "Body\n\u{1E}diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n__TETHER_RC__0";
-        let (body, files) = commit_result(Ok(out.into())).unwrap();
+        let Patch { body, files, .. } = commit_result(Ok(out.into())).unwrap();
         assert_eq!(body, "Body");
         assert_eq!(files[0].path, "x");
     }

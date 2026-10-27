@@ -11,8 +11,14 @@ pub const NOT_A_REPO: &str = "__TETHER_NOTREPO__";
 /// Emitted when `gh` is absent, so that is distinguishable from gh running and refusing.
 pub const GH_MISSING: &str = "__TETHER_NO_GH__";
 const RC_MARKER: &str = "\n__TETHER_RC__";
-/// Larger patches are cut on the host: the list below is rendered row by row.
-pub const PATCH_BYTE_CAP: usize = 2_000_000;
+/// Larger patches are cut on the host: the list below is rendered row by row. The host sends one
+/// byte past it, so a cut patch is told from one that is exactly this long.
+pub const PATCH_BYTE_CAP: usize = 2 * 1024 * 1024;
+/// Whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` say, the parser reads `a/` and
+/// `b/` paths.
+const PATCH_OPTIONS: &str = "--no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/";
+/// `git hash-object -t tree /dev/null`: what an unborn branch diffs against.
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// An absolute directory that is safe to put inside a quoted command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,14 +90,15 @@ pub fn workspace_command(dir: &RepoDir) -> String {
     let missing = shell_quote(GH_MISSING);
     wrap(&format!(
         "if git -C {q} rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-         if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base=; fi; \
-         git -C {q} -c core.quotepath=off --no-pager diff --no-color --no-ext-diff $base 2>&1; printf '\\035'; \
+         if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base={EMPTY_TREE}; fi; \
+         git -C {q} -c core.quotepath=off --no-pager diff {PATCH_OPTIONS} \"$base\" 2>/dev/null | head -c {cap}; printf '\\035'; \
          git -C {q} rev-parse --show-toplevel 2>/dev/null; git -C {q} branch --show-current 2>/dev/null; printf '\\035'; \
          git -C {q} --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e' 2>/dev/null; printf '\\035'; \
          git -C {q} -c core.quotepath=off ls-files --others --exclude-standard 2>/dev/null | head -n 200; printf '\\035'; \
          if command -v gh >/dev/null 2>&1; then (cd {q} && gh pr list --state all --limit 50 --json {PR_LIST_FIELDS} 2>&1); else printf '%s' {missing}; fi; \
          else printf '%s\\035\\035\\035\\035' {nr}; fi",
         nr = shell_quote(NOT_A_REPO),
+        cap = PATCH_BYTE_CAP + 1,
     ))
 }
 
@@ -105,9 +112,10 @@ pub fn docs_command(top: &RepoDir) -> String {
 pub fn commit_command(dir: &RepoDir, id: &str) -> Option<String> {
     valid_commit_id(id).then(|| {
         wrap(&format!(
-            "git -C {} --no-pager show {} --patch --no-color --format=%b%x1e 2>&1 | head -c {PATCH_BYTE_CAP}",
+            "git -C {} --no-pager show {} --patch {PATCH_OPTIONS} --format=%b%x1e 2>&1 | head -c {}",
             dir.q(),
-            shell_quote(id)
+            shell_quote(id),
+            PATCH_BYTE_CAP + 1
         ))
     })
 }
@@ -122,8 +130,9 @@ pub fn pr_detail_command(dir: &RepoDir, number: u64) -> String {
 
 pub fn pr_diff_command(dir: &RepoDir, number: u64) -> String {
     wrap(&format!(
-        "cd {} && gh pr diff {number} --color never 2>&1 | head -c {PATCH_BYTE_CAP}",
-        dir.q()
+        "cd {} && gh pr diff {number} --color never 2>&1 | head -c {}",
+        dir.q(),
+        PATCH_BYTE_CAP + 1
     ))
 }
 
@@ -282,10 +291,11 @@ pub struct WorkspaceSections<'a> {
     pub pull_requests: &'a str,
 }
 
-/// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e.
+/// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e. A patch may hold
+/// any byte, so it is split from the right and the patch takes whatever is left.
 pub fn workspace_sections(output: &str) -> Option<WorkspaceSections<'_>> {
-    let parts: Vec<&str> = output.split('\u{1D}').collect();
-    let [diff, location, commits, untracked, pull_requests] = parts.as_slice() else {
+    let parts: Vec<&str> = output.rsplitn(5, '\u{1D}').collect();
+    let [pull_requests, untracked, commits, location, diff] = parts.as_slice() else {
         return None;
     };
     Some(WorkspaceSections {
@@ -295,6 +305,18 @@ pub fn workspace_sections(output: &str) -> Option<WorkspaceSections<'_>> {
         untracked,
         pull_requests,
     })
+}
+
+/// Output past the cap ends mid-line, maybe mid-character: keep only whole lines.
+pub fn capped_patch(output: &str) -> (&str, bool) {
+    if output.len() <= PATCH_BYTE_CAP {
+        return (output, false);
+    }
+    let head = &output.as_bytes()[..PATCH_BYTE_CAP];
+    match head.iter().rposition(|&b| b == b'\n') {
+        Some(at) => (&output[..at], true),
+        None => ("", true),
+    }
 }
 
 /// First line: the repository root. Second: the branch, empty when HEAD is detached.
@@ -1166,6 +1188,46 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         assert_eq!(s.diff, "+a\u{1E}b");
         assert_eq!(s.commits, commits);
         assert_eq!(parse_commits(s.commits).len(), 2);
+    }
+
+    #[test]
+    fn a_group_separator_inside_the_patch_stays_in_the_patch() {
+        let out = "+a\u{1D}b\u{1D}/r\nmain\n\u{1D}\u{1D}\u{1D}[]";
+        let s = workspace_sections(out).unwrap();
+        assert_eq!(s.diff, "+a\u{1D}b");
+        assert_eq!(s.location, "/r\nmain\n");
+        assert_eq!(s.pull_requests, "[]");
+    }
+
+    #[test]
+    fn the_working_tree_diff_forces_prefixes_handles_an_unborn_branch_and_is_capped() {
+        let command = workspace_command(&RepoDir::new("/r").unwrap());
+        assert!(
+            command.contains("--src-prefix=a/ --dst-prefix=b/"),
+            "{command}"
+        );
+        assert!(command.contains(EMPTY_TREE), "{command}");
+        assert!(command.contains("head -c 2097153"), "{command}");
+        let commit = commit_command(&RepoDir::new("/r").unwrap(), "abc1234").unwrap();
+        assert!(
+            commit.contains("--src-prefix=a/ --dst-prefix=b/"),
+            "{commit}"
+        );
+        assert!(commit.contains("head -c 2097153"), "{commit}");
+    }
+
+    #[test]
+    fn a_patch_past_the_cap_keeps_only_whole_lines() {
+        let short = "diff --git a/x b/x\n+a\n";
+        assert_eq!(capped_patch(short), (short, false));
+        let line = "+".repeat(99) + "\n";
+        let long = line.repeat(PATCH_BYTE_CAP / 100 + 1);
+        let (cut, truncated) = capped_patch(&long);
+        assert!(truncated);
+        assert!(cut.len() < PATCH_BYTE_CAP);
+        assert!(cut.ends_with(&"+".repeat(99)));
+        let exact = "a".repeat(PATCH_BYTE_CAP);
+        assert_eq!(capped_patch(&exact), (exact.as_str(), false));
     }
 
     #[test]
