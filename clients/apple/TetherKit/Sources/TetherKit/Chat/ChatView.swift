@@ -20,6 +20,12 @@ struct ChatView: View {
   /// Set when the chat sits inside the terminal screen: ends the chat and resumes its conversation
   /// (session id, folder) with Claude Code in a new terminal session; returns why it could not.
   var onContinueInTerminal: ((String, String) async -> String?)?
+  /// Set when the chat sits inside the terminal screen: opens the Git screen on the chat's folder.
+  var onShowGit: (() -> Void)?
+  /// Uploads a picked file to the host and returns its remote path, nil when it failed.
+  var onUpload: ((Data, String) async -> String?)?
+  /// Where finished uploads wait for their chat to be on screen.
+  var uploads: ChatUploadInbox?
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
@@ -44,6 +50,7 @@ struct ChatView: View {
   @State private var attachments = ChatAttachments()
   @State private var pickingPhotos = false
   @State private var pickedPhotos: [PhotosPickerItem] = []
+  @State private var pickingFiles = false
   @State private var copiedFolder = false
   @State private var confirmingTerminal = false
   @State private var chipsHeight: CGFloat = 0
@@ -84,6 +91,17 @@ struct ChatView: View {
       ToolbarItem(placement: .topBarTrailing) {
         HStack(spacing: 12) {
           connectionBadge
+          if let onShowGit {
+            Button(action: onShowGit) {
+              Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(TetherColors.textSecondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Git changes")
+            .accessibilityIdentifier("chatGit")
+          }
           moreMenu
         }
       }.withoutGlass()
@@ -139,6 +157,11 @@ struct ChatView: View {
       }
       pickedPhotos = []
     }
+    .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+      guard case let .success(urls) = result else { return }
+      attach(files: urls)
+    }
+    .task(id: uploads?.pending[model.chatName]) { drainUploads() }
     .sheet(item: Binding(get: { reviewing }, set: { reviewing = $0 })) { permission in
       PermissionReviewSheet(permission: permission, cwd: model.cwd)
     }
@@ -692,9 +715,12 @@ struct ChatView: View {
 
   private var attachButton: some View {
     Menu {
-      Button { pickingPhotos = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+      Button { pickingPhotos = true } label: { MenuLabel("Photo Library", systemImage: "photo.on.rectangle") }
+      if onUpload != nil {
+        Button { pickingFiles = true } label: { MenuLabel("File…", systemImage: "doc") }
+      }
       if UIPasteboard.general.hasImages {
-        Button { pasteImage() } label: { Label("Paste image", systemImage: "doc.on.clipboard") }
+        Button { pasteImage() } label: { MenuLabel("Paste image", systemImage: "doc.on.clipboard") }
       }
     } label: {
       Image(systemName: "plus")
@@ -704,11 +730,47 @@ struct ChatView: View {
         .background(TetherColors.surfaceRaised, in: Circle())
         .hitSlop(vertical: 8, horizontal: 8)
     }
-    .disabled(answerPending || attachments.room == 0)
+    .disabled(answerPending || (attachments.room == 0 && onUpload == nil))
     .opacity(answerPending ? 0.55 : 1)
     .padding(.bottom, 4)
-    .accessibilityLabel("Attach image")
+    .accessibilityLabel(onUpload == nil ? "Attach image" : "Attach image or file")
     .accessibilityIdentifier("chatAttach")
+  }
+
+  /// Images attach like a photo from the library; any other file is uploaded and its path joins the
+  /// draft of this chat, even when the upload lands after another chat is on screen.
+  private func attach(files urls: [URL]) {
+    let picked = urls.compactMap { url -> ChatPickedFile? in
+      let stop = url.startAccessingSecurityScopedResource()
+      defer { if stop { url.stopAccessingSecurityScopedResource() } }
+      guard let data = try? Data(contentsOf: url) else { return nil }
+      return ChatPickedFile(name: url.lastPathComponent, data: data)
+    }
+    let split = ChatFileSend.split(picked)
+    for image in split.images.prefix(attachments.room) { attachments.add(data: image.data) }
+    guard let onUpload, !split.uploads.isEmpty else { return }
+    let chat = model.chatName
+    let inbox = uploads
+    let attachments = attachments
+    Task {
+      for file in split.uploads {
+        if let path = await onUpload(file.data, file.name) {
+          inbox?.add([path], chat: chat)
+        } else {
+          attachments.error = "Could not upload \(file.name)."
+        }
+      }
+    }
+  }
+
+  private func drainUploads() {
+    guard let uploads else { return }
+    let paths = uploads.take(chat: model.chatName)
+    guard !paths.isEmpty else { return }
+    let result = ChatFileSend.insertion(paths: paths, in: draft, cursor: cursor)
+    draft = result.text
+    cursor = result.cursor
+    caretRequest = result.cursor
   }
 
   private func pasteImage() {

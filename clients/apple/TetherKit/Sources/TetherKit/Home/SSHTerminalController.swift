@@ -167,6 +167,10 @@ public final class SSHTerminalController {
   /// HEAD when `gitCommits` was read, so a poll can skip an unmoved log.
   @ObservationIgnored private var gitHead: String?
   @ObservationIgnored private var gitCwd: String?
+  /// Where the Git screen reads; an open chat points it at its folder while the sheet is up.
+  @ObservationIgnored private var gitTarget: GitTarget = .session
+  /// Paths of files uploaded from chats, held until the chat that asked for them is on screen.
+  @ObservationIgnored let chatUploads = ChatUploadInbox()
   @ObservationIgnored private var commitPatches: [String: GitPatch] = [:]
   @ObservationIgnored private var pullRequestPatches: [String: (patch: GitPatch, at: Date)] = [:]
   public private(set) var transfer: TransferState = .idle
@@ -561,6 +565,18 @@ public final class SSHTerminalController {
     }
   }
 
+  /// Switching target drops what the other one loaded, so its files never flash under this one.
+  func setGitTarget(_ target: GitTarget) {
+    guard target != gitTarget else { return }
+    gitTarget = target
+    clearGitWorkspace()
+    gitCwd = nil
+    pullRequestsCwd = nil
+    gitPullRequestsLoaded = false
+    gitError = nil
+    pullRequestPatches.removeAll()
+  }
+
   public func clearTransfer() { transfer = .idle }
 
   public func sendPickedMedia(_ item: PhotosPickerItem, isVideo: Bool) async {
@@ -612,7 +628,7 @@ public final class SSHTerminalController {
       guard let result = try await execInSessionCwd(
         GitWorkspaceScript.workspace(diff: diff, commits: commits, knownHead: knownHead))
       else {
-        setGitError("No working directory for this session.")
+        setGitError(gitTarget == .session ? "No working directory for this session." : "That folder is not on the host.")
         return
       }
       read = await Task.detached { GitWorkspaceScript.parse(cwd: result.cwd, result.output) }.value
@@ -708,7 +724,7 @@ public final class SSHTerminalController {
   ) async throws -> (cwd: String, output: String)? {
     for attempt in 0..<2 {
       let refreshing = attempt > 0
-      guard let enter = await sessionCwdScript(refreshing: refreshing) else { return nil }
+      guard let enter = await gitEnterScript(refreshing: refreshing) else { return nil }
       let output = try await (connection ?? control).exec(enter + command)
       guard let split = GitWorkspaceScript.splitCwd(output) else { continue }
       // A fresh pid whose cwd still can't be read: this host has no /proc.
@@ -716,6 +732,11 @@ public final class SSHTerminalController {
       return (split.cwd, split.output)
     }
     return nil
+  }
+
+  private func gitEnterScript(refreshing: Bool, announce: Bool = true) async -> String? {
+    if case let .folder(folder) = gitTarget { return GitWorkspaceScript.enterFolder(folder, announce: announce) }
+    return await sessionCwdScript(refreshing: refreshing, announce: announce)
   }
 
   /// The `cd` prefix for the attached session. The live cwd comes first: the directory the
@@ -741,7 +762,7 @@ public final class SSHTerminalController {
     _ pullRequest: GitPullRequest,
     onSnapshot: @escaping @MainActor ([GitCheck]) -> Void
   ) async -> Bool {
-    guard let enter = await sessionCwdScript(refreshing: !hostHasProc, announce: false) else { return false }
+    guard let enter = await gitEnterScript(refreshing: !hostHasProc, announce: false) else { return false }
     let command = enter + "gh pr checks \(pullRequest.number) --watch --interval 15 2>&1"
     // The stream arrives in chunks that do not respect snapshot boundaries, so
     // accumulate and emit each block only once the next header proves it whole.
