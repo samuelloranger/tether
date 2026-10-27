@@ -115,6 +115,7 @@ mod tests {
             commits: vec![],
             prs: PrList::List(vec![]),
             diff_truncated: false,
+            upstream: None,
         };
         let fx = m.handle(
             Msg::Git(GitMsg::Done(GitDone::Workspace {

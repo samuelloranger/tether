@@ -76,6 +76,7 @@ pub struct Workspace {
     pub prs: PrList,
     /// The host cut the patch: the last file in `files` may be partial.
     pub diff_truncated: bool,
+    pub upstream: Option<git::BranchStatus>,
 }
 
 /// A patch as a diff page shows it (iOS `GitPatch`).
@@ -672,10 +673,9 @@ impl GitPanel {
             markdown: self.doc.as_ref().map(doc_view),
             ..GitView::default()
         };
-        let branch = self.workspace.as_ref().map(|w| w.branch.as_str());
-        view.title = match branch {
-            Some("") => "(detached HEAD)".into(),
-            Some(b) => b.to_owned(),
+        view.title = match self.workspace.as_ref() {
+            Some(w) if w.branch.is_empty() => "(detached HEAD)".into(),
+            Some(w) => git::branch_label(&w.branch, w.upstream.as_ref()),
             None => "Git".into(),
         };
         match self.stack.last() {
@@ -749,6 +749,9 @@ impl GitPanel {
         view.loading = self.workspace_req.is_some();
         if let Some(error) = &self.error {
             view.toast.clone_from(error);
+        }
+        if let Some(status) = &ws.upstream {
+            view.upstream.clone_from(&status.upstream);
         }
         match self.tab {
             GitTab::Changes => {
@@ -1107,6 +1110,8 @@ pub struct GitView {
     pub subtitle: String,
     /// Lines added and removed, drawn in the heat colors instead of `subtitle`.
     pub stat: Option<(u32, u32)>,
+    /// The branch's upstream, as secondary text beside the title; empty when it has none.
+    pub upstream: String,
     pub tab: GitTab,
     pub show_tabs: bool,
     pub can_back: bool,
@@ -1151,6 +1156,7 @@ pub fn workspace_result(raw: Result<String, String>) -> Result<Workspace, String
         commits: git::parse_commits(sections.commits),
         prs: git::pull_request_result(sections.pull_requests),
         diff_truncated,
+        upstream: git::parse_upstream(sections.location),
     })
 }
 
@@ -1246,6 +1252,7 @@ mod tests {
             }],
             prs: PrList::List(vec![pr(7, false, "OPEN"), pr(8, false, "MERGED")]),
             diff_truncated: false,
+            upstream: None,
         }
     }
 
@@ -1858,6 +1865,34 @@ mod tests {
         assert_eq!(ws.untracked, ["new.md"]);
         assert_eq!(ws.commits.len(), 1);
         assert_eq!(ws.prs, PrList::List(vec![]));
+        assert_eq!(ws.upstream, None);
+    }
+
+    #[test]
+    fn the_title_carries_ahead_and_behind_and_the_upstream_sits_beside_it() {
+        let output = "\u{1D}/repo\nmain\norigin/main\n2\t1\n\u{1D}\u{1D}\u{1D}[]\n__TETHER_RC__0";
+        let ws = workspace_result(Ok(output.to_string())).unwrap();
+        let mut p = GitPanel::default();
+        let fx = run(&mut p, GitMsg::Toggle, T0);
+        let GitFx::Run(GitJob::Workspace { req }) = fx[0].clone() else {
+            panic!();
+        };
+        run(
+            &mut p,
+            GitMsg::Done(GitDone::Workspace {
+                req,
+                result: Ok(ws),
+            }),
+            T0,
+        );
+        let v = p.view();
+        assert_eq!(v.title, "main \u{2191}2 \u{2193}1");
+        assert_eq!(v.upstream, "origin/main");
+        run(&mut p, GitMsg::SetTab(GitTab::Commits), T0);
+        assert_eq!(p.view().upstream, "origin/main");
+        let opened = opened();
+        assert_eq!(opened.view().title, "feat/x");
+        assert_eq!(opened.view().upstream, "");
     }
 
     #[test]

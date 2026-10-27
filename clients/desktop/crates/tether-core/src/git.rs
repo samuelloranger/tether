@@ -95,7 +95,9 @@ pub fn workspace_command(dir: &RepoDir) -> String {
         "if git -C {q} rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
          if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base={EMPTY_TREE}; fi; \
          git -C {q} -c core.quotepath=off --no-pager diff {PATCH_OPTIONS} \"$base\" 2>/dev/null | head -c {cap}; printf '\\035'; \
-         git -C {q} rev-parse --show-toplevel 2>/dev/null; git -C {q} branch --show-current 2>/dev/null; printf '\\035'; \
+         git -C {q} rev-parse --show-toplevel 2>/dev/null; printf '%s\\n' \"$(git -C {q} branch --show-current 2>/dev/null)\"; \
+         u=$(git -C {q} rev-parse --abbrev-ref --symbolic-full-name '@{{u}}' 2>/dev/null) && c=$(git -C {q} rev-list --left-right --count 'HEAD...@{{u}}' 2>/dev/null) || {{ u=; c=; }}; \
+         printf '%s\\n%s\\n\\035' \"$u\" \"$c\"; \
          git -C {q} --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e' 2>/dev/null; printf '\\035'; \
          git -C {q} -c core.quotepath=off ls-files --others --exclude-standard 2>/dev/null | head -n 200; printf '\\035'; \
          if command -v gh >/dev/null 2>&1; then (cd {q} && gh pr list --state all --limit 50 --json {PR_LIST_FIELDS} 2>&1); else printf '%s' {missing}; fi; \
@@ -328,6 +330,52 @@ pub fn parse_location(section: &str) -> (String, String) {
     let top = lines.next().unwrap_or("").to_owned();
     let branch = lines.next().unwrap_or("").to_owned();
     (top, branch)
+}
+
+/// Where the branch stands against its upstream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchStatus {
+    pub upstream: String,
+    pub ahead: u32,
+    pub behind: u32,
+}
+
+/// Third and fourth lines of the location section: the upstream's name, then
+/// `rev-list --left-right --count HEAD...@{u}`. Both are empty without an upstream (or on a
+/// detached HEAD), and absent from older output.
+pub fn parse_upstream(section: &str) -> Option<BranchStatus> {
+    let mut lines = section.lines().skip(2);
+    branch_status(lines.next().unwrap_or(""), lines.next().unwrap_or(""))
+}
+
+pub fn branch_status(upstream: &str, counts: &str) -> Option<BranchStatus> {
+    let upstream = upstream.trim();
+    if upstream.is_empty() {
+        return None;
+    }
+    let mut numbers = counts.split_whitespace().map(|n| n.parse().ok());
+    let (Some(Some(ahead)), Some(Some(behind))) = (numbers.next(), numbers.next()) else {
+        return None;
+    };
+    Some(BranchStatus {
+        upstream: upstream.to_owned(),
+        ahead,
+        behind,
+    })
+}
+
+/// `main ↑2 ↓1`: a count shows only when it is not zero.
+pub fn branch_label(branch: &str, status: Option<&BranchStatus>) -> String {
+    let mut label = branch.to_owned();
+    if let Some(s) = status {
+        if s.ahead > 0 {
+            label.push_str(&format!(" \u{2191}{}", s.ahead));
+        }
+        if s.behind > 0 {
+            label.push_str(&format!(" \u{2193}{}", s.behind));
+        }
+    }
+    label
 }
 
 pub fn parse_commits(output: &str) -> Vec<GitCommit> {
@@ -1191,6 +1239,47 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         assert_eq!(s.diff, "+a\u{1E}b");
         assert_eq!(s.commits, commits);
         assert_eq!(parse_commits(s.commits).len(), 2);
+    }
+
+    #[test]
+    fn the_upstream_and_its_counts_follow_the_branch() {
+        let section = "/r\nmain\norigin/main\n2\t1\n";
+        assert_eq!(parse_location(section), ("/r".into(), "main".into()));
+        let status = parse_upstream(section).unwrap();
+        assert_eq!(
+            status,
+            BranchStatus {
+                upstream: "origin/main".into(),
+                ahead: 2,
+                behind: 1
+            }
+        );
+        assert_eq!(
+            branch_label("main", Some(&status)),
+            "main \u{2191}2 \u{2193}1"
+        );
+    }
+
+    #[test]
+    fn no_upstream_or_a_detached_head_shows_only_the_branch() {
+        assert_eq!(parse_upstream("/r\nmain\n\n\n"), None);
+        assert_eq!(parse_upstream("/r\n\n\n\n"), None);
+        // Older output had only the root and the branch.
+        assert_eq!(parse_upstream("/r\nmain\n"), None);
+        assert_eq!(branch_status("origin/main", "garbage"), None);
+        assert_eq!(branch_label("main", None), "main");
+        let even = branch_status("origin/main", "0\t0").unwrap();
+        assert_eq!(branch_label("main", Some(&even)), "main");
+        let behind = branch_status("origin/main", "0\t3").unwrap();
+        assert_eq!(branch_label("main", Some(&behind)), "main \u{2193}3");
+    }
+
+    #[test]
+    fn the_workspace_command_reads_the_upstream_without_failing_when_there_is_none() {
+        let command = workspace_command(&RepoDir::new("/r").unwrap());
+        assert!(command.contains("--symbolic-full-name"), "{command}");
+        assert!(command.contains("--left-right --count"), "{command}");
+        assert!(command.contains("|| { u=; c=; }"), "{command}");
     }
 
     #[test]
