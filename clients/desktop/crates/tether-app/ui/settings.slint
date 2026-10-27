@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { AppBridge, SettingsBridge } from "bridge.slint";
 import { SnippetsBridge } from "extras_bridge.slint";
 import { PageChrome, PrimaryButton, SecondaryButton, Segment, TetherSlider, TetherSwitch } from "components.slint";
@@ -65,7 +65,9 @@ component SmallButton inherits Rectangle {
     border-radius: 8px;
     border-width: focus.has-focus ? 2px : 1px;
     border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     background: touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
+    animate background { duration: Motion.fast; easing: ease-out; }
     focus := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
@@ -90,6 +92,7 @@ component LinkRow inherits Rectangle {
         width: parent.width + 16px;
         border-radius: 8px;
         background: touch.has-hover ? Tokens.surface-hover : transparent;
+        animate background { duration: Motion.fast; easing: ease-out; }
         border-width: focus.has-focus ? 2px : 0px;
         border-color: Tokens.accent;
     }

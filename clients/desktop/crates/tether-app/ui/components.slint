@@ -1,4 +1,4 @@
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 
 component ButtonBase inherits Rectangle {
     forward-focus: focus;
@@ -12,8 +12,10 @@ component ButtonBase inherits Rectangle {
     min-width: label.preferred-width + 36px;
     border-radius: Tokens.radius-button;
     background: !root.enabled ? Tokens.raised : touch.pressed ? root.fill.darker(0.08) : touch.has-hover ? root.fill.brighter(0.06) : root.fill;
+    animate background { duration: Motion.fast; easing: ease-out; }
     border-width: focus.has-focus ? 2px : root.outlined ? 1px : 0px;
     border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     focus := FocusScope {
         width: 100%;
         height: 100%;
@@ -75,6 +77,7 @@ export component IconButton inherits Rectangle {
     background: !root.enabled ? transparent
         : touch.has-hover ? (root.flat ? Tokens.raised : Tokens.raised.brighter(0.15))
         : root.flat ? transparent : Tokens.raised;
+    animate background, border-color { duration: Motion.fast; easing: ease-out; }
     border-width: focus.has-focus || root.active ? 1.5px : root.flat ? 0px : 1px;
     border-color: focus.has-focus || root.active ? Tokens.accent : Tokens.border;
     accessible-role: button;
@@ -95,6 +98,7 @@ export component IconButton inherits Rectangle {
     Image {
         source: root.icon;
         colorize: !root.enabled ? Tokens.text-faint : root.active || touch.has-hover ? Tokens.accent : root.flat ? Tokens.text-secondary : Tokens.accent;
+        animate colorize { duration: Motion.fast; easing: ease-out; }
         width: root.size * 0.47;
         height: root.size * 0.47;
         x: (parent.width - self.width) / 2;
@@ -132,8 +136,10 @@ export component BackButton inherits Rectangle {
     width: row.preferred-width;
     border-radius: 9px;
     background: touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
+    animate background { duration: Motion.fast; easing: ease-out; }
     border-width: focus.has-focus ? 2px : 1px;
     border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     focus := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") { root.clicked(); return accept; }
@@ -205,6 +211,7 @@ export component Segment inherits Rectangle {
     background: Tokens.input;
     border-width: focus.has-focus ? 2px : 1px;
     border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     border-radius: root.raised-style ? 12px : 11px;
     height: root.raised-style ? 42px : 38px;
     focus := FocusScope {
@@ -267,6 +274,7 @@ export component Field inherits VerticalLayout {
         border-radius: Tokens.radius-control;
         border-width: 1px;
         border-color: input.has-focus ? Tokens.accent : Tokens.border;
+        animate border-color { duration: Motion.fast; easing: ease-out; }
         input := TextInput {
             x: 12px;
             width: parent.width - 24px;
@@ -307,6 +315,7 @@ export component AreaField inherits VerticalLayout {
         border-radius: Tokens.radius-control;
         border-width: 1px;
         border-color: area.has-focus ? Tokens.accent : Tokens.border;
+        animate border-color { duration: Motion.fast; easing: ease-out; }
         Flickable {
             x: 12px;
             y: 10px;
@@ -423,12 +432,17 @@ export component ConfirmDialog inherits Rectangle {
     callback confirmed();
     callback cancelled();
     background: Tokens.background.with-alpha(0.62);
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     TouchArea { }
     card := Rectangle {
         width: min(460px, root.width - 48px);
         height: col.preferred-height;
         x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
+        y: (parent.height - self.height) / 2 + (root.shown ? 0 : Motion.rise);
+        animate y { duration: Motion.base; easing: ease-out; }
         background: Tokens.surface;
         border-radius: 16px;
         border-width: 1px;
@@ -466,6 +480,7 @@ export component Select inherits Rectangle {
     border-radius: Tokens.radius-control;
     border-width: 1px;
     border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     forward-focus: focus;
     focus := FocusScope {
         key-pressed(event) => {
@@ -516,6 +531,7 @@ export component Select inherits Rectangle {
                     height: 34px;
                     border-radius: 8px;
                     background: ta.has-hover ? Tokens.raised : transparent;
+                    animate background { duration: Motion.fast; easing: ease-out; }
                     Text {
                         x: 10px;
                         width: parent.width - 40px;
@@ -583,6 +599,7 @@ export component TetherSlider inherits Rectangle {
         background: Tokens.accent;
         border-width: focus.has-focus ? 3px : 2px;
         border-color: focus.has-focus ? Tokens.text : Tokens.background;
+        animate border-color { duration: Motion.fast; easing: ease-out; }
     }
     focus := FocusScope {
         key-pressed(event) => {
@@ -613,6 +630,7 @@ export component TetherSwitch inherits Rectangle {
     background: root.checked ? Tokens.accent : Tokens.raised;
     border-width: focus.has-focus ? 2px : 1px;
     border-color: focus.has-focus ? Tokens.text : root.checked ? Tokens.accent : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     forward-focus: focus;
     Rectangle {
         x: root.checked ? parent.width - self.width - 4px : 4px;
@@ -643,6 +661,7 @@ export component GhostButton inherits Rectangle {
     width: label.preferred-width + 16px;
     border-radius: 8px;
     background: touch.has-hover ? Tokens.accent.with-alpha(0.1) : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     border-width: focus.has-focus ? 2px : 0px;
     border-color: Tokens.accent;
     forward-focus: focus;
@@ -662,5 +681,26 @@ export component GhostButton inherits Rectangle {
         font-weight: 650;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+}
+
+// Fades its content in, lifted by `rise` or shifted by `slide`, as it appears. Slint can't
+// animate an element leaving an `if`, so this is the entrance only.
+export component Reveal inherits Rectangle {
+    in property <length> rise: Motion.rise;
+    in property <length> slide;
+    in property <duration> duration: Motion.base;
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: root.duration; easing: ease-out; }
+    // Flips after the first frame: a starting value that was never drawn has nothing to animate from.
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
+    Rectangle {
+        x: root.shown ? 0 : root.slide;
+        y: root.shown ? 0 : root.rise;
+        width: root.width;
+        height: root.height;
+        animate x, y { duration: root.duration; easing: ease-out; }
+        @children
     }
 }

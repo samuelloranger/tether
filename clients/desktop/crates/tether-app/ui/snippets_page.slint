@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { AppBridge } from "bridge.slint";
 import { Field, PageChrome, PrimaryButton, SecondaryButton } from "components.slint";
 import { SnippetRow, SnippetsBridge } from "extras_bridge.slint";
@@ -13,6 +13,7 @@ component RowAction inherits Rectangle {
     height: 28px;
     border-radius: 8px;
     background: root.enabled && touch.has-hover ? root.ink.with-alpha(0.12) : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     touch := TouchArea { enabled: root.enabled; mouse-cursor: root.enabled ? pointer : default; clicked => { root.clicked(); } }
     label := Text {
         width: 100%;

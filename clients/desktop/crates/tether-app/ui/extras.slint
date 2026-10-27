@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { Tokens } from "tokens.slint";
+import { Tokens, Motion } from "tokens.slint";
 import { GhostButton, IconButton, SecondaryButton } from "components.slint";
 
 export struct PaletteRowData {
@@ -37,6 +37,10 @@ export global PaletteVm {
 export component HistoryOverlay inherits Rectangle {
     in property <color> well: #1e1e2e;
     background: root.well;
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     scope := FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) { HistoryVm.close(); return accept; }
@@ -130,6 +134,7 @@ component PaletteRow inherits Rectangle {
     callback chosen();
     height: 44px;
     background: root.active ? Tokens.accent.with-alpha(0.14) : touch.has-hover ? Tokens.surface-hover : transparent;
+    animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
@@ -165,12 +170,17 @@ export component PaletteOverlay inherits Rectangle {
         if (-list.content-y > sel * 44px) { list.content-y = -sel * 44px; }
         else if ((sel + 1) * 44px > -list.content-y + list.height) { list.content-y = -((sel + 1) * 44px - list.height); }
     }
+    property <bool> shown;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    Timer { interval: 30ms; running: !root.shown; triggered => { root.shown = true; } }
     TouchArea { clicked => { PaletteVm.close(); } }
     card := Rectangle {
         width: min(560px, root.width - 48px);
         height: 46px + (PaletteVm.rows.length == 0 ? 76px : root.list-height);
         x: (parent.width - self.width) / 2;
-        y: 56px;
+        y: 56px + (root.shown ? 0 : Motion.rise);
+        animate y { duration: Motion.base; easing: ease-out; }
         background: Tokens.surface;
         border-radius: 14px;
         border-width: 1px;
