@@ -337,10 +337,14 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
+    // Retries stop at a deadline: one attempt can wait out a whole connect timeout, and the
+    // terminal dial waits behind this.
     var listing: String?
+    let deadline = ContinuousClock.now + .seconds(3)
     for attempt in 0..<3 {
       if let out = try? await control.exec("\(Self.zmx) ls") { listing = out; break }
-      if attempt < 2 { try? await Task.sleep(nanoseconds: 500_000_000) }
+      guard attempt < 2, ContinuousClock.now < deadline else { break }
+      try? await Task.sleep(nanoseconds: 500_000_000)
     }
     // A host that could not be listed is not an empty one: attaching `default` then created it.
     guard let out = listing else {
@@ -372,9 +376,8 @@ public final class SSHTerminalController {
     var listed = false
     for attempt in 0..<3 {
       if let output = try? await control.exec("\(Self.zmx) ls") {
-        listed = true
         let parsed = ZmxSession.parse(output)
-        if !parsed.isEmpty || attempt == 2 { sessions = parsed; break }
+        if !parsed.isEmpty || attempt == 2 { sessions = parsed; listed = true; break }
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
@@ -384,10 +387,16 @@ public final class SSHTerminalController {
   }
 
   /// The Mac's tabs pick from their own listing, so only the single-session screen does this.
+  /// It waits for a connected, still empty screen: a listing that lands mid-dial, or on a host
+  /// still empty, leaves the choice for the next one.
   private func attachDeferredChoice() async {
     guard initialChoiceDeferred else { return }
+    if TetherPlatform.isMac || (hasSession && status == .connected) {
+      initialChoiceDeferred = false
+      return
+    }
+    guard status == .connected, !hasSession, let name = SessionTabState.initialChoice(sessions) else { return }
     initialChoiceDeferred = false
-    guard !TetherPlatform.isMac, !hasSession, let name = SessionTabState.initialChoice(sessions) else { return }
     await switchSession(to: name)
   }
 
