@@ -79,7 +79,7 @@ The steps name the iOS types; the desktop app runs the same loop through `tether
 3. **Auth** — a key held in memory (`publickey_frommemory`, no temp file) or a password — then a PTY channel, then `zmx attach <session>`.
 4. PTY bytes → `TerminalPipeline` → `TerminalEngine` (SwiftTerm) → `TerminalFrame` → renderer. Input / resize / paste write back over the same channel. One dedicated thread drives the session (`SSHSessionPump`) — libssh2 sessions are not thread-safe.
 5. **Everything else is a one-off `ssh exec`:** `zmx ls` (session list), `zmx history` (scrollback), `zmx kill`, `git … diff`, `scp` (send file/photo).
-6. **Reconnect** is foreground-redial on `scenePhase .active`. On first connect the app attaches an existing session if the host has one, and only creates `default` when the host has none.
+6. **Reconnect** is foreground-redial on `scenePhase .active`. On first connect the app attaches `default` or the newest existing session, and creates nothing on an empty host: the empty-state card offers New session. A first `zmx ls` that fails is retried, and if it keeps failing nothing is attached until a later listing works.
 
 ## Push
 

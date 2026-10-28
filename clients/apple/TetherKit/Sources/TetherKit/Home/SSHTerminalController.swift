@@ -217,6 +217,9 @@ public final class SSHTerminalController {
   /// Set when the host had no sessions on first connect: skip the `zmx attach`
   /// so nothing is auto-created. Cleared the moment the user creates a session.
   private var pendingNoSession = false
+  /// The first listing failed, so nothing was picked; the next listing that works attaches what
+  /// it would have.
+  @ObservationIgnored private var initialChoiceDeferred = false
   private var lastCols: UInt16 = 80
   private var lastRows: UInt16 = 24
   /// Once a settled size exists, only it reaches a fresh PTY: a local size can be a frame
@@ -334,7 +337,21 @@ public final class SSHTerminalController {
     guard !didChooseInitialSession else { return }
     didChooseInitialSession = true
     guard attach == Self.defaultAttach else { return }
-    guard let out = try? await control.exec("\(Self.zmx) ls") else { return }
+    // Retries stop at a deadline: one attempt can wait out a whole connect timeout, and the
+    // terminal dial waits behind this.
+    var listing: String?
+    let deadline = ContinuousClock.now + .seconds(3)
+    for attempt in 0..<3 {
+      if let out = try? await control.exec("\(Self.zmx) ls") { listing = out; break }
+      guard attempt < 2, ContinuousClock.now < deadline else { break }
+      try? await Task.sleep(nanoseconds: 500_000_000)
+    }
+    // A host that could not be listed is not an empty one: attaching `default` then created it.
+    guard let out = listing else {
+      pendingNoSession = true
+      initialChoiceDeferred = true
+      return
+    }
     let existing = ZmxSession.parse(out)
     if existing.isEmpty { pendingNoSession = true; return }
     guard !existing.contains(where: { $0.name == Self.defaultAttach }) else { return }
@@ -356,15 +373,31 @@ public final class SSHTerminalController {
   /// Retries when empty: a just-attached session can miss the first `zmx ls`
   /// (separate connection) before the daemon registers it.
   public func refreshSessions() async {
+    var listed = false
     for attempt in 0..<3 {
       if let output = try? await control.exec("\(Self.zmx) ls") {
         let parsed = ZmxSession.parse(output)
-        if !parsed.isEmpty || attempt == 2 { sessions = parsed; break }
+        if !parsed.isEmpty || attempt == 2 { sessions = parsed; listed = true; break }
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
+    if listed { await attachDeferredChoice() }
     await refreshChats()
     await refreshAgentStatus()
+  }
+
+  /// The Mac's tabs pick from their own listing, so only the single-session screen does this.
+  /// It waits for a connected, still empty screen: a listing that lands mid-dial, or on a host
+  /// still empty, leaves the choice for the next one.
+  private func attachDeferredChoice() async {
+    guard initialChoiceDeferred else { return }
+    if TetherPlatform.isMac || (hasSession && status == .connected) {
+      initialChoiceDeferred = false
+      return
+    }
+    guard status == .connected, !hasSession, let name = SessionTabState.initialChoice(sessions) else { return }
+    initialChoiceDeferred = false
+    await switchSession(to: name)
   }
 
   public var othersWaiting: Bool {
