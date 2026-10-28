@@ -554,7 +554,7 @@ public struct SSHTerminalView: View {
   }
 
   private func sessionRow(_ session: ZmxSession) -> some View {
-    let isCurrent = session.name == controller.attach
+    let isCurrent = controller.hasSession && session.name == controller.attach
     let isSelected = isCurrent && !content.showsChat
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return HStack(spacing: 6) {

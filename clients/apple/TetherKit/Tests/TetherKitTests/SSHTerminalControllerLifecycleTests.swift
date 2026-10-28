@@ -391,6 +391,32 @@ final class SSHTerminalControllerSessionSwitchTests: XCTestCase {
     await controller.leave()
   }
 
+  func test_a_tap_on_a_session_that_ended_since_the_last_listing_does_not_recreate_it() async {
+    let stream = ScriptedByteStream()
+    let ops = FakeOps()
+    let lock = NSLock()
+    var listing = "name=work\tpid=1\tclients=0\tcreated=5\tcwd=x\nname=api\tpid=2\tclients=0\tcreated=9\tcwd=x\n"
+    ops.execResult = { command in
+      lock.lock(); defer { lock.unlock() }
+      return command.contains("zmx ls") ? listing : ""
+    }
+    let store = InMemoryHostKeyStore()
+    let controller = SSHTerminalController(
+      title: "test", config: config, hostKeyStore: store, attach: "work", picked: true,
+      dial: { _, _ in stream },
+      control: ControlConnection(config: config, store: store) { ops })
+    await controller.connect()
+    let listed = await eventually { controller.sessions.contains { $0.name == "api" } }
+    XCTAssertTrue(listed)
+
+    lock.lock(); listing = "name=work\tpid=1\tclients=0\tcreated=5\tcwd=x\n"; lock.unlock()
+    await controller.switchSession(to: "api")
+
+    XCTAssertFalse(stream.writtenText.contains("attach 'api'"), stream.writtenText)
+    XCTAssertEqual(controller.attach, "work")
+    await controller.leave()
+  }
+
   func test_new_session_is_the_only_way_to_create_one() async {
     let stream = ScriptedByteStream()
     let controller = SSHTerminalController(

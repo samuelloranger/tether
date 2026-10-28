@@ -545,11 +545,16 @@ public final class SSHTerminalController {
   }
 
   /// A switch never creates: the drawer's list can be a few seconds old, and a link or agent
-  /// banner can name a session that has ended.
+  /// banner can name a session that has ended, so the host is asked each time.
   private func mayAttach(_ name: String) async -> Bool {
-    if mayCreate.contains(name) || sessions.contains(where: { $0.name == name }) { return true }
-    guard let out = try? await control.exec("\(Self.zmx) ls") else { return false }
-    return ZmxSession.parse(out).contains { $0.name == name }
+    if mayCreate.contains(name) { return true }
+    for attempt in 0..<2 {
+      if let out = try? await control.exec("\(Self.zmx) ls") {
+        return ZmxSession.parse(out).contains { $0.name == name }
+      }
+      if attempt == 0 { try? await Task.sleep(nanoseconds: 400_000_000) }
+    }
+    return false
   }
 
   /// The one way a session comes into being: the user asked for it by name.

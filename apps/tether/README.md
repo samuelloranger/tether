@@ -32,7 +32,7 @@ can see:
 
     # agent hooks run this to raise a notification:
     tether notify --title "homelab · claude" --body "Waiting for input" \
-      --link "tether://session/default?host=homelab" --collapse default
+      --link "tether://session/work?host=homelab" --collapse work
 
     # agent hooks run this on every state change; waiting/done also push,
     # unless `zmx ls` shows a client attached to the session:
