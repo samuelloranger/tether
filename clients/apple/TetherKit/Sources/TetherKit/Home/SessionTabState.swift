@@ -19,19 +19,10 @@ struct SessionTabState: Equatable {
 
   struct Change: Equatable {
     var removed: [String] = []
-    var evicted: [String] = []
-    /// Set when the active tab moved on its own, so its controller needs opening.
-    var newActive: String?
   }
 
   static func ordered(_ sessions: [ZmxSession]) -> [String] {
     sessions.sorted { ($0.created, $0.name) < ($1.created, $1.name) }.map(\.name)
-  }
-
-  /// The iOS rule for a first connect: `default` if present, else the newest.
-  static func initialChoice(_ sessions: [ZmxSession]) -> String? {
-    if sessions.contains(where: { $0.name == "default" }) { return "default" }
-    return sessions.max { ($0.created, $0.name) < ($1.created, $1.name) }?.name
   }
 
   /// `default` on an empty host, else the first free `session-N` counting from count + 1.
@@ -116,27 +107,14 @@ struct SessionTabState: Equatable {
         unconfirmed[name] = left - 1
       }
     }
+    // A tab whose session ended leaves no tab active: the app never opens another by itself.
     let gone = Set(names.filter { !listedSet.contains($0) && (unconfirmed[$0] ?? -1) < 0 })
-    var next: String?
-    if let active, gone.contains(active), let index = names.firstIndex(of: active) {
-      next = names[..<index].last { !gone.contains($0) } ?? names[(index + 1)...].first { !gone.contains($0) }
-    }
-    let activeGone = active.map(gone.contains) ?? false
     for name in names where gone.contains(name) {
       remove(name)
       change.removed.append(name)
     }
-    if activeGone, let next {
-      change.evicted += select(next)
-      change.newActive = next
-    }
     let pending = names.filter { !listedSet.contains($0) }
     names = listedOrder + pending
-    if active == nil, !names.isEmpty {
-      let choice = Self.initialChoice(listed) ?? names[0]
-      change.evicted += select(choice)
-      change.newActive = choice
-    }
     return change
   }
 }

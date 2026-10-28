@@ -405,6 +405,19 @@ func (s *acpDaemonState) syncStream() {
 	_ = writeACPMeta(s.meta)
 }
 
+// acpAgentEnv tells the agent's hooks they run in a chat: the holder pushes for it, and a zmx
+// session it was started from is not where the agent lives.
+func acpAgentEnv(environ []string, name string) []string {
+	env := make([]string, 0, len(environ)+1)
+	for _, kv := range environ {
+		if strings.HasPrefix(kv, "ZMX_SESSION=") || strings.HasPrefix(kv, "TETHER_ACP=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "TETHER_ACP="+name)
+}
+
 func acpDaemon(name string) error {
 	signal.Ignore(syscall.SIGHUP)
 	m, err := readACPMeta(name)
@@ -436,6 +449,7 @@ func acpDaemon(name string) error {
 
 	cmd := exec.Command(acpShell(), "-lc", m.Spawn)
 	cmd.Dir = m.Cwd
+	cmd.Env = acpAgentEnv(os.Environ(), name)
 	cmd.Stderr = errf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()

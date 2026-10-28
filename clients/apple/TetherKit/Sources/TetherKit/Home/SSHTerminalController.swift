@@ -213,12 +213,17 @@ public final class SSHTerminalController {
   private let dial: Dialer
   /// Set by `leave()`. A dial still in flight must not adopt its stream after it.
   private var left = false
-  private var didChooseInitialSession = false
-  /// Set when the host had no sessions on first connect: skip the `zmx attach`
-  /// so nothing is auto-created. Cleared the moment the user creates a session.
+  /// `attach` is a session the user chose (a tap, New session, a notification), not the
+  /// placeholder a fresh screen starts with. Only a chosen session is ever attached.
+  private var picked: Bool
+  /// `zmx attach` creates any name the host lacks, and only the user creates sessions: every
+  /// attach is of a listed session, or of one of these until a listing shows it.
+  private var mayCreate: Set<String> = []
+  /// Set when the connect found nothing to attach: skip the `zmx attach` so nothing is
+  /// auto-created. Cleared the moment the user creates a session.
   private var pendingNoSession = false
-  /// The first listing failed, so nothing was picked; the next listing that works attaches what
-  /// it would have.
+  /// A connect's listing failed, so the chosen session was not attached; the next listing that
+  /// shows it attaches it.
   @ObservationIgnored private var initialChoiceDeferred = false
   private var lastCols: UInt16 = 80
   private var lastRows: UInt16 = 24
@@ -233,7 +238,7 @@ public final class SSHTerminalController {
     attach: String = defaultAttach,
     pushIdentity: PushRegistrar.PushIdentity? = nil,
     theme: TerminalTheme = .tether,
-    choosesInitialSession: Bool = true,
+    picked: Bool = false,
     dial: @escaping Dialer = { try await SSHConnector.connect(config: $0, store: $1) },
     control: ControlConnection? = nil,
     ghControl: ControlConnection? = nil
@@ -243,7 +248,7 @@ public final class SSHTerminalController {
     self.config = config
     self.hostKeyStore = hostKeyStore
     self.attach = attach
-    self.didChooseInitialSession = !choosesInitialSession
+    self.picked = picked
     self.pushIdentity = pushIdentity
     self.dial = dial
     self.control = control ?? ControlConnection(config: config, store: hostKeyStore)
@@ -286,7 +291,7 @@ public final class SSHTerminalController {
       control.reset()
       if ghControl !== control { ghControl.reset() }
     }
-    await chooseInitialSessionIfNeeded()
+    await chooseSessionToAttach()
     // libssh2 auth/transport fails transiently with several connections opening at once.
     // A host-key mismatch is never retried — that must fail loudly.
     for attempt in 0..<3 {
@@ -331,12 +336,19 @@ public final class SSHTerminalController {
     }
   }
 
-  /// First connect only: attach "default" or else the newest session; create nothing on an
-  /// empty host. An explicit target (a switch, the launch-env attach) is left alone.
-  private func chooseInitialSessionIfNeeded() async {
-    guard !didChooseInitialSession else { return }
-    didChooseInitialSession = true
-    guard attach == Self.defaultAttach else { return }
+  /// Every connect, the first and each redial: the app never opens a session by itself. A fresh
+  /// screen attaches nothing and shows the host's sessions to pick from; a chosen one is
+  /// attached only if the host lists it, so one that ended while the app was away, or one a
+  /// stale link names, is never recreated.
+  private func chooseSessionToAttach() async {
+    if mayCreate.contains(attach) {
+      pendingNoSession = false
+      return
+    }
+    guard picked else {
+      pendingNoSession = true
+      return
+    }
     // Retries stop at a deadline: one attempt can wait out a whole connect timeout, and the
     // terminal dial waits behind this.
     var listing: String?
@@ -346,16 +358,21 @@ public final class SSHTerminalController {
       guard attempt < 2, ContinuousClock.now < deadline else { break }
       try? await Task.sleep(nanoseconds: 500_000_000)
     }
-    // A host that could not be listed is not an empty one: attaching `default` then created it.
     guard let out = listing else {
       pendingNoSession = true
       initialChoiceDeferred = true
       return
     }
-    let existing = ZmxSession.parse(out)
-    if existing.isEmpty { pendingNoSession = true; return }
-    guard !existing.contains(where: { $0.name == Self.defaultAttach }) else { return }
-    attach = existing.max(by: { $0.created < $1.created })?.name ?? attach
+    guard let name = pick(from: ZmxSession.parse(out)) else {
+      pendingNoSession = true
+      return
+    }
+    attach = name
+    pendingNoSession = false
+  }
+
+  private func pick(from listed: [ZmxSession]) -> String? {
+    listed.contains { $0.name == attach } ? attach : nil
   }
 
   /// Best-effort, once per connection. Delayed so its extra SSH connection doesn't race the
@@ -377,7 +394,12 @@ public final class SSHTerminalController {
     for attempt in 0..<3 {
       if let output = try? await control.exec("\(Self.zmx) ls") {
         let parsed = ZmxSession.parse(output)
-        if !parsed.isEmpty || attempt == 2 { sessions = parsed; listed = true; break }
+        if !parsed.isEmpty || attempt == 2 {
+          sessions = parsed
+          mayCreate.subtract(parsed.map(\.name))
+          listed = true
+          break
+        }
       }
       try? await Task.sleep(nanoseconds: 400_000_000)
     }
@@ -386,16 +408,15 @@ public final class SSHTerminalController {
     await refreshAgentStatus()
   }
 
-  /// The Mac's tabs pick from their own listing, so only the single-session screen does this.
-  /// It waits for a connected, still empty screen: a listing that lands mid-dial, or on a host
-  /// still empty, leaves the choice for the next one.
+  /// Waits for a connected, still empty screen: a listing that lands mid-dial, or one that does
+  /// not show the session yet, leaves it for the next one.
   private func attachDeferredChoice() async {
     guard initialChoiceDeferred else { return }
-    if TetherPlatform.isMac || (hasSession && status == .connected) {
+    if hasSession && status == .connected {
       initialChoiceDeferred = false
       return
     }
-    guard status == .connected, !hasSession, let name = SessionTabState.initialChoice(sessions) else { return }
+    guard status == .connected, !hasSession, let name = pick(from: sessions) else { return }
     initialChoiceDeferred = false
     await switchSession(to: name)
   }
@@ -497,6 +518,8 @@ public final class SSHTerminalController {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
     guard name != attach || !hasSession else { return }
+    guard await mayAttach(name) else { return }
+    picked = true
     let wasAttached = hasSession
     let departing = attach
     attach = name
@@ -521,27 +544,40 @@ public final class SSHTerminalController {
     if wasAttached { flushPushInBackground(session: departing) }
   }
 
+  /// A switch never creates: the drawer's list can be a few seconds old, and a link or agent
+  /// banner can name a session that has ended.
+  private func mayAttach(_ name: String) async -> Bool {
+    if mayCreate.contains(name) || sessions.contains(where: { $0.name == name }) { return true }
+    guard let out = try? await control.exec("\(Self.zmx) ls") else { return false }
+    return ZmxSession.parse(out).contains { $0.name == name }
+  }
+
+  /// The one way a session comes into being: the user asked for it by name.
+  public func createSession(_ name: String) async {
+    allowCreating(name)
+    await switchSession(to: name)
+  }
+
+  func allowCreating(_ name: String) {
+    mayCreate.insert(name)
+  }
+
   /// Opens a new session that runs `command` (already shell-quoted) in place of a login shell.
   public func openSession(_ name: String, running command: String) async {
     launchCommands[name] = command
-    await switchSession(to: name)
+    await createSession(name)
     // A switch that was skipped or replaced never typed it; a later plain attach must not.
     launchCommands[name] = nil
   }
 
-  /// Switch away first when killing the current session — killing the one we're
-  /// attached to would drop our own PTY.
+  /// Killing the current session drops to the empty state and its session list: opening
+  /// another one is the user's call.
   public func killSession(_ name: String) async {
     if name == attach {
-      await refreshSessions()
-      if let next = sessions.first(where: { $0.name != name })?.name {
-        await switchSession(to: next)
-      } else {
-        // Killed the only session — drop to the empty state, don't recreate one.
-        hasSession = false
-        pendingNoSession = true
-      }
+      hasSession = false
+      pendingNoSession = true
     }
+    mayCreate.remove(name)
     _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
     await refreshSessions()
   }

@@ -95,6 +95,7 @@ final class ControllerChatsTests: XCTestCase {
     return SSHTerminalController(
       title: "t", config: config, hostKeyStore: store, attach: "work",
       control: ControlConnection(config: config, store: store) { ops })
+      .creating("work")
   }
 
   private let statusLine = #"{"name":"chat-a","state":"running","turn":"waiting","title":"T","cwd":"/srv/x","created":100,"logBytes":10,"endedReason":""}"#

@@ -12,6 +12,7 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
       title: "test", config: config, hostKeyStore: store, attach: "work",
       dial: { try await script.dial($0, $1) },
       control: ControlConnection(config: config, store: store) { FakeOps() })
+      .creating("work")
   }
 
   func test_after_the_grace_period_the_session_is_closed() async {
@@ -33,6 +34,7 @@ final class SSHTerminalControllerBackgroundTests: XCTestCase {
       title: "test", config: config, hostKeyStore: store, attach: "work",
       dial: { try await DialScript([stream]).dial($0, $1) },
       control: ControlConnection(config: config, store: store) { ops })
+      .creating("work")
     await controller.connect()
     await controller.detachAfterGrace(0.05)
     XCTAssertTrue(stream.closed)

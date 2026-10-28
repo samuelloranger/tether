@@ -18,17 +18,11 @@ final class SessionTabStateTests: XCTestCase {
     XCTAssertEqual(SessionTabState.ordered(listed), ["a", "b", "c"])
   }
 
-  func test_initial_choice_prefers_default_else_newest() {
-    XCTAssertEqual(SessionTabState.initialChoice([session("a", created: 1), session("default", created: 0)]), "default")
-    XCTAssertEqual(SessionTabState.initialChoice([session("a", created: 1), session("b", created: 2)]), "b")
-    XCTAssertNil(SessionTabState.initialChoice([]))
-  }
-
-  func test_first_listing_selects_the_initial_choice() {
+  func test_first_listing_selects_nothing() {
     var state = SessionTabState()
-    let change = state.reconcile(listed: [session("a", created: 1), session("b", created: 2)])
-    XCTAssertEqual(state.active, "b")
-    XCTAssertEqual(change.newActive, "b")
+    _ = state.reconcile(listed: [session("a", created: 1), session("b", created: 2)])
+    XCTAssertNil(state.active)
+    XCTAssertTrue(state.attached.isEmpty)
     XCTAssertEqual(state.names, ["a", "b"])
   }
 
@@ -39,18 +33,12 @@ final class SessionTabStateTests: XCTestCase {
     XCTAssertEqual(state.active, "a")
   }
 
-  func test_a_removed_active_tab_hands_over_to_its_left_neighbour() {
+  func test_an_active_tab_whose_session_ended_leaves_no_tab_active() {
     var state = state([session("a", created: 1), session("b", created: 2), session("c", created: 3)], active: "b")
     let change = state.reconcile(listed: [session("a", created: 1), session("c", created: 3)])
     XCTAssertEqual(change.removed, ["b"])
-    XCTAssertEqual(state.active, "a")
-    XCTAssertEqual(change.newActive, "a")
-  }
-
-  func test_a_removed_leftmost_active_tab_hands_over_to_the_right() {
-    var state = state([session("a", created: 1), session("b", created: 2)], active: "a")
-    _ = state.reconcile(listed: [session("b", created: 2)])
-    XCTAssertEqual(state.active, "b")
+    XCTAssertNil(state.active)
+    XCTAssertEqual(state.names, ["a", "c"])
   }
 
   func test_an_empty_listing_leaves_no_tabs_and_no_active() {
@@ -65,7 +53,6 @@ final class SessionTabStateTests: XCTestCase {
     var state = state([session("a", created: 1), session("b", created: 2)], active: "a")
     let change = state.reconcile(listed: [session("a", created: 1)])
     XCTAssertEqual(change.removed, ["b"])
-    XCTAssertNil(change.newActive)
     XCTAssertEqual(state.active, "a")
   }
 
@@ -78,7 +65,7 @@ final class SessionTabStateTests: XCTestCase {
     }
     let change = state.reconcile(listed: [session("a", created: 1)])
     XCTAssertEqual(change.removed, ["fresh"])
-    XCTAssertEqual(state.active, "a")
+    XCTAssertNil(state.active)
   }
 
   func test_a_confirmed_tab_is_dropped_when_it_disappears() {
@@ -94,11 +81,11 @@ final class SessionTabStateTests: XCTestCase {
     var state = SessionTabState()
     _ = state.reconcile(listed: all)
     var evicted: [String] = []
-    for index in 0..<10 { evicted += state.select("s\(index)") }
-    XCTAssertEqual(evicted, ["s11"], "the initial choice (newest) was viewed first")
+    for index in 0..<11 { evicted += state.select("s\(index)") }
+    XCTAssertEqual(evicted, ["s0"])
     XCTAssertEqual(state.attached.count, SessionTabState.maxAttached)
-    XCTAssertFalse(state.attached.contains("s11"))
-    XCTAssertTrue(state.attached.contains("s9"))
+    XCTAssertFalse(state.attached.contains("s0"))
+    XCTAssertTrue(state.attached.contains("s10"))
   }
 
   func test_viewing_a_tab_again_protects_it_from_eviction() {
@@ -147,16 +134,8 @@ final class SessionTabStateTests: XCTestCase {
     var state = state([session("a", created: 1), session("b", created: 2)], active: "a")
     let change = state.reconcile(listed: [])
     XCTAssertEqual(Set(change.removed), ["a", "b"])
-    XCTAssertNil(change.newActive)
     XCTAssertNil(state.active)
     XCTAssertTrue(state.names.isEmpty)
-  }
-
-  func test_the_handover_skips_neighbours_that_vanish_in_the_same_listing() {
-    var state = state([session("a", created: 1), session("b", created: 2), session("c", created: 3)], active: "b")
-    let change = state.reconcile(listed: [session("c", created: 3)])
-    XCTAssertEqual(change.newActive, "c")
-    XCTAssertEqual(state.active, "c")
   }
 
   func test_a_killed_session_stays_out_until_a_listing_stops_showing_it() {

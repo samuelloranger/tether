@@ -48,6 +48,12 @@ notify_bin="$(dirname "$0")/tether"
 input="$(cat 2>/dev/null || true)"
 field() { printf '%s' "$input" | jq -r "$1" 2>/dev/null || true; }
 
+# A chat's agent: its holder already pushes what needs the phone.
+if [ -n "${TETHER_ACP:-}" ]; then
+  reply
+  exit 0
+fi
+
 # Cursor also runs the Claude hooks from ~/.claude/settings.json; its own entries report it.
 # An escaped "cursor_version" inside a prompt string carries a backslash, so it doesn't match.
 if [ "$agent" = claude ]; then
@@ -139,12 +145,12 @@ if [ "${#body}" -gt 120 ]; then
   body="$(printf '%s' "$body" | cut -c1-117)…"
 fi
 
-link="tether://session/${sess:-default}?host=${host}"
 if [ -n "$sess" ]; then
   "$notify_bin" state --session "$sess" --agent "$agent" --state "$state_out" \
-    --title "$project · $verb" --body "$body" --link "$link" >/dev/null 2>&1 || true
+    --title "$project · $verb" --body "$body" --link "tether://session/${sess}?host=${host}" >/dev/null 2>&1 || true
 else
-  "$notify_bin" notify --title "$project · $verb" --body "$body" --link "$link" \
+  # No session to link to: a link naming one would make the app create it.
+  "$notify_bin" notify --title "$project · $verb" --body "$body" \
     --collapse "agent-default" >/dev/null 2>&1 || true
 fi
 

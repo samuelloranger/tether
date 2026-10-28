@@ -46,6 +46,7 @@ final class SSHLiveSessionSwitchTests: XCTestCase {
         dials.increment()
         return try await SSHConnector.connect(config: config, store: store)
       })
+      .creating("sw-a", "sw-b", "sw-c")
     await controller.connect()
     XCTAssertEqual(controller.status, .connected)
     let attachedFirst = await waitUntil(10) {

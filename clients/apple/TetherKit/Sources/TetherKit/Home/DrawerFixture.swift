@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 /// The real terminal screen over canned host answers, so the session drawer can be shot without a host:
-/// `TETHER_DEBUG_DRAWER=open|chat|chat-open|newchat|agents-open` (`TETHER_DEBUG_THEME=<terminal theme id>` picks the theme) (see `SSHTerminalView.applyDebugDrawerMode`).
+/// `TETHER_DEBUG_DRAWER=open|pick|chat|chat-open|newchat|agents-open` (`TETHER_DEBUG_THEME=<terminal theme id>` picks the theme) (see `SSHTerminalView.applyDebugDrawerMode`).
 public struct DrawerFixtureRoot: View {
   @State private var controller: SSHTerminalController
   @State private var preferences = AppPreferences()
@@ -22,7 +22,7 @@ public struct DrawerFixtureRoot: View {
     let ops = FixtureOps(now: now)
     let created = SSHTerminalController(
       title: "devbox", config: config, hostKeyStore: store, attach: "api",
-      choosesInitialSession: false,
+      picked: ProcessInfo.processInfo.environment["TETHER_DEBUG_DRAWER"] != "pick",
       dial: { _, _ in FixtureTerminal() },
       control: ControlConnection(config: config, store: store) { ops })
     created.debugChatModel = { _ in ChatFixture.longModel() }

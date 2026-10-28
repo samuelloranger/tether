@@ -147,10 +147,10 @@ public struct AppRootView: View {
       let created = MacSessionTabs(
         attach: explicitAttach ?? ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"],
         pushIdentity: pushIdentityProvider()
-      ) { name, choosesInitial, identity in
+      ) { name, picked, identity in
         SSHTerminalController(
           title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
-          attach: name, pushIdentity: identity, theme: theme, choosesInitialSession: choosesInitial
+          attach: name, pushIdentity: identity, theme: theme, picked: picked
         )
       }
       tabs = created
@@ -158,7 +158,8 @@ public struct AppRootView: View {
     } else {
       controller = SSHTerminalController(
         title: profile.name, config: config, hostKeyStore: model.hostKeyStore,
-        attach: attach, pushIdentity: pushIdentityProvider(), theme: preferences.terminalTheme
+        attach: attach, pushIdentity: pushIdentityProvider(), theme: preferences.terminalTheme,
+        picked: explicitAttach != nil || ProcessInfo.processInfo.environment["TETHER_SSH_ATTACH"] != nil
       )
     }
     model.rememberLastHost(profile.id)

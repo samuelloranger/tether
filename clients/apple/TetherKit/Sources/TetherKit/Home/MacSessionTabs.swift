@@ -6,7 +6,7 @@ import UIKit
 @MainActor
 @Observable
 public final class MacSessionTabs {
-  typealias Factory = @MainActor (_ attach: String, _ choosesInitial: Bool, _ pushIdentity: PushRegistrar.PushIdentity?)
+  typealias Factory = @MainActor (_ attach: String, _ picked: Bool, _ pushIdentity: PushRegistrar.PushIdentity?)
     -> SSHTerminalController
 
   private(set) var state = SessionTabState()
@@ -25,7 +25,7 @@ public final class MacSessionTabs {
 
   init(attach: String?, pushIdentity: PushRegistrar.PushIdentity?, make: @escaping Factory) {
     self.make = make
-    let boot = make(attach ?? SSHTerminalController.defaultAttach, attach == nil, pushIdentity)
+    let boot = make(attach ?? SSHTerminalController.defaultAttach, attach != nil, pushIdentity)
     track(boot)
     bare = boot
     // Closing the window leaves no UI to hold the connections, and nothing detaches on its own here.
@@ -86,7 +86,7 @@ public final class MacSessionTabs {
     listed = reader.sessions
     apply(state.reconcile(listed: listed))
     adoptBareIfAttached()
-    if state.names.isEmpty, bare == nil { await restartBare() }
+    if state.active == nil, bare == nil { await restartBare() }
   }
 
   /// The bootstrap controller already attached a session on connect.
@@ -103,15 +103,14 @@ public final class MacSessionTabs {
 
   private func restartBare() async {
     guard !left else { return }
-    let fresh = make(SSHTerminalController.defaultAttach, true, nil)
+    let fresh = make(SSHTerminalController.defaultAttach, false, nil)
     track(fresh)
     bare = fresh
     await fresh.connect()
   }
 
   private func apply(_ change: SessionTabState.Change) {
-    teardown(change.removed + change.evicted)
-    if let active = change.newActive { ensureController(for: active) }
+    teardown(change.removed)
   }
 
   private func teardown(_ names: [String]) {
@@ -121,15 +120,17 @@ public final class MacSessionTabs {
     }
   }
 
-  private func ensureController(for name: String) {
+  private func ensureController(for name: String, creating: Bool = false) {
     guard controllers[name] == nil else { return }
     if let boot = bare, !boot.hasSession || boot.status == .connecting {
       bare = nil
       controllers[name] = boot
+      if creating { boot.allowCreating(name) }
       Task { await boot.switchSession(to: name) }
       return
     }
-    let controller = make(name, false, nil)
+    let controller = make(name, true, nil)
+    if creating { controller.allowCreating(name) }
     track(controller)
     controllers[name] = controller
     Task { await controller.connect() }
@@ -166,7 +167,7 @@ public final class MacSessionTabs {
       return
     }
     teardown(state.open(name))
-    ensureController(for: name)
+    ensureController(for: name, creating: true)
     Task {
       try? await Task.sleep(nanoseconds: 1_500_000_000)
       await refresh()
@@ -177,8 +178,9 @@ public final class MacSessionTabs {
   func open(_ name: String, running command: String) {
     guard !state.names.contains(name) else { return select(name) }
     teardown(state.open(name))
-    let controller = make(name, false, nil)
+    let controller = make(name, true, nil)
     controller.launchCommands[name] = command
+    controller.allowCreating(name)
     track(controller)
     controllers[name] = controller
     Task {

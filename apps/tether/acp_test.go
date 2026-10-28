@@ -405,3 +405,11 @@ func TestACPMetaReportsAttachedOnlyAfterHandshake(t *testing.T) {
 	_ = p.exitCode(t)
 	waitFor(t, "detached", func() bool { return !attached() })
 }
+
+func TestACPAgentEnvMarksTheChatAndDropsTheZmxSession(t *testing.T) {
+	got := acpAgentEnv([]string{"HOME=/h", "ZMX_SESSION=work", "TETHER_ACP=old", "PATH=/bin"}, "chat-1")
+	want := []string{"HOME=/h", "PATH=/bin", "TETHER_ACP=chat-1"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("env %q, want %q", got, want)
+	}
+}

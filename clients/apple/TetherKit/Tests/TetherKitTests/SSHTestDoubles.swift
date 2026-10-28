@@ -245,3 +245,11 @@ final class DialScript: @unchecked Sendable {
     return streams.isEmpty ? ScriptedByteStream() : streams.removeFirst()
   }
 }
+
+extension SSHTerminalController {
+  /// The fakes list no sessions; these attach as if the user had created `names`.
+  func creating(_ names: String...) -> SSHTerminalController {
+    names.forEach(allowCreating)
+    return self
+  }
+}
