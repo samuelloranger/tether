@@ -23,6 +23,7 @@ final class SSHTerminalControllerBellTests: XCTestCase {
       title: "test", config: config, hostKeyStore: store, attach: "work",
       dial: { try await script.dial($0, $1) },
       control: ControlConnection(config: config, store: store) { FakeOps() })
+      .creating("work")
     let active = Flag()
     controller.appIsActive = { active.value }
     await controller.connect()
@@ -61,6 +62,7 @@ final class SSHTerminalControllerReportTests: XCTestCase {
       title: "test", config: config, hostKeyStore: store, attach: "work",
       dial: { try await script.dial($0, $1) },
       control: ControlConnection(config: config, store: store) { FakeOps() })
+      .creating("work")
     let sink = Sink()
     controller.appIsActive = { sink.active }
     controller.writeClipboard = { sink.written.append($0) }

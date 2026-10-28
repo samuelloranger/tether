@@ -554,7 +554,7 @@ public struct SSHTerminalView: View {
   }
 
   private func sessionRow(_ session: ZmxSession) -> some View {
-    let isCurrent = session.name == controller.attach
+    let isCurrent = controller.hasSession && session.name == controller.attach
     let isSelected = isCurrent && !content.showsChat
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return HStack(spacing: 6) {
@@ -743,7 +743,7 @@ public struct SSHTerminalView: View {
     newSessionName = ""
     showTerminal()
     focusedBeforeDrawer = true
-    Task { await controller.switchSession(to: name) }
+    Task { await controller.createSession(name) }
     setDrawer(open: false)
   }
 
@@ -762,7 +762,7 @@ public struct SSHTerminalView: View {
 
   private func newSession() {
     if let tabs { tabs.beginNewSession() } else {
-      Task { await controller.switchSession(to: nextSessionName()) }
+      Task { await controller.createSession(nextSessionName()) }
     }
   }
 
@@ -829,6 +829,7 @@ public struct SSHTerminalView: View {
     case "newchat-continue", "newchat-continue-empty", "newchat-continue-error", "newchat-continue-recent":
       newChatMode = .resume
       showNewChat = true
+    case "pick": break
     default: drawerOpen = true
     }
   }
@@ -1049,9 +1050,9 @@ public struct SSHTerminalView: View {
     }
   }
 
-  /// Shown when the host has no zmx session: nothing is auto-created, so the terminal
-  /// stays gated until the user starts one from the drawer. It covers the whole grid —
-  /// underneath is the bare login shell, or whatever the last session left behind.
+  /// Shown while no zmx session is attached: the app never opens one by itself, so the
+  /// terminal stays gated until the user picks a session here or starts one. It covers the
+  /// whole grid — underneath is the bare login shell, or whatever the last session left behind.
   @ViewBuilder
   private var emptyStateOverlay: some View {
     if case .connected = controller.status, !controller.hasSession {
@@ -1063,14 +1064,43 @@ public struct SSHTerminalView: View {
     }
   }
 
+  /// Newest first; the drawer has the rest.
+  private var pickableSessions: [ZmxSession] {
+    Array(controller.sessions.sorted { $0.created > $1.created }.prefix(6))
+  }
+
   private var emptyStateCard: some View {
     VStack(spacing: 14) {
       Image(systemName: "terminal").font(.largeTitle).foregroundStyle(TetherColors.textSecondary)
-      Text("No session on \(controller.title)")
+      Text(controller.sessions.isEmpty ? "No session on \(controller.title)" : "Open a session on \(controller.title)")
         .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         .multilineTextAlignment(.center)
-      Text("Nothing runs until you start one.")
-        .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+      if controller.sessions.isEmpty {
+        Text("Nothing runs until you start one.")
+          .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+      } else {
+        VStack(spacing: 6) {
+          ForEach(pickableSessions) { session in
+            Button { goToSession(session.name) } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+                Text(session.displayCwd).font(.caption2.monospaced())
+                  .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.horizontal, 12).padding(.vertical, 8)
+              .background(TetherColors.background, in: RoundedRectangle(cornerRadius: 10))
+              .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+            }
+            .buttonStyle(TetherPressStyle())
+            .accessibilityIdentifier("sshEmptyStateSession_\(session.name)")
+          }
+          if controller.sessions.count > pickableSessions.count, tabs == nil {
+            Button("All sessions") { setDrawer(open: true) }
+              .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+          }
+        }
+      }
       Button("New session") {
         if let tabs { tabs.beginNewSession() } else {
           setDrawer(open: true)

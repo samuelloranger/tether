@@ -25,6 +25,7 @@ final class SSHTerminalControllerAgentStatusTests: XCTestCase {
       title: "test", config: config, hostKeyStore: store, attach: "work",
       dial: { _, _ in ScriptedByteStream() },
       control: ControlConnection(config: config, store: store) { ops })
+      .creating("work")
   }
 
   /// connect() refreshes sessions — and so agent status — in the background; let that land

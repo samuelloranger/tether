@@ -103,6 +103,16 @@ test('outside zmx: waiting/done fall back to a plain push, working does nothing'
   const log = calls(env.log);
   expect(log).toHaveLength(1);
   expect(log[0]).toStartWith('notify --title proj · done');
+  expect(log[0]).not.toContain('--link');
+});
+
+test('a chat agent pushes nothing: its holder does', () => {
+  const env = install();
+  for (const state of ['working', 'waiting', 'done', 'clear']) {
+    hook(env, 'claude', state, { cwd: '/src/proj' }, null, { TETHER_ACP: 'chat-1' });
+  }
+  expect(hook(env, 'codex', 'done', { cwd: '/src/proj' }, null, { TETHER_ACP: 'chat-1' }).trim()).toBe('{}');
+  expect(calls(env.log)).toEqual([]);
 });
 
 test('codex always answers {} and cursor answers per event', () => {
