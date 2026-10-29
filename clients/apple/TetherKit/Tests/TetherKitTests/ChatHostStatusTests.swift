@@ -6,6 +6,20 @@ final class ChatHostStatusTests: XCTestCase {
   private let waiting = #"{"name":"chat-b","state":"running","turn":"waiting","title":"Migrate the docs","cwd":"/srv/docs","created":200,"logBytes":10,"endedReason":""}"#
   private let ended = #"{"name":"chat-c","state":"ended","turn":"idle","title":"","cwd":"/srv/app","created":100,"logBytes":10,"endedReason":"agent exited"}"#
 
+  func test_a_spawn_command_with_quotes_survives_when_the_line_is_escaped() throws {
+    let spawn = #"opencode acp --cwd "/srv/api" --flag='x'"#
+    let object: [String: Any] = [
+      "name": "chat-q", "state": "running", "turn": "idle", "title": "", "cwd": "/srv/api", "created": 1,
+      "logBytes": 1, "endedReason": "", "spawn": spawn,
+    ]
+    let line = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    let result = ACPChatStatusListing.parse(line)
+    XCTAssertEqual(result.chats.map(\.name), ["chat-q"])
+    XCTAssertEqual(result.chats.first?.spawn, spawn)
+    let broken = #"{"name":"chat-q","state":"running","spawn":"opencode --cwd "/srv/api""}"#
+    XCTAssertTrue(ACPChatStatusListing.parse(broken).chats.isEmpty)
+  }
+
   func test_status_lines_become_summaries_newest_first() {
     let result = ACPChatStatusListing.parse([ended, working, waiting].joined(separator: "\n"))
     XCTAssertFalse(result.unsupported)

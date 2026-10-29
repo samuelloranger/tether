@@ -106,8 +106,14 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
         _ name: String, _ state: String, _ turn: String, _ title: String, _ cwd: String, _ age: Int,
         spawn: String? = nil, tasks: Int = 0
       ) -> String {
-        let extra = (spawn.map { ",\"spawn\":\"\($0)\"" } ?? "") + (tasks > 0 ? ",\"tasks\":\(tasks)" : "")
-        return "{\"name\":\"\(name)\",\"state\":\"\(state)\",\"turn\":\"\(turn)\",\"title\":\"\(title)\",\"cwd\":\"\(cwd)\",\"created\":\(now - age),\"logBytes\":48213,\"endedReason\":\"\"\(extra)}"
+        var object: [String: Any] = [
+          "name": name, "state": state, "turn": turn, "title": title, "cwd": cwd, "created": now - age,
+          "logBytes": 48213, "endedReason": "",
+        ]
+        if let spawn { object["spawn"] = spawn }
+        if tasks > 0 { object["tasks"] = tasks }
+        let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
+        return String(decoding: data, as: UTF8.self)
       }
       if env["TETHER_DEBUG_DRAWER"]?.hasPrefix("agents") == true {
         return [
@@ -116,6 +122,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
           line("chat-c3", "running", "idle", "Tidy the README", "/home/dev/sites/labby", 3600, spawn: ChatAgents.opencode.spawn, tasks: 1),
           line("chat-d4", "running", "idle", "Chat access across devices", "/home/dev/sites/tether", 7200, spawn: ChatAgents.claude.spawn),
           line("chat-e5", "ended", "idle", "Review PR 303", "/home/dev/sites/tether", 86400, spawn: ChatAgents.codex.spawn),
+          line("chat-f6", "ended", "idle", "Draft the changelog", "/home/dev/sites/labby", 172800, spawn: ChatAgents.claude.spawn),
         ].joined(separator: "\n")
       }
       return [
@@ -159,7 +166,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
     if command.contains("status") {
       return """
         [{"session":"api","agent":"claude","state":"working","since":\(now - 120),"updated":\(now)},
-        {"session":"tether","agent":"claude","state":"done","since":\(now - 25200),"updated":\(now - 25200)}]
+        {"session":"tether","agent":"claude","state":"waiting","since":\(now - 300),"updated":\(now - 300)}]
         """
     }
     return ""
