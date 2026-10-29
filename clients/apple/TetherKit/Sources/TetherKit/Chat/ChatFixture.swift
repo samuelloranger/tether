@@ -304,7 +304,10 @@ enum ChatFixture {
   @MainActor
   static func workflowsModel() -> ChatSessionModel {
     let call = "toolu_workflow"
-    var lines = [update(["sessionUpdate": "session_info_update", "title": "Review the retry helper"])]
+    var lines = [
+      json(["jsonrpc": "2.0", "id": 1, "result": ["sessionId": "sess-1"]]),
+      update(["sessionUpdate": "session_info_update", "title": "Review the retry helper"]),
+    ]
     lines += [
       update(tool(call, "Workflow", kind: "other", status: "pending", toolName: "Workflow", input: [:])),
       update(tool(call, "Workflow", kind: "other", status: "completed", text: "Workflow launched in background.", update: true, toolName: "Workflow")),

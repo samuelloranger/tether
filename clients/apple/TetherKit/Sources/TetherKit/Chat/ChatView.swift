@@ -119,7 +119,7 @@ struct ChatView: View {
       }
       #if DEBUG
       if ChatFixture.openWorkflowSheet {
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        for _ in 0..<100 where model.runningWorkflows.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
         workflowSheet = model.runningWorkflows.first.map { ChatWorkflowSelection(id: $0.toolCallId) }
       }
       if ChatFixture.planMode == "plan-sheet" {
