@@ -41,6 +41,8 @@ struct ChatToolCall: Codable, Equatable, Sendable {
   var terminalEnded: Bool?
   /// The terminal's output as the adapter sent it; `text` is its fenced form.
   var terminalData: String?
+  /// A `Workflow` launch: its end is only known from the host (see `ChatWorkflowTracker`).
+  var isWorkflow: Bool?
 
   init(_ fields: ACPToolFields) {
     id = fields.id
@@ -62,6 +64,7 @@ struct ChatToolCall: Codable, Equatable, Sendable {
     if let value = fields.rawOutput { rawOutput = value }
     if let value = fields.terminalId { terminalId = value }
     if let value = fields.backgroundTaskId { backgroundTaskId = value }
+    if fields.toolName == ChatWorkflowTracker.toolName { isWorkflow = true }
     if fields.terminalExited == true { terminalEnded = true }
     if let value = fields.terminalOutput {
       terminalData = value

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=workflows` a background Workflow still running (`=workflows-sheet` with its sheet open), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
 enum ChatFixture {
   static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
@@ -294,6 +294,53 @@ enum ChatFixture {
     journal.entries = [.init(kind: .prompt, offset: 0, text: "Start the dev server and tail the log, both in the background.", requestId: .int(3))]
     return ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal)
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
+  nonisolated(unsafe) static var openWorkflowSheet = false
+
+  /// A Workflow launch that ACP already reported done, and the host's answer: one run in its
+  /// second phase with one agent finished and one running.
+  @MainActor
+  static func workflowsModel() -> ChatSessionModel {
+    let call = "toolu_workflow"
+    var lines = [update(["sessionUpdate": "session_info_update", "title": "Review the retry helper"])]
+    lines += [
+      update(tool(call, "Workflow", kind: "other", status: "pending", toolName: "Workflow", input: [:])),
+      update(tool(call, "Workflow", kind: "other", status: "completed", text: "Workflow launched in background.", update: true, toolName: "Workflow")),
+      message("The review is running in the background. I'll report when it finishes."),
+      json(["jsonrpc": "2.0", "id": 3, "result": ["stopReason": "end_turn"]]),
+      update(["sessionUpdate": "usage_update", "used": 18_000, "size": 1_000_000]),
+    ]
+    let log = Data((lines.joined(separator: "\n") + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    journal.nextRequestId = 4
+    journal.entries = [.init(kind: .prompt, offset: 0, text: "Review the retry helper with a workflow.", requestId: .int(3))]
+    let answer: ChatSessionModel.Workflows = { _ in
+      let now = Date().timeIntervalSince1970
+      let run: [String: Any] = [
+        "toolCallId": call, "runId": "wf_demo", "title": "review-helper",
+        "description": "Review the helper from several angles, then merge the findings", "status": "running",
+        "startedAt": now - 205, "agents": ["total": 3, "running": 1, "done": 2],
+        "phases": [
+          ["title": "Scan", "agents": [
+            ["label": "callers", "state": "done", "startedAt": now - 200, "endedAt": now - 130],
+            ["label": "tests", "state": "done", "startedAt": now - 200, "endedAt": now - 95],
+          ]],
+          ["title": "Review", "agents": [
+            ["label": "error handling", "state": "running", "startedAt": now - 90, "activity": "Read: src/fetch.ts"],
+            ["label": "backoff maths", "state": "running", "startedAt": now - 88, "activity": "Bash: bun test src/fetch.test.ts"],
+          ]],
+          ["title": "Merge", "agents": []],
+        ],
+      ]
+      let data = try! JSONSerialization.data(withJSONObject: run, options: [.sortedKeys])
+      return String(decoding: data, as: UTF8.self) + "\n"
+    }
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal),
+      workflows: answer
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
@@ -1024,6 +1071,7 @@ public struct ChatFixtureRoot: View {
     ChatFixture.openQuestionOther = mode == "question-other"
     ChatFixture.planMode = mode
     ChatFixture.openTasks = mode == "tasks-open"
+    ChatFixture.openWorkflowSheet = mode == "workflows-sheet"
     listMode = mode == "list"
     let initial: ChatSessionModel
     switch mode {
@@ -1042,6 +1090,7 @@ public struct ChatFixtureRoot: View {
       initial = ChatFixture.subagentsModel()
     case "codex": initial = ChatFixture.codexModel()
     case "tasks", "tasks-open", "tasks-drawer": initial = ChatFixture.tasksModel()
+    case "workflows", "workflows-sheet": initial = ChatFixture.workflowsModel()
     case "images", "images-top", "image-viewer": initial = ChatFixture.imagesModel()
     case "controls", "controls-sheet", "slash", "attach", "mention", "mention-all": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
