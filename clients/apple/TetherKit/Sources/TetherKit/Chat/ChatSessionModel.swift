@@ -614,7 +614,7 @@ final class ChatSessionModel {
           guard !Task.isCancelled, mine == self.generation else { return }
           self.workflowTracker.apply(output: output, calls: self.workflowCalls)
         }
-        try? await Task.sleep(for: self.workflowInterval)
+        try? await Task.sleep(for: self.workflowTracker.interval(base: self.workflowInterval, now: .now))
       }
     }
   }

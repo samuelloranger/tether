@@ -119,8 +119,8 @@ struct ChatView: View {
       }
       #if DEBUG
       if ChatFixture.openWorkflowSheet {
-        for _ in 0..<100 where model.runningWorkflows.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
-        workflowSheet = model.runningWorkflows.first.map { ChatWorkflowSelection(id: $0.toolCallId) }
+        for _ in 0..<100 where model.workflowTracker.runs.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
+        workflowSheet = model.workflowTracker.runs.first.map { ChatWorkflowSelection(id: $0.toolCallId) }
       }
       if ChatFixture.planMode == "plan-sheet" {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -221,7 +221,8 @@ struct ChatView: View {
         case let .tools(items):
           ToolGroupView(
             items: items, cwd: model.cwd, expandedIDs: Set(items.filter(isExpanded).map(\.id)),
-            toggle: toggleExpanded
+            toggle: toggleExpanded, workflowIds: Set(model.workflowTracker.runs.map(\.toolCallId)),
+            openWorkflow: { workflowSheet = ChatWorkflowSelection(id: $0) }
           )
           .equatable()
         }
@@ -1147,7 +1148,7 @@ private struct PermissionReviewSheet: View {
       .background(TetherColors.background)
       .navigationTitle(permission.title)
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }.withoutGlass() }
     }
   }
 }
@@ -1266,13 +1267,6 @@ private struct FollowingTranscript<Content: View>: View {
 extension View {
   @ViewBuilder fileprivate func scrollEdgeEffectHiddenIfAvailable() -> some View {
     if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .all) } else { self }
-  }
-}
-
-extension ToolbarContent {
-  /// iOS 26 wraps every toolbar item in a glass bubble; the chat header stays flat.
-  @ToolbarContentBuilder fileprivate func withoutGlass() -> some ToolbarContent {
-    if #available(iOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
   }
 }
 

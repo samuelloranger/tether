@@ -10,11 +10,16 @@ struct ChatWorkflowRun: Equatable, Identifiable, Sendable {
   }
 
   struct Agent: Equatable, Sendable {
+    /// `stopped`: the run ended and this agent never reported a result.
+    enum State: Equatable, Sendable { case running, done, stopped }
+
     var label: String
-    var isDone: Bool
+    var state: State
     var startedAt: Date?
     var endedAt: Date?
     var activity: String?
+
+    var isDone: Bool { state == .done }
   }
 
   struct Phase: Equatable, Sendable {
@@ -29,6 +34,8 @@ struct ChatWorkflowRun: Equatable, Identifiable, Sendable {
   var status: Status
   var startedAt: Date?
   var endedAt: Date?
+  /// The newest write to the run's files on the host; nil from a host that does not say.
+  var lastActivityAt: Date?
   var summary: String?
   var phases: [Phase]
 
@@ -37,19 +44,37 @@ struct ChatWorkflowRun: Equatable, Identifiable, Sendable {
   var agents: [Agent] { phases.flatMap(\.agents) }
   var doneCount: Int { agents.filter(\.isDone).count }
   var totalCount: Int { agents.count }
+  var runningCount: Int { agents.filter { $0.state == .running }.count }
 
   /// The phase to name on the strip: the first with an agent still running, else the last with
   /// agents, else the first listed.
   var currentPhase: Phase? {
-    phases.first { $0.agents.contains { !$0.isDone } } ?? phases.last { !$0.agents.isEmpty } ?? phases.first
+    phases.first { $0.agents.contains { $0.state == .running } } ?? phases.last { !$0.agents.isEmpty } ?? phases.first
   }
 }
 
 enum ChatWorkflowText {
-  /// "<title> · <phase> · 1/2 agents"; a part with nothing to say is left out.
-  static func strip(_ run: ChatWorkflowRun) -> String {
+  /// How long a run with no end notice may be silent before the app says so.
+  static let quietAfter: TimeInterval = 600
+
+  /// "no activity for 12m" for a running run whose files have not been written for a while. The
+  /// run is still not called done: only the host's end notice says that.
+  static func quiet(_ run: ChatWorkflowRun, now: Date) -> String? {
+    guard run.isRunning, let last = run.lastActivityAt else { return nil }
+    let silent = now.timeIntervalSince(last)
+    guard silent >= quietAfter else { return nil }
+    return "no activity for \(Int(silent / 60))m"
+  }
+
+  /// "<title> · <phase> · 1/2 agents"; a part with nothing to say is left out. A quiet run names
+  /// how long it has been quiet instead of its phase.
+  static func strip(_ run: ChatWorkflowRun, now: Date = .now) -> String {
     var parts = [run.title]
-    if let phase = run.currentPhase?.title, !phase.isEmpty { parts.append(phase) }
+    if let quiet = quiet(run, now: now) {
+      parts.append(quiet)
+    } else if let phase = run.currentPhase?.title, !phase.isEmpty {
+      parts.append(phase)
+    }
     if run.totalCount > 0 { parts.append("\(run.doneCount)/\(run.totalCount) agents") }
     return parts.joined(separator: " \u{00B7} ")
   }
@@ -65,7 +90,8 @@ enum ChatWorkflowText {
   /// How long an agent has run, or ran; nil when the host gave no start.
   static func elapsed(_ agent: ChatWorkflowRun.Agent, now: Date) -> String? {
     guard let start = agent.startedAt else { return nil }
-    return elapsed(((agent.isDone ? agent.endedAt : nil) ?? now).timeIntervalSince(start))
+    if agent.state == .running { return elapsed(now.timeIntervalSince(start)) }
+    return agent.endedAt.map { elapsed($0.timeIntervalSince(start)) }
   }
 
   static func elapsed(_ run: ChatWorkflowRun, now: Date) -> String? {
@@ -88,7 +114,15 @@ enum ChatWorkflowText {
 enum ChatWorkflowListing {
   struct Result: Equatable {
     var runs: [ChatWorkflowRun]
+    /// The host answered with its unknown-command or usage text: it has no such command.
     var unsupported: Bool
+    /// Output that is neither runs nor that text (a dropped connection, a shell error): one failed poll.
+    var failed: Bool
+  }
+
+  static func isUnknownCommand(_ output: String) -> Bool {
+    let lower = output.lowercased()
+    return lower.contains("unknown acp command") || lower.contains("unknown command") || lower.contains("usage:")
   }
 
   static func command(sessionId: String) -> String {
@@ -107,7 +141,9 @@ enum ChatWorkflowListing {
       }
       runs.append(run)
     }
-    return Result(runs: runs, unsupported: runs.isEmpty && stray)
+    let unrecognised = runs.isEmpty && stray
+    return Result(
+      runs: runs, unsupported: unrecognised && isUnknownCommand(output), failed: unrecognised && !isUnknownCommand(output))
   }
 
   private static func run(from line: String) -> ChatWorkflowRun? {
@@ -127,8 +163,14 @@ enum ChatWorkflowListing {
     let phases: [ChatWorkflowRun.Phase] = (object["phases"] as? [[String: Any]] ?? []).map { phase in
       let agents: [ChatWorkflowRun.Agent] = (phase["agents"] as? [[String: Any]] ?? []).map { agent in
         let activity = (agent["activity"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let state: ChatWorkflowRun.Agent.State =
+          switch agent["state"] as? String {
+          case "done": .done
+          case "stopped": .stopped
+          default: status == "running" ? .running : .stopped
+          }
         return ChatWorkflowRun.Agent(
-          label: agent["label"] as? String ?? "", isDone: agent["state"] as? String == "done",
+          label: agent["label"] as? String ?? "", state: state,
           startedAt: date("startedAt", in: agent), endedAt: date("endedAt", in: agent), activity: activity)
       }
       return ChatWorkflowRun.Phase(title: phase["title"] as? String ?? "", agents: agents)
@@ -136,7 +178,8 @@ enum ChatWorkflowListing {
     return ChatWorkflowRun(
       toolCallId: call, runId: runId, title: text("title") ?? "Workflow", description: text("description"),
       status: status == "running" ? .running : status == "completed" ? .completed : .ended(status),
-      startedAt: date("startedAt", in: object), endedAt: date("endedAt", in: object), summary: text("summary"),
+      startedAt: date("startedAt", in: object), endedAt: date("endedAt", in: object),
+      lastActivityAt: date("lastActivityAt", in: object), summary: text("summary"),
       phases: phases)
   }
 }
@@ -145,6 +188,9 @@ enum ChatWorkflowListing {
 struct ChatWorkflowTracker: Equatable, Sendable {
   static let toolName = "Workflow"
   static let pollInterval: Duration = .seconds(5)
+  /// Answers unchanged this long slow the polling down; any change brings it back.
+  static let slowAfter: TimeInterval = 120
+  static let slowFactor = 6
   /// Answers that may lack a just-launched call before the host is taken not to know it.
   static let maxMisses = 6
 
@@ -155,13 +201,21 @@ struct ChatWorkflowTracker: Equatable, Sendable {
   /// False once the host answered like one without the command: nothing is asked again.
   private(set) var supported = true
   private var misses: [String: Int] = [:]
+  private var changedAt: Date?
 
   var running: [ChatWorkflowRun] { runs.filter(\.isRunning) }
 
   func run(forCall id: String) -> ChatWorkflowRun? { runs.first { $0.toolCallId == id } }
 
-  /// `output` is nil when the host could not be asked; nothing changes then.
-  mutating func apply(output: String?, calls: [ChatToolCall]) {
+  /// The wait before the next ask: `base`, or six times that once answers have not changed for two minutes.
+  func interval(base: Duration, now: Date) -> Duration {
+    guard let changedAt, now.timeIntervalSince(changedAt) >= Self.slowAfter else { return base }
+    return base * Self.slowFactor
+  }
+
+  /// `output` is nil when the host could not be asked; nothing changes then, and neither does it
+  /// for output that is not a listing, except that the host's unknown-command text ends the asking.
+  mutating func apply(output: String?, calls: [ChatToolCall], now: Date = .now) {
     guard let output else { return }
     let listing = ChatWorkflowListing.parse(output)
     if listing.unsupported {
@@ -169,6 +223,8 @@ struct ChatWorkflowTracker: Equatable, Sendable {
       runs = []
       return
     }
+    guard !listing.failed else { return }
+    if listing.runs != runs || changedAt == nil { changedAt = now }
     runs = listing.runs
     for call in calls {
       misses[call.id] = run(forCall: call.id) == nil ? (misses[call.id] ?? 0) + 1 : 0

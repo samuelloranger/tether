@@ -10,29 +10,39 @@ struct ChatWorkflowStrip: View {
   let open: (ChatWorkflowRun) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
-        if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
-        Button { open(run) } label: {
-          HStack(spacing: 6) {
-            ProgressView().controlSize(.mini).tint(TetherColors.accent)
-            Text(ChatWorkflowText.strip(run)).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
-              .lineLimit(1).truncationMode(.tail)
-              .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
-          }
-          .padding(.horizontal, 10).frame(minHeight: 30)
-          .contentShape(Rectangle())
+    TimelineView(.periodic(from: .now, by: 30)) { context in
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
+          if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+          row(run, now: context.date)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Workflow: \(ChatWorkflowText.strip(run))")
-        .accessibilityHint("Shows the phases and agents")
       }
     }
     .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 10))
     .overlay(RoundedRectangle(cornerRadius: 10).stroke(TetherColors.border, lineWidth: 1))
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("chatWorkflowStrip")
+  }
+
+  private func row(_ run: ChatWorkflowRun, now: Date) -> some View {
+    let text = ChatWorkflowText.strip(run, now: now)
+    return Button { open(run) } label: {
+      HStack(spacing: 6) {
+        ProgressView().controlSize(.mini).tint(TetherColors.accent)
+          .accessibilityLabel("Running")
+        Text(text).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+          .lineLimit(1).truncationMode(.tail)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+          .accessibilityHidden(true)
+      }
+      .padding(.horizontal, 10).frame(minHeight: 30)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Workflow running: \(text)")
+    .accessibilityHint("Shows the phases and agents")
   }
 }
 
@@ -56,7 +66,7 @@ struct ChatWorkflowSheet: View {
       .background(TetherColors.background)
       .navigationTitle(model.workflowTracker.run(forCall: callId)?.title ?? "Workflow")
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }.withoutGlass() }
     }
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.visible)
@@ -85,7 +95,8 @@ struct ChatWorkflowSheet: View {
   }
 
   private func header(_ run: ChatWorkflowRun, now: Date) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
+    let quiet = ChatWorkflowText.quiet(run, now: now)
+    return VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 6) {
         runGlyph(run)
         Text(ChatWorkflowText.statusWord(run)).font(.footnote.weight(.semibold))
@@ -96,6 +107,15 @@ struct ChatWorkflowSheet: View {
         if let elapsed = ChatWorkflowText.elapsed(run, now: now) {
           Text(elapsed).font(.footnote.monospacedDigit()).foregroundStyle(TetherColors.textFaint)
         }
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(
+        [
+          "Workflow \(ChatWorkflowText.statusWord(run))", "\(run.doneCount) of \(run.totalCount) agents done",
+          ChatWorkflowText.elapsed(run, now: now), quiet,
+        ].compactMap { $0 }.joined(separator: ", "))
+      if let quiet {
+        Text(quiet).font(.caption).foregroundStyle(TetherColors.warning)
       }
       if let description = run.description {
         Text(description).font(.caption).foregroundStyle(TetherColors.textFaint).lineLimit(3)
@@ -133,29 +153,40 @@ struct ChatWorkflowSheet: View {
   }
 
   private func agentRow(_ agent: ChatWorkflowRun.Agent, now: Date) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
+    let elapsed = ChatWorkflowText.elapsed(agent, now: now)
+    let activity = agent.state == .running ? agent.activity : nil
+    return HStack(alignment: .firstTextBaseline, spacing: 8) {
       Group {
-        if agent.isDone {
-          Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
-        } else {
-          ProgressView().controlSize(.mini).tint(TetherColors.accent)
+        switch agent.state {
+        case .done: Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
+        case .stopped: Image(systemName: "stop.fill").font(.system(size: 8)).foregroundStyle(TetherColors.textFaint)
+        case .running: ProgressView().controlSize(.mini).tint(TetherColors.accent)
         }
       }
       .frame(width: 14)
       VStack(alignment: .leading, spacing: 1) {
         Text(agent.label).font(.footnote).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
-        if let activity = agent.activity, !agent.isDone {
+        if let activity {
           Text(activity).font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
             .lineLimit(1).truncationMode(.tail)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      if let elapsed = ChatWorkflowText.elapsed(agent, now: now) {
+      if let elapsed {
         Text(elapsed).font(.caption.monospacedDigit()).foregroundStyle(TetherColors.textFaint)
       }
     }
     .padding(.horizontal, 10).padding(.vertical, 7)
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(agent.label), \(agent.isDone ? "done" : "running")")
+    .accessibilityLabel(
+      [agent.label, Self.stateWord(agent.state), elapsed, activity].compactMap { $0 }.joined(separator: ", "))
+  }
+
+  private static func stateWord(_ state: ChatWorkflowRun.Agent.State) -> String {
+    switch state {
+    case .running: "running"
+    case .done: "done"
+    case .stopped: "stopped"
+    }
   }
 }
