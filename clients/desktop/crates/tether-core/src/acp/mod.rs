@@ -22,6 +22,7 @@ pub mod reducer;
 pub mod slash;
 pub mod tooldetail;
 pub mod verbs;
+pub mod workflows;
 
 #[cfg(test)]
 pub(crate) mod fixture;

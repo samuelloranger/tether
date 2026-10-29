@@ -17,11 +17,12 @@ use tether_core::acp::host;
 use tether_core::acp::images::{ImageAttachment, ImageSink};
 use tether_core::acp::journal::Snapshot;
 use tether_core::acp::mention::{self, FileIndex};
-use tether_core::acp::message::{AcpId, ConfigOption};
+use tether_core::acp::message::{AcpId, ConfigOption, ToolStatus};
 use tether_core::acp::options::StartOptions;
 use tether_core::acp::question::{QuestionAction, QuestionDraft};
-use tether_core::acp::reducer::{ChatState, ItemKind, LinkState, Turn};
+use tether_core::acp::reducer::{ChatState, ItemKind, LinkState, ToolCall, Turn};
 use tether_core::acp::slash;
+use tether_core::acp::workflows;
 
 use super::{
     AnswersWhy, ChatJob, ChatMsg, ExecTag, ImageSource, InspectWhy, Out, Pixels, WriteTag,
@@ -108,6 +109,11 @@ pub struct Session {
     published: Vec<ConfigOption>,
     pub files: FileIndex,
     files_loading: bool,
+    /// What the host says of this chat's Workflow runs; never persisted.
+    pub workflows: workflows::Tracker,
+    /// The dial generation an ask is out for: one loop, and an answer for an older dial is dropped.
+    workflow_asked: Option<u64>,
+    workflow_next: Duration,
     pub sign_in: SignIn,
     generation: u64,
     dialing: bool,
@@ -197,6 +203,9 @@ impl Session {
             published: Vec::new(),
             files: FileIndex::default(),
             files_loading: false,
+            workflows: workflows::Tracker::default(),
+            workflow_asked: None,
+            workflow_next: Duration::ZERO,
             sign_in: SignIn::Idle,
             generation: 0,
             dialing: false,
@@ -342,6 +351,8 @@ impl Session {
         }
         self.dialing = true;
         self.generation += 1;
+        self.workflow_asked = None;
+        self.workflow_next = Duration::ZERO;
         self.detach(ctx);
         self.link.dial_started();
         self.notice = None;
@@ -827,6 +838,7 @@ impl Session {
             self.learn_at = None;
             self.inspect(InspectWhy::Learn, ctx);
         }
+        self.poll_workflows(ctx);
         if self.client.is_some()
             && self.rev != self.snapshot_rev
             && ctx.now.saturating_sub(self.snapshot_at) >= SNAPSHOT_EVERY
@@ -837,6 +849,108 @@ impl Session {
             self.touched();
         }
         changed
+    }
+
+    /// The Workflow tool calls in the transcript.
+    fn workflow_calls(&self) -> Vec<&ToolCall> {
+        self.state()
+            .items
+            .iter()
+            .filter_map(|i| match &i.kind {
+                ItemKind::Tool(call) if call.is_workflow => Some(call),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Asks the host every few seconds while a Workflow call is not known to be over: only with
+    /// the stream up, so a chat that left the front or lost its connection asks nothing. A host
+    /// that answers like one without the command is left alone.
+    fn poll_workflows(&mut self, ctx: &mut Ctx<'_>) {
+        if self.client.is_none()
+            || self.left
+            || self.has_ended()
+            || !ctx.connected
+            || self.workflow_asked.is_some()
+            || ctx.now < self.workflow_next
+        {
+            return;
+        }
+        let Some(id) = self.state().session_id.clone() else {
+            return;
+        };
+        if !self.workflows.needs_polling(&self.workflow_calls()) {
+            return;
+        }
+        self.workflow_asked = Some(self.generation);
+        ctx.out.jobs.push(ChatJob::Exec {
+            tag: ExecTag::Workflows {
+                name: self.name.clone(),
+                generation: self.generation,
+            },
+            command: workflows::command(&id),
+        });
+    }
+
+    /// Whether the answer changed what the screen shows. The tracker is not persisted, so this
+    /// never bumps the revision that triggers a snapshot write.
+    pub fn on_workflows(
+        &mut self,
+        generation: u64,
+        output: Option<String>,
+        ctx: &mut Ctx<'_>,
+    ) -> bool {
+        // `background` clears the ask, so an answer that still names it is for an older dial.
+        if self.workflow_asked != Some(generation) {
+            return false;
+        }
+        self.workflow_asked = None;
+        if generation != self.generation || self.client.is_none() {
+            return false;
+        }
+        let calls: Vec<ToolCall> = self.workflow_calls().into_iter().cloned().collect();
+        let refs: Vec<&ToolCall> = calls.iter().collect();
+        let before = (self.workflows.runs().to_vec(), self.workflows.supported());
+        self.workflows.apply(output.as_deref(), &refs, ctx.now);
+        self.workflow_next = ctx.now + self.workflows.interval(workflows::POLL_INTERVAL, ctx.now);
+        before != (self.workflows.runs().to_vec(), self.workflows.supported())
+    }
+
+    /// How a tool row reads: a Workflow row follows the host until it reports the end, and a
+    /// chat that has ended keeps what ACP said.
+    pub fn tool_status(&self, call: &ToolCall) -> ToolStatus {
+        if self.has_ended() {
+            call.status
+        } else {
+            self.workflows.display_status(call)
+        }
+    }
+
+    /// Whether the host lists this Workflow call, so its row can open the run's sheet.
+    pub fn workflow_listed(&self, call: &ToolCall) -> bool {
+        call.is_workflow
+            && self.workflows.supported()
+            && self.workflows.run_for_call(&call.id).is_some()
+    }
+
+    /// The Workflow call a transcript row key names, when the host lists its run.
+    pub fn workflow_call_for_key(&self, key: &str) -> Option<String> {
+        let id: i64 = key.strip_prefix("item:")?.parse().ok()?;
+        self.state().items.iter().find_map(|item| match &item.kind {
+            ItemKind::Tool(call) if item.id == id && self.workflow_listed(call) => {
+                Some(call.id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// The workflows running now, for the strip; a chat that has ended shows none.
+    pub fn running_workflows(&self) -> Vec<&workflows::Run> {
+        if self.has_ended() {
+            Vec::new()
+        } else {
+            self.workflows.running()
+        }
     }
 
     fn snapshot_if_due(&mut self, ctx: &mut Ctx<'_>) {
@@ -933,6 +1047,8 @@ impl Session {
         }
         self.generation += 1;
         self.dialing = false;
+        self.workflow_asked = None;
+        self.workflow_next = Duration::ZERO;
         self.detach(ctx);
         self.link.connection_lost();
         self.touched();

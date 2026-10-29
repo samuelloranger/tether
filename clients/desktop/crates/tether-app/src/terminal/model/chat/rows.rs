@@ -369,10 +369,10 @@ fn item_rows(
     rows.push(Row { key, body });
 }
 
-fn status(call: &ToolCall, active: bool) -> ToolState {
+fn status(shown: ToolStatus, active: bool) -> ToolState {
     if active {
         ToolState::Running
-    } else if call.status == ToolStatus::Failed {
+    } else if shown == ToolStatus::Failed {
         ToolState::Failed
     } else {
         ToolState::Done
@@ -437,11 +437,16 @@ fn tool(
 ) {
     let file = call.diff.as_ref().map(|d| diff::file_for(d, &s.cwd));
     let short = two_lines(&call.title);
-    let expandable = call.diff.is_some()
+    // A Workflow row the host lists opens the run's sheet instead of unfolding.
+    let sheet = s.workflow_listed(call);
+    let shown = s.tool_status(call);
+    let expandable = sheet
+        || call.diff.is_some()
         || !call.images.is_empty()
         || short.is_some()
         || tooldetail::has_content(call.text.as_deref(), call.raw_output.as_deref());
-    let open = expandable && s.expanded.contains(key);
+    let open = expandable && !sheet && s.expanded.contains(key);
+    let running = matches!(shown, ToolStatus::Pending | ToolStatus::InProgress);
     out.push(Entry {
         key: key.to_string(),
         depth,
@@ -456,7 +461,7 @@ fn tool(
                 .filter(|_| !open)
                 .unwrap_or_else(|| call.title.clone()),
             subtitle: String::new(),
-            state: status(call, call.is_running() || call.is_background_running()),
+            state: status(shown, running || call.is_background_running()),
             added: file.as_ref().map_or(0, |f| f.added),
             removed: file.as_ref().map_or(0, |f| f.removed),
             expandable,
@@ -542,7 +547,7 @@ fn subagent(
             icon: Icon::Subagent,
             title: call.subagent_title(),
             subtitle: parts.join(" \u{00B7} "),
-            state: status(call, call.is_active()),
+            state: status(call.status, call.is_active()),
             added: 0,
             removed: 0,
             expandable,

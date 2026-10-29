@@ -11,6 +11,7 @@ use tether_core::acp::host::{self, DrawerChatState};
 use tether_core::acp::message::ToolKind;
 use tether_core::acp::question::{FieldKind, QuestionDraft};
 use tether_core::acp::reducer::Turn;
+use tether_core::acp::workflows;
 
 use super::newchat::Listing;
 use super::rows::{self, RowCtx};
@@ -227,6 +228,18 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     screen.queued = rows::queued(s);
     if !s.has_ended() {
         screen.tasks = rows::tasks(s);
+        let wall = unix_now();
+        screen.workflows = s
+            .running_workflows()
+            .into_iter()
+            .map(|run| WorkflowStripView {
+                call_id: run.tool_call_id.clone(),
+                text: workflows::strip_text(run, wall),
+            })
+            .collect();
+    }
+    if let Some(id) = &chats.workflow_open {
+        screen.workflow = Some(workflow_sheet(s.workflows.run_for_call(id), unix_now()));
     }
     let need = std::mem::take(&mut ctx.need);
 
@@ -421,6 +434,97 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         s.mark_shown();
     }
     screen
+}
+
+fn workflow_sheet(run: Option<&workflows::Run>, now: i64) -> WorkflowSheetView {
+    let Some(run) = run else {
+        return WorkflowSheetView {
+            missing: true,
+            title: "Workflow".into(),
+            status: String::new(),
+            state: 0,
+            counts: String::new(),
+            elapsed: String::new(),
+            quiet: String::new(),
+            description: String::new(),
+            phases: Vec::new(),
+            summary: String::new(),
+            spoken: "This workflow is no longer listed on the host.".into(),
+        };
+    };
+    let status = workflows::status_word(run);
+    let counts = format!("{}/{} agents", run.done_count(), run.total_count());
+    let elapsed = workflows::run_elapsed(run, now).unwrap_or_default();
+    let quiet = workflows::quiet(run, now).unwrap_or_default();
+    let spoken = [
+        format!("Workflow {status}"),
+        format!("{} of {} agents done", run.done_count(), run.total_count()),
+        elapsed.clone(),
+        quiet.clone(),
+    ]
+    .into_iter()
+    .filter(|p| !p.is_empty())
+    .collect::<Vec<_>>()
+    .join(", ");
+    WorkflowSheetView {
+        missing: false,
+        title: run.title.clone(),
+        status,
+        state: match run.status {
+            workflows::RunStatus::Running => 0,
+            workflows::RunStatus::Completed => 1,
+            workflows::RunStatus::Ended(_) => 2,
+        },
+        counts,
+        elapsed,
+        quiet,
+        description: run.description.clone().unwrap_or_default(),
+        phases: run
+            .phases
+            .iter()
+            .map(|phase| WorkflowPhaseView {
+                title: if phase.title.is_empty() {
+                    "Agents".into()
+                } else {
+                    phase.title.clone()
+                },
+                agents: phase
+                    .agents
+                    .iter()
+                    .map(|agent| {
+                        let elapsed = workflows::agent_elapsed(agent, now).unwrap_or_default();
+                        let activity = if agent.state == workflows::AgentState::Running {
+                            agent.activity.clone().unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        let word = workflows::agent_state_word(agent.state);
+                        WorkflowAgentView {
+                            spoken: [agent.label.as_str(), word, &elapsed, &activity]
+                                .into_iter()
+                                .filter(|p| !p.is_empty())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            label: agent.label.clone(),
+                            state: match agent.state {
+                                workflows::AgentState::Running => 0,
+                                workflows::AgentState::Done => 1,
+                                workflows::AgentState::Stopped => 2,
+                            },
+                            elapsed,
+                            activity,
+                        }
+                    })
+                    .collect(),
+            })
+            .collect(),
+        summary: if run.is_running() {
+            String::new()
+        } else {
+            run.summary.clone().unwrap_or_default()
+        },
+        spoken,
+    }
 }
 
 fn unix_now() -> i64 {

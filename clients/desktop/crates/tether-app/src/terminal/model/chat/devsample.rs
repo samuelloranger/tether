@@ -2,6 +2,7 @@
 
 use tether_core::acp::message::{AcpId, ConfigChoice, ConfigOption, decode};
 use tether_core::acp::reducer::{ChatEvent, ChatState, reduce};
+use tether_core::acp::workflows::{self, Run};
 
 fn line(state: &mut ChatState, text: &str) {
     reduce(state, ChatEvent::Message(decode(text.as_bytes(), None)));
@@ -31,7 +32,53 @@ fn background(state: &mut ChatState, id: &str, command: &str) {
     );
 }
 
-pub fn state() -> ChatState {
+/// The id of the sample's Workflow launch.
+pub const WORKFLOW_CALL: &str = "toolu_wf";
+
+fn workflow_launch(state: &mut ChatState) {
+    update(
+        state,
+        &format!(
+            r#"{{"sessionUpdate":"tool_call","toolCallId":"{WORKFLOW_CALL}","title":"Workflow","kind":"other","status":"completed","_meta":{{"claudeCode":{{"toolName":"Workflow"}}}}}}"#
+        ),
+    );
+}
+
+/// What `acp workflows` would print for the sample's Workflow launch: `kind` is `running` (a
+/// run in its second phase) or `ended` (a run that was killed, with agents that never reported).
+/// Times are set back from `now` so the clocks read like a run in progress.
+pub fn workflow_runs(kind: &str, now: i64) -> Vec<Run> {
+    let at = |ago: i64| now - ago;
+    let line = if kind == "ended" {
+        format!(
+            r#"{{"toolCallId":"{WORKFLOW_CALL}","runId":"wf_sample","title":"Release review","description":"Check the release notes, the changelog and the migration scripts","status":"killed","startedAt":{},"endedAt":{},"lastActivityAt":{},"summary":"Stopped before the merge step: the changelog and the notes were reviewed, the migration scripts were not.","phases":[{{"title":"Review","agents":[{{"label":"Release notes","state":"done","startedAt":{},"endedAt":{}}},{{"label":"Changelog","state":"done","startedAt":{},"endedAt":{}}},{{"label":"Migration scripts","state":"stopped","startedAt":{}}}]}},{{"title":"Merge","agents":[]}}]}}"#,
+            at(1500),
+            at(900),
+            at(900),
+            at(1490),
+            at(1100),
+            at(1490),
+            at(1000),
+            at(1480),
+        )
+    } else {
+        format!(
+            r#"{{"toolCallId":"{WORKFLOW_CALL}","runId":"wf_sample","title":"Release review","description":"Check the release notes, the changelog and the migration scripts","status":"running","startedAt":{},"lastActivityAt":{},"phases":[{{"title":"Review","agents":[{{"label":"Release notes","state":"done","startedAt":{},"endedAt":{}}},{{"label":"Changelog","state":"done","startedAt":{},"endedAt":{}}}]}},{{"title":"Verify","agents":[{{"label":"Migration scripts","state":"running","startedAt":{},"activity":"Bash: bun run migrate --dry-run"}},{{"label":"Smoke test","state":"running","startedAt":{},"activity":"Read: packages/core/src/index.ts"}}]}},{{"title":"Merge","agents":[]}}]}}"#,
+            at(300),
+            at(4),
+            at(295),
+            at(120),
+            at(295),
+            at(95),
+            at(90),
+            at(40),
+        )
+    };
+    workflows::parse(&line).runs
+}
+
+/// `workflow`: the sample's chat also launched a Workflow (see `workflow_runs`).
+pub fn state(workflow: bool) -> ChatState {
     let mut s = ChatState::default();
     line(
         &mut s,
@@ -51,6 +98,9 @@ pub fn state() -> ChatState {
         &mut s,
         r#"{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Both are running in the background. I will report when either one stops."}}"#,
     );
+    if workflow {
+        workflow_launch(&mut s);
+    }
     update(
         &mut s,
         r#"{"sessionUpdate":"notice","severity":"warning","title":"Rate limit close","description":"80% of the five-hour window used"}"#,

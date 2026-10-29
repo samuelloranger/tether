@@ -15,6 +15,7 @@ use tether_core::acp::host::{self, ChatSummary};
 use tether_core::acp::images::ImageAttachment;
 use tether_core::acp::message::{AcpId, ConfigOption};
 use tether_core::acp::options::{OptionsCache, OptionsDraft, StartOptions};
+use tether_core::acp::workflows;
 use tether_core::connect::ConnectError;
 
 #[cfg(debug_assertions)]
@@ -52,6 +53,11 @@ pub enum ExecTag {
     },
     Files {
         name: String,
+    },
+    /// One poll of the chat's Workflow runs (see `acp::workflows`).
+    Workflows {
+        name: String,
+        generation: u64,
     },
     Kill {
         name: String,
@@ -155,6 +161,9 @@ pub enum ChatMsg {
     Toggle(String),
     /// A task line in the strip: open the tool row it stands for.
     OpenTool(String),
+    /// A running workflow in its strip, or its row in the transcript: open the run's sheet.
+    OpenWorkflow(String),
+    CloseWorkflow,
     /// Debug builds: show the canned chat.
     #[cfg(debug_assertions)]
     DevSample(String),
@@ -316,6 +325,9 @@ pub struct Chats {
     controls_open: bool,
     bypass: Option<(String, String)>,
     review: bool,
+    /// The Workflow call whose run the sheet shows.
+    workflow_open: Option<String>,
+    workflow_redrawn: Duration,
     viewer: Option<String>,
     thumbs: HashMap<String, Arc<Pixels>>,
     thumbs_asked: HashSet<String>,
@@ -401,6 +413,8 @@ impl Chats {
             controls_open: false,
             bypass: None,
             review: false,
+            workflow_open: None,
+            workflow_redrawn: Duration::ZERO,
             viewer: None,
             thumbs: HashMap::new(),
             thumbs_asked: HashSet::new(),
@@ -506,6 +520,30 @@ impl Chats {
         let names: Vec<String> = self.sessions.keys().cloned().collect();
         for name in names {
             self.with_session(&name, now, out, |s, ctx| s.tick(ctx));
+        }
+        // Elapsed times and "no activity" read from the clock: redraw each second while the sheet
+        // is open on a run that is still going (an ended run's clock is fixed), and every half
+        // minute while a strip shows.
+        let sheet_clock = self.workflow_open.as_ref().is_some_and(|id| {
+            self.active_session()
+                .and_then(|s| s.workflows.run_for_call(id))
+                .is_some_and(workflows::Run::is_running)
+        });
+        let every = if sheet_clock {
+            Some(Duration::from_secs(1))
+        } else if self
+            .active_session()
+            .is_some_and(|s| !s.running_workflows().is_empty())
+        {
+            Some(Duration::from_secs(30))
+        } else {
+            None
+        };
+        if let Some(every) = every
+            && now.saturating_sub(self.workflow_redrawn) >= every
+        {
+            self.workflow_redrawn = now;
+            self.dirty = true;
         }
         if let Some(nc) = self.new_chat.as_mut()
             && let Some(job) = nc.tick(now)
@@ -636,6 +674,7 @@ impl Chats {
         self.active = Some(name.to_string());
         self.controls_open = false;
         self.review = false;
+        self.workflow_open = None;
         self.follow_seq += 1;
         self.focus_seq += 1;
         self.draft_seq += 1;
@@ -704,7 +743,21 @@ impl Chats {
             None,
         )
         .with_agent(Some(front));
-        sample.dev_state(devsample::state(), now);
+        // `TETHER_DEV_CHAT_WORKFLOW` (`running` or `ended`) adds a Workflow run to the sample,
+        // and `TETHER_DEV_CHAT_WORKFLOW_OPEN` opens its sheet.
+        let workflow = crate::app::dev_env("TETHER_DEV_CHAT_WORKFLOW");
+        sample.dev_state(devsample::state(workflow.is_some()), now);
+        if let Some(kind) = &workflow {
+            let wall = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            sample
+                .workflows
+                .set_runs(devsample::workflow_runs(kind, wall));
+            if crate::app::dev_env("TETHER_DEV_CHAT_WORKFLOW_OPEN").is_some() {
+                self.workflow_open = Some(devsample::WORKFLOW_CALL.into());
+            }
+        }
         self.sessions.insert("sample".into(), sample);
         let rows = [
             ("sample", "/srv/app", front, "Release the new build"),
@@ -757,6 +810,7 @@ impl Chats {
         }
         self.controls_open = false;
         self.review = false;
+        self.workflow_open = None;
         self.viewer = None;
         self.dirty = true;
     }
@@ -951,6 +1005,22 @@ impl Chats {
                     out.open_url = Some(url);
                 }
             }
+            ChatMsg::OpenWorkflow(call_id) => self.workflow_open = Some(call_id),
+            ChatMsg::CloseWorkflow => {
+                self.workflow_open = None;
+                self.focus_seq += 1;
+            }
+            // A Workflow row the host lists opens the run's sheet instead of unfolding.
+            ChatMsg::Toggle(key) | ChatMsg::OpenTool(key)
+                if self
+                    .active_session()
+                    .and_then(|s| s.workflow_call_for_key(&key))
+                    .is_some() =>
+            {
+                self.workflow_open = self
+                    .active_session()
+                    .and_then(|s| s.workflow_call_for_key(&key));
+            }
             ChatMsg::Review => self.review = true,
             ChatMsg::CloseReview => {
                 self.review = false;
@@ -1091,6 +1161,17 @@ impl Chats {
             } => {
                 self.with_session(&name, now, out, |s, ctx| s.on_files(result.ok(), ctx));
             }
+            ChatMsg::ExecDone {
+                tag: ExecTag::Workflows { name, generation },
+                result,
+            } => {
+                let changed = self
+                    .with_session(&name, now, out, |s, ctx| {
+                        s.on_workflows(generation, result.ok(), ctx)
+                    })
+                    .unwrap_or(false);
+                self.dirty = changed;
+            }
             // The rest act on the chat in front.
             other => {
                 if let Some(name) = self.active.clone() {
@@ -1123,6 +1204,9 @@ impl Chats {
             return;
         }
         if self.bypass.take().is_some() {
+            return;
+        }
+        if self.workflow_open.take().is_some() {
             return;
         }
         if self.review {
