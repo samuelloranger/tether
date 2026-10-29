@@ -24,13 +24,14 @@ final class SSHV5FlowTests: TetherUITestCase {
     shot(app, "01-connected")
 
     app.buttons["sshTerminalDrawer"].firstMatch.tap()
-    let field = app.textFields["sshNewSessionField"].firstMatch
-    XCTAssertTrue(field.waitForExistence(timeout: 5), "no new-session field")
+    let add = app.buttons["sshNewSessionAdd"].firstMatch
+    XCTAssertTrue(add.waitForExistence(timeout: 5), "no new-session menu")
     shot(app, "02-drawer")
 
-    field.tap()
-    field.typeText("session-2")
-    app.buttons["sshNewSessionAdd"].firstMatch.tap()
+    add.tap()
+    let newTerminal = app.buttons["sshNewTerminal"].firstMatch
+    XCTAssertTrue(newTerminal.waitForExistence(timeout: 5), "no New terminal item")
+    newTerminal.tap()
     usleep(2_000_000)
     shot(app, "03-live-switch-to-session-2")
 
