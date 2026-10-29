@@ -2163,6 +2163,42 @@ fn a_dropped_connection_stops_the_polling() {
 }
 
 #[test]
+fn only_a_running_run_ticks_the_open_sheet_each_second() {
+    for (status, ticks) in [("running", true), ("killed", false)] {
+        let mut h = Harness::new();
+        workflow_chat(&mut h);
+        tick_for(&mut h, 10);
+        let (tag, _) = workflow_asks(&mut h).remove(0);
+        answer_workflows(&mut h, tag, &workflow_line(status));
+        h.msg(ChatMsg::OpenWorkflow("toolu_w".into()));
+        tick_for(&mut h, 2000);
+        h.chats.dirty = false;
+        tick_for(&mut h, 1100);
+        assert_eq!(h.chats.dirty, ticks, "{status}");
+    }
+}
+
+#[test]
+fn an_unchanged_answer_neither_redraws_nor_marks_the_chat_changed() {
+    let mut h = Harness::new();
+    let (name, _) = workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    let (tag, _) = workflow_asks(&mut h).remove(0);
+    answer_workflows(&mut h, tag, &workflow_line("running"));
+    tick_for(&mut h, 5100);
+    let (tag, _) = workflow_asks(&mut h).remove(0);
+    h.screen();
+    let rev = h.chats.sessions[&name].changed_since_shown();
+    h.chats.dirty = false;
+    h.msg(ChatMsg::ExecDone {
+        tag,
+        result: Ok(workflow_line("running")),
+    });
+    assert!(!h.chats.dirty);
+    assert_eq!(h.chats.sessions[&name].changed_since_shown(), rev);
+}
+
+#[test]
 fn the_sample_shows_a_running_and_an_ended_workflow() {
     for (kind, running) in [("running", true), ("ended", false)] {
         let mut h = Harness::new();

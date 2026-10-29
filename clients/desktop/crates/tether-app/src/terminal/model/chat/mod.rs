@@ -15,6 +15,7 @@ use tether_core::acp::host::{self, ChatSummary};
 use tether_core::acp::images::ImageAttachment;
 use tether_core::acp::message::{AcpId, ConfigOption};
 use tether_core::acp::options::{OptionsCache, OptionsDraft, StartOptions};
+use tether_core::acp::workflows;
 use tether_core::connect::ConnectError;
 
 #[cfg(debug_assertions)]
@@ -521,8 +522,14 @@ impl Chats {
             self.with_session(&name, now, out, |s, ctx| s.tick(ctx));
         }
         // Elapsed times and "no activity" read from the clock: redraw each second while the sheet
-        // is open, and every half minute while a strip shows.
-        let every = if self.workflow_open.is_some() {
+        // is open on a run that is still going (an ended run's clock is fixed), and every half
+        // minute while a strip shows.
+        let sheet_clock = self.workflow_open.as_ref().is_some_and(|id| {
+            self.active_session()
+                .and_then(|s| s.workflows.run_for_call(id))
+                .is_some_and(workflows::Run::is_running)
+        });
+        let every = if sheet_clock {
             Some(Duration::from_secs(1))
         } else if self
             .active_session()
@@ -1158,9 +1165,12 @@ impl Chats {
                 tag: ExecTag::Workflows { name, generation },
                 result,
             } => {
-                self.with_session(&name, now, out, |s, ctx| {
-                    s.on_workflows(generation, result.ok(), ctx)
-                });
+                let changed = self
+                    .with_session(&name, now, out, |s, ctx| {
+                        s.on_workflows(generation, result.ok(), ctx)
+                    })
+                    .unwrap_or(false);
+                self.dirty = changed;
             }
             // The rest act on the chat in front.
             other => {

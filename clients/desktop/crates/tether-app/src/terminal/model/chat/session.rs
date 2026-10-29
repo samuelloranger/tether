@@ -351,6 +351,8 @@ impl Session {
         }
         self.dialing = true;
         self.generation += 1;
+        self.workflow_asked = None;
+        self.workflow_next = Duration::ZERO;
         self.detach(ctx);
         self.link.dial_started();
         self.notice = None;
@@ -890,23 +892,28 @@ impl Session {
         });
     }
 
-    pub fn on_workflows(&mut self, generation: u64, output: Option<String>, ctx: &mut Ctx<'_>) {
+    /// Whether the answer changed what the screen shows. The tracker is not persisted, so this
+    /// never bumps the revision that triggers a snapshot write.
+    pub fn on_workflows(
+        &mut self,
+        generation: u64,
+        output: Option<String>,
+        ctx: &mut Ctx<'_>,
+    ) -> bool {
         // `background` clears the ask, so an answer that still names it is for an older dial.
         if self.workflow_asked != Some(generation) {
-            return;
+            return false;
         }
         self.workflow_asked = None;
         if generation != self.generation || self.client.is_none() {
-            return;
+            return false;
         }
         let calls: Vec<ToolCall> = self.workflow_calls().into_iter().cloned().collect();
         let refs: Vec<&ToolCall> = calls.iter().collect();
-        let before = self.workflows.clone();
+        let before = (self.workflows.runs().to_vec(), self.workflows.supported());
         self.workflows.apply(output.as_deref(), &refs, ctx.now);
         self.workflow_next = ctx.now + self.workflows.interval(workflows::POLL_INTERVAL, ctx.now);
-        if self.workflows != before {
-            self.touched();
-        }
+        before != (self.workflows.runs().to_vec(), self.workflows.supported())
     }
 
     /// How a tool row reads: a Workflow row follows the host until it reports the end, and a

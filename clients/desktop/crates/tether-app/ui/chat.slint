@@ -2119,7 +2119,7 @@ export component ChatWorkflow inherits Rectangle {
                         Text { text: ChatVm.wf-elapsed; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
                     }
                     if ChatVm.wf-quiet != "": Text { text: ChatVm.wf-quiet; font-size: 12px; color: Tokens.warning; }
-                    if ChatVm.wf-description != "": Wrapped { text: ChatVm.wf-description; font-size: 12px; ink: Tokens.text-faint; }
+                    if ChatVm.wf-description != "": Text { width: 100%; height: min(self.preferred-height, 3 * 16px); text: ChatVm.wf-description; font-size: 12px; color: Tokens.text-faint; wrap: word-wrap; overflow: elide; }
                 }
                 for phase in ChatVm.wf-phases: VerticalLayout {
                     spacing: 6px;
