@@ -17,13 +17,15 @@ public struct SSHTerminalView: View {
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var drawerOpen = false
-  /// The drawer's name field takes the keyboard; closing the drawer hands it back.
+  /// Opening the drawer takes the keyboard; closing it hands it back.
   @State private var focusedBeforeDrawer = false
   /// Live horizontal drag on the drawer, `nil` when no finger is on it.
   @State private var dragTranslation: CGFloat?
   @State private var showSettings = false
   @State private var showGit = false
-  @State private var newSessionName = ""
+  @State private var gitFolder: String?
+  @State private var endedExpanded = false
+  @State private var pendingContinue: PendingContinue?
   @State private var selectionText: String?
   /// The one destructive route: every "kill" entry point sets this, and the
   /// single confirmation dialog is the only thing that acts on it.
@@ -259,10 +261,12 @@ public struct SSHTerminalView: View {
         onCancel: { showNewChat = false }
       )
     }
-    .sheet(isPresented: $showGit, onDismiss: { controller.setGitTarget(.session) }) {
+    .sheet(isPresented: $showGit, onDismiss: { gitFolder = nil; controller.setGitTarget(.session) }) {
       GitDiffView(controller: controller) { showGit = false }
         // Set again on appear: a sheet queued behind a chat's own Git sheet opens after that one reset it.
-        .onAppear { controller.setGitTarget(content.chat.map { GitTarget.forChat(folder: $0.cwd) } ?? .session) }
+        .onAppear {
+          controller.setGitTarget((gitFolder ?? content.chat?.cwd).map { GitTarget.forChat(folder: $0) } ?? .session)
+        }
         .macSheetSize(width: 900, height: 640, large: true)
     }
     .sheet(isPresented: $showHistory) {
@@ -277,6 +281,24 @@ public struct SSHTerminalView: View {
     ) { name in
       if let tabs { tabs.kill(name) } else { Task { await controller.killSession(name) } }
     }
+    .alert(
+      "Continue in a terminal?",
+      isPresented: Binding(get: { pendingContinue != nil }, set: { if !$0 { pendingContinue = nil } })
+    ) {
+      Button("Continue") {
+        guard let pending = pendingContinue else { return }
+        pendingContinue = nil
+        setDrawer(open: false)
+        Task {
+          if let reason = await continueInTerminal(chat: pending.chat, sessionId: pending.sessionId, cwd: pending.cwd) {
+            promptNotice = reason
+          }
+        }
+      }
+      Button("Cancel", role: .cancel) { pendingContinue = nil }
+    } message: {
+      Text("The chat ends here and Claude Code picks the conversation up in a new terminal session.")
+    }
     .destructiveConfirmation(
       $pendingChatKill,
       title: { "Delete \($0.title)?" },
@@ -286,6 +308,12 @@ public struct SSHTerminalView: View {
       content.chatKilled(row.name)
       Task { await controller.killChat(row.name) }
     }
+  }
+
+  private struct PendingContinue: Equatable {
+    let chat: String
+    let sessionId: String
+    let cwd: String
   }
 
   /// Two Claude Codes on one conversation would both write it, so the chat's agent ends first; if
@@ -501,51 +529,37 @@ public struct SSHTerminalView: View {
   }
 
   private var drawer: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Text("Sessions").font(.footnote.weight(.semibold))
-        .foregroundStyle(TetherColors.textSecondary)
-        .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 8)
-        .accessibilityAddTraits(.isHeader)
+    let chatRows = DrawerLayout.waitingFirst(
+      DrawerChatRows.rows(
+        chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)),
+        agents: controller.chatTitles.agents(for: controller.chats.map(\.name)))
+    ) { $0.state == .waiting }
+    let sessions = DrawerLayout.waitingFirst(controller.sessions) { controller.agentStatuses[$0.name]?.state == .waiting }
+    let folders = DrawerLayout.sessionFolders(controller.sessions)
+    let split = DrawerLayout.splitEnded(chatRows)
+    return VStack(alignment: .leading, spacing: 0) {
+      drawerHeader(terminals: sessions.count, chats: chatRows.count)
+      Divider().overlay(TetherColors.border)
       ScrollView {
         VStack(spacing: 8) {
-          ForEach(controller.sessions) { session in
-            sessionRow(session)
-          }
-          if controller.sessions.isEmpty {
-            Text("No sessions yet — name one below to start it.")
+          sectionHeader("Terminals", count: sessions.count)
+          ForEach(sessions) { sessionRow($0, folder: folders[$0.name]) }
+          if sessions.isEmpty && chatRows.isEmpty {
+            Text("Nothing running yet. Use + to start a terminal or a chat.")
               .font(.caption.monospaced()).multilineTextAlignment(.leading)
-              .foregroundStyle(TetherColors.textFaint).padding(.top, 12)
+              .foregroundStyle(TetherColors.textFaint).padding(.top, 4)
           }
-          let chatRows = DrawerChatRows.rows(
-            chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)),
-            agents: controller.chatTitles.agents(for: controller.chats.map(\.name)))
           if !chatRows.isEmpty {
-            Text("Chats").font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
-              .foregroundStyle(TetherColors.textFaint)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.horizontal, 2).padding(.top, 8)
-              .accessibilityAddTraits(.isHeader)
-            ForEach(chatRows) { chatRow($0) }
+            sectionHeader("Chats", count: chatRows.count)
+            ForEach(split.collapsed ? split.live : chatRows) { chatRow($0) }
+            if split.collapsed {
+              endedDisclosure(count: split.ended.count)
+              if endedExpanded { ForEach(split.ended) { chatRow($0) } }
+            }
           }
-          newSessionRow
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 12).padding(.bottom, 12)
       }
-      Divider().overlay(TetherColors.border)
-      Button {
-        setDrawer(open: false)
-        onHome()
-      } label: {
-        HStack(spacing: 10) {
-          Image(systemName: "house").font(.subheadline.weight(.semibold))
-          Text("Home · machines & keys").font(.subheadline.weight(.semibold))
-          Spacer()
-        }
-        .foregroundStyle(TetherColors.accent)
-        .padding(.horizontal, 16).padding(.vertical, 16)
-      }
-      .buttonStyle(TetherPressStyle())
-      .accessibilityIdentifier("sshDrawerHome")
     }
     .frame(maxHeight: .infinity, alignment: .top)
     .background(TetherColors.background.ignoresSafeArea())
@@ -553,38 +567,156 @@ public struct SSHTerminalView: View {
     .accessibilityAction(.escape) { setDrawer(open: false) }
   }
 
-  private func sessionRow(_ session: ZmxSession) -> some View {
+  private var drawerStateLabel: String {
+    if case .connected = controller.status { return "connected" }
+    return statusLabel
+  }
+
+  private func drawerHeader(terminals: Int, chats: Int) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 8) {
+        Text(controller.title).font(.subheadline.weight(.semibold))
+          .foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+        Spacer(minLength: 4)
+        Button {
+          setDrawer(open: false)
+          onHome()
+        } label: {
+          Text("Switch").font(.footnote.weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .padding(.horizontal, 6).frame(minHeight: tapTarget).contentShape(Rectangle())
+        }
+        .buttonStyle(TetherPressStyle())
+        .accessibilityIdentifier("sshDrawerHome")
+        .accessibilityLabel("Switch machine")
+        Menu {
+          Button(action: startNewTerminal) { Label("New terminal", systemImage: "terminal") }
+            .accessibilityIdentifier("sshNewTerminal")
+          Button { newChatMode = .new; showNewChat = true } label: { Label("New chat…", systemImage: "bubble.left") }
+            .accessibilityIdentifier("sshNewChat")
+          Button { newChatMode = .resume; showNewChat = true } label: {
+            Label("Continue a chat…", systemImage: "arrow.counterclockwise")
+          }
+          .accessibilityIdentifier("sshContinueChat")
+        } label: {
+          Image(systemName: "plus").font(.body.weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("sshNewSessionAdd")
+        .accessibilityLabel("New terminal or chat")
+      }
+      HStack(alignment: .firstTextBaseline, spacing: 5) {
+        Circle().fill(lampColor).frame(width: 6, height: 6).accessibilityHidden(true)
+        Text(DrawerLayout.summary(state: drawerStateLabel, terminals: terminals, chats: chats))
+          .font(.caption2).foregroundStyle(TetherColors.textFaint)
+      }
+      .padding(.top, -6).padding(.bottom, 8)
+      .accessibilityElement(children: .combine)
+    }
+    .padding(.leading, 14).padding(.trailing, 6).padding(.top, 4)
+  }
+
+  private func sectionHeader(_ title: String, count: Int) -> some View {
+    HStack(spacing: 6) {
+      Text(title)
+      Text("\(count)")
+    }
+    .font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
+    .foregroundStyle(TetherColors.textFaint)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 2).padding(.top, 10)
+    .accessibilityElement(children: .combine)
+    .accessibilityAddTraits(.isHeader)
+  }
+
+  private func endedDisclosure(count: Int) -> some View {
+    Button {
+      withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { endedExpanded.toggle() }
+    } label: {
+      HStack(spacing: 6) {
+        Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+          .rotationEffect(.degrees(endedExpanded ? 90 : 0))
+        Text("Ended · \(count)").font(.caption.monospaced())
+        Spacer()
+      }
+      .foregroundStyle(TetherColors.textFaint)
+      .padding(.horizontal, 4).frame(minHeight: 32).contentShape(Rectangle())
+    }
+    .buttonStyle(TetherPressStyle())
+    .accessibilityIdentifier("drawerEndedToggle")
+    .accessibilityLabel("Ended chats, \(count)")
+    .accessibilityValue(endedExpanded ? "expanded" : "collapsed")
+  }
+
+  /// The one row shape for sessions and chats: the glyph and two lines on the left, only the kill control
+  /// trailing. The kill control stays visible: keyboard and VoiceOver users never need the context menu,
+  /// and a full-swipe kill would destroy work without a prompt.
+  private func drawerRow<Main: View>(
+    selected: Bool, needsYou: Bool, ended: Bool = false,
+    killID: String, killLabel: String, onKill: @escaping () -> Void,
+    @ViewBuilder main: () -> Main
+  ) -> some View {
+    HStack(spacing: 6) {
+      main()
+      Button(action: onKill) {
+        Image(systemName: "xmark").font(.footnote.weight(.semibold))
+          .foregroundStyle(TetherColors.textFaint.opacity(0.6))
+          .frame(width: 44, height: 44).contentShape(Rectangle())
+      }
+      .buttonStyle(TetherPressStyle())
+      .padding(.trailing, -12).padding(.vertical, -6)
+      .accessibilityIdentifier(killID)
+      .accessibilityLabel(killLabel)
+      .accessibilityHint("Asks to confirm first")
+    }
+    .padding(.horizontal, 12).padding(.vertical, 10)
+    .modifier(DrawerRowChrome(selected: selected, needsYou: needsYou, ended: ended))
+    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: selected)
+  }
+
+  private func sessionRow(_ session: ZmxSession, folder: String?) -> some View {
     let isCurrent = controller.hasSession && session.name == controller.attach
     let isSelected = isCurrent && !content.showsChat
+    let agent = controller.agentStatuses[session.name]
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
-    return HStack(spacing: 6) {
+    let shownFolder = showsDetail ? folder : nil
+    let hasStatus = agent != nil || isCurrent
+    return drawerRow(
+      selected: isSelected, needsYou: agent?.state == .waiting,
+      killID: "zmxKill_\(session.name)", killLabel: "Kill session \(session.name)",
+      onKill: { pendingKill = session.name }
+    ) {
       Button {
-        showTerminal()
-        focusedBeforeDrawer = true
-        Task { await controller.switchSession(to: session.name) }
-        setDrawer(open: false)
+        openSession(session.name)
       } label: {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
           // The dot repeats what the label already says, so it can go when text
           // needs the room; "attached" is never carried by colour alone.
           Circle().fill(isCurrent ? TetherColors.success : TetherColors.textFaint)
             .frame(width: lampSize, height: lampSize)
-            .frame(width: glyphSlot)
+            .frame(width: glyphSlot).padding(.top, 4)
           VStack(alignment: .leading, spacing: 2) {
             Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-            if showsDetail {
-              Text(session.displayCwd).font(.caption2.monospaced())
-                .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
-            } else if isCurrent {
-              Text("attached").font(.caption2.monospaced()).foregroundStyle(TetherColors.success)
+              .lineLimit(1)
+            if shownFolder != nil || hasStatus {
+              HStack(spacing: 4) {
+                if let shownFolder {
+                  Text(shownFolder).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.middle)
+                  if hasStatus { Text("·").foregroundStyle(TetherColors.textFaint) }
+                }
+                if let agent {
+                  TimelineView(.periodic(from: .now, by: 60)) { context in
+                    AgentStatusTag(status: agent, now: context.date)
+                  }
+                  .fixedSize()
+                } else if isCurrent {
+                  Text("attached").foregroundStyle(TetherColors.success).fixedSize()
+                }
+              }
+              .font(.caption2.monospaced())
+              .accessibilityHidden(true)
             }
           }
           Spacer(minLength: 4)
-          if let agent = controller.agentStatuses[session.name] {
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-              AgentStatusTag(status: agent, now: context.date)
-            }
-          }
         }
         .contentShape(Rectangle())
       }
@@ -592,32 +724,28 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("zmxSession_\(session.name)")
       .accessibilityLabel(sessionAccessibilityLabel(session, isCurrent: isCurrent))
       .accessibilityHint(isCurrent ? "Already attached" : "Attaches this session")
-      // A visible control stays: keyboard and VoiceOver users never need the
-      // context menu, and a full-swipe kill would destroy work without a prompt.
-      Button { pendingKill = session.name } label: {
-        Image(systemName: "xmark.circle.fill").font(.body)
-          .foregroundStyle(TetherColors.textFaint)
-          .frame(width: tapTarget * 0.8, height: tapTarget * 0.8).contentShape(Rectangle())
-      }
-      .buttonStyle(TetherPressStyle())
-      .accessibilityIdentifier("zmxKill_\(session.name)")
-      .accessibilityLabel("Kill session \(session.name)")
-      .accessibilityHint("Asks to confirm first")
     }
-    .padding(.horizontal, 12).padding(.vertical, 10)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? TetherColors.accent.opacity(0.4) : TetherColors.border))
-    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isSelected)
     .contextMenu {
+      Button { openSession(session.name) } label: { Label("Open", systemImage: "terminal") }
       Button {
-        showTerminal()
-        Task { await controller.switchSession(to: session.name) }
-        setDrawer(open: false)
-      } label: { Label("Open", systemImage: "terminal") }
-      Button(role: .destructive) { pendingKill = session.name } label: {
-        Label("Kill", systemImage: "xmark.circle")
-      }
+        acknowledgeCopy(session.name, announce: "Name copied", into: $showCopyConfirmation)
+      } label: { Label("Copy name", systemImage: "doc.on.doc") }
+      Button { openGit(folder: session.displayCwd) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
+      Button(role: .destructive) { pendingKill = session.name } label: { Label("Kill", systemImage: "xmark.circle") }
     }
+  }
+
+  private func openSession(_ name: String) {
+    showTerminal()
+    focusedBeforeDrawer = true
+    Task { await controller.switchSession(to: name) }
+    setDrawer(open: false)
+  }
+
+  /// The Git sheet over a row's folder, whichever session or chat is in front.
+  private func openGit(folder: String) {
+    gitFolder = folder
+    showGit = true
   }
 
   private func chatSubtitle(_ row: DrawerChatRow, agentLabel: String?, folder: Bool) -> some View {
@@ -636,29 +764,39 @@ public struct SSHTerminalView: View {
 
   private func chatRow(_ row: DrawerChatRow) -> some View {
     let isSelected = content.isSelected(chat: row.name)
-    let needsYou = row.state == .waiting
-    return HStack(spacing: 6) {
+    let ended = row.state == .ended
+    let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
+    let resumable = DrawerLayout.resumableSessionId(row, journal: UserDefaultsChatJournalStore(name: row.name).load())
+    return drawerRow(
+      selected: isSelected, needsYou: row.state == .waiting, ended: ended,
+      killID: "chatKill_\(row.name)", killLabel: "Delete chat \(row.title)",
+      onKill: { pendingChatKill = row }
+    ) {
       Button {
         openChat(controller.chatRoute(for: row))
       } label: {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
           ChatAgentMark(agent: row.agent, size: glyphSlot + 2)
-            .opacity(row.state == .ended ? 0.55 : 1)
-            .frame(width: glyphSlot)
+            .opacity(ended ? 0.55 : 1)
+            .frame(width: glyphSlot).padding(.top, 1)
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 2) {
-            Text(row.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-              .lineLimit(1)
+            Text(row.title).font(.subheadline.weight(.semibold))
+              .foregroundStyle(ended ? TetherColors.textSecondary : TetherColors.textPrimary)
+              .lineLimit(2).multilineTextAlignment(.leading)
             Group {
-              if let agentLabel = row.agentLabel, DynamicTypeLayout.showsDetail(for: dynamicTypeSize) {
-                // The logo already names the agent, so a narrow row gives up the label, then the folder.
+              if let agentLabel = row.agentLabel, showsDetail {
+                let fits = DrawerLayout.chatSubtitleFits
                 ViewThatFits(in: .horizontal) {
-                  chatSubtitle(row, agentLabel: agentLabel, folder: true).fixedSize(horizontal: true, vertical: false)
-                  chatSubtitle(row, agentLabel: agentLabel, folder: false).fixedSize(horizontal: true, vertical: false)
-                  chatSubtitle(row, agentLabel: nil, folder: true)
+                  chatSubtitle(row, agentLabel: fits[0].agentLabel ? agentLabel : nil, folder: fits[0].folder)
+                    .fixedSize(horizontal: true, vertical: false)
+                  chatSubtitle(row, agentLabel: fits[1].agentLabel ? agentLabel : nil, folder: fits[1].folder)
+                    .fixedSize(horizontal: true, vertical: false)
+                  chatSubtitle(row, agentLabel: fits[2].agentLabel ? agentLabel : nil, folder: fits[2].folder)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
               } else {
-                chatSubtitle(row, agentLabel: nil, folder: DynamicTypeLayout.showsDetail(for: dynamicTypeSize))
+                chatSubtitle(row, agentLabel: nil, folder: showsDetail)
               }
             }
             .font(.caption2.monospaced())
@@ -672,24 +810,18 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("chatRow_\(row.name)")
       .accessibilityLabel("Chat \(row.title), \(row.agentLabel.map { "\($0), " } ?? "")\(row.stateLabel), \(row.subtitle)")
       .accessibilityHint(isSelected ? "Already open" : "Opens this chat")
-      Button { pendingChatKill = row } label: {
-        Image(systemName: "xmark.circle.fill").font(.body)
-          .foregroundStyle(TetherColors.textFaint)
-          .frame(width: tapTarget * 0.8, height: tapTarget * 0.8).contentShape(Rectangle())
-      }
-      .buttonStyle(TetherPressStyle())
-      .accessibilityIdentifier("chatKill_\(row.name)")
-      .accessibilityLabel("Delete chat \(row.title)")
-      .accessibilityHint("Asks to confirm first")
     }
-    .padding(.horizontal, 12).padding(.vertical, 10)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
-      needsYou ? TetherColors.warning.opacity(0.7) : isSelected ? TetherColors.accent.opacity(0.4) : TetherColors.border,
-      lineWidth: needsYou ? 1.5 : 1))
-    .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: isSelected)
     .contextMenu {
       Button { openChat(controller.chatRoute(for: row)) } label: { Label("Open", systemImage: "bubble.left") }
+      Button {
+        acknowledgeCopy(row.cwd, announce: "Folder copied", into: $showCopyConfirmation)
+      } label: { Label("Copy folder", systemImage: "folder") }
+      Button { openGit(folder: row.cwd) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
+      if let resumable {
+        Button { pendingContinue = PendingContinue(chat: row.name, sessionId: resumable, cwd: row.cwd) } label: {
+          Label("Continue in terminal", systemImage: "terminal")
+        }
+      }
       Button(role: .destructive) { pendingChatKill = row } label: { Label("Delete", systemImage: "trash") }
     }
   }
@@ -706,44 +838,15 @@ public struct SSHTerminalView: View {
     return parts.joined(separator: ", ")
   }
 
-  private var newSessionRow: some View {
-    HStack(spacing: 8) {
-      TextField("new session", text: $newSessionName)
-        .textInputAutocapitalization(.never).autocorrectionDisabled()
-        .font(.caption.monospaced()).foregroundStyle(TetherColors.textPrimary)
-        .padding(9).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
-        .accessibilityIdentifier("sshNewSessionField")
-        .accessibilityLabel("New session name")
-        .onSubmit(startNewSession)
-      Menu {
-        Button(action: startNewSession) { Label("Terminal session", systemImage: "terminal") }
-        Button { newChatMode = .new; showNewChat = true } label: { Label("Chat…", systemImage: "bubble.left") }
-          .accessibilityIdentifier("sshNewChat")
-      } label: {
-        Image(systemName: "plus").font(.subheadline.weight(.semibold))
-          .frame(width: tapTarget * 0.85, height: tapTarget * 0.85)
-          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
-          .foregroundStyle(TetherColors.onAccent)
-      }
-      .accessibilityIdentifier("sshNewSessionAdd")
-      .accessibilityLabel("New session or chat")
-    }
-    .padding(.top, 4)
-  }
-
   private func send(_ item: PhotosPickerItem) async {
     let isVideo = MediaTransfer.isVideo(contentTypes: item.supportedContentTypes)
     await controller.sendPickedMedia(item, isVideo: isVideo)
   }
 
-  private func startNewSession() {
-    var name = newSessionName.trimmingCharacters(in: .whitespaces)
-    if name.isEmpty { name = nextSessionName() }
-    newSessionName = ""
+  private func startNewTerminal() {
     showTerminal()
     focusedBeforeDrawer = true
-    Task { await controller.createSession(name) }
+    Task { await controller.createSession(nextSessionName()) }
     setDrawer(open: false)
   }
 
@@ -1114,5 +1217,33 @@ public struct SSHTerminalView: View {
     }
     .padding(24).frame(maxWidth: 300)
     .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
+  }
+}
+
+/// The fill and outline of a drawer row: a selected row is tinted with an accent bar, an outline marks
+/// a row that needs an answer, and an ended chat is drawn as an empty dashed slot.
+private struct DrawerRowChrome: ViewModifier {
+  let selected: Bool
+  let needsYou: Bool
+  let ended: Bool
+
+  func body(content: Content) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 12)
+    content
+      .background(selected && !ended ? TetherColors.accent.opacity(0.10) : .clear, in: shape)
+      .background(ended ? Color.clear : TetherColors.surface, in: shape)
+      .overlay(alignment: .leading) {
+        if selected { Rectangle().fill(TetherColors.accent).frame(width: 3) }
+      }
+      .clipShape(shape)
+      .overlay {
+        if needsYou {
+          shape.strokeBorder(TetherColors.warning.opacity(0.7), lineWidth: 1.5)
+        } else if ended {
+          shape.strokeBorder(TetherColors.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        } else {
+          shape.strokeBorder(TetherColors.border)
+        }
+      }
   }
 }
