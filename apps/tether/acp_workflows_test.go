@@ -50,7 +50,13 @@ func wfAgentFile(t *testing.T, dir, id string, lines ...string) {
 	wfWrite(t, filepath.Join(dir, "agent-"+id+".jsonl"), strings.Join(lines, ""))
 }
 
+func wfEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("TETHER_NOTIFY_HOME", t.TempDir())
+}
+
 func wfFixture(t *testing.T) string {
+	wfEnv(t)
 	cfg := t.TempDir()
 	proj := filepath.Join(cfg, "projects", "-some-project")
 	sess := filepath.Join(proj, wfTestSession)
@@ -119,7 +125,7 @@ func TestWorkflowRunsFromSessionFiles(t *testing.T) {
 	if strings.Join(titles, ",") != "Plan,Build,Ship,Surprise" {
 		t.Fatalf("phases = %v", titles)
 	}
-	if a.Agents != (wfCounts{Total: 3, Running: 2, Done: 1}) {
+	if a.Agents != (wfCounts{Total: 3, Stopped: 2, Done: 1}) {
 		t.Fatalf("counts = %+v", a.Agents)
 	}
 	plan := a.Phases[0].Agents[0]
@@ -129,9 +135,12 @@ func TestWorkflowRunsFromSessionFiles(t *testing.T) {
 	if len(a.Phases[2].Agents) != 0 {
 		t.Fatalf("Ship should have no agents: %+v", a.Phases[2])
 	}
-	// A finished run does not report live activity even when an agent never wrote a result.
-	if got := a.Phases[1].Agents[0].Activity; got != "" {
-		t.Fatalf("activity on an ended run = %q", got)
+	// A finished run reports no live activity, and an agent with no result is stopped.
+	if b := a.Phases[1].Agents[0]; b.Activity != "" || b.State != "stopped" || b.EndedAt == 0 {
+		t.Fatalf("builder on an ended run = %+v", b)
+	}
+	if e := a.Phases[3].Agents[0]; e.State != "stopped" {
+		t.Fatalf("extra on an ended run = %+v", e)
 	}
 
 	b := runs[1]
@@ -159,6 +168,9 @@ func TestWorkflowRunningAgentActivity(t *testing.T) {
 	if a.Status != "running" || a.EndedAt != 0 {
 		t.Fatalf("run A: %+v", a)
 	}
+	if a.Agents != (wfCounts{Total: 3, Running: 2, Done: 1}) {
+		t.Fatalf("counts = %+v", a.Agents)
+	}
 	builder := a.Phases[1].Agents[0]
 	if builder.State != "running" || builder.Activity != "Bash: go test ./..." || builder.StartedAt == 0 {
 		t.Fatalf("builder = %+v", builder)
@@ -166,6 +178,7 @@ func TestWorkflowRunningAgentActivity(t *testing.T) {
 }
 
 func TestWorkflowMissingSessionIsEmpty(t *testing.T) {
+	wfEnv(t)
 	cfg := t.TempDir()
 	var out bytes.Buffer
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
@@ -198,6 +211,7 @@ func TestWorkflowOutputIsOneJSONLinePerRun(t *testing.T) {
 }
 
 func TestWorkflowTranscriptMissingFilesTolerated(t *testing.T) {
+	wfEnv(t)
 	cfg := t.TempDir()
 	wfWrite(t, filepath.Join(cfg, "projects", "p", wfTestSession+".jsonl"),
 		wfLaunchLine(t, "2026-01-01T10:00:00.000Z", "toolu_A", "wf_zzzz-999", "lonely")+"not json\n")

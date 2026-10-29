@@ -153,19 +153,28 @@ the reason on stderr and exits 1.
 
 `acp workflows --session <sessionId> [--json]` reports the background Workflow runs of a Claude
 Code session, which ACP itself never says anything about after launch. It reads Claude Code's own
-files (`$CLAUDE_CONFIG_DIR`, default `~/.claude`): the session transcript
-`projects/*/<sessionId>.jsonl` for the launch and the `<task-notification>` that ends a run (any
+files (`$CLAUDE_CONFIG_DIR`, default `~/.claude`): the session transcript (the newest
+`projects/<dir>/<sessionId>.jsonl`) for the launch and the `<task-notification>` that ends a run (any
 status other than `completed` is passed through), the run's `journal.jsonl` for which agents
 started and finished, the saved script's `meta` for the title and phase order, and a bounded tail
 of each agent's transcript for its latest tool call. That layout is private to Claude Code and may
 change between releases; a session or file that is missing yields no output and exit 0. One JSON
 line per run, in launch order:
 
-    {"toolCallId":"toolu_…","runId":"wf_…","title":"review","description":"…","status":"running","startedAt":1790000000,"agents":{"total":3,"running":1,"done":2},"phases":[{"title":"Scan","agents":[{"label":"a","state":"done","startedAt":1790000001,"endedAt":1790000090},{"label":"b","state":"running","startedAt":1790000002,"activity":"Bash: go test ./..."}]}]}
+    {"toolCallId":"toolu_…","runId":"wf_…","title":"review","description":"…","status":"running","startedAt":1790000000,"lastActivityAt":1790000090,"agents":{"total":3,"running":1,"done":2},"phases":[{"title":"Scan","agents":[{"label":"a","state":"done","startedAt":1790000001,"endedAt":1790000090},{"label":"b","state":"running","startedAt":1790000002,"activity":"Bash: go test ./..."}]}]}
 
 `status` is `running` until the notification arrives, then `completed`, `failed`, `killed` or
-whatever Claude Code reports, with `endedAt` and `summary`. `activity` is only given for a running
-agent of a running run. Times are Unix seconds.
+whatever Claude Code reports, with `endedAt` and `summary`. An agent is `running` or `done`; once
+the run has ended, an agent with no result is `stopped` (counted in `agents.stopped`, not in
+`running`). `activity` is only given for a running agent of a running run. `lastActivityAt` is the
+newest write to the run's journal or agent transcripts: a run whose notification never arrives
+stays `running`, and a client can show how long it has been quiet. Times are Unix seconds.
+
+The transcript is scanned incrementally: `~/.tether-notify/workflows/<sessionId>.json` keeps the
+file's identity, the offset scanned so far and the launches and endings found, and a call reads
+only what was appended. A file that shrank or whose start changed is scanned again from the top.
+A transcript line over 1 MiB is never held whole; only its start is read, enough for a
+notification that carries a large result.
 
 ### Lifecycle and retention
 
