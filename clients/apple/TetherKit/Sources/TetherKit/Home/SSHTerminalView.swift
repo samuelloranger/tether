@@ -23,7 +23,8 @@ public struct SSHTerminalView: View {
   @State private var dragTranslation: CGFloat?
   @State private var showSettings = false
   @State private var showGit = false
-  @State private var gitFolder: String?
+  /// Set by a row's Git menu item; nil means the open chat's folder, else the attached session.
+  @State private var gitOverride: GitTarget?
   @State private var endedExpanded = false
   @State private var pendingContinue: PendingContinue?
   @State private var selectionText: String?
@@ -261,11 +262,11 @@ public struct SSHTerminalView: View {
         onCancel: { showNewChat = false }
       )
     }
-    .sheet(isPresented: $showGit, onDismiss: { gitFolder = nil; controller.setGitTarget(.session) }) {
+    .sheet(isPresented: $showGit, onDismiss: { gitOverride = nil; controller.setGitTarget(.session) }) {
       GitDiffView(controller: controller) { showGit = false }
         // Set again on appear: a sheet queued behind a chat's own Git sheet opens after that one reset it.
         .onAppear {
-          controller.setGitTarget((gitFolder ?? content.chat?.cwd).map { GitTarget.forChat(folder: $0) } ?? .session)
+          controller.setGitTarget(gitOverride ?? content.chat.map { GitTarget.forChat(folder: $0.cwd) } ?? .session)
         }
         .macSheetSize(width: 900, height: 640, large: true)
     }
@@ -308,12 +309,6 @@ public struct SSHTerminalView: View {
       content.chatKilled(row.name)
       Task { await controller.killChat(row.name) }
     }
-  }
-
-  private struct PendingContinue: Equatable {
-    let chat: String
-    let sessionId: String
-    let cwd: String
   }
 
   /// Two Claude Codes on one conversation would both write it, so the chat's agent ends first; if
@@ -537,12 +532,13 @@ public struct SSHTerminalView: View {
     let sessions = DrawerLayout.waitingFirst(controller.sessions) { controller.agentStatuses[$0.name]?.state == .waiting }
     let folders = DrawerLayout.sessionFolders(controller.sessions)
     let split = DrawerLayout.splitEnded(chatRows)
+    let showsEnded = DrawerLayout.showsEnded(expanded: endedExpanded, ended: split.ended, open: content.chat?.name)
     return VStack(alignment: .leading, spacing: 0) {
       drawerHeader(terminals: sessions.count, chats: chatRows.count)
       Divider().overlay(TetherColors.border)
       ScrollView {
         VStack(spacing: 8) {
-          sectionHeader("Terminals", count: sessions.count)
+          if !sessions.isEmpty { sectionHeader("Terminals", count: sessions.count) }
           ForEach(sessions) { sessionRow($0, folder: folders[$0.name]) }
           if sessions.isEmpty && chatRows.isEmpty {
             Text("Nothing running yet. Use + to start a terminal or a chat.")
@@ -553,8 +549,8 @@ public struct SSHTerminalView: View {
             sectionHeader("Chats", count: chatRows.count)
             ForEach(split.collapsed ? split.live : chatRows) { chatRow($0) }
             if split.collapsed {
-              endedDisclosure(count: split.ended.count)
-              if endedExpanded { ForEach(split.ended) { chatRow($0) } }
+              endedDisclosure(count: split.ended.count, expanded: showsEnded)
+              if showsEnded { ForEach(split.ended) { chatRow($0) } }
             }
           }
         }
@@ -583,7 +579,7 @@ public struct SSHTerminalView: View {
           onHome()
         } label: {
           Text("Switch").font(.footnote.weight(.semibold)).foregroundStyle(TetherColors.accent)
-            .padding(.horizontal, 6).frame(minHeight: tapTarget).contentShape(Rectangle())
+            .padding(.horizontal, 6).frame(minHeight: max(44, tapTarget)).contentShape(Rectangle())
         }
         .buttonStyle(TetherPressStyle())
         .accessibilityIdentifier("sshDrawerHome")
@@ -599,7 +595,7 @@ public struct SSHTerminalView: View {
           .accessibilityIdentifier("sshContinueChat")
         } label: {
           Image(systemName: "plus").font(.body.weight(.semibold)).foregroundStyle(TetherColors.accent)
-            .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
+            .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
         }
         .accessibilityIdentifier("sshNewSessionAdd")
         .accessibilityLabel("New terminal or chat")
@@ -609,7 +605,7 @@ public struct SSHTerminalView: View {
         Text(DrawerLayout.summary(state: drawerStateLabel, terminals: terminals, chats: chats))
           .font(.caption2).foregroundStyle(TetherColors.textFaint)
       }
-      .padding(.top, -6).padding(.bottom, 8)
+      .padding(.bottom, 8)
       .accessibilityElement(children: .combine)
     }
     .padding(.leading, 14).padding(.trailing, 6).padding(.top, 4)
@@ -628,23 +624,23 @@ public struct SSHTerminalView: View {
     .accessibilityAddTraits(.isHeader)
   }
 
-  private func endedDisclosure(count: Int) -> some View {
+  private func endedDisclosure(count: Int, expanded: Bool) -> some View {
     Button {
-      withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { endedExpanded.toggle() }
+      withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { endedExpanded = !expanded }
     } label: {
       HStack(spacing: 6) {
         Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
-          .rotationEffect(.degrees(endedExpanded ? 90 : 0))
+          .rotationEffect(.degrees(expanded ? 90 : 0))
         Text("Ended · \(count)").font(.caption.monospaced())
         Spacer()
       }
       .foregroundStyle(TetherColors.textFaint)
-      .padding(.horizontal, 4).frame(minHeight: 32).contentShape(Rectangle())
+      .padding(.horizontal, 4).frame(minHeight: 44).contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("drawerEndedToggle")
     .accessibilityLabel("Ended chats, \(count)")
-    .accessibilityValue(endedExpanded ? "expanded" : "collapsed")
+    .accessibilityValue(expanded ? "expanded" : "collapsed")
   }
 
   /// The one row shape for sessions and chats: the glyph and two lines on the left, only the kill control
@@ -724,13 +720,16 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("zmxSession_\(session.name)")
       .accessibilityLabel(sessionAccessibilityLabel(session, isCurrent: isCurrent))
       .accessibilityHint(isCurrent ? "Already attached" : "Attaches this session")
+      .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
     .contextMenu {
       Button { openSession(session.name) } label: { Label("Open", systemImage: "terminal") }
       Button {
         acknowledgeCopy(session.name, announce: "Name copied", into: $showCopyConfirmation)
       } label: { Label("Copy name", systemImage: "doc.on.doc") }
-      Button { openGit(folder: session.displayCwd) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
+      if let git = DrawerLayout.gitTarget(cwd: session.displayCwd, isAttached: isCurrent) {
+        Button { openGit(git) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
+      }
       Button(role: .destructive) { pendingKill = session.name } label: { Label("Kill", systemImage: "xmark.circle") }
     }
   }
@@ -743,8 +742,8 @@ public struct SSHTerminalView: View {
   }
 
   /// The Git sheet over a row's folder, whichever session or chat is in front.
-  private func openGit(folder: String) {
-    gitFolder = folder
+  private func openGit(_ target: GitTarget) {
+    gitOverride = target
     showGit = true
   }
 
@@ -755,7 +754,7 @@ public struct SSHTerminalView: View {
         Text("·").foregroundStyle(TetherColors.textFaint)
       }
       if folder {
-        Text(row.subtitle).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+        Text(row.subtitle).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.middle)
         Text("·").foregroundStyle(TetherColors.textFaint)
       }
       ChatStateTag(state: row.state)
@@ -766,7 +765,6 @@ public struct SSHTerminalView: View {
     let isSelected = content.isSelected(chat: row.name)
     let ended = row.state == .ended
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
-    let resumable = DrawerLayout.resumableSessionId(row, journal: UserDefaultsChatJournalStore(name: row.name).load())
     return drawerRow(
       selected: isSelected, needsYou: row.state == .waiting, ended: ended,
       killID: "chatKill_\(row.name)", killLabel: "Delete chat \(row.title)",
@@ -810,18 +808,17 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("chatRow_\(row.name)")
       .accessibilityLabel("Chat \(row.title), \(row.agentLabel.map { "\($0), " } ?? "")\(row.stateLabel), \(row.subtitle)")
       .accessibilityHint(isSelected ? "Already open" : "Opens this chat")
+      .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
     .contextMenu {
       Button { openChat(controller.chatRoute(for: row)) } label: { Label("Open", systemImage: "bubble.left") }
       Button {
         acknowledgeCopy(row.cwd, announce: "Folder copied", into: $showCopyConfirmation)
       } label: { Label("Copy folder", systemImage: "folder") }
-      Button { openGit(folder: row.cwd) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
-      if let resumable {
-        Button { pendingContinue = PendingContinue(chat: row.name, sessionId: resumable, cwd: row.cwd) } label: {
-          Label("Continue in terminal", systemImage: "terminal")
-        }
+      if let git = DrawerLayout.gitTarget(cwd: row.cwd, isAttached: false) {
+        Button { openGit(git) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
       }
+      ContinueInTerminalItem(row: row) { pendingContinue = $0 }
       Button(role: .destructive) { pendingChatKill = row } label: { Label("Delete", systemImage: "trash") }
     }
   }
@@ -1245,5 +1242,25 @@ private struct DrawerRowChrome: ViewModifier {
           shape.strokeBorder(TetherColors.border)
         }
       }
+  }
+}
+
+private struct PendingContinue: Equatable {
+  let chat: String
+  let sessionId: String
+  let cwd: String
+}
+
+/// Reads the chat's journal only when the context menu is built, not on every drawer frame.
+private struct ContinueInTerminalItem: View {
+  let row: DrawerChatRow
+  let onContinue: (PendingContinue) -> Void
+
+  var body: some View {
+    if let id = DrawerLayout.resumableSessionId(row, journal: UserDefaultsChatJournalStore(name: row.name).load()) {
+      Button { onContinue(PendingContinue(chat: row.name, sessionId: id, cwd: row.cwd)) } label: {
+        Label("Continue in terminal", systemImage: "terminal")
+      }
+    }
   }
 }

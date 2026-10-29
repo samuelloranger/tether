@@ -52,6 +52,35 @@ final class DrawerLayoutTests: XCTestCase {
     XCTAssertEqual(DrawerLayout.homeRelative("/srv/x"), "/srv/x")
   }
 
+  func test_home_relative_handles_a_bare_home_root_and_trailing_slashes() {
+    XCTAssertEqual(DrawerLayout.homeRelative("/home"), "/home")
+    XCTAssertEqual(DrawerLayout.homeRelative("/Users"), "/Users")
+    XCTAssertEqual(DrawerLayout.homeRelative("/home/dev/"), "~")
+    XCTAssertEqual(DrawerLayout.homeRelative("/home/dev/x/"), "~/x")
+  }
+
+  func test_an_open_ended_chat_keeps_the_fold_open() {
+    let ended = [chat("a", .ended), chat("b", .ended)]
+    XCTAssertFalse(DrawerLayout.showsEnded(expanded: false, ended: ended, open: nil))
+    XCTAssertFalse(DrawerLayout.showsEnded(expanded: false, ended: ended, open: "live"))
+    XCTAssertTrue(DrawerLayout.showsEnded(expanded: false, ended: ended, open: "b"))
+    XCTAssertTrue(DrawerLayout.showsEnded(expanded: true, ended: ended, open: nil))
+  }
+
+  func test_git_is_offered_for_an_absolute_folder_or_the_attached_session() {
+    XCTAssertEqual(DrawerLayout.gitTarget(cwd: "/srv/x", isAttached: false), .folder("/srv/x"))
+    XCTAssertEqual(DrawerLayout.gitTarget(cwd: "/srv/x", isAttached: true), .session)
+    XCTAssertEqual(DrawerLayout.gitTarget(cwd: "", isAttached: true), .session)
+    XCTAssertNil(DrawerLayout.gitTarget(cwd: "", isAttached: false))
+    XCTAssertNil(DrawerLayout.gitTarget(cwd: "~/x", isAttached: false))
+  }
+
+  func test_a_chat_titled_by_its_folder_shows_a_home_relative_parent() {
+    let summary = ACPChatSummary(
+      name: "c", isRunning: true, logBytes: 1, cwd: "/home/dev/projects/app", created: Date(timeIntervalSince1970: 1), spawn: "claude")
+    XCTAssertEqual(DrawerChatRows.rows(chats: [summary], titles: [:])[0].subtitle, "~/projects")
+  }
+
   func test_a_narrow_chat_row_gives_up_the_agent_label_before_the_folder() {
     let fits = DrawerLayout.chatSubtitleFits
     XCTAssertTrue(fits[0].agentLabel && fits[0].folder)

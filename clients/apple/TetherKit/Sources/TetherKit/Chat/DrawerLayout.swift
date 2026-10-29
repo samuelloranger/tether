@@ -36,6 +36,19 @@ enum DrawerLayout {
       }, uniquingKeysWith: { first, _ in first })
   }
 
+  /// Whether the ended chats are listed: the user opened the fold, or the open chat is one of them.
+  static func showsEnded(expanded: Bool, ended: [DrawerChatRow], open: String?) -> Bool {
+    expanded || ended.contains { $0.name == open }
+  }
+
+  /// What a row's Git item opens, nil when it has nothing to read: the attached session follows its
+  /// live folder, any other row needs an absolute one.
+  static func gitTarget(cwd: String, isAttached: Bool) -> GitTarget? {
+    if isAttached { return .session }
+    if case .folder = GitTarget.forChat(folder: cwd) { return GitTarget.forChat(folder: cwd) }
+    return nil
+  }
+
   static func homeRelative(_ path: String) -> String {
     let parts = path.split(separator: "/", omittingEmptySubsequences: true)
     guard parts.count >= 2, parts[0] == "home" || parts[0] == "Users" else { return path }

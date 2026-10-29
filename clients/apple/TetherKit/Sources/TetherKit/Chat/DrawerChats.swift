@@ -33,7 +33,7 @@ enum DrawerChatRows {
       let folder = ChatFormat.folderName(chat.cwd)
       let stored = titles[chat.name].flatMap { $0.isEmpty ? nil : $0 }
       let title = chat.hostTitle ?? stored ?? folder
-      let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd) ?? chat.cwd) : folder
+      let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
       return DrawerChatRow(
         name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd,
         multiClient: chat.multiClient,
