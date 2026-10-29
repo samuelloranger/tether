@@ -47,6 +47,7 @@ struct ChatView: View {
   @State private var reviewing: ChatPermission?
   @State private var questionTyping = false
   @State private var showingControls = false
+  @State private var workflowSheet: ChatWorkflowSelection?
   @State private var attachments = ChatAttachments()
   @State private var pickingPhotos = false
   @State private var pickedPhotos: [PhotosPickerItem] = []
@@ -117,6 +118,10 @@ struct ChatView: View {
         showingControls = true
       }
       #if DEBUG
+      if ChatFixture.openWorkflowSheet {
+        for _ in 0..<100 where model.workflowTracker.runs.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
+        workflowSheet = model.workflowTracker.runs.first.map { ChatWorkflowSelection(id: $0.toolCallId) }
+      }
       if ChatFixture.planMode == "plan-sheet" {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         reviewing = model.state.pendingPermissions.first
@@ -146,6 +151,7 @@ struct ChatView: View {
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingPermissions.first?.requestId)
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingQuestions.first?.requestId)
     .sheet(isPresented: $showingControls) { ChatControlsSheet(model: model) }
+    .sheet(item: $workflowSheet) { ChatWorkflowSheet(model: model, callId: $0.id) }
     .photosPicker(
       isPresented: $pickingPhotos, selection: $pickedPhotos, maxSelectionCount: max(1, attachments.room),
       matching: .images
@@ -215,7 +221,8 @@ struct ChatView: View {
         case let .tools(items):
           ToolGroupView(
             items: items, cwd: model.cwd, expandedIDs: Set(items.filter(isExpanded).map(\.id)),
-            toggle: toggleExpanded
+            toggle: toggleExpanded, workflowIds: Set(model.workflowTracker.runs.map(\.toolCallId)),
+            openWorkflow: { workflowSheet = ChatWorkflowSelection(id: $0) }
           )
           .equatable()
         }
@@ -297,7 +304,7 @@ struct ChatView: View {
   /// An unanswered permission or question lives in the card, not in the scroll.
   /// Pending asks live in their cards, and queued messages above the composer until they start.
   private var visibleItems: [ChatItem] {
-    model.state.items.filter {
+    model.displayItems.filter {
       if case let .permission(permission) = $0.kind { return permission.resolvedOptionId != nil }
       if case let .question(question) = $0.kind { return !question.isPending }
       if case .user = $0.kind { return !model.state.isQueued($0.id) }
@@ -610,6 +617,9 @@ struct ChatView: View {
             .padding(.horizontal, 4)
             .accessibilityIdentifier("chatAnswerRetry")
         }
+      }
+      if !model.runningWorkflows.isEmpty {
+        ChatWorkflowStrip(runs: model.runningWorkflows) { workflowSheet = ChatWorkflowSelection(id: $0.toolCallId) }
       }
       if !model.hasEnded, !model.state.backgroundCommands.isEmpty {
         ChatTaskStrip(commands: model.state.backgroundCommands, open: openBackgroundCommand)
@@ -1138,7 +1148,7 @@ private struct PermissionReviewSheet: View {
       .background(TetherColors.background)
       .navigationTitle(permission.title)
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+      .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }.withoutGlass() }
     }
   }
 }
@@ -1257,13 +1267,6 @@ private struct FollowingTranscript<Content: View>: View {
 extension View {
   @ViewBuilder fileprivate func scrollEdgeEffectHiddenIfAvailable() -> some View {
     if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .all) } else { self }
-  }
-}
-
-extension ToolbarContent {
-  /// iOS 26 wraps every toolbar item in a glass bubble; the chat header stays flat.
-  @ToolbarContentBuilder fileprivate func withoutGlass() -> some ToolbarContent {
-    if #available(iOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
   }
 }
 

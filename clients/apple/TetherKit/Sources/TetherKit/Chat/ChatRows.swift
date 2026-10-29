@@ -357,9 +357,13 @@ struct ToolGroupView: View, Equatable {
   let cwd: String
   let expandedIDs: Set<Int>
   let toggle: (Int) -> Void
+  /// Workflow calls the host reports a run for: their rows open the run's sheet.
+  var workflowIds: Set<String> = []
+  var openWorkflow: (String) -> Void = { _ in }
 
   static func == (lhs: ToolGroupView, rhs: ToolGroupView) -> Bool {
     lhs.items == rhs.items && lhs.cwd == rhs.cwd && lhs.expandedIDs == rhs.expandedIDs
+      && lhs.workflowIds == rhs.workflowIds
   }
 
   var body: some View {
@@ -381,7 +385,9 @@ struct ToolGroupView: View, Equatable {
       if call.subagent != nil {
         SubagentRow(call: call, cwd: cwd, expanded: expandedIDs.contains(item.id)) { toggle(item.id) }
       } else {
-        ToolCallRow(call: call, cwd: cwd, expanded: expandedIDs.contains(item.id)) { toggle(item.id) }
+        ToolCallRow(
+          call: call, cwd: cwd, expanded: expandedIDs.contains(item.id),
+          open: workflowIds.contains(call.id) ? { openWorkflow(call.id) } : nil, toggle: { toggle(item.id) })
       }
     case let .permission(permission):
       if let resolved = permission.resolvedOptionId {
@@ -435,18 +441,20 @@ struct ToolCallRow: View {
   let call: ChatToolCall
   let cwd: String
   let expanded: Bool
+  /// Replaces the expansion: a Workflow row the host knows opens its run instead.
+  var open: (() -> Void)?
   let toggle: () -> Void
 
   private var expandable: Bool {
-    call.diff != nil || !call.images.isEmpty || ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput)
+    open != nil || call.diff != nil || !call.images.isEmpty || ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput)
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      Button(action: toggle) { header }
+      Button(action: open ?? toggle) { header }
         .buttonStyle(.plain)
         .disabled(!expandable)
-      if expanded && expandable { detailView }
+      if expanded && expandable && open == nil { detailView }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .accessibilityElement(children: .contain)
@@ -475,7 +483,7 @@ struct ToolCallRow: View {
         }
         statusGlyph.frame(width: 14)
         if expandable {
-          Image(systemName: expanded ? "chevron.down" : "chevron.right")
+          Image(systemName: expanded && open == nil ? "chevron.down" : "chevron.right")
             .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
         }
       }
@@ -483,7 +491,9 @@ struct ToolCallRow: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(call.title), \(call.isBackgroundRunning ? "running in the background" : statusWord)")
-    .accessibilityHint(expandable ? (expanded ? "Hides the details" : "Shows the details") : "")
+    .accessibilityHint(
+      open != nil ? "Shows the workflow's phases and agents"
+        : expandable ? (expanded ? "Hides the details" : "Shows the details") : "")
   }
 
   private var statusGlyph: some View {

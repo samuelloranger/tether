@@ -94,7 +94,7 @@ struct SubagentRow: View {
         VStack(spacing: 0) {
           ForEach(Array(call.children.enumerated()), id: \.element.id) { index, child in
             if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
-            ToolCallRow(call: child, cwd: cwd, expanded: openChildren.contains(child.id)) { toggleChild(child.id) }
+            ToolCallRow(call: child, cwd: cwd, expanded: openChildren.contains(child.id), toggle: { toggleChild(child.id) })
           }
         }
         .padding(.leading, 10)

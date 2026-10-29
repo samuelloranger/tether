@@ -15,6 +15,8 @@ final class ChatSessionModel {
   typealias ListFiles = @Sendable () async -> String?
   /// The words a running turn may show (see `ChatVerbs`).
   typealias SpinnerVerbs = @Sendable () async -> [String]
+  /// The output of `tether acp workflows` for a session id, or nil when the host can't say.
+  typealias Workflows = @Sendable (_ sessionId: String) async -> String?
 
   let chatName: String
   let cwd: String
@@ -42,6 +44,8 @@ final class ChatSessionModel {
   /// The folder's files for `@` mentions; loaded when the palette first opens.
   private(set) var fileIndex = ChatFileIndex()
   private var loadingFiles = false
+  /// The Workflow runs the host reports; empty until a poll answers, and never persisted.
+  private(set) var workflowTracker = ChatWorkflowTracker()
 
   enum SignInRetry: Equatable { case idle, checking, stillSignedOut }
 
@@ -64,6 +68,9 @@ final class ChatSessionModel {
   private let inspect: Inspect?
   private let listFiles: ListFiles?
   private let spinnerVerbs: SpinnerVerbs?
+  private let workflows: Workflows?
+  private let workflowInterval: Duration
+  private var workflowTask: Task<Void, Never>?
   private var verbsAsked = false
   /// Empty until the host answered; Tether's own words stand in meanwhile.
   private(set) var verbs: [String] = []
@@ -91,7 +98,7 @@ final class ChatSessionModel {
     titleStore: ChatTitleStore? = nil,
     hostAnswers: HostAnswers? = nil, snapshots: (any ChatSnapshotStore)? = nil, inspect: Inspect? = nil,
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
-    listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, images: ChatImageStore? = nil,
+    listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, workflows: Workflows? = nil, workflowInterval: Duration = ChatWorkflowTracker.pollInterval, images: ChatImageStore? = nil,
     optionDefaults: ChatOptionDefaultsStore? = nil, agent: ChatAgentProfile? = ChatAgents.claude,
     optionPicks: [String: String]? = nil, changedPicks: Set<String> = [], optionsCache: ChatOptionsCache? = nil, dial: @escaping Dial
   ) {
@@ -104,6 +111,8 @@ final class ChatSessionModel {
     self.loadSessionId = loadSessionId
     self.listFiles = listFiles
     self.spinnerVerbs = spinnerVerbs
+    self.workflows = workflows
+    self.workflowInterval = workflowInterval
     self.hostLabel = hostLabel
     self.outboxStore = outboxStore
     self.outbox = ChatOutbox(restoring: outboxStore?.load() ?? [])
@@ -147,6 +156,9 @@ final class ChatSessionModel {
           command: ChatFileList.command(cwd: route.cwd), config: config, store: hostKeyStore, deadline: 15)
       },
       spinnerVerbs: { await ChatVerbCache.shared.verbs(config: config, store: hostKeyStore) },
+      workflows: { id in
+        await ACPHostExec.run(command: ChatWorkflowListing.command(sessionId: id), config: config, store: hostKeyStore)
+      },
       images: files.images(route.name), optionDefaults: ChatOptionDefaultsStore(), agent: agent,
       optionPicks: route.optionPicks, changedPicks: route.changedPicks, optionsCache: ChatOptionsCache(config: config)
     ) { spawn, from in
@@ -231,6 +243,7 @@ final class ChatSessionModel {
     if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh
     link.dialSucceeded(at: .now)
+    startWorkflowPolling(generation: mine)
     let updates = await fresh.updates()
     forwardTask = Task { [weak self] in
       for await next in updates {
@@ -575,7 +588,40 @@ final class ChatSessionModel {
     notice = ACPClientError.hostFailureText(error, started: started)
   }
 
+  private var workflowCalls: [ChatToolCall] {
+    state.items.compactMap {
+      if case let .tool(call) = $0.kind, call.isWorkflow == true { return call }
+      return nil
+    }
+  }
+
+  /// The transcript with each Workflow row as the host reports it (see `ChatWorkflowTracker`).
+  var displayItems: [ChatItem] { hasEnded ? state.items : workflowTracker.display(state.items) }
+
+  /// Running workflows for the strip; a chat that has ended shows none.
+  var runningWorkflows: [ChatWorkflowRun] { hasEnded ? [] : workflowTracker.running }
+
+  /// Asks the host every few seconds while a Workflow call is not known to be over. A host that
+  /// answers like one without the command is left alone, and the rows keep what ACP said.
+  private func startWorkflowPolling(generation mine: Int) {
+    workflowTask?.cancel()
+    guard let workflows else { return }
+    workflowTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self, mine == self.generation else { return }
+        if let id = self.state.sessionId, !self.hasEnded, self.workflowTracker.needsPolling(calls: self.workflowCalls) {
+          let output = await workflows(id)
+          guard !Task.isCancelled, mine == self.generation else { return }
+          self.workflowTracker.apply(output: output, calls: self.workflowCalls)
+        }
+        try? await Task.sleep(for: self.workflowTracker.interval(base: self.workflowInterval, now: .now))
+      }
+    }
+  }
+
   private func detachClient() {
+    workflowTask?.cancel()
+    workflowTask = nil
     forwardTask?.cancel()
     settleTask?.cancel()
     forwardTask = nil
