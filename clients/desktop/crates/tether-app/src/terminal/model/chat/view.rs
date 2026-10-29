@@ -407,6 +407,48 @@ pub struct TaskView {
     pub title: String,
 }
 
+/// A background Workflow run still going, as the strip above the composer lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkflowStripView {
+    /// The Workflow tool call the run belongs to; the sheet opens on it.
+    pub call_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkflowAgentView {
+    pub label: String,
+    /// 0 running, 1 done, 2 stopped.
+    pub state: u8,
+    pub elapsed: String,
+    pub activity: String,
+    pub spoken: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkflowPhaseView {
+    pub title: String,
+    pub agents: Vec<WorkflowAgentView>,
+}
+
+/// One run in full: its phases with each agent's state and time, and the summary once it ended.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkflowSheetView {
+    /// The host no longer lists the run.
+    pub missing: bool,
+    pub title: String,
+    pub status: String,
+    /// 0 running, 1 done, 2 ended another way.
+    pub state: u8,
+    pub counts: String,
+    pub elapsed: String,
+    pub quiet: String,
+    pub description: String,
+    pub phases: Vec<WorkflowPhaseView>,
+    pub summary: String,
+    pub spoken: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChatScreen {
     pub active: bool,
@@ -416,6 +458,8 @@ pub struct ChatScreen {
     /// Sent while a turn runs and not started yet; shown above the composer, not in the transcript.
     pub queued: Vec<String>,
     pub tasks: Vec<TaskView>,
+    pub workflows: Vec<WorkflowStripView>,
+    pub workflow: Option<WorkflowSheetView>,
     pub follow_seq: u64,
     pub notice: String,
     pub draft: Option<String>,

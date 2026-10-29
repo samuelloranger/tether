@@ -11,9 +11,10 @@ use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
-    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatTaskVm, ChatVm, CtlChoiceVm,
-    CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
-    PermOptionVm, QChoiceVm, QFieldVm, QueuedVm, SavedSessionVm,
+    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatTaskVm, ChatVm,
+    ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm,
+    NcChoiceVm, NcMenuVm, PaletteItemVm, PermOptionVm, QChoiceVm, QFieldVm, QueuedVm,
+    SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 
 thread_local! {
@@ -538,6 +539,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     if !s.active {
         vm.set_ctl_open(false);
         vm.set_review_open(false);
+        vm.set_wf_open(false);
         vm.set_viewer_open(false);
         return;
     }
@@ -579,6 +581,53 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
         .collect();
     if vm.get_tasks().iter().ne(tasks.iter().cloned()) {
         vm.set_tasks(model(tasks));
+    }
+    let workflows: Vec<ChatWorkflowVm> = s
+        .workflows
+        .iter()
+        .map(|w| ChatWorkflowVm {
+            call_id: w.call_id.as_str().into(),
+            text: w.text.as_str().into(),
+        })
+        .collect();
+    if vm.get_workflows().iter().ne(workflows.iter().cloned()) {
+        vm.set_workflows(model(workflows));
+    }
+    match &s.workflow {
+        Some(w) => {
+            vm.set_wf_open(true);
+            vm.set_wf_missing(w.missing);
+            vm.set_wf_title(w.title.as_str().into());
+            vm.set_wf_status(w.status.as_str().into());
+            vm.set_wf_state(i32::from(w.state));
+            vm.set_wf_counts(w.counts.as_str().into());
+            vm.set_wf_elapsed(w.elapsed.as_str().into());
+            vm.set_wf_quiet(w.quiet.as_str().into());
+            vm.set_wf_description(w.description.as_str().into());
+            vm.set_wf_summary(w.summary.as_str().into());
+            vm.set_wf_spoken(w.spoken.as_str().into());
+            vm.set_wf_phases(model(
+                w.phases
+                    .iter()
+                    .map(|p| WfPhaseVm {
+                        title: p.title.as_str().into(),
+                        agents: model(
+                            p.agents
+                                .iter()
+                                .map(|a| WfAgentVm {
+                                    label: a.label.as_str().into(),
+                                    state: i32::from(a.state),
+                                    elapsed: a.elapsed.as_str().into(),
+                                    activity: a.activity.as_str().into(),
+                                    spoken: a.spoken.as_str().into(),
+                                })
+                                .collect(),
+                        ),
+                    })
+                    .collect(),
+            ));
+        }
+        None => vm.set_wf_open(false),
     }
 
     let c = &s.composer;
@@ -796,6 +845,8 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_new_chat(|mode| send(ChatMsg::NewChat(u8::try_from(mode).unwrap_or(0))));
     vm.on_toggle(|k| send(ChatMsg::Toggle(k.into())));
     vm.on_task_open(|k| send(ChatMsg::OpenTool(k.into())));
+    vm.on_workflow_open(|id| send(ChatMsg::OpenWorkflow(id.into())));
+    vm.on_close_workflow(|| send(ChatMsg::CloseWorkflow));
     vm.on_open_link(|url| send(ChatMsg::OpenLink(url.into())));
     vm.on_open_image(|id| send(ChatMsg::OpenImage(id.into())));
     vm.on_close_viewer(|| send(ChatMsg::CloseViewer));

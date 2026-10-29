@@ -69,6 +69,10 @@ pub struct ToolCall {
     pub background_task_id: Option<String>,
     #[serde(default)]
     pub terminal_exited: bool,
+    /// A `Workflow` launch: its end is only known from the host (see `workflows::Tracker`).
+    /// Absent in a snapshot from before the mark.
+    #[serde(default)]
+    pub is_workflow: bool,
     /// The command's raw output, kept so a delta can be appended before the text is fenced again.
     #[serde(default)]
     pub terminal_data: String,
@@ -91,6 +95,7 @@ impl ToolCall {
             has_terminal: false,
             background_task_id: None,
             terminal_exited: false,
+            is_workflow: false,
             terminal_data: String::new(),
         };
         if let Some(name) = &fields.tool_name
@@ -125,6 +130,9 @@ impl ToolCall {
             && !v.is_empty()
         {
             self.images = v.clone();
+        }
+        if fields.tool_name.as_deref() == Some(super::workflows::TOOL_NAME) {
+            self.is_workflow = true;
         }
         self.has_terminal |= fields.has_terminal;
         self.terminal_exited |= fields.terminal_exit;

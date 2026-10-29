@@ -93,6 +93,26 @@ export struct ChatTaskVm {
     title: string,
 }
 
+// A running Workflow in the strip above the composer.
+export struct ChatWorkflowVm {
+    call-id: string,
+    text: string,
+}
+
+// state: 0 running, 1 done, 2 stopped.
+export struct WfAgentVm {
+    label: string,
+    state: int,
+    elapsed: string,
+    activity: string,
+    spoken: string,
+}
+
+export struct WfPhaseVm {
+    title: string,
+    agents: [WfAgentVm],
+}
+
 export struct PaletteItemVm {
     primary: string,
     secondary: string,
@@ -186,6 +206,7 @@ export global ChatVm {
     in property <[ChatRowVm]> rows;
     in property <[QueuedVm]> queued;
     in property <[ChatTaskVm]> tasks;
+    in property <[ChatWorkflowVm]> workflows;
     in property <int> follow-seq;
     in property <string> notice;
     // Composer.
@@ -254,6 +275,19 @@ export global ChatVm {
     in property <bool> viewer-open;
     in property <image> viewer-image;
     in property <bool> viewer-missing;
+    // One Workflow run in full.
+    in property <bool> wf-open;
+    in property <bool> wf-missing;
+    in property <string> wf-title;
+    in property <string> wf-status;
+    in property <int> wf-state;              // 0 running, 1 done, 2 ended another way
+    in property <string> wf-counts;
+    in property <string> wf-elapsed;
+    in property <string> wf-quiet;
+    in property <string> wf-description;
+    in property <[WfPhaseVm]> wf-phases;
+    in property <string> wf-summary;
+    in property <string> wf-spoken;
     // New chat.
     in property <bool> nc-open;
     in-out property <int> nc-mode;
@@ -280,6 +314,8 @@ export global ChatVm {
     callback new-chat(int);
     callback toggle(string);
     callback task-open(string);
+    callback workflow-open(string);
+    callback close-workflow();
     callback open-link(string);
     callback open-image(string);
     callback close-viewer();
@@ -1669,6 +1705,35 @@ component TaskStrip inherits Rectangle {
     }
 }
 
+// The Workflow runs still going, above the composer; a click opens the run's phases and agents.
+component WorkflowStrip inherits Rectangle {
+    background: Tokens.surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Tokens.border;
+    height: wf-strip.preferred-height + 2px;
+    wf-strip := VerticalLayout {
+        padding-top: 1px;
+        padding-bottom: 1px;
+        for w in ChatVm.workflows: Pressable {
+            height: 28px;
+            accessible-role: button;
+            accessible-label: "Workflow running: " + w.text;
+            accessible-description: "Shows the phases and agents";
+            accessible-action-default => { ChatVm.workflow-open(w.call-id); }
+            clicked => { ChatVm.workflow-open(w.call-id); }
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                VerticalLayout { alignment: center; width: 6px; TextDot { ink: Tokens.accent; line-height: 14px; } }
+                Text { horizontal-stretch: 1; text: w.text; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
+                VerticalLayout { alignment: center; width: 10px; Chevron { open: false; } }
+            }
+        }
+    }
+}
+
 component BottomBar inherits Rectangle {
     background: Tokens.background;
     height: col.preferred-height;
@@ -1713,6 +1778,7 @@ component BottomBar inherits Rectangle {
             VerticalLayout { alignment: center; Glyph { which: ChatVm.banner-icon; size: 13px; ink: Tokens.text-secondary; } }
             Text { text: ChatVm.banner; font-size: 12.5px; color: Tokens.text-secondary; }
         }
+        if ChatVm.workflows.length > 0: WorkflowStrip { }
         if ChatVm.tasks.length > 0: TaskStrip { }
         if ChatVm.banner == "" && ChatVm.composer-shown: Composer { }
     }
@@ -2004,6 +2070,111 @@ export component ChatReview inherits Rectangle {
                     }
                 }
                 for item in ChatVm.review-md: Md { kind: item.kind; level: item.level; text: item.text; links: item.links; }
+            }
+        }
+    }
+}
+
+// One Workflow run, over the chat like the review: phases with their agents, then the summary.
+export component ChatWorkflow inherits Rectangle {
+    background: Tokens.background;
+    TouchArea { }
+    VerticalLayout {
+        Rectangle {
+            height: 48px;
+            background: Tokens.surface;
+            HorizontalLayout {
+                padding: 9px;
+                padding-left: 10px;
+                spacing: 10px;
+                VerticalLayout { alignment: center; IconButton { flat: true; size: 30px; icon: @image-url("icons/back.svg"); tooltip: "Back · Esc"; clicked => { ChatVm.close-workflow(); } } }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text { text: ChatVm.wf-title; font-size: 14px; font-weight: 600; color: Tokens.text; overflow: elide; }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Tokens.border; }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding-left: max(24px, (root.width - ChatStyle.column) / 2);
+                padding-right: max(24px, (root.width - ChatStyle.column) / 2);
+                padding-top: 16px;
+                padding-bottom: 28px;
+                spacing: 14px;
+                alignment: start;
+                if ChatVm.wf-missing: Wrapped { text: "This workflow is no longer listed on the host."; font-size: 12.5px; ink: Tokens.text-secondary; }
+                if !ChatVm.wf-missing: VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        accessible-role: text;
+                        accessible-label: ChatVm.wf-spoken;
+                        VerticalLayout { alignment: center; StatusMark { state: ChatVm.wf-state; } }
+                        Text { text: ChatVm.wf-status; font-size: 12.5px; font-weight: 600; color: ChatVm.wf-state == 0 ? Tokens.accent : ChatVm.wf-state == 2 ? Tokens.danger : Tokens.text-secondary; vertical-alignment: center; }
+                        Text { text: ChatVm.wf-counts; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: ChatVm.wf-elapsed; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
+                    }
+                    if ChatVm.wf-quiet != "": Text { text: ChatVm.wf-quiet; font-size: 12px; color: Tokens.warning; }
+                    if ChatVm.wf-description != "": Wrapped { text: ChatVm.wf-description; font-size: 12px; ink: Tokens.text-faint; }
+                }
+                for phase in ChatVm.wf-phases: VerticalLayout {
+                    spacing: 6px;
+                    Text { text: phase.title; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+                    Group {
+                        height: agents.preferred-height + 2px;
+                        agents := VerticalLayout {
+                            padding-top: 1px;
+                            padding-bottom: 1px;
+                            if phase.agents.length == 0: Rectangle {
+                                height: 30px;
+                                Text { x: 12px; text: "Not started"; font-size: 12.5px; color: Tokens.text-faint; vertical-alignment: center; }
+                            }
+                            for agent[i] in phase.agents: Rectangle {
+                                height: agent-row.preferred-height;
+                                accessible-role: text;
+                                accessible-label: agent.spoken;
+                                if i > 0: Rectangle { y: 0; x: 34px; height: 1px; width: parent.width - 34px; background: Tokens.border; }
+                                agent-row := HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    padding-top: 7px;
+                                    padding-bottom: 7px;
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        padding-top: 2px;
+                                        width: 14px;
+                                        if agent.state == 2: Rectangle { width: 14px; height: 14px; Rectangle { x: 4px; y: 4px; width: 6px; height: 6px; background: Tokens.text-faint; border-radius: 1px; } }
+                                        if agent.state != 2: StatusMark { state: agent.state; }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 1px;
+                                        Text { text: agent.label; font-size: 12.5px; color: Tokens.text; overflow: elide; }
+                                        if agent.activity != "": Text { text: agent.activity; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
+                                    }
+                                    Text { text: agent.elapsed; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: top; }
+                                }
+                            }
+                        }
+                    }
+                }
+                if ChatVm.wf-summary != "": Group {
+                    height: summary-text.preferred-height + 20px;
+                    summary-text := Text {
+                        x: 10px;
+                        y: 10px;
+                        width: parent.width - 20px;
+                        text: ChatVm.wf-summary;
+                        font-size: 12.5px;
+                        color: Tokens.text-secondary;
+                        wrap: word-wrap;
+                    }
+                }
             }
         }
     }
@@ -2389,6 +2560,7 @@ export component ChatOverlays inherits Rectangle {
     in property <length> left;   // the docked sidebar's width
     if ChatVm.active && ChatVm.ctl-open: ChatControls { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     if ChatVm.active && ChatVm.review-open: ChatReview { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    if ChatVm.active && ChatVm.wf-open: ChatWorkflow { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     viewer := Linger { open: ChatVm.viewer-open; }
     new-chat := Linger { open: ChatVm.nc-open; }
     delete := Linger { open: ChatVm.delete-title != ""; }

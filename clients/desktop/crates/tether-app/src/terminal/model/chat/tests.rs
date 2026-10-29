@@ -1936,3 +1936,249 @@ fn a_dialog_opening_on_an_agent_the_host_lacks_says_why() {
         "a mode change keeps the reason"
     );
 }
+
+// MARK: Workflows
+
+const WORKFLOW_LAUNCH: &str = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"toolu_w","title":"Workflow","kind":"other","status":"completed","_meta":{"claudeCode":{"toolName":"Workflow"}}}}}"#;
+
+fn workflow_line(status: &str) -> String {
+    let (agent, tail) = if status == "running" {
+        ("running", String::new())
+    } else {
+        (
+            "stopped",
+            r#","summary":"Stopped early","endedAt":100"#.into(),
+        )
+    };
+    format!(
+        r#"{{"toolCallId":"toolu_w","runId":"wf_x","title":"review","status":"{status}","startedAt":10,"phases":[{{"title":"Scan","agents":[{{"label":"a","state":"done","startedAt":10,"endedAt":50}},{{"label":"b","state":"{agent}","startedAt":20}}]}},{{"title":"Merge","agents":[]}}]{tail}}}"#
+    )
+}
+
+fn workflow_asks(h: &mut Harness) -> Vec<(ExecTag, String)> {
+    let jobs = h.take();
+    let mut asks = Vec::new();
+    for job in jobs {
+        match job {
+            ChatJob::Exec {
+                tag: tag @ ExecTag::Workflows { .. },
+                command,
+            } => asks.push((tag, command)),
+            other => h.jobs.push(other),
+        }
+    }
+    asks
+}
+
+fn tick_for(h: &mut Harness, ms: u64) {
+    h.now += ms;
+    h.run(|c, now, out| c.on_tick(now, out));
+}
+
+fn workflow_chat(h: &mut Harness) -> (String, u64) {
+    let (name, generation) = h.live_chat();
+    h.feed(&name, generation, WORKFLOW_LAUNCH);
+    (name, generation)
+}
+
+fn answer_workflows(h: &mut Harness, tag: ExecTag, output: &str) {
+    h.msg(ChatMsg::ExecDone {
+        tag,
+        result: Ok(output.to_string()),
+    });
+}
+
+/// The state of the first tool entry on screen.
+fn first_tool_state(s: &ChatScreen) -> Option<super::view::ToolState> {
+    s.rows.iter().find_map(|r| match &r.body {
+        RowBody::Tools(entries) => entries.iter().find_map(|e| match &e.body {
+            super::view::EntryBody::Tool { state, .. } => Some(*state),
+            _ => None,
+        }),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_workflow_call_is_polled_with_the_quoted_session_id_until_the_host_reports_its_end() {
+    use super::view::ToolState;
+    let mut h = Harness::new();
+    workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    let mut asks = workflow_asks(&mut h);
+    assert_eq!(asks.len(), 1);
+    let (tag, command) = asks.remove(0);
+    assert!(
+        command.contains("tether acp workflows --session 's1' --json 2>&1"),
+        "{command}"
+    );
+    tick_for(&mut h, 10);
+    assert!(workflow_asks(&mut h).is_empty(), "one ask at a time");
+
+    answer_workflows(&mut h, tag, &workflow_line("running"));
+    let s = h.screen();
+    assert_eq!(s.workflows.len(), 1);
+    assert_eq!(
+        s.workflows[0].text,
+        "review \u{00B7} Scan \u{00B7} 1/2 agents"
+    );
+    assert_eq!(first_tool_state(&s), Some(ToolState::Running));
+
+    tick_for(&mut h, 4000);
+    assert!(workflow_asks(&mut h).is_empty(), "not before the interval");
+    tick_for(&mut h, 1500);
+    let (tag, _) = workflow_asks(&mut h).remove(0);
+    answer_workflows(&mut h, tag, &workflow_line("completed"));
+    let s = h.screen();
+    assert!(s.workflows.is_empty());
+    assert_eq!(first_tool_state(&s), Some(ToolState::Done));
+    tick_for(&mut h, 60_000);
+    assert!(
+        workflow_asks(&mut h).is_empty(),
+        "no more asks once the run is over"
+    );
+}
+
+#[test]
+fn a_killed_run_reads_failed_and_its_sheet_shows_stopped_agents_and_the_summary() {
+    use super::view::ToolState;
+    let mut h = Harness::new();
+    workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    let (tag, _) = workflow_asks(&mut h).remove(0);
+    answer_workflows(&mut h, tag, &workflow_line("killed"));
+    let s = h.screen();
+    assert!(s.workflows.is_empty());
+    assert_eq!(first_tool_state(&s), Some(ToolState::Failed));
+    let key = s
+        .rows
+        .iter()
+        .find_map(|r| match &r.body {
+            RowBody::Tools(entries) => entries.first().map(|e| e.key.clone()),
+            _ => None,
+        })
+        .expect("the Workflow row");
+
+    h.msg(ChatMsg::Toggle(key));
+    let sheet = h
+        .screen()
+        .workflow
+        .expect("tapping the row opens the sheet");
+    assert_eq!(sheet.status, "killed");
+    assert_eq!(sheet.state, 2);
+    assert_eq!(sheet.summary, "Stopped early");
+    assert_eq!(sheet.counts, "1/2 agents");
+    assert_eq!(sheet.phases[0].agents[1].state, 2);
+    assert_eq!(
+        sheet.phases[0].agents[1].elapsed, "",
+        "a stopped agent has no clock"
+    );
+    assert!(sheet.phases[1].agents.is_empty());
+    h.msg(ChatMsg::Escape);
+    assert!(h.screen().workflow.is_none());
+}
+
+#[test]
+fn the_strip_opens_the_sheet_and_escape_closes_it_before_other_overlays() {
+    let mut h = Harness::new();
+    workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    let (tag, _) = workflow_asks(&mut h).remove(0);
+    answer_workflows(&mut h, tag, &workflow_line("running"));
+    let call = h.screen().workflows[0].call_id.clone();
+    h.msg(ChatMsg::Controls);
+    h.msg(ChatMsg::OpenWorkflow(call));
+    let s = h.screen();
+    let sheet = s.workflow.expect("the sheet");
+    assert_eq!(sheet.state, 0);
+    assert_eq!(sheet.phases[0].agents[1].state, 0);
+    assert!(s.controls.is_some());
+    h.msg(ChatMsg::Escape);
+    let s = h.screen();
+    assert!(s.workflow.is_none());
+    assert!(s.controls.is_some());
+}
+
+#[test]
+fn a_run_the_host_does_not_list_says_so_in_its_sheet() {
+    let mut h = Harness::new();
+    workflow_chat(&mut h);
+    h.msg(ChatMsg::OpenWorkflow("toolu_w".into()));
+    let sheet = h.screen().workflow.unwrap();
+    assert!(sheet.missing);
+}
+
+#[test]
+fn a_chat_without_a_workflow_call_never_asks() {
+    let mut h = Harness::new();
+    h.live_chat();
+    tick_for(&mut h, 10_000);
+    assert!(workflow_asks(&mut h).is_empty());
+}
+
+#[test]
+fn an_old_host_is_asked_once_and_the_row_keeps_what_acp_said() {
+    use super::view::ToolState;
+    let mut h = Harness::new();
+    workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    let (tag, _) = workflow_asks(&mut h).remove(0);
+    answer_workflows(&mut h, tag, "tether: unknown acp command \"workflows\"");
+    tick_for(&mut h, 60_000);
+    assert!(workflow_asks(&mut h).is_empty());
+    let s = h.screen();
+    assert!(s.workflows.is_empty());
+    assert_eq!(first_tool_state(&s), Some(ToolState::Done));
+}
+
+#[test]
+fn polling_stops_when_the_chat_leaves_the_front_and_an_old_answer_is_dropped() {
+    let mut h = Harness::new();
+    let (name, _) = workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    let (stale, _) = workflow_asks(&mut h).remove(0);
+    h.run(|c, now, out| c.leave_active(now, out));
+    h.take();
+    tick_for(&mut h, 30_000);
+    assert!(
+        workflow_asks(&mut h).is_empty(),
+        "nothing is asked from the background"
+    );
+    answer_workflows(&mut h, stale, &workflow_line("running"));
+    assert!(
+        h.chats.sessions[&name].workflows.runs().is_empty(),
+        "an answer for the older dial changes nothing"
+    );
+}
+
+#[test]
+fn a_dropped_connection_stops_the_polling() {
+    let mut h = Harness::new();
+    workflow_chat(&mut h);
+    tick_for(&mut h, 10);
+    assert_eq!(workflow_asks(&mut h).len(), 1);
+    h.run(|c, now, out| c.on_dropped(now, out));
+    tick_for(&mut h, 30_000);
+    assert!(workflow_asks(&mut h).is_empty());
+}
+
+#[test]
+fn the_sample_shows_a_running_and_an_ended_workflow() {
+    for (kind, running) in [("running", true), ("ended", false)] {
+        let mut h = Harness::new();
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        h.chats.dev_sample("claude", t(h.now));
+        let sample = h.chats.sessions.get_mut("sample").unwrap();
+        sample
+            .workflows
+            .set_runs(devsample::workflow_runs(kind, wall));
+        h.msg(ChatMsg::OpenWorkflow(devsample::WORKFLOW_CALL.into()));
+        let s = h.screen();
+        assert_eq!(s.workflows.len(), usize::from(running));
+        let sheet = s.workflow.unwrap();
+        assert_eq!(sheet.state, if running { 0 } else { 2 });
+    }
+}
