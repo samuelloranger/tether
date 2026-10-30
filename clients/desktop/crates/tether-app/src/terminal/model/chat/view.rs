@@ -453,6 +453,20 @@ pub struct WorkflowSheetView {
 pub struct ChatScreen {
     pub active: bool,
     pub tabs: Vec<TabView>,
+    pub sidebar: Vec<SidebarView>,
+    pub archived: bool,
+    pub archived_count: usize,
+    pub actions: Option<(String, String, bool, bool)>,
+    pub rename: Option<String>,
+    pub rename_title: String,
+    pub branch: Option<(String, String, String)>,
+    pub parent: String,
+    pub parent_context: String,
+    pub parent_available: bool,
+    pub organization_error: String,
+    pub usage: Vec<UsageView>,
+    pub usage_freshness: String,
+
     pub header: HeaderView,
     pub rows: Vec<Row>,
     /// Sent while a turn runs and not started yet; shown above the composer, not in the transcript.
@@ -474,4 +488,19 @@ pub struct ChatScreen {
     pub viewer: Option<Option<Picture>>,
     pub new_chat: Option<NewChatView>,
     pub delete_title: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SidebarView {
+    pub section: String,
+    pub project_key: String,
+    pub collapsed: bool,
+    pub tab: Option<TabView>,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageView {
+    pub provider: String,
+    pub window: String,
+    pub used: Option<f32>,
+    pub reset: String,
 }

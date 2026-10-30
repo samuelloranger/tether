@@ -46,6 +46,13 @@ impl ChatFiles {
         Self { root, directory }
     }
 
+    pub fn branch(&self, name: &str) -> Option<super::organization::Branch> {
+        self.read(name, "branch")
+    }
+    pub fn save_branch(&self, name: &str, branch: &super::organization::Branch) -> io::Result<()> {
+        self.write(name, "branch", branch)
+    }
+
     pub fn directory(&self) -> &Path {
         &self.directory
     }
@@ -187,7 +194,7 @@ impl ChatFiles {
 
     /// Removes everything kept for a chat: journal, snapshot, outbox, title and images.
     pub fn clear(&self, name: &str) {
-        for kind in [JOURNAL, SNAPSHOT, OUTBOX, TITLE, AGENT] {
+        for kind in [JOURNAL, SNAPSHOT, OUTBOX, TITLE, AGENT, "branch"] {
             self.remove(name, kind);
         }
         let _ = fs::remove_dir_all(self.images_directory(name));
@@ -217,6 +224,24 @@ mod tests {
             &journal,
             builder.state().clone(),
         )
+    }
+
+    #[test]
+    fn branch_context_and_draft_survive_reopen_and_clear_with_chat() {
+        let (_dir, files) = files();
+        let branch = super::super::organization::Branch {
+            parent: super::super::organization::Parent {
+                name: "parent".into(),
+                title: "Parent".into(),
+                method: "copy".into(),
+            },
+            context: "history".into(),
+            draft: "edited prompt".into(),
+        };
+        files.save_branch("child", &branch).unwrap();
+        assert_eq!(files.branch("child"), Some(branch));
+        files.clear("child");
+        assert!(files.branch("child").is_none());
     }
 
     #[test]

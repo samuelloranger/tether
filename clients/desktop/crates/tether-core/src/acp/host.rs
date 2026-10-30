@@ -150,6 +150,7 @@ pub struct ChatSummary {
     pub multi_client: bool,
     /// Background commands the holder counts as running, from `acp status`.
     pub tasks: u32,
+    pub organization: super::organization::Organization,
 }
 
 impl ChatSummary {
@@ -166,6 +167,7 @@ impl ChatSummary {
             has_status: false,
             multi_client: false,
             tasks: 0,
+            organization: Default::default(),
         }
     }
 
@@ -219,6 +221,7 @@ pub fn parse_listing(output: &str) -> Listing {
                 has_status: false,
                 multi_client: false,
                 tasks: 0,
+                organization: Default::default(),
             })
         })();
         match parsed {
@@ -295,8 +298,14 @@ fn status_chat(line: &str) -> Option<ChatSummary> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        organization: serde_json::from_value(Value::Object(object.clone())).unwrap_or_default(),
         turn,
-        host_title: title,
+        host_title: object
+            .get("customTitle")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or(title),
         has_status: true,
         multi_client: object.get("multiClient").and_then(Value::as_bool) == Some(true),
         tasks: number_int(object.get("tasks"))
@@ -391,9 +400,9 @@ pub fn drawer_rows(
         .map(|chat| {
             let folder = folder_name(&chat.cwd);
             let stored = titles.get(&chat.name).filter(|t| !t.is_empty());
-            let title = chat
-                .host_title
-                .clone()
+            let title = (!chat.organization.custom_title.is_empty())
+                .then(|| chat.organization.custom_title.clone())
+                .or_else(|| chat.host_title.clone())
                 .or_else(|| stored.cloned())
                 .unwrap_or_else(|| folder.clone());
             let subtitle = if title == folder {

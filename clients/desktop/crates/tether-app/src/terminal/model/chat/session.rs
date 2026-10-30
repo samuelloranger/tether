@@ -135,6 +135,8 @@ pub struct Session {
     pub expanded: HashSet<String>,
     pub window_start: Option<i64>,
     pub draft: String,
+    pub branch: Option<tether_core::acp::organization::Branch>,
+    branch_write_pending: Option<AcpId>,
     /// Character offset of the caret in `draft`.
     pub cursor: usize,
     pub palette_dismissed: Option<String>,
@@ -179,6 +181,8 @@ impl Session {
         let outbox = files
             .map(|f| Outbox::restoring(&f.outbox(name)))
             .unwrap_or_default();
+        let branch = files.and_then(|f| f.branch(name));
+        let draft = branch.as_ref().map(|b| b.draft.clone()).unwrap_or_default();
         Self {
             name: name.to_string(),
             cwd: cwd.to_string(),
@@ -226,8 +230,10 @@ impl Session {
             left: false,
             expanded: HashSet::new(),
             window_start: None,
-            draft: String::new(),
-            cursor: 0,
+            cursor: draft.chars().count(),
+            draft,
+            branch,
+            branch_write_pending: None,
             palette_dismissed: None,
             attachments: Vec::new(),
             attach_error: None,
@@ -304,7 +310,7 @@ impl Session {
     }
 
     pub fn can_send(&self) -> bool {
-        self.can_interact() && !self.needs_sign_in()
+        self.can_interact() && !self.needs_sign_in() && self.branch_write_pending.is_none()
     }
 
     pub fn needs_sign_in(&self) -> bool {
@@ -1066,18 +1072,27 @@ impl Session {
     }
 
     fn write(&mut self, bytes: Vec<u8>, tag: Option<WriteTag>, ctx: &mut Ctx<'_>) {
+        let ack = self.branch_write_pending.is_some()
+            && matches!(&tag,Some(WriteTag::Prompt{out,..}) if self.branch_write_pending.as_ref()==out.id.as_ref());
         ctx.out.jobs.push(ChatJob::Write {
             name: self.name.clone(),
             generation: self.generation,
             bytes,
             tag,
-            ack: false,
+            ack,
         });
     }
 
     /// A Stop lands first and is journaled after, as iOS does: a cancel that never reached the
     /// agent must not read "Stopped" or drop the queued messages.
     pub fn on_written(&mut self, generation: u64, tag: WriteTag, ctx: &mut Ctx<'_>) {
+        if let WriteTag::Prompt { out, .. } = &tag {
+            if self.branch_write_pending.as_ref() == out.id.as_ref() {
+                self.branch_write_pending = None;
+                self.touched();
+            }
+            return;
+        }
         if generation != self.generation || !matches!(tag, WriteTag::Cancel(_)) {
             return;
         }
@@ -1158,6 +1173,9 @@ impl Session {
                 images,
                 lost,
             } => {
+                if self.branch_write_pending.as_ref() == out.id.as_ref() {
+                    self.branch_write_pending = None;
+                }
                 undo(self, &out, ctx);
                 self.outbox.record_failure(&text, images, lost, None);
                 self.persist_outbox(ctx);
@@ -1242,6 +1260,12 @@ impl Session {
         let images = self.ready_images();
         self.deliver(text, images, 0, ctx);
         self.draft.clear();
+        if let Some(branch) = self.branch.as_mut() {
+            branch.draft.clear();
+            if let Some(files) = ctx.files {
+                saved(files.save_branch(&self.name, branch));
+            }
+        }
         self.cursor = 0;
         self.attachments.clear();
         self.attach_error = None;
@@ -1267,12 +1291,37 @@ impl Session {
         let store = ctx.files.map(|f| f.images(&self.name));
         let live = matches!(self.chan, Chan::Live(_));
         let prompt = match (self.client.as_mut(), live) {
-            (Some(client), true) => client.prompt(&text, &images, store.as_ref()).ok(),
+            (Some(client), true) => client
+                .prompt_with_context(
+                    &text,
+                    &images,
+                    store.as_ref(),
+                    self.branch.as_ref().map(|b| b.context.as_str()),
+                )
+                .ok(),
             _ => None,
         };
         match prompt {
             Some(out) => {
+                if self.branch.as_ref().is_some_and(|b| !b.context.is_empty())
+                    && self.client.as_ref().is_some_and(|c| {
+                        c.journal()
+                            .entries
+                            .iter()
+                            .filter(|e| e.kind == tether_core::acp::journal::EntryKind::Prompt)
+                            .count()
+                            == 1
+                    })
+                {
+                    self.branch_write_pending = out.id.clone();
+                }
                 self.persist_journal(ctx);
+                if let Some(branch) = self.branch.as_mut() {
+                    branch.draft.clear();
+                    if let Some(files) = ctx.files {
+                        saved(files.save_branch(&self.name, branch));
+                    }
+                }
                 self.write(
                     out.line.clone(),
                     Some(WriteTag::Prompt {
@@ -1548,6 +1597,12 @@ impl Session {
                     self.palette_dismissed = None;
                 }
                 self.draft = text;
+                if let Some(branch) = self.branch.as_mut() {
+                    branch.draft.clone_from(&self.draft);
+                    if let Some(files) = ctx.files {
+                        saved(files.save_branch(&self.name, branch));
+                    }
+                }
                 self.cursor = cursor;
                 if self.mention_token().is_some() {
                     self.load_files(ctx);

@@ -1,5 +1,5 @@
 import { Tokens, Motion } from "tokens.slint";
-import { IconButton, Segment, ConfirmDialog, Linger } from "components.slint";
+import { IconButton, Segment, ConfirmDialog, Linger, PrimaryButton, SecondaryButton } from "components.slint";
 import { MdLinkVm, MdItemVm, MdTable, DiffLineVm } from "git.slint";
 import { Heat, TextDot } from "agents.slint";
 import { ScrollView } from "std-widgets.slint";
@@ -67,6 +67,9 @@ export struct ChatTabVm {
     active: bool,
     agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, -1 an agent not known here
 }
+
+export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, }
+export struct PlanUsageVm { provider: string, window: string, used: float, value: string, reset: string, }
 
 export struct NcChoiceVm {
     value: string,
@@ -183,6 +186,39 @@ export struct SavedSessionVm {
 export global ChatVm {
     in property <bool> active;
     in property <[ChatTabVm]> tabs;
+    in property <[ChatSideVm]> sidebar;
+    in property <bool> archived;
+    in property <int> archived-count;
+    in property <[PlanUsageVm]> plan-usage;
+    in property <string> usage-freshness;
+    in property <string> organization-error;
+    in property <string> actions-name;
+    in property <string> actions-title;
+    in property <bool> actions-pinned;
+    in property <bool> actions-archived;
+    in property <bool> rename-open;
+    in-out property <string> rename-title;
+    in property <bool> branch-open;
+    in-out property <string> branch-title;
+    in-out property <string> branch-prompt;
+    in property <string> branch-parent;
+    in property <string> parent-title;
+    in property <string> parent-context;
+    in property <bool> parent-available;
+    callback actions(string);
+    callback actions-close();
+    callback pin(string);
+    callback archive(string);
+    callback restore(string);
+    callback show-archived(bool);
+    callback collapse-project(string);
+    callback rename(string);
+    callback rename-save(string);
+    callback branch(string);
+    callback branch-create(string,string);
+    callback branch-cancel();
+    callback parent();
+    callback refresh-usage();
     // The tab strip's "+" menu: a new session, a new chat, or an earlier conversation.
     in-out property <bool> add-menu;
     in-out property <length> add-menu-x;
@@ -865,6 +901,9 @@ component Row inherits VerticalLayout {
                     }
                     if root.r.text != "": Para { text: root.r.text; }
                 }
+            }
+            HorizontalLayout { alignment: end;
+                SmallAction { text: "Branch & edit"; enabled: ChatVm.phase == 2 || ChatVm.phase == 4; clicked => { ChatVm.branch(root.r.key); } }
             }
         }
     }
@@ -1785,10 +1824,20 @@ component BottomBar inherits Rectangle {
 }
 
 export component ChatPane inherits Rectangle {
+    property <bool> parent-open: false;
+    property <string> source-title: ChatVm.title;
+    changed source-title => { root.parent-open = false; }
     background: Tokens.background;
     // Keys belong to the composer, never the PTY behind it.
     TouchArea { }
     VerticalLayout {
+        if ChatVm.parent-title != "": Rectangle { height: 44px; background: Tokens.surface;
+            HorizontalLayout { padding-left: 20px; padding-right: 20px; spacing: 8px;
+                Text { text: "Earlier context copied · branched from"; color: Tokens.text-faint; font-size: 12px; vertical-alignment: center; }
+                SmallAction { text: ChatVm.parent-title; enabled: ChatVm.parent-available; clicked => { ChatVm.parent(); } }
+                if ChatVm.parent-context != "": SmallAction { text: root.parent-open ? "Hide earlier messages" : "Show earlier messages"; clicked => { root.parent-open = !root.parent-open; } }
+            }
+        }
         Rectangle {
             vertical-stretch: 1;
             scroll := ScrollView {
@@ -1807,6 +1856,11 @@ export component ChatPane inherits Rectangle {
                     padding-bottom: 32px + ChatVm.queued.length * 40px;
                     spacing: 12px;
                     alignment: start;
+                    if root.parent-open && ChatVm.parent-context != "": VerticalLayout { spacing: 8px;
+                        Text { text: "Copied earlier context · read only"; color: Tokens.text-faint; font-size: 12px; }
+                        Wrapped { text: ChatVm.parent-context; ink: Tokens.text-secondary; font-size: 13px; }
+                        Rectangle { height: 1px; background: Tokens.border; }
+                    }
                     for r in ChatVm.rows: Row { r: r; }
                 }
             }
@@ -2537,7 +2591,7 @@ export component ChatSidebarRow inherits Rectangle {
         background: close-touch.has-hover ? Tokens.border : transparent;
         animate background { duration: Motion.fast; easing: ease-out; }
         Image {
-            source: @image-url("icons/close.svg");
+            source: @image-url("icons/more.svg");
             colorize: close-touch.has-hover ? Tokens.text : Tokens.text-secondary;
             animate colorize { duration: Motion.fast; easing: ease-out; }
             width: 10px;
@@ -2552,7 +2606,50 @@ export component ChatSidebarRow inherits Rectangle {
         width: 16px;
         height: 16px;
         mouse-cursor: pointer;
-        clicked => { ChatVm.delete(root.tab.name); }
+        clicked => { ChatVm.actions(root.tab.name); }
+    }
+}
+
+component ChatOrganizationDialog inherits Rectangle {
+    background: Tokens.background.with-alpha(0.65);
+    TouchArea { }
+    Rectangle {
+        width: min(500px,parent.width - 48px); height: min(content.preferred-height,parent.height - 48px);
+        x: (parent.width - self.width)/2; y: max(24px,(parent.height - self.height)/2 - 25px);
+        background: Tokens.surface; border-radius: 16px; border-width: 1px; border-color: Tokens.border;
+        content := VerticalLayout { padding: 24px; spacing: 14px;
+            Text { text: ChatVm.branch-open ? "Branch conversation" : ChatVm.rename-open ? "Rename chat" : ChatVm.actions-name != "" ? ChatVm.actions-title : "Chat action unavailable"; color: Tokens.text; font-size: 20px; font-weight: 600; overflow: elide; }
+            if ChatVm.organization-error != "": Text { text: ChatVm.organization-error; color: Tokens.warning; font-size: 13px; wrap: word-wrap; }
+            if ChatVm.branch-open: VerticalLayout { spacing: 12px;
+                Text { text: "Try another approach in a new chat. The original stays available."; wrap: word-wrap; color: Tokens.text-secondary; font-size: 13px; }
+                Text { text: "Before selected message · " + ChatVm.branch-parent; wrap: word-wrap; color: Tokens.text-faint; font-size: 12px; }
+                Text { text: "New chat name"; color: Tokens.text-secondary; font-size: 12px; }
+                Rectangle { height: 38px; background: Tokens.input; border-width: 1px; border-color: Tokens.border; border-radius: 8px;
+                    TextInput { x: 10px; width: parent.width - 20px; height: parent.height; text <=> ChatVm.branch-title; color: Tokens.text; vertical-alignment: center; single-line: true; }
+                }
+                Text { text: "Edit your prompt"; color: Tokens.text-secondary; font-size: 12px; }
+                Rectangle { height: 110px; background: Tokens.input; border-width: 1px; border-color: Tokens.border; border-radius: 8px;
+                    TextInput { x: 10px; y: 10px; width: parent.width - 20px; height: parent.height - 20px; text <=> ChatVm.branch-prompt; color: Tokens.text; wrap: word-wrap; }
+                }
+                Text { text: "Copy earlier messages"; color: Tokens.text; font-size: 13px; }
+                Text { text: "Starts a new agent session with earlier conversation text. Native branching at this message is unavailable. Files stay as they are."; color: Tokens.text-faint; wrap: word-wrap; font-size: 12px; }
+            }
+            if ChatVm.rename-open: Rectangle { height: 38px; background: Tokens.input; border-width: 1px; border-color: Tokens.border; border-radius: 8px;
+                TextInput { x: 10px; width: parent.width - 20px; height: parent.height; text <=> ChatVm.rename-title; color: Tokens.text; vertical-alignment: center; single-line: true; }
+            }
+            if ChatVm.actions-name != "" && !ChatVm.rename-open && !ChatVm.branch-open: VerticalLayout { spacing: 4px;
+                SmallAction { text: ChatVm.actions-pinned ? "Unpin chat" : "Pin chat"; clicked => { ChatVm.pin(ChatVm.actions-name); } }
+                SmallAction { text: "Rename…"; clicked => { ChatVm.rename(ChatVm.actions-name); } }
+                SmallAction { text: ChatVm.actions-archived ? "Restore chat" : "Archive chat"; clicked => { if (ChatVm.actions-archived) { ChatVm.restore(ChatVm.actions-name); } else { ChatVm.archive(ChatVm.actions-name); } } }
+                Text { text: "Archive hides this chat and keeps its history. An active agent keeps running."; font-size: 12px; wrap: word-wrap; color: Tokens.text-faint; }
+                SmallAction { text: "Delete…"; style: 2; clicked => { ChatVm.delete(ChatVm.actions-name); ChatVm.actions-close(); } }
+            }
+            HorizontalLayout { alignment: end; spacing: 8px;
+                SecondaryButton { text: ChatVm.branch-open || ChatVm.rename-open ? "Cancel" : "Done"; clicked => { if (ChatVm.branch-open) { ChatVm.branch-cancel(); } else { ChatVm.actions-close(); } } }
+                if ChatVm.branch-open: PrimaryButton { text: "Create branch"; enabled: ChatVm.branch-title != "" && ChatVm.branch-prompt != ""; clicked => { ChatVm.branch-create(ChatVm.branch-title,ChatVm.branch-prompt); } }
+                if ChatVm.rename-open: PrimaryButton { text: "Save"; clicked => { ChatVm.rename-save(ChatVm.rename-title); } }
+            }
+        }
     }
 }
 
@@ -2561,6 +2658,7 @@ export component ChatOverlays inherits Rectangle {
     if ChatVm.active && ChatVm.ctl-open: ChatControls { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     if ChatVm.active && ChatVm.review-open: ChatReview { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     if ChatVm.active && ChatVm.wf-open: ChatWorkflow { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    if ChatVm.actions-name != "" || ChatVm.rename-open || ChatVm.branch-open || ChatVm.organization-error != "": ChatOrganizationDialog { }
     viewer := Linger { open: ChatVm.viewer-open; }
     new-chat := Linger { open: ChatVm.nc-open; }
     delete := Linger { open: ChatVm.delete-title != ""; }
@@ -2574,4 +2672,29 @@ export component ChatOverlays inherits Rectangle {
         confirmed => { ChatVm.delete-confirmed(); }
         cancelled => { ChatVm.delete-cancelled(); }
     }
+}
+
+export component ChatPlanUsage inherits VerticalLayout {
+    padding-left: 10px; padding-right: 10px; padding-top: 8px; padding-bottom: 8px; spacing: 7px;
+    Rectangle { height: 1px; background: Tokens.border; }
+    HorizontalLayout { spacing: 4px;
+        Text { text: "Plan usage · host accounts"; color: Tokens.text-faint; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+        IconButton { icon: @image-url("icons/refresh.svg"); size: 26px; tooltip: "Refresh account usage (once per minute)"; clicked => { ChatVm.refresh-usage(); } }
+    }
+    HorizontalLayout { spacing: 12px;
+        for provider[i] in ["Claude", "Codex"]: VerticalLayout { spacing: 5px; horizontal-stretch: 1;
+            Text { text: provider; font-size: 12px; font-weight: 600; color: Tokens.text; }
+            for slot[j] in [0,1]: VerticalLayout { spacing: 3px;
+                HorizontalLayout {
+                    Text { text: ChatVm.plan-usage[i*2+j].window; font-size: 11px; color: Tokens.text-faint; horizontal-stretch: 1; }
+                    Text { text: ChatVm.plan-usage[i*2+j].value; font-size: 11px; color: Tokens.text-secondary; }
+                }
+                Rectangle { height: 3px; background: Tokens.raised; border-radius: 2px;
+                    Rectangle { height: parent.height; width: parent.width * clamp(ChatVm.plan-usage[i*2+j].used / 100, 0, 1); background: ChatVm.plan-usage[i*2+j].used >= 80 ? Tokens.warning : Tokens.accent; border-radius: 2px; }
+                }
+                Text { text: ChatVm.plan-usage[i*2+j].reset; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
+            }
+        }
+    }
+    Text { text: ChatVm.usage-freshness; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
 }

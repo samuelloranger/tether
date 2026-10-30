@@ -120,6 +120,139 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             name: row.name,
         });
     }
+    screen.archived = chats.archived;
+    screen.archived_count = ordered.iter().filter(|c| c.organization.archived).count();
+    screen.organization_error = chats.organization_error.clone();
+    let mut sidebar = ordered
+        .iter()
+        .filter(|c| {
+            if chats.archived {
+                c.organization.archived
+            } else {
+                !c.organization.archived || c.turn == host::HostTurn::Waiting
+            }
+        })
+        .collect::<Vec<_>>();
+    let group = |c: &host::ChatSummary| -> (u8, String) {
+        if c.organization.archived && c.turn == host::HostTurn::Waiting && !chats.archived {
+            return (0, "Needs you · archived".into());
+        }
+        if c.organization.pinned && !chats.archived {
+            return (1, "Pinned".into());
+        }
+        let path = if c.organization.project_root.is_empty() {
+            &c.cwd
+        } else {
+            &c.organization.project_root
+        };
+        (2, path.clone())
+    };
+    sidebar.sort_by_key(|c| (group(c), std::cmp::Reverse(c.created)));
+    let mut previous = None;
+    for c in sidebar {
+        let key = group(c);
+        let collapsed = chats.collapsed_projects.contains(&key.1);
+        if previous.as_ref() != Some(&key) {
+            let label = if key.0 < 2 {
+                key.1.clone()
+            } else {
+                tether_core::acp::format::folder_name(&key.1)
+            };
+            screen.sidebar.push(SidebarView {
+                section: label,
+                project_key: key.1.clone(),
+                collapsed,
+                tab: None,
+            });
+            previous = Some(key);
+        }
+        if !collapsed && let Some(tab) = screen.tabs.iter().find(|t| t.name == c.name) {
+            let mut tab = tab.clone();
+            if !c.organization.custom_title.is_empty() {
+                tab.title = c.organization.custom_title.clone();
+            }
+            screen.sidebar.push(SidebarView {
+                section: String::new(),
+                project_key: String::new(),
+                collapsed: false,
+                tab: Some(tab),
+            });
+        }
+    }
+    if let Some(name) = &chats.actions
+        && let Some(c) = ordered.iter().find(|c| &c.name == name)
+    {
+        screen.actions = Some((
+            name.clone(),
+            chats.title_of(c),
+            c.organization.pinned,
+            c.organization.archived,
+        ));
+    }
+    screen.rename = chats.rename.clone();
+    screen.rename_title = chats
+        .rename
+        .as_ref()
+        .and_then(|name| ordered.iter().find(|c| &c.name == name))
+        .map(|c| chats.title_of(c))
+        .unwrap_or_default();
+    if let Some(dialog) = &chats.branch_dialog {
+        screen.branch = Some((
+            dialog.title.clone(),
+            dialog.branch.draft.clone(),
+            dialog.branch.parent.title.clone(),
+        ));
+    }
+    let wall = unix_now();
+    for (provider, usage) in [
+        ("Claude", &chats.plan_usage.claude),
+        ("Codex", &chats.plan_usage.codex),
+    ] {
+        for (window, value) in [("5 hours", &usage.five_hour), ("Weekly", &usage.weekly)] {
+            let valid = value.as_ref().filter(|w| w.valid());
+            screen.usage.push(UsageView {
+                provider: provider.into(),
+                window: window.into(),
+                used: valid.map(|w| w.used_percent as f32),
+                reset: valid.map(|w| w.reset_text(wall)).unwrap_or_else(|| {
+                    if chats.usage_loading {
+                        "Loading…".into()
+                    } else {
+                        "Unavailable".into()
+                    }
+                }),
+            });
+        }
+    }
+    let oldest = [
+        chats.plan_usage.claude.updated_at,
+        chats.plan_usage.codex.updated_at,
+    ]
+    .into_iter()
+    .filter(|n| *n > 0)
+    .min();
+    screen.usage_freshness = if let Some(at) = oldest {
+        let mins = (wall - at).max(0) / 60;
+        format!(
+            "Updated {}m ago{}",
+            mins,
+            if !chats.connected || chats.plan_usage.claude.stale || chats.plan_usage.codex.stale {
+                " · stale"
+            } else {
+                ""
+            }
+        )
+    } else if chats.usage_loading {
+        "Loading account usage…".into()
+    } else {
+        "Usage unavailable · check host sign-in".into()
+    };
+    screen.tabs.retain(|t| {
+        ordered
+            .iter()
+            .find(|c| c.name == t.name)
+            .is_none_or(|c| !c.organization.archived || t.active)
+    });
     if let Some(name) = &chats.delete_prompt {
         screen.delete_title = screen
             .tabs
@@ -191,7 +324,11 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let (phase_n, word) = phase(s.link.phase());
     let status = StatusLine::new(state);
     screen.header = HeaderView {
-        title: s.title(),
+        title: ordered
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| chats.title_of(c))
+            .unwrap_or_else(|| s.title()),
         folder: s.cwd.clone(),
         folder_copied: chats.folder_copied_at.is_some(),
         phase: phase_n,
@@ -216,6 +353,21 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         agent: agent_index(s.agent()),
     };
     screen.notice = s.notice.clone().unwrap_or_default();
+    let parent = s.branch.as_ref().map(|b| &b.parent).or_else(|| {
+        ordered
+            .iter()
+            .find(|c| c.name == name)
+            .and_then(|c| c.organization.parent.as_ref())
+    });
+    screen.parent_context = s
+        .branch
+        .as_ref()
+        .map(|b| b.context.clone())
+        .unwrap_or_default();
+    if let Some(parent) = parent {
+        screen.parent = parent.title.clone();
+        screen.parent_available = ordered.iter().any(|c| c.name == parent.name);
+    }
 
     let mut ctx = RowCtx {
         host: &chats.host,

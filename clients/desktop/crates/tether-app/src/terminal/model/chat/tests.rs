@@ -2218,3 +2218,195 @@ fn the_sample_shows_a_running_and_an_ended_workflow() {
         assert_eq!(sheet.state, if running { 0 } else { 2 });
     }
 }
+
+#[test]
+fn project_sidebar_pins_once_and_keeps_archived_waiting_chats_discoverable() {
+    let mut h = Harness::new();
+    h.exec(|t|*t==ExecTag::Status,concat!(
+        r#"{"name":"p","state":"running","cwd":"/srv/a","created":1,"pinned":true,"customTitle":"Pinned title"}"#,"\n",
+        r#"{"name":"w","state":"running","cwd":"/srv/b","created":2,"archived":true,"turn":"waiting"}"#,"\n",
+        r#"{"name":"a","state":"ended","cwd":"/srv/a","created":3,"archived":true}"#));
+    let s = h.screen();
+    assert_eq!(
+        s.sidebar
+            .iter()
+            .filter_map(|r| r.tab.as_ref())
+            .filter(|t| t.name == "p")
+            .count(),
+        1
+    );
+    assert!(s.sidebar.iter().any(|r| r.section == "Pinned"));
+    assert!(
+        s.sidebar
+            .iter()
+            .any(|r| r.section == "Needs you · archived")
+    );
+    assert!(
+        !s.sidebar
+            .iter()
+            .filter_map(|r| r.tab.as_ref())
+            .any(|t| t.name == "a")
+    );
+    h.msg(ChatMsg::Archived(true));
+    let s = h.screen();
+    assert!(
+        s.sidebar
+            .iter()
+            .filter_map(|r| r.tab.as_ref())
+            .any(|t| t.name == "a")
+    );
+}
+
+#[test]
+fn archiving_does_not_issue_a_kill_and_restoring_uses_metadata() {
+    let mut h = Harness::new();
+    h.take();
+    h.msg(ChatMsg::Archive("chat".into()));
+    let jobs = h.take();
+    assert!(jobs.iter().any(|j|matches!(j,ChatJob::Exec{tag:ExecTag::Organize{name},command} if name=="chat" && command.contains("archived"))));
+    assert!(!jobs.iter().any(|j| matches!(
+        j,
+        ChatJob::Exec {
+            tag: ExecTag::Kill { .. },
+            ..
+        }
+    )));
+    h.msg(ChatMsg::Restore("chat".into()));
+    assert!(h.take().iter().any(|j|matches!(j,ChatJob::Exec{tag:ExecTag::Organize{..},command} if command.contains("false"))));
+}
+
+#[test]
+fn usage_polling_is_bounded_and_hidden_sidebar_never_polls() {
+    let mut h = Harness::new();
+    h.take();
+    h.chats.usage_loading = false;
+    h.chats.usage_asked = Some(t(0));
+    h.run(|c, _, out| c.on_tick(t(59999), out));
+    assert!(!h.take().iter().any(|j| matches!(
+        j,
+        ChatJob::Exec {
+            tag: ExecTag::Usage,
+            ..
+        }
+    )));
+    h.chats.usage_visible = false;
+    h.run(|c, _, out| c.on_tick(t(60001), out));
+    assert!(!h.take().iter().any(|j| matches!(
+        j,
+        ChatJob::Exec {
+            tag: ExecTag::Usage,
+            ..
+        }
+    )));
+    h.chats.usage_visible = true;
+    h.run(|c, _, out| c.on_tick(t(60001), out));
+    assert_eq!(
+        h.take()
+            .iter()
+            .filter(|j| matches!(
+                j,
+                ChatJob::Exec {
+                    tag: ExecTag::Usage,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn creating_a_branch_preserves_original_and_opens_distinct_unsent_draft() {
+    let mut h = Harness::new();
+    let (parent, _) = h.live_chat();
+    h.msg(ChatMsg::DraftEdited {
+        text: "original prompt".into(),
+        cursor_byte: 15,
+    });
+    h.msg(ChatMsg::Send);
+    let id = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .find(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .unwrap()
+        .id;
+    h.take();
+    h.msg(ChatMsg::Branch(format!("item:{id}")));
+    assert!(h.screen().branch.is_some());
+    h.msg(ChatMsg::BranchCreate {
+        title: "Alternative".into(),
+        prompt: "edited prompt".into(),
+    });
+    let child = h.chats.active().unwrap().to_string();
+    assert_ne!(child, parent);
+    assert_eq!(h.chats.active_session().unwrap().draft, "edited prompt");
+    assert_eq!(h.files.branch(&child).unwrap().parent.name, parent);
+    assert!(h.chats.sessions.get(&parent).unwrap().state().items.iter().any(|i|matches!(&i.kind,tether_core::acp::reducer::ItemKind::User{text,..} if text=="original prompt")));
+    assert!(
+        !h.writes().iter().any(|s| s.contains("session/prompt")),
+        "create must not send the prompt"
+    );
+}
+
+#[test]
+fn first_branch_seed_write_blocks_overlap_and_failure_keeps_explicit_retry() {
+    use tether_core::acp::organization::{Branch, Parent};
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.take();
+    h.chats.sessions.get_mut(&name).unwrap().branch = Some(Branch {
+        parent: Parent {
+            name: "parent".into(),
+            title: "Parent".into(),
+            method: "copy".into(),
+        },
+        context: "Earlier context".into(),
+        draft: "first".into(),
+    });
+    h.msg(ChatMsg::DraftEdited {
+        text: "first".into(),
+        cursor_byte: 5,
+    });
+    h.msg(ChatMsg::Send);
+    let tag = h
+        .take()
+        .into_iter()
+        .find_map(|j| match j {
+            ChatJob::Write {
+                tag: Some(tag),
+                ack: true,
+                ..
+            } => Some(tag),
+            _ => None,
+        })
+        .expect("first seed write requests acknowledgement");
+    assert!(!h.chats.active_session().unwrap().can_send());
+    h.msg(ChatMsg::DraftEdited {
+        text: "second".into(),
+        cursor_byte: 6,
+    });
+    h.msg(ChatMsg::Send);
+    assert!(
+        h.writes().is_empty(),
+        "second prompt must wait for first send outcome"
+    );
+    h.msg(ChatMsg::WriteFailed {
+        name: name.clone(),
+        generation,
+        tag,
+    });
+    assert!(h.chats.active_session().unwrap().can_send());
+    assert_eq!(h.files.outbox(&name)[0].text, "first");
+    let retry = h.chats.active_session().unwrap().outbox.persisted()[0].id;
+    h.msg(ChatMsg::Retry(retry.to_string()));
+    assert!(
+        h.writes()
+            .iter()
+            .any(|wire| wire.contains("tether/branchContext")),
+        "explicit retry keeps the context"
+    );
+}

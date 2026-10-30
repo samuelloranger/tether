@@ -450,7 +450,17 @@ fn decode_update(update: &Json, images: Option<&dyn ImageSink>) -> Update {
             Some(text) => Update::AgentThought { text },
             None => unknown(),
         },
-        "user_message_chunk" => match content_text(update.get("content")) {
+        "user_message_chunk" => match update
+            .get("content")
+            .filter(|block| {
+                block
+                    .get("_meta")
+                    .and_then(|m| m.get("tether/branchContext"))
+                    .and_then(Value::as_bool)
+                    != Some(true)
+            })
+            .and_then(|content| content_text(Some(content)))
+        {
             Some(text) => Update::UserMessage {
                 text,
                 message_id: string(update.get("messageId")),

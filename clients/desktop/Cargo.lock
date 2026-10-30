@@ -6113,6 +6113,7 @@ dependencies = [
  "nix",
  "rfd",
  "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "smithay-client-toolkit",

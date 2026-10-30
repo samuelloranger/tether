@@ -17,6 +17,7 @@ pub mod lines;
 pub mod mention;
 pub mod message;
 pub mod options;
+pub mod organization;
 pub mod question;
 pub mod reducer;
 pub mod slash;
