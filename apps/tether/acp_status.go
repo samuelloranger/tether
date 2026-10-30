@@ -36,7 +36,13 @@ type acpStatusLine struct {
 	// Spawn is the command that started the agent, so a client can tell which agent a chat runs.
 	Spawn string `json:"spawn,omitempty"`
 	// MultiClient: the session's holder lets several clients attach at once (absent from older ones).
-	MultiClient bool `json:"multiClient,omitempty"`
+	MultiClient       bool       `json:"multiClient,omitempty"`
+	Pinned            bool       `json:"pinned,omitempty"`
+	Archived          bool       `json:"archived,omitempty"`
+	CustomTitle       string     `json:"customTitle,omitempty"`
+	ProjectRoot       string     `json:"projectRoot,omitempty"`
+	Parent            *acpParent `json:"parent,omitempty"`
+	OrganizationError string     `json:"organizationError,omitempty"`
 }
 
 func acpStatusOf(name string) (*acpStatusLine, error) {
@@ -45,6 +51,14 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 		return nil, err
 	}
 	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient, Spawn: m.Spawn}
+	organization, err := readACPOrganization(name)
+	if err != nil {
+		// Ancillary metadata must never hide a healthy agent or its pending approval.
+		organization = acpOrganization{}
+		l.OrganizationError = "Chat organization could not be read"
+	}
+	l.Pinned, l.Archived, l.CustomTitle, l.Parent = organization.Pinned, organization.Archived, organization.Title, organization.Parent
+	l.ProjectRoot = acpProjectRoot(m.Cwd)
 	if metaRunning(m) {
 		l.State = "running"
 		if m.Turn == "working" || m.Turn == "waiting" {
@@ -58,7 +72,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 	return l, nil
 }
 
-// acpStatus prints one JSON object per session, read from meta.json alone.
+// acpStatus prints one JSON object per session without contacting its daemon.
 func acpStatus(names []string, w io.Writer) error {
 	enc := json.NewEncoder(w)
 	if len(names) == 0 {

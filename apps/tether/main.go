@@ -183,6 +183,8 @@ func usage() {
                                              title, cwd, created, logBytes, endedReason (exit 3 if unknown)
   acp sessions CWD [--limit N] [--agent-cmd CMD]
                                              the agent's saved conversations for CWD as JSON lines, newest first
+  acp organize NAME --json PATCH             patch pin/archive/title/branch-parent metadata without stopping the agent
+  acp usage [--json]                         Claude and Codex account 5-hour/weekly quotas and reset times
   list                                       list registered phones
   remove <token>                             forget a phone
 `)
