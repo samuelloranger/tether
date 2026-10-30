@@ -100,6 +100,15 @@ struct ChatToolCall: Codable, Equatable, Sendable {
     isRunning || (subagent?.background == true && children.contains { $0.isRunning })
   }
 
+  static let writingCommand = "Writing command…"
+
+  /// The adapter announces a command as `Terminal` before the model has written it; the
+  /// update that carries the command replaces the title.
+  var displayTitle: String {
+    kind == .execute && status == .pending && title == "Terminal" && (terminalData ?? "").isEmpty
+      ? Self.writingCommand : title
+  }
+
   var subagentTitle: String {
     if let description = subagent?.description, !description.isEmpty { return description }
     return title == "Task" || title == "Agent" ? "Subagent" : title
@@ -248,7 +257,7 @@ struct ChatState: Codable, Equatable, Sendable {
       guard let latest = call.children.last(where: { $0.isRunning }) ?? call.children.last else {
         return call.subagentTitle
       }
-      return "\(call.subagentTitle) \u{00B7} \(latest.title)"
+      return "\(call.subagentTitle) \u{00B7} \(latest.displayTitle)"
     }
     return nil
   }

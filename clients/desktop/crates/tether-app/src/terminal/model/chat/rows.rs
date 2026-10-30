@@ -436,7 +436,7 @@ fn tool(
     out: &mut Vec<Entry>,
 ) {
     let file = call.diff.as_ref().map(|d| diff::file_for(d, &s.cwd));
-    let short = two_lines(&call.title);
+    let short = two_lines(call.display_title());
     // A Workflow row the host lists opens the run's sheet instead of unfolding.
     let sheet = s.workflow_listed(call);
     let shown = s.tool_status(call);
@@ -459,7 +459,7 @@ fn tool(
             },
             title: short
                 .filter(|_| !open)
-                .unwrap_or_else(|| call.title.clone()),
+                .unwrap_or_else(|| call.display_title().to_string()),
             subtitle: String::new(),
             state: status(shown, running || call.is_background_running()),
             added: file.as_ref().map_or(0, |f| f.added),

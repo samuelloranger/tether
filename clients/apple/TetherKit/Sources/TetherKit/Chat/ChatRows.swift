@@ -464,7 +464,7 @@ struct ToolCallRow: View {
     ToolRowLayout(
       symbol: call.images.isEmpty ? call.kind.symbolName : "photo",
       tint: call.status == .failed ? TetherColors.danger : TetherColors.textFaint,
-      title: call.title,
+      title: call.displayTitle,
       titleTint: call.status == .failed ? TetherColors.danger : TetherColors.textSecondary
     ) {
       HStack(spacing: 8) {
@@ -490,7 +490,7 @@ struct ToolCallRow: View {
     }
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(call.title), \(call.isBackgroundRunning ? "running in the background" : statusWord)")
+    .accessibilityLabel("\(call.displayTitle), \(call.isBackgroundRunning ? "running in the background" : statusWord)")
     .accessibilityHint(
       open != nil ? "Shows the workflow's phases and agents"
         : expandable ? (expanded ? "Hides the details" : "Shows the details") : "")
