@@ -2505,3 +2505,20 @@ fn dropping_while_a_branch_is_pending_keeps_the_dialog_for_a_retry() {
     h.msg(ChatMsg::BranchCancel);
     assert!(h.chats.branch_dialog.is_none(), "cancel works again");
 }
+
+#[test]
+fn an_organize_reply_keeps_the_project_from_status() {
+    let mut h = Harness::new();
+    h.exec(
+        |t| *t == ExecTag::Status,
+        r#"{"name":"chat","state":"running","logBytes":10,"cwd":"/home/sam/api/src","created":100,"turn":"idle","projectRoot":"/home/sam/api"}"#,
+    );
+    h.msg(ChatMsg::Archive("chat".into()));
+    h.exec(
+        |tag| matches!(tag, ExecTag::Organize { name } if name == "chat"),
+        r#"{"pinned":true,"archived":false}"#,
+    );
+    let chat = h.chats.listed.iter().find(|c| c.name == "chat").unwrap();
+    assert!(chat.organization.pinned);
+    assert_eq!(chat.organization.project_root, "/home/sam/api");
+}

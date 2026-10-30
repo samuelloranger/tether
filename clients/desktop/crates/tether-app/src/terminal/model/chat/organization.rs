@@ -143,7 +143,12 @@ impl Chats {
                             .chain(self.provisional.iter_mut())
                             .filter(|c| &c.name == name)
                         {
+                            // The organize reply has no projectRoot; only status carries it.
+                            let root = std::mem::take(&mut chat.organization.project_root);
                             chat.organization = metadata.clone();
+                            if chat.organization.project_root.is_empty() {
+                                chat.organization.project_root = root;
+                            }
                         }
                         if self
                             .pending_branch
