@@ -72,16 +72,45 @@ func TestACPArchiveAndPinPreventRetentionWithoutChangingAgent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := acpOrganize([]string{"ordinary", "--json", `{"title":"Old title","parent":{"name":"parent","title":"Old parent","method":"copy"}}`}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
 	pruneEnded("")
 	if !exists("archive") || !exists("pin") || exists("ordinary") {
 		t.Fatal("retention ignored explicit organization")
+	}
+	if _, err := os.Stat(acpOrganizationPath("ordinary")); !os.IsNotExist(err) {
+		t.Fatal("pruned chat left stale organization", err)
 	}
 	if err := acpOrganize([]string{"archive", "--json", `{"archived":false}`}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	pruneEnded("")
-	if exists("archive") {
-		t.Fatal("unarchived old chat should follow normal retention")
+	if !exists("archive") {
+		t.Fatal("restoring old history must grant a fresh retention period")
+	}
+	if _, err := acpStatusOf("archive"); err != nil {
+		t.Fatal("restored chat disappeared from status", err)
+	}
+}
+
+func TestACPCorruptOrganizationDoesNotHideLiveStatus(t *testing.T) {
+	acpEnv(t)
+	writeEnded(t, "chat", time.Now().Add(-48*time.Hour).Unix(), 0)
+	if err := os.MkdirAll(filepath.Dir(acpOrganizationPath("chat")), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(acpOrganizationPath("chat"), []byte("broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := acpStatusOf("chat")
+	if err != nil || l.Name != "chat" || l.OrganizationError == "" {
+		t.Fatalf("hidden chat: %+v %v", l, err)
+	}
+	t.Setenv("TETHER_ACP_KEEP_ENDED", "1h")
+	pruneEnded("")
+	if !exists("chat") {
+		t.Fatal("corrupt organization permitted pruning")
 	}
 }
 

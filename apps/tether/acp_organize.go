@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -19,6 +20,8 @@ type acpOrganization struct {
 	Archived bool       `json:"archived"`
 	Title    string     `json:"title"`
 	Parent   *acpParent `json:"parent,omitempty"`
+	// Restoring an old history grants it a fresh normal retention period.
+	RestoredAt int64 `json:"restoredAt,omitempty"`
 }
 
 type acpParent struct {
@@ -96,9 +99,15 @@ func acpOrganize(args []string, w io.Writer) error {
 			return err
 		}
 		if patch.Pinned != nil {
+			if out.Pinned && !*patch.Pinned {
+				out.RestoredAt = time.Now().Unix()
+			}
 			out.Pinned = *patch.Pinned
 		}
 		if patch.Archived != nil {
+			if out.Archived && !*patch.Archived {
+				out.RestoredAt = time.Now().Unix()
+			}
 			out.Archived = *patch.Archived
 		}
 		if patch.Title != nil {

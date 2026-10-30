@@ -157,7 +157,9 @@ holder record. Status adds `customTitle`, `pinned`, `archived`, `parent`, and `p
 These fields are additive; the original `title` still means the agent's title. Organization
 is stored in private sidecar files outside the holder directory, so daemon writes cannot
 overwrite it. Archive does not stop or delete a chat. Pinned and archived histories are
-exempt from automatic retention; restoring/unpinning makes normal retention apply again.
+exempt from automatic retention; restoring/unpinning grants a fresh normal retention period.
+Unreadable organization metadata leaves the agent visible with an `organizationError` and
+conservatively prevents pruning until the metadata can be recovered.
 
 `acp usage --json` reads the Claude and Codex accounts signed in on this host:
 

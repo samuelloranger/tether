@@ -147,17 +147,27 @@ func pruneEnded(except string) {
 			}
 			at = st.ModTime()
 		}
+		if restored := time.Unix(organization.RestoredAt, 0); restored.After(at) {
+			at = restored
+		}
 		if time.Since(at) < keep {
 			continue
 		}
 		_ = withSessionLock("acp-organization", func() error {
 			// An archive made after the earlier read wins over retention.
 			current, err := readACPOrganization(e.Name())
-			if err != nil || current.Archived || current.Pinned {
+			if err != nil || current.Archived || current.Pinned || time.Since(time.Unix(current.RestoredAt, 0)) < keep {
 				return nil
 			}
 			_ = os.RemoveAll(filepath.Dir(m.Sock))
-			return os.RemoveAll(acpDir(e.Name()))
+			if err := os.RemoveAll(acpDir(e.Name())); err != nil {
+				return err
+			}
+			err = os.Remove(acpOrganizationPath(e.Name()))
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
 		})
 	}
 }
