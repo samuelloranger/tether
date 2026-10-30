@@ -39,6 +39,10 @@ pub enum GitJob {
     Workspace {
         req: u64,
     },
+    PullRequests {
+        req: u64,
+        top: String,
+    },
     Docs {
         req: u64,
         top: String,
@@ -98,6 +102,10 @@ pub enum GitDone {
     Workspace {
         req: u64,
         result: Result<Workspace, String>,
+    },
+    PullRequests {
+        req: u64,
+        prs: PrList,
     },
     Docs {
         req: u64,
@@ -235,6 +243,7 @@ pub struct GitPanel {
     next_req: u64,
     workspace_req: Option<u64>,
     workspace: Option<Workspace>,
+    prs_req: Option<u64>,
     error: Option<String>,
     docs: Option<Vec<String>>,
     docs_req: Option<u64>,
@@ -618,12 +627,34 @@ impl GitPanel {
                 }
                 self.workspace_req = None;
                 match result {
-                    Ok(ws) => {
+                    Ok(mut ws) => {
+                        // The list on screen stays until its refresh answers, unless the
+                        // shell moved to another repository.
+                        if let Some(old) = self.workspace.take().filter(|old| old.top == ws.top) {
+                            ws.prs = old.prs;
+                        } else {
+                            self.prs_req = None;
+                        }
+                        let top = ws.top.clone();
                         self.workspace = Some(ws);
                         self.error = None;
                         self.ensure_docs(fx);
+                        if self.prs_req.is_none() {
+                            let req = self.req();
+                            self.prs_req = Some(req);
+                            fx.push(GitFx::Run(GitJob::PullRequests { req, top }));
+                        }
                     }
                     Err(message) => self.error = Some(message),
+                }
+            }
+            GitDone::PullRequests { req, prs } => {
+                if self.prs_req != Some(req) {
+                    return;
+                }
+                self.prs_req = None;
+                if let Some(ws) = self.workspace.as_mut() {
+                    ws.prs = prs;
                 }
             }
             GitDone::Docs { req, result } => {
@@ -675,6 +706,8 @@ impl GitPanel {
                 }
                 if merged {
                     self.last_refresh = None;
+                    // A list asked for before the merge would still show it open.
+                    self.prs_req = None;
                 } else {
                     self.fetch_pr_detail(now, fx);
                 }
@@ -830,6 +863,7 @@ impl GitPanel {
                 }
             }
             GitTab::PullRequests => match &ws.prs {
+                PrList::Loading => view.loading = true,
                 PrList::List(pulls) => {
                     let open = pulls.iter().filter(|p| p.state() == PrState::Open).count();
                     view.subtitle = format!("{open} open");
@@ -923,7 +957,11 @@ fn pr_view(page: &PrPage) -> PrView {
         PrState::Open if pr.is_draft => ("Draft", Tone::Neutral),
         PrState::Open => ("Open", Tone::Good),
     };
-    let mut chips = vec![format!("{} files", pr.changed_files)];
+    let mut chips: Vec<String> = pr
+        .changed_files
+        .map(|n| format!("{n} files"))
+        .into_iter()
+        .collect();
     if let Some(decision) = pr.review_decision.as_deref().filter(|d| !d.is_empty()) {
         chips.push(decision.replace('_', " ").to_ascii_lowercase());
     }
@@ -1184,10 +1222,18 @@ pub fn workspace_result(raw: Result<String, String>) -> Result<Workspace, String
         files: git::group_diff(diff),
         untracked: git::parse_untracked(sections.untracked),
         commits: git::parse_commits(sections.commits),
-        prs: git::pull_request_result(sections.pull_requests),
+        prs: PrList::Loading,
         diff_truncated,
         upstream: git::parse_upstream(sections.location),
     })
+}
+
+/// `raw` is the exec outcome of `git::pull_requests_command`.
+pub fn pull_requests_result(raw: Result<String, String>) -> PrList {
+    match raw {
+        Ok(output) => git::pull_request_result(&git::unwrap_output(&output).0),
+        Err(sentence) => PrList::Failed(sentence),
+    }
 }
 
 pub fn docs_result(raw: Result<String, String>) -> Result<Vec<String>, String> {
@@ -1272,7 +1318,7 @@ mod tests {
             base: "main".into(),
             url: format!("https://example.test/pr/{number}"),
             is_draft: draft,
-            changed_files: 3,
+            changed_files: Some(3),
             review_decision: Some("REVIEW_REQUIRED".into()),
             raw_state: Some(state.into()),
         }
@@ -1724,6 +1770,8 @@ mod tests {
         assert_eq!(v.status, "Merged");
         assert_eq!(v.state_chip, "Merged");
         assert!(!v.can_merge);
+        // The list asked for when the panel opened predates the merge.
+        assert_eq!(p.prs_req, None);
     }
 
     #[test]
@@ -1967,20 +2015,140 @@ mod tests {
 
     #[test]
     fn the_workspace_command_output_becomes_a_workspace() {
-        let output = "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b\n\u{1D}/repo\nmain\n\u{1D}abc\u{1F}s\u{1F}n\u{1F}5\u{1E}\u{1D}new.md\n\u{1D}[]\n__TETHER_RC__0";
+        let output = "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b\n\u{1D}/repo\nmain\n\u{1D}abc\u{1F}s\u{1F}n\u{1F}5\u{1E}\u{1D}new.md\n\n__TETHER_RC__0";
         let ws = workspace_result(Ok(output.to_string())).unwrap();
         assert_eq!(ws.top, "/repo");
         assert_eq!(ws.branch, "main");
         assert_eq!(ws.files.len(), 1);
         assert_eq!(ws.untracked, ["new.md"]);
         assert_eq!(ws.commits.len(), 1);
-        assert_eq!(ws.prs, PrList::List(vec![]));
+        assert_eq!(ws.prs, PrList::Loading);
         assert_eq!(ws.upstream, None);
+    }
+
+    fn pr_job(fx: &[GitFx]) -> (u64, String) {
+        fx.iter()
+            .find_map(|f| match f {
+                GitFx::Run(GitJob::PullRequests { req, top }) => Some((*req, top.clone())),
+                _ => None,
+            })
+            .expect("a pull request job")
+    }
+
+    fn workspace_done(p: &mut GitPanel, req: u64, ws: Workspace) -> Vec<GitFx> {
+        run(
+            p,
+            GitMsg::Done(GitDone::Workspace {
+                req,
+                result: Ok(ws),
+            }),
+            T0,
+        )
+    }
+
+    #[test]
+    fn the_changes_show_before_the_pull_requests_arrive() {
+        let mut p = GitPanel::default();
+        let fx = run(&mut p, GitMsg::Toggle, T0);
+        let GitFx::Run(GitJob::Workspace { req }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        let fx = workspace_done(
+            &mut p,
+            req,
+            Workspace {
+                prs: PrList::Loading,
+                ..workspace()
+            },
+        );
+        assert_eq!(p.view().rows.len(), 4);
+        let (prs, top) = pr_job(&fx);
+        assert_eq!(top, "/repo");
+        run(&mut p, GitMsg::SetTab(GitTab::PullRequests), T0);
+        assert!(p.view().loading);
+        run(
+            &mut p,
+            GitMsg::Done(GitDone::PullRequests {
+                req: prs,
+                prs: PrList::List(vec![pr(7, false, "OPEN")]),
+            }),
+            T0,
+        );
+        let v = p.view();
+        assert!(!v.loading);
+        assert_eq!(v.rows[0].primary, "#7 title 7");
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_pull_requests_until_their_own_answer() {
+        let mut p = opened();
+        run(&mut p, GitMsg::SetTab(GitTab::PullRequests), T0);
+        let fx = run(&mut p, GitMsg::Refresh, sec(1));
+        let GitFx::Run(GitJob::Workspace { req }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        let stale = p.prs_req.expect("the first list is still asked for");
+        let fx = workspace_done(
+            &mut p,
+            req,
+            Workspace {
+                prs: PrList::Loading,
+                ..workspace()
+            },
+        );
+        // One list in flight at a time.
+        assert!(
+            !fx.iter()
+                .any(|f| matches!(f, GitFx::Run(GitJob::PullRequests { .. })))
+        );
+        assert_eq!(p.view().rows.len(), 2);
+        run(
+            &mut p,
+            GitMsg::Done(GitDone::PullRequests {
+                req: stale,
+                prs: PrList::Failed("rate limited".into()),
+            }),
+            T0,
+        );
+        assert!(p.view().notice.contains("rate limited"));
+    }
+
+    #[test]
+    fn another_repository_drops_the_pull_requests_and_asks_again() {
+        let mut p = opened();
+        run(&mut p, GitMsg::SetTab(GitTab::PullRequests), T0);
+        let first = p.prs_req.unwrap();
+        let fx = run(&mut p, GitMsg::Refresh, sec(1));
+        let GitFx::Run(GitJob::Workspace { req }) = fx[0].clone() else {
+            panic!("{fx:?}");
+        };
+        let fx = workspace_done(
+            &mut p,
+            req,
+            Workspace {
+                top: "/other".into(),
+                prs: PrList::Loading,
+                ..workspace()
+            },
+        );
+        let (second, top) = pr_job(&fx);
+        assert_eq!(top, "/other");
+        assert_ne!(first, second);
+        assert!(p.view().loading);
+        run(
+            &mut p,
+            GitMsg::Done(GitDone::PullRequests {
+                req: first,
+                prs: PrList::List(vec![pr(7, false, "OPEN")]),
+            }),
+            T0,
+        );
+        assert!(p.view().loading, "the old repository's answer is ignored");
     }
 
     #[test]
     fn the_title_carries_ahead_and_behind_and_the_upstream_sits_beside_it() {
-        let output = "\u{1D}/repo\nmain\norigin/main\n2\t1\n\u{1D}\u{1D}\u{1D}[]\n__TETHER_RC__0";
+        let output = "\u{1D}/repo\nmain\norigin/main\n2\t1\n\u{1D}\u{1D}\n__TETHER_RC__0";
         let ws = workspace_result(Ok(output.to_string())).unwrap();
         let mut p = GitPanel::default();
         let fx = run(&mut p, GitMsg::Toggle, T0);
@@ -2007,10 +2175,7 @@ mod tests {
 
     #[test]
     fn a_directory_that_is_not_a_repository_is_an_error() {
-        let out = format!(
-            "{}\u{1D}\u{1D}\u{1D}\u{1D}\n__TETHER_RC__0",
-            git::NOT_A_REPO
-        );
+        let out = format!("{}\u{1D}\u{1D}\u{1D}\n__TETHER_RC__0", git::NOT_A_REPO);
         assert!(
             workspace_result(Ok(out))
                 .unwrap_err()
