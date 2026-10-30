@@ -14,6 +14,7 @@ use super::question::{
 
 pub const LAUNCH_TOOL_NAMES: [&str; 2] = ["Agent", "Task"];
 pub const ASYNC_LAUNCH_PREFIX: &str = "Async agent launched successfully";
+pub const WRITING_COMMAND: &str = "Writing command…";
 
 /// A subagent launch, as the adapter's `Agent` tool (older `Task`) describes it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +178,20 @@ impl ToolCall {
         self.is_running()
             || (self.subagent.as_ref().is_some_and(|s| s.background)
                 && self.children.iter().any(ToolCall::is_running))
+    }
+
+    /// The adapter announces a command as `Terminal` before the model has written it; the
+    /// update that carries the command replaces the title.
+    pub fn display_title(&self) -> &str {
+        if self.kind == ToolKind::Execute
+            && self.status == ToolStatus::Pending
+            && self.title == "Terminal"
+            && self.terminal_data.is_empty()
+        {
+            WRITING_COMMAND
+        } else {
+            &self.title
+        }
     }
 
     pub fn subagent_title(&self) -> String {
@@ -452,7 +467,11 @@ impl ChatState {
                 .or(call.children.last());
             return Some(match latest {
                 None => call.subagent_title(),
-                Some(latest) => format!("{} \u{00B7} {}", call.subagent_title(), latest.title),
+                Some(latest) => format!(
+                    "{} \u{00B7} {}",
+                    call.subagent_title(),
+                    latest.display_title()
+                ),
             });
         }
         None
@@ -2158,5 +2177,55 @@ mod tests {
         msg(&mut s, Inbound::Update(Update::CurrentMode("plan".into())));
         assert_eq!(s.option("mode").unwrap().current_value, "plan");
         assert_eq!(s.current_choice("mode").unwrap(), "plan");
+    }
+
+    #[test]
+    fn a_command_announced_before_it_is_written_reads_as_writing_until_it_arrives() {
+        let mut s = ChatState::default();
+        let frame = |update: Value| {
+            decode(
+                json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": update}})
+                    .to_string()
+                    .as_bytes(),
+                None,
+            )
+        };
+        msg(
+            &mut s,
+            frame(json!({
+                "sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Terminal", "kind": "execute",
+                "status": "pending", "rawInput": {},
+                "_meta": {"claudeCode": {"toolName": "Bash"}, "terminal_info": {"terminal_id": "t1"}},
+                "content": [{"type": "terminal", "terminalId": "t1"}]
+            })),
+        );
+        let title = |s: &ChatState| match &s.items[0].kind {
+            ItemKind::Tool(call) => call.display_title().to_string(),
+            _ => panic!(),
+        };
+        assert_eq!(title(&s), WRITING_COMMAND);
+        msg(
+            &mut s,
+            frame(json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "t1", "title": "ls -la",
+                "rawInput": {"command": "ls -la"}
+            })),
+        );
+        assert_eq!(title(&s), "ls -la");
+    }
+
+    #[test]
+    fn a_terminal_title_that_ran_or_ended_is_shown_as_sent() {
+        let call = |status, data: &str| ToolCall {
+            terminal_data: data.into(),
+            ..ToolCall::new(&ToolFields {
+                title: Some("Terminal".into()),
+                kind: Some(ToolKind::Execute),
+                status: Some(status),
+                ..ToolFields::new("t1")
+            })
+        };
+        assert_eq!(call(ToolStatus::Failed, "").display_title(), "Terminal");
+        assert_eq!(call(ToolStatus::Pending, "out").display_title(), "Terminal");
     }
 }

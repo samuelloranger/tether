@@ -147,6 +147,31 @@ final class ChatCapabilitiesTests: XCTestCase {
     XCTAssertEqual(call.text, "```console\na\nb\n```")
   }
 
+  func test_a_command_announced_before_it_is_written_reads_as_writing_until_it_arrives() throws {
+    var state = reduce(
+      ChatState(),
+      #"{"sessionUpdate":"tool_call","toolCallId":"c","title":"Terminal","kind":"execute","status":"pending","rawInput":{},"_meta":{"claudeCode":{"toolName":"Bash"},"terminal_info":{"terminal_id":"c"}},"content":[{"type":"terminal","terminalId":"c"}]}"#)
+    guard case let .tool(announced) = state.items[0].kind else { return XCTFail() }
+    XCTAssertEqual(announced.displayTitle, ChatToolCall.writingCommand)
+    state = reduce(
+      state, #"{"sessionUpdate":"tool_call_update","toolCallId":"c","title":"ls -la","rawInput":{"command":"ls -la"}}"#)
+    guard case let .tool(written) = state.items[0].kind else { return XCTFail() }
+    XCTAssertEqual(written.displayTitle, "ls -la")
+  }
+
+  func test_a_terminal_title_that_ran_or_ended_is_shown_as_sent() throws {
+    var state = reduce(
+      ChatState(), #"{"sessionUpdate":"tool_call","toolCallId":"c","title":"Terminal","kind":"execute","status":"pending"}"#)
+    state = reduce(
+      state, #"{"sessionUpdate":"tool_call_update","toolCallId":"c","_meta":{"terminal_output":{"terminal_id":"c","data":"a\n"}}}"#)
+    guard case let .tool(ran) = state.items[0].kind else { return XCTFail() }
+    XCTAssertEqual(ran.displayTitle, "Terminal")
+    state = reduce(
+      ChatState(), #"{"sessionUpdate":"tool_call","toolCallId":"c","title":"Terminal","kind":"execute","status":"failed"}"#)
+    guard case let .tool(failed) = state.items[0].kind else { return XCTFail() }
+    XCTAssertEqual(failed.displayTitle, "Terminal")
+  }
+
   func test_old_format_output_in_content_still_parses_and_blank_terminal_data_is_ignored() throws {
     var state = reduce(
       ChatState(),
