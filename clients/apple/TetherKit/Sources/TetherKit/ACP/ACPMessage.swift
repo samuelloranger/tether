@@ -277,6 +277,9 @@ enum ACPDecoder {
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
       return .agentThought(text: text)
     case "user_message_chunk":
+      if let block = update["content"] as? JSON, (block["_meta"] as? JSON)?["tether/branchContext"] as? Bool == true {
+        return .unknown(kind: kind)
+      }
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
       return .userMessage(text: text, messageId: update["messageId"] as? String)
     case "tool_call", "tool_call_update":

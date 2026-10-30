@@ -27,6 +27,17 @@ final class ChatOrganizationTests: XCTestCase {
       line: .prompt(id: .string("desktop-3"), text: "Edited prompt", imageCount: 0, sessionId: "s1")))
   }
 
+  func test_adapter_replayed_user_messages_hide_only_marked_branch_context() throws {
+    let seed = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Earlier context","_meta":{"tether/branchContext":true}}}}}"#
+    let visible = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Edited prompt"}}}}"#
+    var builder = ChatTranscriptBuilder(journal: ChatJournal())
+    try builder.feed(Data((seed + "\n" + visible + "\n").utf8))
+    let users = builder.state.items.compactMap { item -> String? in
+      if case let .user(text, _, _, _) = item.kind { return text }; return nil
+    }
+    XCTAssertEqual(users, ["Edited prompt"])
+  }
+
   func test_image_prompts_cannot_be_branched_without_copying_their_images() {
     let items = [ChatItem(id: 1, kind: .user(text: "Compare these", imageCount: 2, offset: 0))]
     XCTAssertNil(ChatBranching.point(items: items, at: 1))
