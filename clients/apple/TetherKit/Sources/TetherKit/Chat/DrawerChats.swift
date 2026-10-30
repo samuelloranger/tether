@@ -8,6 +8,11 @@ struct DrawerChatRow: Equatable, Identifiable {
   var state: DrawerChatState
   var cwd: String
   var multiClient = false
+  var pinned = false
+  var archived = false
+  var projectRoot: String?
+  var customTitle: String?
+  var parent: ChatParent?
   /// The resolved agent's key; nil for an agent this app does not know.
   var agentKey: String? = ChatAgents.claude.key
 
@@ -20,7 +25,10 @@ struct DrawerChatRow: Equatable, Identifiable {
   var stateLabel: String { state.label }
 
   func route(journal: ChatJournal) -> ChatRoute {
-    ChatRoute(existing: name, cwd: cwd, journal: journal, multiClient: multiClient, agentKey: agentKey)
+    var route = ChatRoute(existing: name, cwd: cwd, journal: journal, multiClient: multiClient, agentKey: agentKey)
+    route.parent = parent
+    route.customTitle = customTitle
+    return route
   }
 }
 
@@ -32,11 +40,11 @@ enum DrawerChatRows {
     chats.map { chat in
       let folder = ChatFormat.folderName(chat.cwd)
       let stored = titles[chat.name].flatMap { $0.isEmpty ? nil : $0 }
-      let title = chat.hostTitle ?? stored ?? folder
+      let title = chat.customTitle ?? chat.hostTitle ?? stored ?? folder
       let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
       return DrawerChatRow(
         name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd,
-        multiClient: chat.multiClient,
+        multiClient: chat.multiClient, pinned: chat.pinned, archived: chat.archived, projectRoot: chat.projectRoot, customTitle: chat.customTitle, parent: chat.parent,
         agentKey: ChatAgents.resolve(localKey: agents[chat.name], statusSpawn: chat.spawn)?.key)
     }
   }
@@ -73,9 +81,12 @@ extension ChatRoute {
     name: String, chats: [ACPChatSummary], journal: ChatJournal, localAgent: String? = nil
   ) -> ChatRoute {
     let chat = chats.first { $0.name == name }
-    return ChatRoute(
+    var route = ChatRoute(
       existing: name, cwd: chat?.cwd ?? "", journal: journal, multiClient: chat?.multiClient ?? false,
       agentKey: ChatAgents.resolve(localKey: localAgent, statusSpawn: chat?.spawn)?.key)
+    route.parent = chat?.parent
+    route.customTitle = chat?.customTitle
+    return route
   }
 
   /// A fresh chat in `cwdText`; `~` needs the host's home, so a host that cannot report it gives nil.

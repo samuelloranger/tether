@@ -52,6 +52,7 @@ actor ACPClient {
   private var feedFailed = false
   /// Joined a chat another client started: the session id comes from the log.
   private var joining = false
+  private var branchSeedSending = false
 
   /// `resume` must already be checked against the journal with `ChatSnapshot.isConsistent`; the
   /// stream is then expected to start at its offset.
@@ -166,16 +167,26 @@ actor ACPClient {
   func prompt(text: String, images: [ChatImageAttachment] = []) async throws {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
     guard !ended else { throw ACPClientError.connectionLost }
+    guard !branchSeedSending else {
+      throw ACPClientError.agent(code: -32001, message: "Wait for the first branch message to finish sending, then retry.")
+    }
     let offset = builder.consumedOffset
     let count = images.count
     let refs = images.compactMap { self.images?.put($0) }
     let requestId = allocateId()
+    let hasEarlierPrompt = builder.state.items.contains { if case .user = $0.kind { return true }; return false }
+    let branchSeed = hasEarlierPrompt ? nil : journal.branchSeed
+    branchSeedSending = branchSeed != nil
+    defer { branchSeedSending = false }
+    journal.branchSeed = nil
+    journal.branchDraft = nil
     journal.entries.append(
       .init(kind: .prompt, offset: offset, text: text, requestId: requestId, imageCount: count, images: refs))
     builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))
     publish()
     store.save(journal)
     var blocks: [[String: Any]] = images.map { ["type": "image", "mimeType": $0.mimeType, "data": $0.data] }
+    if let branchSeed, !branchSeed.isEmpty { blocks.append(["type": "text", "text": branchSeed, "_meta": ["tether/branchContext": true]]) }
     if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
     do {
       try await send(method: "session/prompt", id: requestId, params: ["sessionId": sessionId, "prompt": blocks])
@@ -185,6 +196,8 @@ actor ACPClient {
       }) {
         journal.entries.remove(at: index)
       }
+      journal.branchSeed = branchSeed
+      if journal.branch != nil { journal.branchDraft = text }
       store.save(journal)
       builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))
       publish()

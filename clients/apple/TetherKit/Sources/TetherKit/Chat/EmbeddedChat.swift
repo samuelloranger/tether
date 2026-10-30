@@ -9,12 +9,14 @@ struct EmbeddedChat: View {
   @State private var showGit = false
   private let controller: SSHTerminalController
   private let folder: String
+  private let onOpenChat: ((ChatRoute) -> Void)?
 
   init(
     route: ChatRoute, controller: SSHTerminalController, needsYou: Bool = false, onSessions: @escaping () -> Void,
-    onContinueInTerminal: @escaping (String, String) async -> String?
+    onContinueInTerminal: @escaping (String, String) async -> String?, onOpenChat: ((ChatRoute) -> Void)? = nil
   ) {
     self.onSessions = onSessions
+    self.onOpenChat = onOpenChat
     self.needsYou = needsYou
     self.onContinueInTerminal = onContinueInTerminal
     self.controller = controller
@@ -31,7 +33,16 @@ struct EmbeddedChat: View {
           showGit = true
         },
         onUpload: { data, name in await controller.sendFile(data: data, filename: name, to: .uploads) },
-        uploads: controller.chatUploads)
+        uploads: controller.chatUploads,
+        onBranch: { point, title, prompt in
+          switch await controller.branchChat(source: model, point: point, title: title, prompt: prompt) {
+          case let .failed(message): return message
+          case let .ready(route): onOpenChat?(route); return nil
+          }
+        }, onOpenParent: { parent in
+          onOpenChat?(ChatRoute.opening(name: parent.name, chats: controller.chats,
+            journal: UserDefaultsChatJournalStore(name: parent.name).load(), localAgent: model.agent?.key))
+        })
     }
     .sheet(isPresented: $showGit, onDismiss: { controller.setGitTarget(.session) }) {
       GitDiffView(controller: controller) { showGit = false }

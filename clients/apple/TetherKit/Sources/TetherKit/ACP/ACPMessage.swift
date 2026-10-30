@@ -212,7 +212,7 @@ enum ACPDecoder {
     case "session/prompt":
       let params = line["params"] as? JSON
       let blocks = params?["prompt"] as? [JSON] ?? []
-      let text = blocks.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
+      let text = blocks.filter { $0["type"] as? String == "text" && ($0["_meta"] as? JSON)?["tether/branchContext"] as? Bool != true }.compactMap { $0["text"] as? String }.joined()
       return .prompt(
         id: id, text: text, imageCount: blocks.filter { $0["type"] as? String == "image" }.count,
         sessionId: params?["sessionId"] as? String)

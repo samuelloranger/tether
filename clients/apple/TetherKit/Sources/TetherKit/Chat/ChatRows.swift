@@ -70,6 +70,7 @@ struct ChatItemRow: View, Equatable {
   /// Set while the agent has no session for want of a login: the row then offers another try.
   var signInRetry: ChatSessionModel.SignInRetry?
   var retrySignIn: () -> Void = {}
+  var branch: (() -> Void)?
 
   static func == (lhs: ChatItemRow, rhs: ChatItemRow) -> Bool {
     lhs.item == rhs.item && lhs.cwd == rhs.cwd && lhs.expanded == rhs.expanded && lhs.queued == rhs.queued
@@ -80,6 +81,14 @@ struct ChatItemRow: View, Equatable {
     switch item.kind {
     case let .user(text, count, _, images):
       UserMessageRow(text: text, imageCount: count, images: images, queued: queued)
+        .contextMenu {
+          Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+          if let branch {
+            Button(action: branch) { Label(count == 0 ? "Branch & edit…" : "Branch unavailable for image prompts", systemImage: "arrow.triangle.branch") }
+              .disabled(queued || count > 0)
+          }
+        }
+        .accessibilityAction(named: Text("Branch and edit")) { if !queued, count == 0 { branch?() } }
     case let .assistant(text, _):
       AssistantTextView(text: text)
     case let .images(refs, _):
