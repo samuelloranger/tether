@@ -69,7 +69,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 	return l, nil
 }
 
-// acpStatus prints one JSON object per session, read from meta.json alone.
+// acpStatus prints one JSON object per session without contacting its daemon.
 func acpStatus(names []string, w io.Writer) error {
 	enc := json.NewEncoder(w)
 	if len(names) == 0 {
