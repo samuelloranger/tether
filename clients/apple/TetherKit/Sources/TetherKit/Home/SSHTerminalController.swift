@@ -119,6 +119,9 @@ public final class SSHTerminalController {
   public private(set) var sessions: [ZmxSession] = []
   /// The host's chats from `tether acp ls`; empty when the host has none or lacks the command.
   var chats: [ACPChatSummary] = []
+  var planUsage = ChatPlanUsage()
+  var planUsageLoading = false
+  @ObservationIgnored var planUsageReadAt: Date?
   /// False once the host answered `acp status` as an unknown command.
   @ObservationIgnored var chatStatusSupported = true
   /// A chat a notification tap asked for; the terminal screen swaps it in and clears this.
@@ -196,7 +199,7 @@ public final class SSHTerminalController {
   let control: ControlConnection
   /// `gh` talks to GitHub and can take seconds; on its own connection it never holds
   /// the session list or the diff behind it.
-  private let ghControl: ControlConnection
+  let ghControl: ControlConnection
   static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether"
   static let agentStatusCommand =

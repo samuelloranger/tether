@@ -100,6 +100,16 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
 
   func exec(_ command: String) throws -> String {
     let env = ProcessInfo.processInfo.environment
+    if command.contains("acp usage") {
+      if env["TETHER_DEBUG_DRAWER"] == "projects-unavailable" {
+        return """
+          {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":\(now + 8280)},"weekly":{"usedPercent":68,"resetsAt":\(now + 273600)},"updatedAt":\(now - 1080),"stale":true},"codex":{"fiveHour":null,"weekly":null,"error":"Sign in on devbox"}}
+          """
+      }
+      return """
+        {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":\(now + 8280)},"weekly":{"usedPercent":68,"resetsAt":\(now + 273600)},"updatedAt":\(now),"stale":false},"codex":{"fiveHour":{"usedPercent":24,"resetsAt":\(now + 14760)},"weekly":{"usedPercent":83,"resetsAt":\(now + 115200)},"updatedAt":\(now),"stale":false}}
+        """
+    }
     if command.contains("acp status") {
       if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether: unknown acp command \"status\"" }
       func line(
@@ -110,12 +120,17 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
           "name": name, "state": state, "turn": turn, "title": title, "cwd": cwd, "created": now - age,
           "logBytes": 48213, "endedReason": "",
         ]
+        if env["TETHER_DEBUG_DRAWER"]?.hasPrefix("projects") == true {
+          object["projectRoot"] = cwd
+          object["pinned"] = name == "chat-a1"
+          object["archived"] = name == "chat-e5" || name == "chat-f6"
+        }
         if let spawn { object["spawn"] = spawn }
         if tasks > 0 { object["tasks"] = tasks }
         let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
         return String(decoding: data, as: UTF8.self)
       }
-      if env["TETHER_DEBUG_DRAWER"]?.hasPrefix("agents") == true {
+      if env["TETHER_DEBUG_DRAWER"]?.hasPrefix("agents") == true || env["TETHER_DEBUG_DRAWER"]?.hasPrefix("projects") == true {
         return [
           line("chat-a1", "running", "working", "Release 6.3.1", "/home/dev/sites/tether", 600, spawn: ChatAgents.claude.spawn),
           line("chat-b2", "running", "waiting", "Fix the season-pack cleanup", "/home/dev/sites/rawkoon", 1800, spawn: ChatAgents.codex.spawn),

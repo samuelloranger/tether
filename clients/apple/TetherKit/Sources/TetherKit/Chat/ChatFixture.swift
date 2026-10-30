@@ -1107,6 +1107,14 @@ public struct ChatFixtureRoot: View {
     case "subagents", "subagents-open", "subagents-open-top":
       ChatFixture.openSubagents = mode != "subagents"
       initial = ChatFixture.subagentsModel()
+    case "branch-child":
+      var journal = ChatJournal()
+      journal.sessionId = "sess-branch"
+      journal.branch = ChatBranch(parent: .init(name: "chat-source", title: "Retry for fetchJSON"), title: "Retry for fetchJSON · alternative", earlier: #"[{"role":"user","text":"Find the fetch helper"},{"role":"assistant","text":"The helper is in src/fetch.ts."}]"#)
+      journal.branchSeed = ChatBranching.seed(journal.branch!.earlier)
+      journal.branchDraft = "Retry only GET requests, with jitter and a timeout."
+      initial = ChatSessionModel(chatName: "fixture-branch", cwd: "/work/api-server", readOnly: false,
+        store: InMemoryChatJournalStore(journal)) { _, _ in FixtureByteStream(log: Data()) }
     case "codex": initial = ChatFixture.codexModel()
     case "tasks", "tasks-open", "tasks-drawer": initial = ChatFixture.tasksModel()
     case "workflows", "workflows-sheet": initial = ChatFixture.workflowsModel()
