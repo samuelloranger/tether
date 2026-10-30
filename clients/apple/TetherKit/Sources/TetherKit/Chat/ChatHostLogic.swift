@@ -57,6 +57,11 @@ struct ACPChatSummary: Equatable, Identifiable, Sendable {
   var multiClient = false
   /// Background commands the holder counts as running; the host omits the field at zero.
   var tasks = 0
+  var pinned = false
+  var archived = false
+  var customTitle: String?
+  var projectRoot: String?
+  var parent: ChatParent?
 
   var id: String { name }
 
@@ -139,6 +144,8 @@ struct ChatRoute: Hashable, Identifiable {
   var optionPicks: [String: String]?
   /// The picks the sheet changed; only these become the stored defaults.
   var changedPicks: Set<String> = []
+  var parent: ChatParent?
+  var customTitle: String?
   /// This device starts the chat (a new one or a Continue), so it records the agent; an existing or joined chat leaves that to the host.
   var startedHere = false
   var agentToRecord: ChatAgentProfile? { startedHere ? ChatAgents.profile(forKey: agentKey) : nil }

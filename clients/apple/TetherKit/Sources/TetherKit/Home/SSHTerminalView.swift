@@ -25,7 +25,12 @@ public struct SSHTerminalView: View {
   @State private var showGit = false
   /// Set by a row's Git menu item; nil means the open chat's folder, else the attached session.
   @State private var gitOverride: GitTarget?
-  @State private var endedExpanded = false
+  @State private var collapsedProjects: Set<String> = []
+  @State private var showingArchive = false
+  @State private var chatActions: DrawerChatRow?
+  @State private var renamingChat: DrawerChatRow?
+  @State private var chatNewTitle = ""
+  @State private var archivedChat: DrawerChatRow?
   @State private var pendingContinue: PendingContinue?
   @State private var selectionText: String?
   /// The one destructive route: every "kill" entry point sets this, and the
@@ -69,6 +74,11 @@ public struct SSHTerminalView: View {
   }
 
   public var body: some View {
+    presentations(core)
+  }
+
+  // Split from `presentations` so the type checker keeps up with the modifier chain.
+  private var core: some View {
     ZStack(alignment: .leading) {
       terminalStack
         .opacity(content.showsChat ? 0 : 1)
@@ -78,7 +88,8 @@ public struct SSHTerminalView: View {
       if let route = content.chat {
         EmbeddedChat(
           route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) },
-          onContinueInTerminal: { id, cwd in await continueInTerminal(chat: route.name, sessionId: id, cwd: cwd) })
+          onContinueInTerminal: { id, cwd in await continueInTerminal(chat: route.name, sessionId: id, cwd: cwd) },
+          onOpenChat: openChat)
           .id(route.name)
       }
       if drawerProgress > 0 {
@@ -199,6 +210,13 @@ public struct SSHTerminalView: View {
     .onChange(of: controller.hasSession) { _, has in
       if !has && !TetherPlatform.isMac { focused = false }
     }
+    .task(id: "usage-\(drawerOpen)-\(scenePhase == .active)-\(controller.status == .connected)") {
+      guard drawerOpen, scenePhase == .active, controller.status == .connected else { return }
+      while !Task.isCancelled {
+        await controller.refreshPlanUsage()
+        try? await Task.sleep(nanoseconds: 120_000_000_000)
+      }
+    }
     .onChange(of: drawerOpen) { _, open in
       if open { focusedBeforeDrawer = focused } else if focusedBeforeDrawer, !content.showsChat { focused = true }
     }
@@ -220,6 +238,10 @@ public struct SSHTerminalView: View {
     .onChange(of: ObjectIdentifier(controller)) { refocusOnMac() }
     .onAppear { refocusOnMac() }
     .focusedSceneValue(\.terminalMenuActions, menuActions)
+  }
+
+  private func presentations(_ base: some View) -> some View {
+    base
     .sheet(item: $answering, onDismiss: { Task { await controller.refreshAgentStatus() } }) { target in
       if let questionRunner {
         AgentQuestionSheet(target: target, runner: questionRunner) { answering = nil }
@@ -281,6 +303,26 @@ public struct SSHTerminalView: View {
       message: "Everything running in this session stops."
     ) { name in
       if let tabs { tabs.kill(name) } else { Task { await controller.killSession(name) } }
+    }
+    .confirmationDialog(chatActions?.title ?? "Chat", isPresented: Binding(
+      get: { chatActions != nil }, set: { if !$0 { chatActions = nil } }), titleVisibility: .visible
+    ) {
+      if let row = chatActions {
+        Button(row.pinned ? "Unpin chat" : "Pin chat") { updateChat(row, patch: ["pinned": !row.pinned]) }
+        Button("Rename…") { chatNewTitle = row.title; renamingChat = row }
+        Button(row.archived ? "Restore chat" : "Archive chat") {
+          updateChat(row, patch: ["archived": !row.archived], archive: !row.archived)
+        }
+        Button("Delete…", role: .destructive) { pendingChatKill = row }
+      }
+    }
+    .alert("Rename chat", isPresented: Binding(get: { renamingChat != nil }, set: { if !$0 { renamingChat = nil } })) {
+      TextField("Chat name", text: $chatNewTitle)
+      Button("Save") {
+        if let row = renamingChat { updateChat(row, patch: ["title": chatNewTitle.trimmingCharacters(in: .whitespacesAndNewlines)]) }
+        renamingChat = nil
+      }
+      Button("Cancel", role: .cancel) { renamingChat = nil }
     }
     .alert(
       "Continue in a terminal?",
@@ -531,10 +573,13 @@ public struct SSHTerminalView: View {
     ) { $0.state == .waiting }
     let sessions = DrawerLayout.waitingFirst(controller.sessions) { controller.agentStatuses[$0.name]?.state == .waiting }
     let folders = DrawerLayout.sessionFolders(controller.sessions)
-    let split = DrawerLayout.splitEnded(chatRows)
-    let showsEnded = DrawerLayout.showsEnded(expanded: endedExpanded, ended: split.ended, open: content.chat?.name)
+    let visible = chatRows.filter { !$0.archived }
+    let archived = chatRows.filter(\.archived)
+    let pinned = visible.filter(\.pinned)
+    let groups = ChatOrganization.groups(chatRows)
+    let attention = ChatOrganization.attention(chatRows)
     return VStack(alignment: .leading, spacing: 0) {
-      drawerHeader(terminals: sessions.count, chats: chatRows.count)
+      drawerHeader(terminals: sessions.count, chats: visible.count)
       Divider().overlay(TetherColors.border)
       ScrollView {
         VStack(spacing: 8) {
@@ -545,17 +590,66 @@ public struct SSHTerminalView: View {
               .font(.caption.monospaced()).multilineTextAlignment(.leading)
               .foregroundStyle(TetherColors.textFaint).padding(.top, 4)
           }
-          if !chatRows.isEmpty {
-            sectionHeader("Chats", count: chatRows.count)
-            ForEach(split.collapsed ? split.live : chatRows) { chatRow($0) }
-            if split.collapsed {
-              endedDisclosure(count: split.ended.count, expanded: showsEnded)
-              if showsEnded { ForEach(split.ended) { chatRow($0) } }
+          if showingArchive {
+            Button { showingArchive = false } label: {
+              Label("Archived chats", systemImage: "chevron.backward").font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
+            Text("History stays available. Archiving does not stop an agent.")
+              .font(.caption).foregroundStyle(TetherColors.textSecondary)
+            ForEach(archived) { chatRow($0) }
+            if archived.isEmpty { Text("No archived chats.").font(.caption).foregroundStyle(TetherColors.textSecondary) }
+          } else {
+            if !attention.isEmpty {
+              sectionHeader("Needs you · archived", count: attention.count)
+              ForEach(attention) { chatRow($0) }
+            }
+            if !pinned.isEmpty {
+              sectionHeader("Pinned", count: pinned.count)
+              ForEach(pinned) { chatRow($0) }
+            }
+            if !groups.isEmpty { sectionHeader("Projects", count: groups.count) }
+            ForEach(groups) { group in
+              Button {
+                if collapsedProjects.contains(group.path) { collapsedProjects.remove(group.path) }
+                else { collapsedProjects.insert(group.path) }
+              } label: {
+                HStack(spacing: 6) {
+                  Image(systemName: collapsedProjects.contains(group.path) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                  Image(systemName: "folder").font(.caption)
+                  Text(group.title).font(.caption.weight(.semibold))
+                  Spacer(minLength: 0)
+                  if group.needsYou && collapsedProjects.contains(group.path) {
+                    Circle().fill(TetherColors.accent).frame(width: 8, height: 8)
+                      .accessibilityLabel("A chat needs you")
+                  }
+                }
+                .foregroundStyle(TetherColors.textSecondary).frame(minHeight: 36).contentShape(Rectangle())
+              }
+              .buttonStyle(TetherPressStyle()).accessibilityLabel(group.path)
+              .accessibilityValue(collapsedProjects.contains(group.path) ? "collapsed" : "expanded")
+              if !collapsedProjects.contains(group.path) { ForEach(group.rows) { chatRow($0) } }
+            }
+            Button { showingArchive = true } label: {
+              HStack { Label("Archived chats", systemImage: "archivebox"); Spacer(); Text("\(archived.count)") }
+                .font(.caption).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
+            }
+            .accessibilityIdentifier("drawerArchive")
           }
         }
         .padding(.horizontal, 12).padding(.bottom, 12)
       }
+      if let archivedChat {
+        HStack {
+          Text("Chat archived").font(.caption)
+          Spacer()
+          Button("Undo") { updateChat(archivedChat, patch: ["archived": false]); self.archivedChat = nil }
+            .font(.caption.weight(.semibold)).frame(minHeight: 44)
+        }.padding(.horizontal, 16).background(TetherColors.surfaceRaised)
+      }
+      Divider().overlay(TetherColors.border)
+      ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title)
     }
     .frame(maxHeight: .infinity, alignment: .top)
     .background(TetherColors.background.ignoresSafeArea())
@@ -624,37 +718,18 @@ public struct SSHTerminalView: View {
     .accessibilityAddTraits(.isHeader)
   }
 
-  private func endedDisclosure(count: Int, expanded: Bool) -> some View {
-    Button {
-      withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { endedExpanded = !expanded }
-    } label: {
-      HStack(spacing: 6) {
-        Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
-          .rotationEffect(.degrees(expanded ? 90 : 0))
-        Text("Ended · \(count)").font(.caption.monospaced())
-        Spacer()
-      }
-      .foregroundStyle(TetherColors.textFaint)
-      .padding(.horizontal, 4).frame(minHeight: 44).contentShape(Rectangle())
-    }
-    .buttonStyle(TetherPressStyle())
-    .accessibilityIdentifier("drawerEndedToggle")
-    .accessibilityLabel("Ended chats, \(count)")
-    .accessibilityValue(expanded ? "expanded" : "collapsed")
-  }
-
   /// The one row shape for sessions and chats: the glyph and two lines on the left, only the kill control
   /// trailing. The kill control stays visible: keyboard and VoiceOver users never need the context menu,
   /// and a full-swipe kill would destroy work without a prompt.
   private func drawerRow<Main: View>(
     selected: Bool, needsYou: Bool, ended: Bool = false,
-    killID: String, killLabel: String, onKill: @escaping () -> Void,
+    killID: String, killLabel: String, killSymbol: String = "xmark", onKill: @escaping () -> Void,
     @ViewBuilder main: () -> Main
   ) -> some View {
     HStack(spacing: 6) {
       main()
       Button(action: onKill) {
-        Image(systemName: "xmark").font(.footnote.weight(.semibold))
+        Image(systemName: killSymbol).font(.footnote.weight(.semibold))
           .foregroundStyle(TetherColors.textFaint.opacity(0.6))
           .frame(width: 44, height: 44).contentShape(Rectangle())
       }
@@ -767,8 +842,8 @@ public struct SSHTerminalView: View {
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return drawerRow(
       selected: isSelected, needsYou: row.state == .waiting, ended: ended,
-      killID: "chatKill_\(row.name)", killLabel: "Delete chat \(row.title)",
-      onKill: { pendingChatKill = row }
+      killID: "chatActions_\(row.name)", killLabel: "Actions for \(row.title)", killSymbol: "ellipsis",
+      onKill: { chatActions = row }
     ) {
       Button {
         openChat(controller.chatRoute(for: row))
@@ -819,7 +894,25 @@ public struct SSHTerminalView: View {
         Button { openGit(git) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
       }
       ContinueInTerminalItem(row: row) { pendingContinue = $0 }
+      Button { updateChat(row, patch: ["pinned": !row.pinned]) } label: {
+        Label(row.pinned ? "Unpin chat" : "Pin chat", systemImage: row.pinned ? "pin.slash" : "pin")
+      }
+      Button { chatNewTitle = row.title; renamingChat = row } label: { Label("Rename…", systemImage: "pencil") }
+      Button { updateChat(row, patch: ["archived": !row.archived], archive: !row.archived) } label: {
+        Label(row.archived ? "Restore chat" : "Archive chat", systemImage: row.archived ? "arrow.uturn.backward" : "archivebox")
+      }
       Button(role: .destructive) { pendingChatKill = row } label: { Label("Delete", systemImage: "trash") }
+    }
+  }
+
+  private func updateChat(_ row: DrawerChatRow, patch: [String: Any], archive: Bool = false) {
+    Task {
+      if let failure = await controller.organizeChat(row.name, patch: patch) { promptNotice = failure }
+      else if archive {
+        archivedChat = row
+        try? await Task.sleep(for: .seconds(6))
+        if archivedChat?.name == row.name { archivedChat = nil }
+      }
     }
   }
 
@@ -920,6 +1013,7 @@ public struct SSHTerminalView: View {
     case "chat", "chat-open":
       if let row { content.open(controller.chatRoute(for: row)) }
       if mode == "chat-open" { try? await Task.sleep(nanoseconds: 700_000_000); drawerOpen = true }
+    case "projects-archive": showingArchive = true; drawerOpen = true
     case "newchat": showNewChat = true
     case "newchat-claude", "newchat-codex-open", "newchat-opencode-first":
       newChatAgent = mode == "newchat-claude" ? ChatAgents.claude : mode == "newchat-codex-open" ? ChatAgents.codex : ChatAgents.opencode
@@ -986,7 +1080,7 @@ public struct SSHTerminalView: View {
     .accessibilityHidden(true)
   }
 
-  private var panelWidth: CGFloat { min(drawerWidth, 360) }
+  private var panelWidth: CGFloat { min(max(drawerWidth, 320), 390) }
 
   /// Where the panel sits right now: the live drag if there is one, otherwise
   /// the settled state.

@@ -26,6 +26,8 @@ struct ChatView: View {
   var onUpload: ((Data, String) async -> String?)?
   /// Where finished uploads wait for their chat to be on screen.
   var uploads: ChatUploadInbox?
+  var onBranch: ((ChatBranchPoint, String, String) async -> String?)?
+  var onOpenParent: ((ChatParent) -> Void)?
   var seedAttachments = false
   #if DEBUG
   var sendDraft: String?
@@ -55,6 +57,8 @@ struct ChatView: View {
   @State private var copiedFolder = false
   @State private var confirmingTerminal = false
   @State private var chipsHeight: CGFloat = 0
+  @State private var branching: ChatBranchPoint?
+  @State private var earlierBranchOpen = false
   @State private var cursor: Int?
   @State private var caretRequest: Int?
 
@@ -109,9 +113,17 @@ struct ChatView: View {
     }
     .task { await model.connect() }
     .task {
-      if !initialDraft.isEmpty, draft.isEmpty { draft = initialDraft }
+      if draft.isEmpty { draft = initialDraft.isEmpty ? model.branchDraft : initialDraft }
       #if DEBUG
       if seedAttachments { attachments.seedPlaceholders() }
+      #endif
+      #if DEBUG
+      if ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] == "branch" {
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        if let item = model.state.items.first(where: { if case .user = $0.kind { return true }; return false }) {
+          branching = ChatBranching.point(items: model.state.items, at: item.id, inherited: model.branch?.earlier ?? "")
+        }
+      }
       #endif
       if openControls {
         try? await Task.sleep(nanoseconds: 900_000_000)
@@ -140,6 +152,7 @@ struct ChatView: View {
       sendMessage()
       #endif
     }
+    .onChange(of: draft) { _, next in model.saveBranchDraft(next) }
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .active: model.sceneBecameActive()
@@ -150,6 +163,11 @@ struct ChatView: View {
     .onDisappear { model.leave() }
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingPermissions.first?.requestId)
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingQuestions.first?.requestId)
+    .sheet(item: $branching) { point in
+      ChatBranchSheet(point: point, sourceTitle: model.title) { title, prompt in
+        await onBranch?(point, title, prompt) ?? "Open this chat from a connected machine to branch it."
+      }
+    }
     .sheet(isPresented: $showingControls) { ChatControlsSheet(model: model) }
     .sheet(item: $workflowSheet) { ChatWorkflowSheet(model: model, callId: $0.id) }
     .photosPicker(
@@ -201,6 +219,23 @@ struct ChatView: View {
     let lastIDs = blocks.map(\.lastID)
     let range = ChatTranscriptWindow.range(lastIDs: lastIDs, start: windowStart)
     return VStack(alignment: .leading, spacing: 12) {
+      if let branch = model.branch {
+        VStack(alignment: .leading, spacing: 6) {
+          Button { onOpenParent?(branch.parent) } label: {
+            Label("Branched from \(branch.parent.title)", systemImage: "arrow.triangle.branch")
+              .font(.caption).multilineTextAlignment(.leading)
+          }
+          .accessibilityIdentifier("chatBranchParent")
+          Text("Earlier context copied · original chat preserved").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+          if !branch.earlier.isEmpty {
+            DisclosureGroup("Earlier messages", isExpanded: $earlierBranchOpen) {
+              Text(branch.readableEarlier).font(.caption).foregroundStyle(TetherColors.textSecondary).textSelection(.enabled)
+            }.font(.caption)
+          }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 10))
+      }
       if model.state.items.isEmpty { emptyState }
       if range.lowerBound > 0 {
         EarlierMessagesButton {
@@ -215,7 +250,10 @@ struct ChatView: View {
             item: item, cwd: model.cwd, expanded: isExpanded(item), toggle: { toggleExpanded(item.id) },
             queued: model.state.isQueued(item.id), host: model.hostLabel, agent: model.agent,
             signInRetry: model.needsSignIn && item.id == model.state.items.last?.id ? model.signInRetry : nil,
-            retrySignIn: { model.retrySignIn() }
+            retrySignIn: { model.retrySignIn() },
+            branch: onBranch == nil ? nil : {
+              branching = ChatBranching.point(items: model.state.items, at: item.id, queued: Set(model.state.queuedItemIds), inherited: model.branch?.earlier ?? "")
+            }
           )
           .equatable()
         case let .tools(items):

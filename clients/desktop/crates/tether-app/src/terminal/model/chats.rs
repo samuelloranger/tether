@@ -81,6 +81,7 @@ impl TerminalModel {
             return;
         }
         let mut out = Out::default();
+        self.chats.usage_visible = self.sidebar.visibility() != tether_core::sidebar::Shown::Hidden;
         self.chats.on_tick(now, &mut out);
         self.chats.flush_due(now);
         self.chat_out(out, now, fx);

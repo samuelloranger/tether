@@ -28,6 +28,14 @@ pub fn events(message: &Value, at_offset: usize) -> Vec<ChatEvent> {
             let mut text = String::new();
             let mut image_count = 0;
             for block in blocks.into_iter().flatten() {
+                if block
+                    .get("_meta")
+                    .and_then(|m| m.get("tether/branchContext"))
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
+                    continue;
+                }
                 match block.get("type").and_then(Value::as_str) {
                     Some("text") => {
                         text.push_str(block.get("text").and_then(Value::as_str).unwrap_or(""))
@@ -109,6 +117,14 @@ mod tests {
 
     use super::*;
     use crate::acp::message::AcpId;
+
+    #[test]
+    fn copied_context_is_hidden_only_when_explicitly_marked() {
+        let line = json!({"id":1,"method":"session/prompt","params":{"prompt":[{"type":"text","text":"earlier secret context","_meta":{"tether/branchContext":true}},{"type":"text","text":"edited prompt"}]}});
+        assert!(
+            matches!(&events(&line,0)[..],[ChatEvent::UserPrompt{text,..}] if text=="edited prompt")
+        );
+    }
 
     #[test]
     fn a_prompt_becomes_the_users_message_with_its_request_id() {

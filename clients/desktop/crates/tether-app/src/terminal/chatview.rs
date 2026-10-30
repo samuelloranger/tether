@@ -11,9 +11,9 @@ use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
-    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatTabVm, ChatTaskVm, ChatVm,
+    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm, ChatTaskVm, ChatVm,
     ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm,
-    NcChoiceVm, NcMenuVm, PaletteItemVm, PermOptionVm, QChoiceVm, QFieldVm, QueuedVm,
+    NcChoiceVm, NcMenuVm, PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm,
     SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 
@@ -22,6 +22,8 @@ thread_local! {
     static ROWS: RefCell<Vec<Row>> = const { RefCell::new(Vec::new()) };
     static FIELDS: RefCell<Vec<FieldView>> = const { RefCell::new(Vec::new()) };
     static DRAFT_SEQ: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static BRANCH_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static RENAME_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static DIALOG_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -467,6 +469,71 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             })
             .collect(),
     ));
+    vm.set_sidebar(model(
+        s.sidebar
+            .iter()
+            .map(|r| ChatSideVm {
+                section: r.section.as_str().into(),
+                project_key: r.project_key.as_str().into(),
+                collapsed: r.collapsed,
+                tab: r
+                    .tab
+                    .as_ref()
+                    .map(|t| ChatTabVm {
+                        name: t.name.as_str().into(),
+                        title: t.title.as_str().into(),
+                        state: i32::from(t.state),
+                        label: t.label.as_str().into(),
+                        active: t.active,
+                        agent: i32::from(t.agent),
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    ));
+    vm.set_archived(s.archived);
+    vm.set_archived_count(s.archived_count as i32);
+    vm.set_organization_error(s.organization_error.as_str().into());
+    let (name, title, pinned, archived) = s.actions.clone().unwrap_or_default();
+    vm.set_actions_name(name.into());
+    vm.set_actions_title(title.into());
+    vm.set_actions_pinned(pinned);
+    vm.set_actions_archived(archived);
+    vm.set_rename_open(s.rename.is_some());
+    if !RENAME_SHOWN.replace(s.rename.is_some()) {
+        vm.set_rename_title(s.rename_title.as_str().into());
+    }
+    vm.set_branch_busy(s.branch_busy);
+    vm.set_branch_open(s.branch.is_some());
+    if let Some((title, prompt, parent)) = &s.branch {
+        if !BRANCH_SHOWN.replace(true) {
+            vm.set_branch_title(title.as_str().into());
+            vm.set_branch_prompt(prompt.as_str().into());
+        }
+        vm.set_branch_parent(parent.as_str().into());
+    } else {
+        BRANCH_SHOWN.set(false);
+    }
+    vm.set_parent_context(s.parent_context.as_str().into());
+    vm.set_parent_title(s.parent.as_str().into());
+    vm.set_parent_available(s.parent_available);
+    vm.set_plan_usage(model(
+        s.usage
+            .iter()
+            .map(|u| PlanUsageVm {
+                provider: u.provider.as_str().into(),
+                window: u.window.as_str().into(),
+                used: u.used.unwrap_or(-1.0),
+                value: u
+                    .used
+                    .map(|v| format!("{v:.0}% used"))
+                    .unwrap_or_else(|| "—".into())
+                    .into(),
+                reset: u.reset.as_str().into(),
+            })
+            .collect(),
+    ));
+    vm.set_usage_freshness(s.usage_freshness.as_str().into());
     vm.set_delete_title(s.delete_title.as_str().into());
     match &s.new_chat {
         Some(nc) => {
@@ -838,6 +905,25 @@ fn index(i: i32) -> usize {
 /// Wired once per window, like the git panel: the callbacks route through the current sink.
 pub fn wire(ui: &crate::AppWindow) {
     let vm = ui.global::<ChatVm>();
+    vm.on_actions(|n| send(ChatMsg::Actions(n.into())));
+    vm.on_actions_close(|| send(ChatMsg::ActionsClose));
+    vm.on_pin(|n| send(ChatMsg::Pin(n.into())));
+    vm.on_archive(|n| send(ChatMsg::Archive(n.into())));
+    vm.on_restore(|n| send(ChatMsg::Restore(n.into())));
+    vm.on_show_archived(|v| send(ChatMsg::Archived(v)));
+    vm.on_collapse_project(|p| send(ChatMsg::CollapseProject(p.into())));
+    vm.on_rename(|n| send(ChatMsg::Rename(n.into())));
+    vm.on_rename_save(|title| send(ChatMsg::RenameSave(title.into())));
+    vm.on_branch(|k| send(ChatMsg::Branch(k.into())));
+    vm.on_branch_create(|title, prompt| {
+        send(ChatMsg::BranchCreate {
+            title: title.into(),
+            prompt: prompt.into(),
+        })
+    });
+    vm.on_branch_cancel(|| send(ChatMsg::BranchCancel));
+    vm.on_parent(|| send(ChatMsg::Parent));
+    vm.on_refresh_usage(|| send(ChatMsg::RefreshUsage));
     vm.on_select(|n| send(ChatMsg::Select(n.into())));
     vm.on_delete(|n| send(ChatMsg::Delete(n.into())));
     vm.on_delete_confirmed(|| send(ChatMsg::DeleteConfirmed));

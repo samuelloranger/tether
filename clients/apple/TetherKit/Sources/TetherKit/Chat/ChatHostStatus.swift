@@ -43,7 +43,11 @@ enum ACPChatStatusListing {
       turn: (object["turn"] as? String).flatMap(ChatHostTurn.init(rawValue:)) ?? .idle,
       hostTitle: title.flatMap { $0.isEmpty ? nil : $0 }, hasStatus: true,
       multiClient: object["multiClient"] as? Bool == true,
-      tasks: max(0, (object["tasks"] as? NSNumber)?.intValue ?? 0))
+      tasks: max(0, (object["tasks"] as? NSNumber)?.intValue ?? 0),
+      pinned: object["pinned"] as? Bool == true, archived: object["archived"] as? Bool == true,
+      customTitle: (object["customTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+      projectRoot: object["projectRoot"] as? String,
+      parent: (object["parent"] as? [String: String]).flatMap(ChatParent.init))
   }
 }
 

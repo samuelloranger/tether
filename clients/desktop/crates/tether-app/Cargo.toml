@@ -10,6 +10,7 @@ name = "tether"
 path = "src/main.rs"
 
 [dependencies]
+serde_json.workspace = true
 tether-core.workspace = true
 tether-ssh = { path = "../tether-ssh" }
 tether-term = { path = "../tether-term" }

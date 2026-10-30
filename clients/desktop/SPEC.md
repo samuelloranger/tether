@@ -757,3 +757,14 @@ Live SSH tests against a real host stay off unless an env var opts in, same poli
 - Snippets are typed, not pasted, and use the iOS macro escapes; Ctrl+Shift+P opens them and Ctrl+Shift+H opens History.
 - Google Fonts install per user under the data folder's `fonts` (`%LOCALAPPDATA%\Tether\fonts` on Windows), TrueType only, monospace only, no redirects.
 - Windows and Linux are released with iOS and Mac: one `vX.Y.Z` tag, one release, one `SHA256SUMS.txt`; each OS updates from its own feed.
+
+
+### Chat projects, archive, branching and plan usage
+
+The sidebar groups chats by the host-reported repository root (working folder fallback). Pinned chats appear once above projects; each group can collapse. A chat's trailing menu offers pin/unpin, rename, archive/restore, and a separate confirmed delete. Archive changes host metadata without killing the agent. Archived chats awaiting input remain in a Needs you section, and an archive view restores any chat. User titles take priority over agent-generated titles. Older hosts report an actionable update error when metadata cannot be saved.
+
+Each committed user message has **Branch & edit**. The dialog edits its prompt and child title, then creates a separate chat with an unsent draft. The original remains intact. This version explicitly copies earlier user/assistant text; native arbitrary-message forking is not advertised. Selected and earlier image messages, or more than 128 KiB of context, are rejected with an explanation instead of being silently dropped/truncated. Context is sent as a marked text block only with the first prompt; the visible journal holds only the edited prompt. Persisted journal state prevents a reconnect from reapplying the seed; failed-send undo permits an explicit retry. The child stores its parent/context/draft in its host-scoped local chat files and shows a parent link. Neither a branch nor archive restores workspace files.
+
+The drawer footer shows Claude and Codex account usage on the selected SSH host. The host's `tether acp usage --json` supplies five-hour and weekly percentages used, reset times, update time and stale/error state. Missing windows display an em dash, with no synthetic zero. The model polls no faster than once per minute while connected, focused and with the sidebar visible. Refresh obeys the same limit. Session token counts and dollar cost are independent from these provider allowances.
+
+Debug screenshots: `TETHER_DEV_CHAT_SAMPLE=claude TETHER_DEV_CHAT_ORGANIZATION=1` supplies example project/usage state, and `TETHER_DEV_CHAT_BRANCH=1` opens the branch dialog. Sample readings are debug-only and never used as fallback for live accounts.

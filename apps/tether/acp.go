@@ -107,7 +107,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|kill")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill")
 	}
 	switch args[0] {
 	case "attach":
@@ -132,6 +132,10 @@ func runACP(args []string) error {
 		return acpSessions(args[1:], os.Stdout)
 	case "workflows":
 		return acpWorkflows(args[1:], os.Stdout)
+	case "organize":
+		return acpOrganize(args[1:], os.Stdout)
+	case "usage":
+		return acpUsage(args[1:], os.Stdout)
 	case "kill":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: acp kill <name>")
@@ -826,5 +830,14 @@ func acpKill(name string) error {
 		_ = syscall.Kill(m.Pid, syscall.SIGKILL)
 	}
 	_ = os.RemoveAll(filepath.Dir(m.Sock))
-	return os.RemoveAll(acpDir(name))
+	if err := os.RemoveAll(acpDir(name)); err != nil {
+		return err
+	}
+	return withSessionLock("acp-organization", func() error {
+		err := os.Remove(acpOrganizationPath(name))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	})
 }

@@ -13,7 +13,7 @@ pub(crate) struct SidebarState {
 }
 
 impl SidebarState {
-    fn visibility(&self) -> Shown {
+    pub(super) fn visibility(&self) -> Shown {
         visibility(
             !self.closed,
             self.overlay,

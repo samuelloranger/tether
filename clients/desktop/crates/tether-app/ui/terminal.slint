@@ -3,7 +3,7 @@ import { ConfirmDialog, GhostButton, PrimaryButton, SecondaryButton, IconButton,
 import { HistoryOverlay, PaletteOverlay, HistoryVm, PaletteVm } from "extras.slint";
 import { AgentVm, AgentChip, AgentBanner, AgentSheet, Heat, TextDot } from "agents.slint";
 import { GitVm, GitSidePanel, GitOverlays } from "git.slint";
-import { ChatVm, ChatPane, ChatSidebarRow, ChatTitleBlock, ChatStatus, ChatOverlays } from "chat.slint";
+import { ChatVm, ChatPane, ChatSidebarRow, ChatTitleBlock, ChatStatus, ChatOverlays, ChatPlanUsage } from "chat.slint";
 
 export struct TermTab {
     name: string, cwd: string, active: bool, attention: bool,
@@ -377,7 +377,15 @@ component Sidebar inherits Rectangle {
                         ChatVm.add-menu = true;
                     }
                 }
-                for chat in ChatVm.tabs: ChatSidebarRow { tab: chat; picked => { root.picked(); } }
+                if ChatVm.archived: SidebarAction { icon: @image-url("icons/back.svg"); text: "Back to projects"; clicked => { ChatVm.show-archived(false); } }
+                for row in ChatVm.sidebar: VerticalLayout {
+                    if row.section != "": Rectangle { height: 30px;
+                        Text { x: 8px; height: parent.height; text: (row.collapsed ? "›  " : "⌄  ") + row.section; color: Tokens.text-faint; font-size: 11.5px; vertical-alignment: center; overflow: elide; width: parent.width - 16px; }
+                        TouchArea { mouse-cursor: pointer; clicked => { ChatVm.collapse-project(row.project-key); } }
+                    }
+                    if row.section == "": ChatSidebarRow { tab: row.tab; picked => { root.picked(); } }
+                }
+                if !ChatVm.archived: SidebarAction { icon: @image-url("icons/history.svg"); text: "Archived chats · " + ChatVm.archived-count; clicked => { ChatVm.show-archived(true); } }
                 if ChatVm.tabs.length == 0: Text {
                     x: 8px;
                     height: 26px;
@@ -388,6 +396,7 @@ component Sidebar inherits Rectangle {
                 }
             }
         }
+        ChatPlanUsage { }
         Rectangle { height: 1px; background: Tokens.border; }
         Rectangle { height: 4px; }
         SidebarAction { icon: @image-url("icons/back.svg"); text: "Hosts"; clicked => { TerminalVm.back(); } }

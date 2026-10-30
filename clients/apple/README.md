@@ -51,3 +51,13 @@ connect state machine (behind an ops seam), `zmx ls` / git-diff parsing, key
 encoding and randomart, grid-to-text flattening. Anything touching the Keychain
 or a live SSH host is DEBUG-env-gated (skips in CI) and verified by driving the
 simulator or a real host instead.
+
+## Chat organization and branching
+
+The session drawer groups chats by repository (working folder when the host cannot identify a repository). Pin a chat to keep it above the project groups. A chat's trailing menu also offers Rename, Archive/Restore, and a separate confirmed Delete action. Archive hides a chat without stopping its agent; archived chats waiting for an answer remain visible under Needs you.
+
+Long-press a text prompt and choose **Branch & edit…** to create a separate conversation with an editable, unsent prompt. The sheet explicitly copies earlier user/assistant text into a fresh agent session; it does not perform a native session fork, restore files, or create a Git worktree. The child links to its original conversation. Earlier images and copied context over 128 KiB are refused with an explanation rather than silently omitted or truncated. The context seed and draft persist locally, and a failed first send keeps them for an explicit retry.
+
+The drawer footer shows Claude and Codex account usage on the selected host: 5-hour and weekly percent used, reset time, and freshness. Missing windows show a dash. Readings are account-wide, not this chat's token count. The app asks at most once a minute while the drawer is visible and connected; unavailable hosts retain the last reading with its age. Update the host's `tether` tool to use organization and plan-usage commands.
+
+Additional DEBUG screenshot fixtures: `TETHER_DEBUG_DRAWER=projects-open|projects-archive|projects-unavailable`, and `TETHER_DEBUG_CHAT_FIXTURE=branch|branch-child`.

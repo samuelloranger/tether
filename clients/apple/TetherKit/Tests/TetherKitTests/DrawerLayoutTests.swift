@@ -16,16 +16,6 @@ final class DrawerLayoutTests: XCTestCase {
     XCTAssertEqual(DrawerLayout.waitingFirst(["x", "y"]) { _ in false }, ["x", "y"])
   }
 
-  func test_ended_chats_collapse_from_two() {
-    let one = DrawerLayout.splitEnded([chat("a", .idle), chat("b", .ended)])
-    XCTAssertFalse(one.collapsed)
-    XCTAssertEqual(one.ended.map(\.name), ["b"])
-    let two = DrawerLayout.splitEnded([chat("a", .ended), chat("b", .idle), chat("c", .ended)])
-    XCTAssertTrue(two.collapsed)
-    XCTAssertEqual(two.live.map(\.name), ["b"])
-    XCTAssertEqual(two.ended.map(\.name), ["a", "c"])
-  }
-
   func test_the_summary_spells_out_the_state_and_skips_zero_counts() {
     XCTAssertEqual(DrawerLayout.summary(state: "connected", terminals: 3, chats: 4), "connected · 3 terminals · 4 chats")
     XCTAssertEqual(DrawerLayout.summary(state: "connected", terminals: 1, chats: 1), "connected · 1 terminal · 1 chat")
@@ -57,14 +47,6 @@ final class DrawerLayoutTests: XCTestCase {
     XCTAssertEqual(DrawerLayout.homeRelative("/Users"), "/Users")
     XCTAssertEqual(DrawerLayout.homeRelative("/home/dev/"), "~")
     XCTAssertEqual(DrawerLayout.homeRelative("/home/dev/x/"), "~/x")
-  }
-
-  func test_an_open_ended_chat_keeps_the_fold_open() {
-    let ended = [chat("a", .ended), chat("b", .ended)]
-    XCTAssertFalse(DrawerLayout.showsEnded(expanded: false, ended: ended, open: nil))
-    XCTAssertFalse(DrawerLayout.showsEnded(expanded: false, ended: ended, open: "live"))
-    XCTAssertTrue(DrawerLayout.showsEnded(expanded: false, ended: ended, open: "b"))
-    XCTAssertTrue(DrawerLayout.showsEnded(expanded: true, ended: ended, open: nil))
   }
 
   func test_git_is_offered_for_an_absolute_folder_or_the_attached_session() {

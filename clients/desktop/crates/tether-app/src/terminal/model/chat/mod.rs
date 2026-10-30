@@ -21,6 +21,7 @@ use tether_core::connect::ConnectError;
 #[cfg(debug_assertions)]
 mod devsample;
 mod newchat;
+mod organization;
 mod rows;
 mod screen;
 mod session;
@@ -40,6 +41,10 @@ const FOLDER_COPIED_FOR: Duration = Duration::from_millis(1300);
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecTag {
     Status,
+    Usage,
+    Organize {
+        name: String,
+    },
     List,
     Inspect {
         name: String,
@@ -152,6 +157,24 @@ pub enum ChatJob {
 pub enum ChatMsg {
     // From the window.
     Select(String),
+    Actions(String),
+    ActionsClose,
+    Pin(String),
+    Archive(String),
+    Restore(String),
+    Archived(bool),
+    CollapseProject(String),
+    Rename(String),
+    RenameSave(String),
+    Branch(String),
+    BranchCreate {
+        title: String,
+        prompt: String,
+    },
+    BranchCancel,
+    Parent,
+    RefreshUsage,
+
     Delete(String),
     /// Home's Chat on a machine card: the dialog opens once the session list is in.
     NewChatWhenReady,
@@ -302,6 +325,17 @@ pub struct Out {
 
 pub struct Chats {
     files: Option<ChatFiles>,
+    actions: Option<String>,
+    rename: Option<String>,
+    branch_dialog: Option<organization::BranchDialog>,
+    pending_branch: Option<(String, organization::BranchDialog)>,
+    archived: bool,
+    collapsed_projects: HashSet<String>,
+    plan_usage: tether_core::acp::organization::PlanUsage,
+    usage_asked: Option<Duration>,
+    usage_loading: bool,
+    pub(super) usage_visible: bool,
+    organization_error: String,
     defaults: ChatDefaults,
     options_cache: OptionsCache,
     /// The host as the options cache and the chat files name it (`host:port`).
@@ -394,6 +428,17 @@ impl Chats {
     pub fn new(files: Option<ChatFiles>, host: &str) -> Self {
         Self {
             files,
+            actions: None,
+            rename: None,
+            branch_dialog: None,
+            pending_branch: None,
+            archived: false,
+            collapsed_projects: HashSet::new(),
+            plan_usage: Default::default(),
+            usage_asked: None,
+            usage_loading: false,
+            usage_visible: true,
+            organization_error: String::new(),
             defaults: ChatDefaults::default(),
             options_cache: OptionsCache::default(),
             scope: host.to_string(),
@@ -457,7 +502,15 @@ impl Chats {
     }
 
     pub fn tab_names(&self) -> Vec<String> {
-        self.ordered().into_iter().map(|c| c.name.clone()).collect()
+        self.ordered()
+            .into_iter()
+            .filter(|c| {
+                !c.organization.archived
+                    || self.active.as_deref() == Some(c.name.as_str())
+                    || c.turn == host::HostTurn::Waiting
+            })
+            .map(|c| c.name.clone())
+            .collect()
     }
 
     /// Oldest left, like the session tabs; chats started here sit at the end until listed.
@@ -485,6 +538,14 @@ impl Chats {
     pub fn on_dropped(&mut self, now: Duration, out: &mut Out) {
         self.connected = false;
         self.polling = false;
+        self.usage_loading = false;
+        // A dropped connection never answers the organize exec; keep the dialog for a retry.
+        if let Some((name, _)) = self.pending_branch.take() {
+            if let Some(files) = &self.files {
+                files.clear(&name);
+            }
+            self.organization_error = "Connection lost before the branch was created.".into();
+        }
         let names: Vec<String> = self.sessions.keys().cloned().collect();
         for name in names {
             self.with_session(&name, now, out, |s, ctx| s.background(ctx));
@@ -499,6 +560,7 @@ impl Chats {
     }
 
     pub fn on_tick(&mut self, now: Duration, out: &mut Out) {
+        self.poll_usage(now, out);
         let every = if self.has_chats() {
             POLL_WITH_CHATS
         } else {
@@ -715,6 +777,7 @@ impl Chats {
             has_status: false,
             multi_client: multi,
             tasks: 0,
+            organization: Default::default(),
         });
         let session = Session::new(
             &name,
@@ -778,12 +841,67 @@ impl Chats {
             }
             self.provisional.push(chat);
         }
+        if crate::app::dev_env("TETHER_DEV_CHAT_ORGANIZATION").is_some() {
+            let wall = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            use tether_core::acp::organization::{ProviderUsage, UsageWindow};
+            self.plan_usage.claude = ProviderUsage {
+                five_hour: Some(UsageWindow {
+                    used_percent: 42.0,
+                    resets_at: wall + 8280,
+                }),
+                weekly: Some(UsageWindow {
+                    used_percent: 68.0,
+                    resets_at: wall + 273600,
+                }),
+                updated_at: wall,
+                stale: false,
+                error: None,
+            };
+            self.plan_usage.codex = ProviderUsage {
+                five_hour: Some(UsageWindow {
+                    used_percent: 24.0,
+                    resets_at: wall + 14760,
+                }),
+                weekly: Some(UsageWindow {
+                    used_percent: 83.0,
+                    resets_at: wall + 115200,
+                }),
+                updated_at: wall,
+                stale: false,
+                error: None,
+            };
+            if let Some(c) = self.provisional.iter_mut().find(|c| c.name == "sample") {
+                c.organization.pinned = true;
+            }
+            let mut archived = ChatSummary::new("archived", "/srv/app");
+            archived.host_title = Some("Previous release review".into());
+            archived.organization.archived = true;
+            self.provisional.push(archived);
+        }
         // opencode has no chat on this host yet: its dialog shows the first-time note.
         for a in [&agent::CLAUDE, &agent::CODEX] {
             self.options_cache
                 .store(&self.scope, a.key, &devsample::options(a.key));
         }
         self.active = Some("sample".into());
+        if crate::app::dev_env("TETHER_DEV_CHAT_BRANCH").is_some()
+            && let Some(id) = self
+                .active_session()
+                .and_then(|s| {
+                    s.state().items.iter().find(|i| {
+                        matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. })
+                    })
+                })
+                .map(|i| i.id)
+        {
+            self.handle_organization(
+                &ChatMsg::Branch(format!("item:{id}")),
+                now,
+                &mut Out::default(),
+            );
+        }
         self.follow_seq += 1;
         self.focus_seq += 1;
     }
@@ -817,6 +935,9 @@ impl Chats {
 
     pub fn handle(&mut self, msg: ChatMsg, now: Duration, out: &mut Out) {
         self.dirty = true;
+        if self.handle_organization(&msg, now, out) {
+            return;
+        }
         match msg {
             #[cfg(debug_assertions)]
             ChatMsg::DevSample(agent) => self.dev_sample(&agent, now),
@@ -1192,6 +1313,16 @@ impl Chats {
     }
 
     fn escape(&mut self, now: Duration, out: &mut Out) {
+        if self.pending_branch.is_some() {
+            return;
+        }
+        if self.branch_dialog.take().is_some()
+            || self.rename.take().is_some()
+            || self.actions.take().is_some()
+        {
+            self.organization_error.clear();
+            return;
+        }
         // Whatever closes, the keyboard goes back to the composer.
         self.focus_seq += 1;
         if self.delete_prompt.take().is_some() {

@@ -3,6 +3,43 @@ import Foundation
 extension SSHTerminalController {
   var chatTitles: ChatTitleStore { ChatTitleStore(config: config) }
 
+  func organizeChat(_ name: String, patch: [String: Any]) async -> String? {
+    guard let command = ACPHostCommand.organize(name: name, patch: patch),
+      let output = try? await control.exec(command),
+      let object = (try? JSONSerialization.jsonObject(with: Data(output.utf8))) as? [String: Any],
+      object["error"] == nil
+    else { return "Couldn't update this chat. Update tether on the host and try again." }
+    await refreshChats()
+    return nil
+  }
+
+  /// On `ghControl`: the host can take ~12 s to refresh its usage cache, and the serial `control` queue carries status, git and kill.
+  func refreshPlanUsage() async {
+    guard !planUsageLoading, planUsageReadAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+    planUsageLoading = true
+    planUsageReadAt = Date()
+    defer { planUsageLoading = false }
+    guard let output = try? await ghControl.exec(ACPHostCommand.usage), let usage = ChatPlanUsage.parse(output) else { return }
+    planUsage = usage
+  }
+
+  func branchChat(source: ChatSessionModel, point: ChatBranchPoint, title: String, prompt: String) async -> ChatStart {
+    if let failure = point.failure { return .failed(failure) }
+    guard let agent = source.agent else { return .failed("This chat's agent is not supported.") }
+    let result = await newChat(cwdText: source.cwd, request: .init(agent: agent))
+    guard case let .ready(route) = result else { return result }
+    let parent = ChatParent(name: source.chatName, title: source.title)
+    var journal = UserDefaultsChatJournalStore(name: route.name).load()
+    journal.branch = ChatBranch(parent: parent, title: title, earlier: point.earlier)
+    journal.branchSeed = ChatBranching.seed(point.earlier)
+    journal.branchDraft = prompt
+    UserDefaultsChatJournalStore(name: route.name).save(journal)
+    if let failure = await organizeChat(route.name, patch: [
+      "title": title, "parent": ["name": parent.name, "title": parent.title, "method": "copy"],
+    ]) { return .failed(failure) }
+    return .ready(route)
+  }
+
   /// One extra exec per refresh. A host without `acp status` falls back to `acp ls` (running or
   /// ended only); a failed read or a host without chats shows no chats and never an error: chats are
   /// an extra on top of the terminal.
