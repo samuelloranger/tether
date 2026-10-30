@@ -542,6 +542,11 @@ export component Select inherits Rectangle {
         y: root.height + 4px;
         width: root.width;
         Rectangle {
+            // A PopupWindow is created when shown, so this fades each opening in.
+            property <bool> shown;
+            opacity: self.shown ? 1 : 0;
+            animate opacity { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
             background: Tokens.surface;
             border-radius: Tokens.radius-control;
             border-width: 1px;
@@ -731,18 +736,14 @@ export component Reveal inherits Rectangle {
 // Keeps an `if` element alive past its close so it can animate out: `alive` gates the `if`,
 // `shown` drives the motion. It is false for the first frame, since a starting value that was
 // never drawn has nothing to animate from, and while closing.
+// Closing is read from bindings alone: a `changed` handler runs late, and a close made inside a
+// click or key handler would drop the `if` before it ran.
 export component Linger {
     in property <bool> open;
     in property <duration> duration: Motion.base;
-    out property <bool> alive: root.open || root.leaving;
+    out property <bool> alive: root.open || root.entered;
     out property <bool> shown: root.open && root.entered;
-    property <bool> leaving;
     property <bool> entered;
-    changed open => { root.leaving = !root.open && root.entered; }
     Timer { interval: 30ms; running: root.open && !root.entered; triggered => { root.entered = true; } }
-    Timer {
-        interval: root.duration;
-        running: root.leaving;
-        triggered => { root.leaving = false; root.entered = false; }
-    }
+    Timer { interval: root.duration; running: !root.open && root.entered; triggered => { root.entered = false; } }
 }

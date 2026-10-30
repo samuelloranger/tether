@@ -591,37 +591,61 @@ export component TerminalPage inherits Rectangle {
             picked => { TerminalVm.sidebar-dismiss(); }
         }
     }
-    if TerminalVm.menu-link != "" || TerminalVm.menu-tab != "": TouchArea {
+    term-menu := Linger { open: TerminalVm.menu-link != "" || TerminalVm.menu-tab != ""; duration: Motion.fast; }
+    if term-menu.alive: TouchArea {
+        enabled: term-menu.shown;
         clicked => { TerminalVm.close-menu(); }
         menu := Rectangle {
-            x: TerminalVm.menu-x; y: TerminalVm.menu-y - self.lift; width: 180px; height: items.preferred-height;
-            property <bool> shown;
+            // What it opened with stays while it fades out; a right-click elsewhere while it is
+            // open moves it there.
+            property <string> live-tab: TerminalVm.menu-tab;
+            property <string> live-link: TerminalVm.menu-link;
+            property <length> live-x: TerminalVm.menu-x;
+            property <length> live-y: TerminalVm.menu-y;
+            property <string> tab;
+            property <string> link;
+            property <bool> copy;
+            property <length> at-x;
+            property <length> at-y;
+            function hold() {
+                if (TerminalVm.menu-tab != "" || TerminalVm.menu-link != "") {
+                    self.tab = TerminalVm.menu-tab;
+                    self.link = TerminalVm.menu-link;
+                    self.copy = TerminalVm.menu-copy;
+                    self.at-x = TerminalVm.menu-x;
+                    self.at-y = TerminalVm.menu-y;
+                }
+            }
+            init => { self.hold(); }
+            changed live-tab => { self.hold(); }
+            changed live-link => { self.hold(); }
+            changed live-x => { self.hold(); }
+            changed live-y => { self.hold(); }
             // Only the entrance glides; a menu reopened elsewhere jumps there.
-            property <length> lift: menu.shown ? 0 : 4px;
-            opacity: menu.shown ? 1 : 0;
+            property <length> lift: term-menu.shown ? 0 : 4px;
+            x: self.at-x; y: self.at-y - self.lift; width: 180px; height: items.preferred-height;
+            opacity: term-menu.shown ? 1 : 0;
             animate opacity, lift { duration: Motion.fast; easing: ease-out; }
-            Timer { interval: 30ms; running: !menu.shown; triggered => { menu.shown = true; } }
             background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
             drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
             items := VerticalLayout {
                 padding: 4px;
-                if TerminalVm.menu-tab != "": MenuItem { text: "Kill session"; danger: true; clicked => { TerminalVm.kill-from-menu(); } }
-                if TerminalVm.menu-link != "": MenuItem { text: "Copy link"; clicked => { TerminalVm.copy-link(); } }
-                if TerminalVm.menu-link != "": MenuItem { text: TerminalVm.menu-copy ? "Copy" : "Paste"; clicked => { TerminalVm.menu-primary(); } }
+                if menu.tab != "": MenuItem { text: "Kill session"; danger: true; clicked => { TerminalVm.kill-from-menu(); } }
+                if menu.link != "": MenuItem { text: "Copy link"; clicked => { TerminalVm.copy-link(); } }
+                if menu.link != "": MenuItem { text: menu.copy ? "Copy" : "Paste"; clicked => { TerminalVm.menu-primary(); } }
             }
         }
     }
-    if ChatVm.add-menu: TouchArea {
+    add-menu := Linger { open: ChatVm.add-menu; duration: Motion.fast; }
+    if add-menu.alive: TouchArea {
+        enabled: add-menu.shown;
         clicked => { ChatVm.add-menu = false; }
         add := Rectangle {
             x: min(ChatVm.add-menu-x, root.width - self.width - 8px);
             y: ChatVm.add-menu-y - self.lift;
-            property <bool> shown;
-            // Only the entrance glides; a menu reopened elsewhere jumps there.
-            property <length> lift: add.shown ? 0 : 4px;
-            opacity: add.shown ? 1 : 0;
+            property <length> lift: add-menu.shown ? 0 : 4px;
+            opacity: add-menu.shown ? 1 : 0;
             animate opacity, lift { duration: Motion.fast; easing: ease-out; }
-            Timer { interval: 30ms; running: !add.shown; triggered => { add.shown = true; } }
             width: 190px;
             height: add-items.preferred-height;
             background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
@@ -631,6 +655,35 @@ export component TerminalPage inherits Rectangle {
                 MenuItem { text: "New session"; clicked => { ChatVm.add-menu = false; TerminalVm.new-session(); } }
                 MenuItem { text: "New chat\u{2026}"; clicked => { ChatVm.add-menu = false; ChatVm.new-chat(0); } }
                 MenuItem { text: "Continue a chat\u{2026}"; clicked => { ChatVm.add-menu = false; ChatVm.new-chat(1); } }
+            }
+        }
+    }
+    actions-pop := Linger { open: ChatVm.actions-name != "" && !ChatVm.rename-open && !ChatVm.branch-open; duration: Motion.fast; }
+    if actions-pop.alive: TouchArea {
+        enabled: actions-pop.shown;
+        clicked => { ChatVm.actions-close(); }
+        pop := Rectangle {
+            // The chat it opened for, held so the labels don't flip while it fades out.
+            property <string> name;
+            property <bool> pinned;
+            property <bool> archived;
+            init => { self.name = ChatVm.actions-name; self.pinned = ChatVm.actions-pinned; self.archived = ChatVm.actions-archived; }
+            property <length> lift: actions-pop.shown ? 0 : 4px;
+            x: max(8px, min(ChatVm.actions-x - self.width, root.width - self.width - 8px));
+            y: min(ChatVm.actions-y, root.height - self.height - 8px) - self.lift;
+            opacity: actions-pop.shown ? 1 : 0;
+            animate opacity, lift { duration: Motion.fast; easing: ease-out; }
+            width: 200px;
+            height: pop-items.preferred-height;
+            background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
+            drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
+            pop-items := VerticalLayout {
+                padding: 4px;
+                MenuItem { text: pop.pinned ? "Unpin" : "Pin"; clicked => { ChatVm.pin(pop.name); } }
+                MenuItem { text: "Rename\u{2026}"; clicked => { ChatVm.rename(pop.name); } }
+                MenuItem { text: pop.archived ? "Restore" : "Archive"; clicked => { if (pop.archived) { ChatVm.restore(pop.name); } else { ChatVm.archive(pop.name); } } }
+                Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Tokens.border; } }
+                MenuItem { text: "Delete\u{2026}"; danger: true; clicked => { ChatVm.delete(pop.name); ChatVm.actions-close(); } }
             }
         }
     }
@@ -649,7 +702,8 @@ export component TerminalPage inherits Rectangle {
         width: parent.width;
         height: parent.height;
     }
-    if AgentVm.open: AgentSheet { }
+    agent-sheet := Linger { open: AgentVm.open; }
+    if agent-sheet.alive: AgentSheet { shown: agent-sheet.shown; }
     if kill.alive: ConfirmDialog {
         shown: kill.shown;
         title: "Kill session " + TerminalVm.kill-name + "?";

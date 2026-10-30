@@ -129,13 +129,18 @@ export component AgentBanner inherits Rectangle {
 }
 
 export component AgentSheet inherits Rectangle {
+    // Set by a Linger, so it fades out as well as in.
+    in property <bool> shown: true;
     background: Tokens.background.with-alpha(0.62);
-    TouchArea { }
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    TouchArea { enabled: root.shown; }
     card := Rectangle {
         width: min(520px, root.width - 48px);
         height: min(root.height - 48px, col.preferred-height);
         x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
+        y: (parent.height - self.height) / 2 + (root.shown ? 0 : Motion.rise);
+        animate y { duration: Motion.base; easing: ease-out; }
         background: Tokens.surface;
         border-radius: 16px;
         border-width: 1px;

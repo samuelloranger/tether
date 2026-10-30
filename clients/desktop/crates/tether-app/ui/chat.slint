@@ -224,6 +224,9 @@ export global ChatVm {
     in-out property <bool> add-menu;
     in-out property <length> add-menu-x;
     in-out property <length> add-menu-y;
+    // The chat row's "…" button: the actions popover hangs from its bottom-right corner.
+    in-out property <length> actions-x;
+    in-out property <length> actions-y;
     in property <bool> has-chats;
     // The header line: the chat's title and how its link stands.
     in property <string> title;
@@ -878,11 +881,33 @@ component QuietRow inherits HorizontalLayout {
 component Row inherits VerticalLayout {
     in property <ChatRowVm> r;
     // User: a quiet surface inset from the left, so the agent's prose keeps the full measure.
-    if root.r.kind == 0: HorizontalLayout {
-        padding-left: 48px;
-        alignment: end;
-        VerticalLayout {
-            spacing: 3px;
+    // Branch & edit waits in the left gutter until the message is hovered.
+    if root.r.kind == 0: user := TouchArea {
+        height: user-row.preferred-height;
+        user-row := HorizontalLayout {
+            width: parent.width;
+            height: parent.height;
+            padding-left: 14px;
+            spacing: 6px;
+            alignment: end;
+            VerticalLayout {
+                alignment: start;
+                padding-top: 2px;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    opacity: user.has-hover ? 1 : 0;
+                    animate opacity { duration: Motion.fast; easing: ease-out; }
+                    IconButton {
+                        flat: true;
+                        size: 28px;
+                        icon: @image-url("icons/branch.svg");
+                        tooltip: "Branch & edit";
+                        enabled: ChatVm.phase == 2 || ChatVm.phase == 4;
+                        clicked => { ChatVm.branch(root.r.key); }
+                    }
+                }
+            }
             Rectangle {
                 background: Tokens.surface;
                 border-radius: 14px;
@@ -902,9 +927,6 @@ component Row inherits VerticalLayout {
                     }
                     if root.r.text != "": Para { text: root.r.text; }
                 }
-            }
-            HorizontalLayout { alignment: end;
-                SmallAction { text: "Branch & edit"; enabled: ChatVm.phase == 2 || ChatVm.phase == 4; clicked => { ChatVm.branch(root.r.key); } }
             }
         }
     }
@@ -1961,10 +1983,14 @@ component InfoRow inherits Rectangle {
 }
 
 export component ChatControls inherits Rectangle {
-    background: Tokens.background.with-alpha(0.5);
-    TouchArea { clicked => { ChatVm.ctl-close(); } }
+    // Set by a Linger: the panel slides in from the right edge and back out.
+    in property <bool> shown: true;
+    background: Tokens.background.with-alpha(root.shown ? 0.5 : 0);
+    animate background { duration: Motion.slow; easing: ease-out; }
+    TouchArea { enabled: root.shown; clicked => { ChatVm.ctl-close(); } }
     Rectangle {
-        x: parent.width - self.width;
+        x: parent.width - (root.shown ? self.width : 0);
+        animate x { duration: Motion.slow; easing: ease-out; }
         width: min(380px, parent.width);
         background: Tokens.background;
         Rectangle { x: 0; width: 1px; background: Tokens.border; }
@@ -2088,8 +2114,12 @@ export component ChatControls inherits Rectangle {
 
 // Covers the chat under the terminal header, like the git viewer.
 export component ChatReview inherits Rectangle {
+    // Set by a Linger, so it fades out as well as in.
+    in property <bool> shown: true;
     background: Tokens.background;
-    TouchArea { }
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    TouchArea { enabled: root.shown; }
     VerticalLayout {
         Rectangle {
             height: 48px;
@@ -2132,8 +2162,12 @@ export component ChatReview inherits Rectangle {
 
 // One Workflow run, over the chat like the review: phases with their agents, then the summary.
 export component ChatWorkflow inherits Rectangle {
+    // Set by a Linger, so it fades out as well as in.
+    in property <bool> shown: true;
     background: Tokens.background;
-    TouchArea { }
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    TouchArea { enabled: root.shown; }
     VerticalLayout {
         Rectangle {
             height: 48px;
@@ -2299,6 +2333,10 @@ component NcMenu inherits Rectangle {
         width: max(root.width, 190px);
         height: min(list.preferred-height + 8px, 280px);
         Rectangle {
+            property <bool> shown;
+            opacity: self.shown ? 1 : 0;
+            animate opacity { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
             background: Tokens.surface;
             border-radius: 9px;
             border-width: 1px;
@@ -2607,21 +2645,41 @@ export component ChatSidebarRow inherits Rectangle {
         width: 16px;
         height: 16px;
         mouse-cursor: pointer;
-        clicked => { ChatVm.actions(root.tab.name); }
+        clicked => {
+            ChatVm.actions-x = self.absolute-position.x + self.width;
+            ChatVm.actions-y = self.absolute-position.y + self.height + 6px;
+            ChatVm.actions(root.tab.name);
+        }
     }
 }
 
 component ChatOrganizationDialog inherits Rectangle {
+    // Set by a Linger, so it fades out as well as in.
+    in property <bool> shown: true;
     background: Tokens.background.with-alpha(0.65);
-    TouchArea { }
-    Rectangle {
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    // What it opened as stays while it fades out, though the model has already moved on.
+    property <bool> open: ChatVm.rename-open || ChatVm.branch-open || ChatVm.organization-error != "";
+    property <int> live-mode: ChatVm.branch-open ? 2 : ChatVm.rename-open ? 1 : 0;
+    property <string> live-error: ChatVm.organization-error;
+    property <int> mode: 0;
+    property <string> error;
+    init => { root.mode = root.live-mode; root.error = root.live-error; }
+    changed live-mode => { if (root.open) { root.mode = root.live-mode; } }
+    changed live-error => { if (root.open) { root.error = root.live-error; } }
+    TouchArea { enabled: root.shown; }
+    card := Rectangle {
         width: min(500px,parent.width - 48px); height: min(content.preferred-height,parent.height - 48px);
-        x: (parent.width - self.width)/2; y: max(24px,(parent.height - self.height)/2 - 25px);
+        x: (parent.width - self.width)/2;
+        y: max(24px,(parent.height - self.height)/2 - 25px) + (root.shown ? 0 : Motion.rise);
+        animate y { duration: Motion.base; easing: ease-out; }
         background: Tokens.surface; border-radius: 16px; border-width: 1px; border-color: Tokens.border;
+        drop-shadow-blur: 50px; drop-shadow-offset-y: 18px; drop-shadow-color: #00000059;
         content := VerticalLayout { padding: 24px; spacing: 14px;
-            Text { text: ChatVm.branch-open ? "Branch conversation" : ChatVm.rename-open ? "Rename chat" : ChatVm.actions-name != "" ? ChatVm.actions-title : "Chat action unavailable"; color: Tokens.text; font-size: 20px; font-weight: 600; overflow: elide; }
-            if ChatVm.organization-error != "": Text { text: ChatVm.organization-error; color: Tokens.warning; font-size: 13px; wrap: word-wrap; }
-            if ChatVm.branch-open: VerticalLayout { spacing: 12px;
+            Text { text: root.mode == 2 ? "Branch conversation" : root.mode == 1 ? "Rename chat" : "Chat action unavailable"; color: Tokens.text; font-size: 20px; font-weight: 600; overflow: elide; }
+            if root.error != "": Text { text: root.error; color: Tokens.warning; font-size: 13px; wrap: word-wrap; }
+            if root.mode == 2: VerticalLayout { spacing: 12px;
                 Text { text: "Try another approach in a new chat. The original stays available."; wrap: word-wrap; color: Tokens.text-secondary; font-size: 13px; }
                 Text { text: "Before selected message · " + ChatVm.branch-parent; wrap: word-wrap; color: Tokens.text-faint; font-size: 12px; }
                 Text { text: "New chat name"; color: Tokens.text-secondary; font-size: 12px; }
@@ -2635,20 +2693,13 @@ component ChatOrganizationDialog inherits Rectangle {
                 Text { text: "Copy earlier messages"; color: Tokens.text; font-size: 13px; }
                 Text { text: "Starts a new agent session with earlier conversation text. Native branching at this message is unavailable. Files stay as they are."; color: Tokens.text-faint; wrap: word-wrap; font-size: 12px; }
             }
-            if ChatVm.rename-open: Rectangle { height: 38px; background: Tokens.input; border-width: 1px; border-color: Tokens.border; border-radius: 8px;
+            if root.mode == 1: Rectangle { height: 38px; background: Tokens.input; border-width: 1px; border-color: Tokens.border; border-radius: 8px;
                 TextInput { x: 10px; width: parent.width - 20px; height: parent.height; text <=> ChatVm.rename-title; color: Tokens.text; vertical-alignment: center; single-line: true; }
             }
-            if ChatVm.actions-name != "" && !ChatVm.rename-open && !ChatVm.branch-open: VerticalLayout { spacing: 4px;
-                SmallAction { text: ChatVm.actions-pinned ? "Unpin chat" : "Pin chat"; clicked => { ChatVm.pin(ChatVm.actions-name); } }
-                SmallAction { text: "Rename…"; clicked => { ChatVm.rename(ChatVm.actions-name); } }
-                SmallAction { text: ChatVm.actions-archived ? "Restore chat" : "Archive chat"; clicked => { if (ChatVm.actions-archived) { ChatVm.restore(ChatVm.actions-name); } else { ChatVm.archive(ChatVm.actions-name); } } }
-                Text { text: "Archive hides this chat and keeps its history. An active agent keeps running."; font-size: 12px; wrap: word-wrap; color: Tokens.text-faint; }
-                SmallAction { text: "Delete…"; style: 2; clicked => { ChatVm.delete(ChatVm.actions-name); ChatVm.actions-close(); } }
-            }
             HorizontalLayout { alignment: end; spacing: 8px;
-                SecondaryButton { text: ChatVm.branch-open || ChatVm.rename-open ? "Cancel" : "Done"; enabled: !ChatVm.branch-busy; clicked => { if (ChatVm.branch-open) { ChatVm.branch-cancel(); } else { ChatVm.actions-close(); } } }
-                if ChatVm.branch-open: PrimaryButton { text: ChatVm.branch-busy ? "Creating…" : "Create branch"; enabled: !ChatVm.branch-busy && ChatVm.branch-title != "" && ChatVm.branch-prompt != ""; clicked => { ChatVm.branch-create(ChatVm.branch-title,ChatVm.branch-prompt); } }
-                if ChatVm.rename-open: PrimaryButton { text: "Save"; clicked => { ChatVm.rename-save(ChatVm.rename-title); } }
+                SecondaryButton { text: root.mode == 0 ? "Done" : "Cancel"; enabled: root.shown && !ChatVm.branch-busy; clicked => { if (root.mode == 2) { ChatVm.branch-cancel(); } else { ChatVm.actions-close(); } } }
+                if root.mode == 2: PrimaryButton { text: ChatVm.branch-busy ? "Creating…" : "Create branch"; enabled: root.shown && !ChatVm.branch-busy && ChatVm.branch-title != "" && ChatVm.branch-prompt != ""; clicked => { ChatVm.branch-create(ChatVm.branch-title,ChatVm.branch-prompt); } }
+                if root.mode == 1: PrimaryButton { text: "Save"; enabled: root.shown; clicked => { ChatVm.rename-save(ChatVm.rename-title); } }
             }
         }
     }
@@ -2656,10 +2707,14 @@ component ChatOrganizationDialog inherits Rectangle {
 
 export component ChatOverlays inherits Rectangle {
     in property <length> left;   // the docked sidebar's width
-    if ChatVm.active && ChatVm.ctl-open: ChatControls { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
-    if ChatVm.active && ChatVm.review-open: ChatReview { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
-    if ChatVm.active && ChatVm.wf-open: ChatWorkflow { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
-    if ChatVm.actions-name != "" || ChatVm.rename-open || ChatVm.branch-open || ChatVm.organization-error != "": ChatOrganizationDialog { }
+    controls := Linger { open: ChatVm.active && ChatVm.ctl-open; duration: Motion.slow; }
+    review := Linger { open: ChatVm.active && ChatVm.review-open; }
+    workflow := Linger { open: ChatVm.active && ChatVm.wf-open; }
+    if controls.alive: ChatControls { shown: controls.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    if review.alive: ChatReview { shown: review.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    if workflow.alive: ChatWorkflow { shown: workflow.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    organize := Linger { open: ChatVm.rename-open || ChatVm.branch-open || ChatVm.organization-error != ""; }
+    if organize.alive: ChatOrganizationDialog { shown: organize.shown; }
     viewer := Linger { open: ChatVm.viewer-open; }
     new-chat := Linger { open: ChatVm.nc-open; }
     delete := Linger { open: ChatVm.delete-title != ""; }
@@ -2676,6 +2731,8 @@ export component ChatOverlays inherits Rectangle {
 }
 
 export component ChatPlanUsage inherits VerticalLayout {
+    // Sits under the stretching chat list; without this it takes a share of the spare height.
+    vertical-stretch: 0;
     padding-left: 10px; padding-right: 10px; padding-top: 8px; padding-bottom: 8px; spacing: 7px;
     Rectangle { height: 1px; background: Tokens.border; }
     HorizontalLayout { spacing: 4px;
@@ -2683,15 +2740,15 @@ export component ChatPlanUsage inherits VerticalLayout {
         IconButton { icon: @image-url("icons/refresh.svg"); size: 26px; tooltip: "Refresh account usage (once per minute)"; clicked => { ChatVm.refresh-usage(); } }
     }
     HorizontalLayout { spacing: 12px;
-        for provider[i] in ["Claude", "Codex"]: VerticalLayout { spacing: 5px; horizontal-stretch: 1;
+        for provider[i] in ["Claude", "Codex"]: VerticalLayout { spacing: 6px; horizontal-stretch: 1; alignment: start;
             Text { text: provider; font-size: 12px; font-weight: 600; color: Tokens.text; }
-            for slot[j] in [0,1]: VerticalLayout { spacing: 3px;
+            for slot[j] in [0,1]: VerticalLayout { spacing: 3px; alignment: start;
                 HorizontalLayout {
                     Text { text: ChatVm.plan-usage[i*2+j].window; font-size: 11px; color: Tokens.text-faint; horizontal-stretch: 1; }
                     Text { text: ChatVm.plan-usage[i*2+j].value; font-size: 11px; color: Tokens.text-secondary; }
                 }
                 Rectangle { height: 3px; background: Tokens.raised; border-radius: 2px;
-                    Rectangle { height: parent.height; width: parent.width * clamp(ChatVm.plan-usage[i*2+j].used / 100, 0, 1); background: ChatVm.plan-usage[i*2+j].used >= 80 ? Tokens.warning : Tokens.accent; border-radius: 2px; }
+                    Rectangle { x: 0; height: parent.height; width: parent.width * clamp(ChatVm.plan-usage[i*2+j].used / 100, 0, 1); background: ChatVm.plan-usage[i*2+j].used >= 80 ? Tokens.warning : Tokens.accent; border-radius: 2px; }
                 }
                 Text { text: ChatVm.plan-usage[i*2+j].reset; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
             }
