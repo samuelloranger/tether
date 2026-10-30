@@ -328,6 +328,7 @@ pub struct Chats {
     actions: Option<String>,
     rename: Option<String>,
     branch_dialog: Option<organization::BranchDialog>,
+    pending_branch: Option<(String, organization::BranchDialog)>,
     archived: bool,
     collapsed_projects: HashSet<String>,
     plan_usage: tether_core::acp::organization::PlanUsage,
@@ -430,6 +431,7 @@ impl Chats {
             actions: None,
             rename: None,
             branch_dialog: None,
+            pending_branch: None,
             archived: false,
             collapsed_projects: HashSet::new(),
             plan_usage: Default::default(),
@@ -537,6 +539,13 @@ impl Chats {
         self.connected = false;
         self.polling = false;
         self.usage_loading = false;
+        // A dropped connection never answers the organize exec; keep the dialog for a retry.
+        if let Some((name, _)) = self.pending_branch.take() {
+            if let Some(files) = &self.files {
+                files.clear(&name);
+            }
+            self.organization_error = "Connection lost before the branch was created.".into();
+        }
         let names: Vec<String> = self.sessions.keys().cloned().collect();
         for name in names {
             self.with_session(&name, now, out, |s, ctx| s.background(ctx));
@@ -877,8 +886,8 @@ impl Chats {
                 .store(&self.scope, a.key, &devsample::options(a.key));
         }
         self.active = Some("sample".into());
-        if crate::app::dev_env("TETHER_DEV_CHAT_BRANCH").is_some() {
-            if let Some(id) = self
+        if crate::app::dev_env("TETHER_DEV_CHAT_BRANCH").is_some()
+            && let Some(id) = self
                 .active_session()
                 .and_then(|s| {
                     s.state().items.iter().find(|i| {
@@ -886,13 +895,12 @@ impl Chats {
                     })
                 })
                 .map(|i| i.id)
-            {
-                self.handle_organization(
-                    &ChatMsg::Branch(format!("item:{id}")),
-                    now,
-                    &mut Out::default(),
-                );
-            }
+        {
+            self.handle_organization(
+                &ChatMsg::Branch(format!("item:{id}")),
+                now,
+                &mut Out::default(),
+            );
         }
         self.follow_seq += 1;
         self.focus_seq += 1;
@@ -1305,6 +1313,9 @@ impl Chats {
     }
 
     fn escape(&mut self, now: Duration, out: &mut Out) {
+        if self.pending_branch.is_some() {
+            return;
+        }
         if self.branch_dialog.take().is_some()
             || self.rename.take().is_some()
             || self.actions.take().is_some()

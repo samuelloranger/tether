@@ -7,6 +7,7 @@ use tether_core::acp::{
 };
 use tether_core::zmx::shell_quote;
 
+#[derive(Clone)]
 pub struct BranchDialog {
     pub branch: Branch,
     pub title: String,
@@ -144,18 +145,55 @@ impl Chats {
                         {
                             chat.organization = metadata.clone();
                         }
+                        if self
+                            .pending_branch
+                            .as_ref()
+                            .is_some_and(|(pending, _)| pending == name)
+                        {
+                            let (_, dialog) = self.pending_branch.take().unwrap();
+                            self.branch_dialog = None;
+                            self.open_route(
+                                name.clone(),
+                                dialog.cwd,
+                                None,
+                                dialog.multi,
+                                dialog.agent,
+                                StartOptions::Stored,
+                                now,
+                                out,
+                            );
+                            if let Some(chat) =
+                                self.provisional.iter_mut().find(|c| &c.name == name)
+                            {
+                                chat.organization = metadata.clone();
+                            }
+                            self.draft_seq += 1;
+                        }
                         if metadata.archived && self.active.as_deref() == Some(name) {
                             self.leave_active(now, out);
                         }
                     }
                     None => {
+                        if self
+                            .pending_branch
+                            .as_ref()
+                            .is_some_and(|(pending, _)| pending == name)
+                        {
+                            self.pending_branch = None;
+                            if let Some(files) = &self.files {
+                                files.clear(name);
+                            }
+                        }
                         self.organization_error =
                             "Couldn't save chat organization. Update tether on the host and retry."
-                                .into()
+                                .into();
                     }
                 }
             }
             ChatMsg::Branch(key) => {
+                if self.pending_branch.is_some() {
+                    return true;
+                }
                 self.actions = None;
                 let Some(s) = self.active_session() else {
                     return true;
@@ -169,6 +207,11 @@ impl Chats {
                     .find(|c| c.name == s.name)
                     .map(|c| self.title_of(c))
                     .unwrap_or_else(|| s.title());
+                if s.state().is_queued(id) {
+                    self.organization_error =
+                        "That prompt has not started. Wait for it before branching.".into();
+                    return true;
+                }
                 let parent = Parent {
                     name: s.name.clone(),
                     title: title.clone(),
@@ -191,9 +234,17 @@ impl Chats {
                     Err(message) => self.organization_error = message.into(),
                 }
             }
-            ChatMsg::BranchCancel => self.branch_dialog = None,
+            ChatMsg::BranchCancel => {
+                if self.pending_branch.is_none() {
+                    self.branch_dialog = None;
+                    self.organization_error.clear();
+                }
+            }
             ChatMsg::BranchCreate { title, prompt } => {
-                let Some(mut dialog) = self.branch_dialog.take() else {
+                if self.pending_branch.is_some() {
+                    return true;
+                }
+                let Some(mut dialog) = self.branch_dialog.clone() else {
                     return true;
                 };
                 if !self.connected {
@@ -220,17 +271,9 @@ impl Chats {
                     json!({"title":title.trim(),"parent":dialog.branch.parent}),
                     out,
                 );
-                self.open_route(
-                    name,
-                    dialog.cwd,
-                    None,
-                    dialog.multi,
-                    dialog.agent,
-                    StartOptions::Stored,
-                    now,
-                    out,
-                );
-                self.draft_seq += 1;
+                dialog.title = title.clone();
+                self.branch_dialog = Some(dialog.clone());
+                self.pending_branch = Some((name, dialog));
             }
             ChatMsg::Parent => {
                 let parent = self

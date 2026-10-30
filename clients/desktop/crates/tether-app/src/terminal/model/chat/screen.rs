@@ -120,6 +120,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             name: row.name,
         });
     }
+    screen.branch_busy = chats.pending_branch.is_some();
     screen.archived = chats.archived;
     screen.archived_count = ordered.iter().filter(|c| c.organization.archived).count();
     screen.organization_error = chats.organization_error.clone();

@@ -199,6 +199,7 @@ export global ChatVm {
     in property <bool> rename-open;
     in-out property <string> rename-title;
     in property <bool> branch-open;
+    in property <bool> branch-busy;
     in-out property <string> branch-title;
     in-out property <string> branch-prompt;
     in property <string> branch-parent;
@@ -2645,8 +2646,8 @@ component ChatOrganizationDialog inherits Rectangle {
                 SmallAction { text: "Delete…"; style: 2; clicked => { ChatVm.delete(ChatVm.actions-name); ChatVm.actions-close(); } }
             }
             HorizontalLayout { alignment: end; spacing: 8px;
-                SecondaryButton { text: ChatVm.branch-open || ChatVm.rename-open ? "Cancel" : "Done"; clicked => { if (ChatVm.branch-open) { ChatVm.branch-cancel(); } else { ChatVm.actions-close(); } } }
-                if ChatVm.branch-open: PrimaryButton { text: "Create branch"; enabled: ChatVm.branch-title != "" && ChatVm.branch-prompt != ""; clicked => { ChatVm.branch-create(ChatVm.branch-title,ChatVm.branch-prompt); } }
+                SecondaryButton { text: ChatVm.branch-open || ChatVm.rename-open ? "Cancel" : "Done"; enabled: !ChatVm.branch-busy; clicked => { if (ChatVm.branch-open) { ChatVm.branch-cancel(); } else { ChatVm.actions-close(); } } }
+                if ChatVm.branch-open: PrimaryButton { text: ChatVm.branch-busy ? "Creating…" : "Create branch"; enabled: !ChatVm.branch-busy && ChatVm.branch-title != "" && ChatVm.branch-prompt != ""; clicked => { ChatVm.branch-create(ChatVm.branch-title,ChatVm.branch-prompt); } }
                 if ChatVm.rename-open: PrimaryButton { text: "Save"; clicked => { ChatVm.rename-save(ChatVm.rename-title); } }
             }
         }

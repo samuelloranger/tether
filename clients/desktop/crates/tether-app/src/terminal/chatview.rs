@@ -503,6 +503,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     if !RENAME_SHOWN.replace(s.rename.is_some()) {
         vm.set_rename_title(s.rename_title.as_str().into());
     }
+    vm.set_branch_busy(s.branch_busy);
     vm.set_branch_open(s.branch.is_some());
     if let Some((title, prompt, parent)) = &s.branch {
         if !BRANCH_SHOWN.replace(true) {

@@ -460,6 +460,7 @@ pub struct ChatScreen {
     pub rename: Option<String>,
     pub rename_title: String,
     pub branch: Option<(String, String, String)>,
+    pub branch_busy: bool,
     pub parent: String,
     pub parent_context: String,
     pub parent_available: bool,

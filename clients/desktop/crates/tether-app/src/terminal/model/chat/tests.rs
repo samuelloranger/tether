@@ -2341,6 +2341,13 @@ fn creating_a_branch_preserves_original_and_opens_distinct_unsent_draft() {
         title: "Alternative".into(),
         prompt: "edited prompt".into(),
     });
+    assert_eq!(
+        h.chats.active(),
+        Some(parent.as_str()),
+        "parent stays active before metadata acknowledgement"
+    );
+    let child_name = h.chats.pending_branch.as_ref().unwrap().0.clone();
+    h.exec(|tag|matches!(tag,ExecTag::Organize{name} if name==&child_name),r#"{"title":"Alternative","pinned":false,"archived":false,"parent":{"name":"source","title":"Original","method":"copy"}}"#);
     let child = h.chats.active().unwrap().to_string();
     assert_ne!(child, parent);
     assert_eq!(h.chats.active_session().unwrap().draft, "edited prompt");
@@ -2409,4 +2416,85 @@ fn first_branch_seed_write_blocks_overlap_and_failure_keeps_explicit_retry() {
             .any(|wire| wire.contains("tether/branchContext")),
         "explicit retry keeps the context"
     );
+}
+
+#[test]
+fn branch_metadata_failure_keeps_parent_and_editable_prompt_without_spawning() {
+    let mut h = Harness::new();
+    let (parent, _) = h.live_chat();
+    h.take();
+    h.msg(ChatMsg::DraftEdited {
+        text: "original".into(),
+        cursor_byte: 8,
+    });
+    h.msg(ChatMsg::Send);
+    h.take();
+    let id = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .find(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .unwrap()
+        .id;
+    h.msg(ChatMsg::Branch(format!("item:{id}")));
+    h.msg(ChatMsg::BranchCreate {
+        title: "Alternative".into(),
+        prompt: "edited".into(),
+    });
+    let child = h.chats.pending_branch.as_ref().unwrap().0.clone();
+    h.exec(
+        |tag| matches!(tag,ExecTag::Organize{name} if name==&child),
+        "unknown acp command organize",
+    );
+    assert_eq!(h.chats.active(), Some(parent.as_str()));
+    assert!(h.chats.pending_branch.is_none());
+    assert_eq!(
+        h.chats.branch_dialog.as_ref().unwrap().branch.draft,
+        "edited"
+    );
+    assert!(
+        !h.take().iter().any(|j| matches!(j, ChatJob::Dial { .. })),
+        "failed organization never spawns a child"
+    );
+}
+
+#[test]
+fn dropping_while_a_branch_is_pending_keeps_the_dialog_for_a_retry() {
+    let mut h = Harness::new();
+    let (parent, _) = h.live_chat();
+    h.take();
+    h.msg(ChatMsg::DraftEdited {
+        text: "original".into(),
+        cursor_byte: 8,
+    });
+    h.msg(ChatMsg::Send);
+    h.take();
+    let id = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .find(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .unwrap()
+        .id;
+    h.msg(ChatMsg::Branch(format!("item:{id}")));
+    h.msg(ChatMsg::BranchCreate {
+        title: "Alternative".into(),
+        prompt: "edited".into(),
+    });
+    assert!(h.chats.pending_branch.is_some());
+    h.run(|c, now, out| c.on_dropped(now, out));
+    assert!(h.chats.pending_branch.is_none());
+    assert_eq!(h.chats.active(), Some(parent.as_str()));
+    assert_eq!(
+        h.chats.branch_dialog.as_ref().unwrap().branch.draft,
+        "edited"
+    );
+    h.msg(ChatMsg::BranchCancel);
+    assert!(h.chats.branch_dialog.is_none(), "cancel works again");
 }
