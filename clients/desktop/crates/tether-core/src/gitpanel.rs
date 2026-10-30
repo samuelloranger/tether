@@ -706,6 +706,8 @@ impl GitPanel {
                 }
                 if merged {
                     self.last_refresh = None;
+                    // A list asked for before the merge would still show it open.
+                    self.prs_req = None;
                 } else {
                     self.fetch_pr_detail(now, fx);
                 }
@@ -1768,6 +1770,8 @@ mod tests {
         assert_eq!(v.status, "Merged");
         assert_eq!(v.state_chip, "Merged");
         assert!(!v.can_merge);
+        // The list asked for when the panel opened predates the merge.
+        assert_eq!(p.prs_req, None);
     }
 
     #[test]

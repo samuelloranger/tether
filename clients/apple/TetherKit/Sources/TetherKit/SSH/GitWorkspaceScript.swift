@@ -145,8 +145,9 @@ enum GitWorkspaceScript {
     // Keep gh's stderr: swallowing it into an empty list made the screen blame
     // a missing CLI for a repository with nothing open.
     let missing = shellQuote(GitRepositoryModel.ghMissingSentinel)
-    return "if ! command -v gh >/dev/null 2>&1; then printf '%s' \(missing); elif t=$(mktemp); then "
-      + "gh pr list --state merged --limit 20 --json number,title,headRefName,baseRefName,url,isDraft,state >\"$t\" 2>&1 & "
+    return "if ! command -v gh >/dev/null 2>&1; then printf '%s' \(missing); "
+      + "elif ! t=$(mktemp 2>/dev/null); then echo \"Couldn't create a temporary file on the host.\"; "
+      + "else gh pr list --state merged --limit 20 --json number,title,headRefName,baseRefName,url,isDraft,state >\"$t\" 2>&1 & "
       + "gh pr list --state open --limit 50 "
       + "--json number,title,headRefName,baseRefName,url,isDraft,changedFiles,reviewDecision,state 2>&1; wait; "
       + "printf '\\035'; cat \"$t\"; rm -f \"$t\"; fi"

@@ -109,11 +109,11 @@ pub fn workspace_command(dir: &RepoDir) -> String {
 pub fn pull_requests_command(dir: &RepoDir) -> String {
     wrap(&format!(
         "if ! command -v gh >/dev/null 2>&1; then printf '%s' {missing}; \
-         elif cd {q} && t=$(mktemp); then \
-         gh pr list --state merged --limit 20 --json {MERGED_PR_FIELDS} >\"$t\" 2>&1 & \
+         elif ! cd {q} 2>/dev/null; then echo \"Couldn't open the repository folder.\"; \
+         elif ! t=$(mktemp 2>/dev/null); then echo \"Couldn't create a temporary file on the host.\"; \
+         else gh pr list --state merged --limit 20 --json {MERGED_PR_FIELDS} >\"$t\" 2>&1 & \
          gh pr list --state open --limit 50 --json {OPEN_PR_FIELDS} 2>&1; wait; \
-         printf '\\035'; cat \"$t\"; rm -f \"$t\"; \
-         else echo \"Couldn't open the repository folder.\"; fi",
+         printf '\\035'; cat \"$t\"; rm -f \"$t\"; fi",
         missing = shell_quote(GH_MISSING),
         q = dir.q(),
     ))
@@ -1489,6 +1489,60 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         assert!(command.contains("; wait; "), "{command}");
         assert!(command.contains(GH_MISSING), "{command}");
         assert!(!workspace_command(&RepoDir::new("/r").unwrap()).contains("gh pr"));
+    }
+
+    /// Runs the real command against a stand-in `gh` that answers the merged half last.
+    #[cfg(unix)]
+    fn run_pull_requests_command(tmpdir: &str) -> PrList {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let gh = bin.path().join("gh");
+        std::fs::write(
+            &gh,
+            "#!/bin/sh\ncase \"$*\" in\n\
+             *'--state merged'*) sleep 0.2; echo '[{\"number\":2,\"title\":\"m\",\"headRefName\":\"h\",\"baseRefName\":\"main\",\"url\":\"u\",\"isDraft\":false,\"state\":\"MERGED\"}]' ;;\n\
+             *'--state open'*) echo '[{\"number\":9,\"title\":\"o\",\"headRefName\":\"h\",\"baseRefName\":\"main\",\"url\":\"u\",\"isDraft\":false,\"changedFiles\":4,\"state\":\"OPEN\"}]' ;;\n\
+             esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!(
+            "{}:{}",
+            bin.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let dir = RepoDir::new(repo.path().to_str().unwrap()).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(pull_requests_command(&dir))
+            .env("PATH", path)
+            .env("TMPDIR", tmpdir)
+            .output()
+            .unwrap();
+        let (text, rc) = unwrap_output(&String::from_utf8(out.stdout).unwrap());
+        assert_eq!(rc, Some(0), "{text}");
+        pull_request_result(&text)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_pull_request_command_waits_for_both_halves_on_a_real_shell() {
+        let tmp = tempfile::tempdir().unwrap();
+        let PrList::List(pulls) = run_pull_requests_command(tmp.path().to_str().unwrap()) else {
+            panic!("expected a list");
+        };
+        assert_eq!(pulls.iter().map(|p| p.number).collect::<Vec<_>>(), [9, 2]);
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_host_without_a_temporary_file_says_so() {
+        assert_eq!(
+            run_pull_requests_command("/nonexistent/tether-test"),
+            PrList::Failed("Couldn't create a temporary file on the host.".into())
+        );
     }
 
     #[test]

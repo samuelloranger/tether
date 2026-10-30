@@ -168,6 +168,7 @@ final class GitRepositoryModelTests: XCTestCase {
     XCTAssertTrue(script.contains(" & gh pr list --state open"), script)
     XCTAssertTrue(script.contains("; wait; "), script)
     XCTAssertTrue(script.contains(GitRepositoryModel.ghMissingSentinel), script)
+    XCTAssertTrue(script.contains("Couldn't create a temporary file on the host."), script)
   }
 
   func test_a_populated_list_still_parses() {
