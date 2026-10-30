@@ -881,11 +881,33 @@ component QuietRow inherits HorizontalLayout {
 component Row inherits VerticalLayout {
     in property <ChatRowVm> r;
     // User: a quiet surface inset from the left, so the agent's prose keeps the full measure.
-    if root.r.kind == 0: HorizontalLayout {
-        padding-left: 48px;
-        alignment: end;
-        VerticalLayout {
-            spacing: 3px;
+    // Branch & edit waits in the left gutter until the message is hovered.
+    if root.r.kind == 0: user := TouchArea {
+        height: user-row.preferred-height;
+        user-row := HorizontalLayout {
+            width: parent.width;
+            height: parent.height;
+            padding-left: 14px;
+            spacing: 6px;
+            alignment: end;
+            VerticalLayout {
+                alignment: start;
+                padding-top: 2px;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    opacity: user.has-hover ? 1 : 0;
+                    animate opacity { duration: Motion.fast; easing: ease-out; }
+                    IconButton {
+                        flat: true;
+                        size: 28px;
+                        icon: @image-url("icons/branch.svg");
+                        tooltip: "Branch & edit";
+                        enabled: ChatVm.phase == 2 || ChatVm.phase == 4;
+                        clicked => { ChatVm.branch(root.r.key); }
+                    }
+                }
+            }
             Rectangle {
                 background: Tokens.surface;
                 border-radius: 14px;
@@ -905,9 +927,6 @@ component Row inherits VerticalLayout {
                     }
                     if root.r.text != "": Para { text: root.r.text; }
                 }
-            }
-            HorizontalLayout { alignment: end;
-                SmallAction { text: "Branch & edit"; enabled: ChatVm.phase == 2 || ChatVm.phase == 4; clicked => { ChatVm.branch(root.r.key); } }
             }
         }
     }
@@ -1964,10 +1983,14 @@ component InfoRow inherits Rectangle {
 }
 
 export component ChatControls inherits Rectangle {
-    background: Tokens.background.with-alpha(0.5);
-    TouchArea { clicked => { ChatVm.ctl-close(); } }
+    // Set by a Linger: the panel slides in from the right edge and back out.
+    in property <bool> shown: true;
+    background: Tokens.background.with-alpha(root.shown ? 0.5 : 0);
+    animate background { duration: Motion.slow; easing: ease-out; }
+    TouchArea { enabled: root.shown; clicked => { ChatVm.ctl-close(); } }
     Rectangle {
-        x: parent.width - self.width;
+        x: parent.width - (root.shown ? self.width : 0);
+        animate x { duration: Motion.slow; easing: ease-out; }
         width: min(380px, parent.width);
         background: Tokens.background;
         Rectangle { x: 0; width: 1px; background: Tokens.border; }
@@ -2091,8 +2114,12 @@ export component ChatControls inherits Rectangle {
 
 // Covers the chat under the terminal header, like the git viewer.
 export component ChatReview inherits Rectangle {
+    // Set by a Linger, so it fades out as well as in.
+    in property <bool> shown: true;
     background: Tokens.background;
-    TouchArea { }
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    TouchArea { enabled: root.shown; }
     VerticalLayout {
         Rectangle {
             height: 48px;
@@ -2135,8 +2162,12 @@ export component ChatReview inherits Rectangle {
 
 // One Workflow run, over the chat like the review: phases with their agents, then the summary.
 export component ChatWorkflow inherits Rectangle {
+    // Set by a Linger, so it fades out as well as in.
+    in property <bool> shown: true;
     background: Tokens.background;
-    TouchArea { }
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: Motion.base; easing: ease-out; }
+    TouchArea { enabled: root.shown; }
     VerticalLayout {
         Rectangle {
             height: 48px;
@@ -2302,6 +2333,10 @@ component NcMenu inherits Rectangle {
         width: max(root.width, 190px);
         height: min(list.preferred-height + 8px, 280px);
         Rectangle {
+            property <bool> shown;
+            opacity: self.shown ? 1 : 0;
+            animate opacity { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
             background: Tokens.surface;
             border-radius: 9px;
             border-width: 1px;
@@ -2672,9 +2707,12 @@ component ChatOrganizationDialog inherits Rectangle {
 
 export component ChatOverlays inherits Rectangle {
     in property <length> left;   // the docked sidebar's width
-    if ChatVm.active && ChatVm.ctl-open: ChatControls { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
-    if ChatVm.active && ChatVm.review-open: ChatReview { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
-    if ChatVm.active && ChatVm.wf-open: ChatWorkflow { x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    controls := Linger { open: ChatVm.active && ChatVm.ctl-open; duration: Motion.slow; }
+    review := Linger { open: ChatVm.active && ChatVm.review-open; }
+    workflow := Linger { open: ChatVm.active && ChatVm.wf-open; }
+    if controls.alive: ChatControls { shown: controls.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    if review.alive: ChatReview { shown: review.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    if workflow.alive: ChatWorkflow { shown: workflow.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     organize := Linger { open: ChatVm.rename-open || ChatVm.branch-open || ChatVm.organization-error != ""; }
     if organize.alive: ChatOrganizationDialog { shown: organize.shown; }
     viewer := Linger { open: ChatVm.viewer-open; }
