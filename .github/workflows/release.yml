@@ -14,6 +14,10 @@ name: Release builds
 # desktop client goes to the edge update channel as X.Y.Z+1-main.N. No tag, no GitHub release.
 # Only what changed since the last edge build of that platform is rebuilt; the hidden refs
 # refs/edge/ios, refs/edge/mac and refs/edge/desktop record those commits.
+# The push itself starts the edge run, so it builds while CI runs; each upload first waits
+# for that commit's CI (.github/scripts/wait-for-ci.sh) and ships nothing if it failed. CI
+# completing also starts a run (workflow_run): it is how a re-run CI that turned green still
+# ships, and it builds nothing when the push run already moved the marks.
 #
 # Manual runs are build-only: they upload workflow artifacts without touching a release.
 #
@@ -23,6 +27,7 @@ name: Release builds
 on:
   push:
     tags: ['v*.*.*']
+    branches: [main]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -42,11 +47,12 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 # Edge runs queue behind each other so each one diffs against the commits the previous one
 # shipped; releases never wait on them.
 concurrency:
-  group: ${{ github.event_name == 'workflow_run' && 'release-edge' || format('release-{0}', github.run_id) }}
+  group: ${{ (github.event_name == 'workflow_run' || github.ref == 'refs/heads/main') && 'release-edge' || format('release-{0}', github.run_id) }}
   cancel-in-progress: false
 
 # On a tag push github.ref_name IS vX.Y.Z; on the other events it is a branch.
@@ -57,11 +63,15 @@ env:
 
 jobs:
   # Decides the lane, the commit, the versions and which platforms build. The edge lane
-  # starts only from a green CI run of a push to this repository's main, and skips the
-  # release commit itself: its tag already builds everything.
+  # starts from a push to main or a green CI run of one, and skips the release commit
+  # itself: its tag already builds everything.
   plan:
     if: >-
-      github.event_name != 'workflow_run' || (
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (
+        startsWith(github.ref, 'refs/tags/') ||
+        !startsWith(github.event.head_commit.message, 'release: v'))) ||
+      (github.event_name == 'workflow_run' &&
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -86,6 +96,7 @@ jobs:
         id: plan
         env:
           EVENT: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
           SCOPE: ${{ inputs.scope }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
@@ -94,8 +105,8 @@ jobs:
           APP_VERSION="$(jq -r .version package.json)"
           CARGO_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/ s/^version = "\(.*\)"$/\1/p' clients/desktop/Cargo.toml | head -1)"
           IOS=false MAC=false DESKTOP=false CHANNEL=stable
-          case "$EVENT" in
-            push)
+          case "$EVENT:$GIT_REF" in
+            push:refs/tags/*)
               LANE=release
               VERSION="${TAG#v}"
               DESKTOP_VERSION="$VERSION"
@@ -105,7 +116,7 @@ jobs:
                 exit 1
               fi
               ;;
-            workflow_run)
+            push:refs/heads/main | workflow_run:*)
               LANE=edge CHANNEL=edge
               IFS=. read -r MAJOR MINOR PATCH <<< "$APP_VERSION"
               VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
@@ -157,7 +168,7 @@ jobs:
                 if changed desktop "^clients/desktop/|$PIPELINE"; then DESKTOP=true; fi
               fi
               ;;
-            workflow_dispatch)
+            workflow_dispatch:*)
               LANE=manual
               VERSION="$APP_VERSION"
               DESKTOP_VERSION="$CARGO_VERSION"
@@ -168,7 +179,7 @@ jobs:
               esac
               ;;
             *)
-              echo "::error::Unexpected event $EVENT"
+              echo "::error::Unexpected event $EVENT on $GIT_REF"
               exit 1
               ;;
           esac
@@ -457,6 +468,11 @@ jobs:
           xcrun altool --validate-app -f "$IPA" -t ios \
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
+      # A push run builds while CI is still running; nothing ships until CI passed.
+      - name: Wait for CI
+        if: needs.plan.outputs.lane == 'edge' && github.event_name == 'push'
+        run: .github/scripts/wait-for-ci.sh "${{ needs.plan.outputs.ref }}"
+
       # continue-on-error on a release only: `publish` gates on this job, and a rejected
       # upload (duplicate build number, Apple outage, review rule) must not strand the
       # release in draft. scope=testflight uploads on a manual run too.
@@ -642,6 +658,10 @@ jobs:
           xcrun altool --validate-app -f build/export/Tether.pkg -t macos \
             --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
 
+      - name: Wait for CI
+        if: steps.signing.outputs.ready == 'true' && needs.plan.outputs.lane == 'edge' && github.event_name == 'push'
+        run: .github/scripts/wait-for-ci.sh "${{ needs.plan.outputs.ref }}"
+
       # continue-on-error on a release for the same reason as the iOS upload.
       - name: Upload to TestFlight
         id: upload
@@ -751,6 +771,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}-${{ needs.plan.outputs.desktop_version }}
           path: dist
+
+      - name: Wait for CI
+        if: needs.plan.outputs.lane == 'edge' && github.event_name == 'push'
+        run: .github/scripts/wait-for-ci.sh "${{ needs.plan.outputs.ref }}"
 
       - name: Point the update feed at this version
         run: .github/scripts/update-feed.sh "${{ matrix.feed }}" "${{ matrix.os }}" "$CHANNEL" "$VERSION" dist/velopack
