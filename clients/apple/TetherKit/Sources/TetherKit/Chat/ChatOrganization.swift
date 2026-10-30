@@ -38,12 +38,13 @@ struct ChatBranchPoint: Identifiable {
 
 enum ChatBranching {
   /// Only committed conversation text before the chosen prompt is carried into a fresh agent.
+  /// `inherited` is the branch context the current chat itself started from; it is not in `items`.
   /// Tool approvals, executable requests and hidden thoughts never become replayed instructions.
-  static func point(items: [ChatItem], at id: Int, queued: Set<Int> = []) -> ChatBranchPoint? {
+  static func point(items: [ChatItem], at id: Int, queued: Set<Int> = [], inherited: String = "") -> ChatBranchPoint? {
     guard let index = items.firstIndex(where: { $0.id == id }), !queued.contains(id),
       case let .user(prompt, images, _, _) = items[index].kind, images == 0
     else { return nil }
-    var messages: [[String: String]] = []
+    var messages = (try? JSONSerialization.jsonObject(with: Data(inherited.utf8))) as? [[String: String]] ?? []
     var includesImages = false
     for item in items[..<index] where !queued.contains(item.id) {
       switch item.kind {
@@ -80,6 +81,7 @@ struct ChatProjectGroup: Identifiable {
   var rows: [DrawerChatRow]
   var id: String { path }
   var title: String { ChatFormat.folderName(path) }
+  var needsYou: Bool { rows.contains { $0.state == .waiting } }
 }
 
 enum ChatOrganization {

@@ -19,6 +19,13 @@ final class ChatSessionModel {
   typealias Workflows = @Sendable (_ sessionId: String) async -> String?
 
   private var preferredTitle: String?
+  /// Read once: the transcript body and the composer re-render far too often to decode the journal.
+  private(set) var branch: ChatBranch?
+  private(set) var branchDraft = ""
+  private var sentBranchPrompt = false
+  private var pendingBranchDraft: String?
+  private var draftTask: Task<Void, Never>?
+  private static let draftDebounce = Duration.milliseconds(400)
   let chatName: String
   let cwd: String
   let readOnly: Bool
@@ -104,6 +111,10 @@ final class ChatSessionModel {
     optionPicks: [String: String]? = nil, changedPicks: Set<String> = [], optionsCache: ChatOptionsCache? = nil, dial: @escaping Dial
   ) {
     self.preferredTitle = customTitle
+    let stored = store.load()
+    self.branch = stored.branch
+    self.branchDraft = stored.branchDraft ?? ""
+    self.sentBranchPrompt = stored.entries.contains { $0.kind == .prompt }
     self.agent = agent
     self.optionPicks = optionPicks
     self.changedPicks = changedPicks
@@ -178,15 +189,25 @@ final class ChatSessionModel {
     }
   }
 
-  var title: String { preferredTitle ?? store.load().branch?.title ?? state.title ?? ChatFormat.folderName(cwd) }
-  var branch: ChatBranch? { store.load().branch }
-  var branchDraft: String { store.load().branchDraft ?? "" }
+  var title: String { preferredTitle ?? branch?.title ?? state.title ?? ChatFormat.folderName(cwd) }
 
+  /// Debounced and sent through the client, which is the only journal writer once it exists; with
+  /// no client yet the latest text waits and goes out as soon as one is dialled.
   func saveBranchDraft(_ text: String) {
-    var journal = store.load()
-    guard journal.branch != nil, !journal.entries.contains(where: { $0.kind == .prompt }) else { return }
-    journal.branchDraft = text
-    store.save(journal)
+    guard branch != nil, !sentBranchPrompt else { return }
+    pendingBranchDraft = text
+    draftTask?.cancel()
+    draftTask = Task { [weak self] in
+      try? await Task.sleep(for: Self.draftDebounce)
+      guard !Task.isCancelled else { return }
+      await self?.flushBranchDraft()
+    }
+  }
+
+  private func flushBranchDraft() async {
+    guard let client, let text = pendingBranchDraft else { return }
+    pendingBranchDraft = nil
+    await client.saveBranchDraft(text)
   }
 
   /// Send, Stop and Approve wait for the replay: until then the transcript may still be partial
@@ -260,6 +281,7 @@ final class ChatSessionModel {
     if resume == nil, snapshots != nil { learnIdentity(of: fresh, from: inspectRead, retry: spawn) }
     if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh
+    await flushBranchDraft()
     link.dialSucceeded(at: .now)
     startWorkflowPolling(generation: mine)
     let updates = await fresh.updates()
@@ -349,6 +371,11 @@ final class ChatSessionModel {
   func leave() {
     left = true
     generation += 1
+    draftTask?.cancel()
+    if let client, let text = pendingBranchDraft {
+      pendingBranchDraft = nil
+      Task { await client.saveBranchDraft(text) }
+    }
     detachClient()
   }
 
@@ -519,6 +546,10 @@ final class ChatSessionModel {
     }
     do {
       try await client.prompt(text: text, images: images)
+      sentBranchPrompt = true
+      pendingBranchDraft = nil
+      draftTask?.cancel()
+      branchDraft = ""
     } catch {
       outbox.recordFailure(text, images: images, imagesLost: imagesLost)
     }

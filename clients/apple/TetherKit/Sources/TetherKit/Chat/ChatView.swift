@@ -121,7 +121,7 @@ struct ChatView: View {
       if ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] == "branch" {
         try? await Task.sleep(nanoseconds: 1_200_000_000)
         if let item = model.state.items.first(where: { if case .user = $0.kind { return true }; return false }) {
-          branching = ChatBranching.point(items: model.state.items, at: item.id)
+          branching = ChatBranching.point(items: model.state.items, at: item.id, inherited: model.branch?.earlier ?? "")
         }
       }
       #endif
@@ -252,7 +252,7 @@ struct ChatView: View {
             signInRetry: model.needsSignIn && item.id == model.state.items.last?.id ? model.signInRetry : nil,
             retrySignIn: { model.retrySignIn() },
             branch: onBranch == nil ? nil : {
-              branching = ChatBranching.point(items: model.state.items, at: item.id, queued: Set(model.state.queuedItemIds))
+              branching = ChatBranching.point(items: model.state.items, at: item.id, queued: Set(model.state.queuedItemIds), inherited: model.branch?.earlier ?? "")
             }
           )
           .equatable()

@@ -13,12 +13,13 @@ extension SSHTerminalController {
     return nil
   }
 
+  /// On `ghControl`: the host can take ~12 s to refresh its usage cache, and the serial `control` queue carries status, git and kill.
   func refreshPlanUsage() async {
     guard !planUsageLoading, planUsageReadAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
     planUsageLoading = true
     planUsageReadAt = Date()
     defer { planUsageLoading = false }
-    guard let output = try? await control.exec(ACPHostCommand.usage), let usage = ChatPlanUsage.parse(output) else { return }
+    guard let output = try? await ghControl.exec(ACPHostCommand.usage), let usage = ChatPlanUsage.parse(output) else { return }
     planUsage = usage
   }
 

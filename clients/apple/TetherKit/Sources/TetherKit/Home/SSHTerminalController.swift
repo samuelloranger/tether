@@ -199,7 +199,7 @@ public final class SSHTerminalController {
   let control: ControlConnection
   /// `gh` talks to GitHub and can take seconds; on its own connection it never holds
   /// the session list or the diff behind it.
-  private let ghControl: ControlConnection
+  let ghControl: ControlConnection
   static let zmx = "~/.local/bin/zmx"
   private static let notify = "~/.local/bin/tether"
   static let agentStatusCommand =

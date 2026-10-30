@@ -25,7 +25,6 @@ public struct SSHTerminalView: View {
   @State private var showGit = false
   /// Set by a row's Git menu item; nil means the open chat's folder, else the attached session.
   @State private var gitOverride: GitTarget?
-  @State private var endedExpanded = false
   @State private var collapsedProjects: Set<String> = []
   @State private var showingArchive = false
   @State private var chatActions: DrawerChatRow?
@@ -215,7 +214,7 @@ public struct SSHTerminalView: View {
       guard drawerOpen, scenePhase == .active, controller.status == .connected else { return }
       while !Task.isCancelled {
         await controller.refreshPlanUsage()
-        try? await Task.sleep(nanoseconds: 60_000_000_000)
+        try? await Task.sleep(nanoseconds: 120_000_000_000)
       }
     }
     .onChange(of: drawerOpen) { _, open in
@@ -621,6 +620,10 @@ public struct SSHTerminalView: View {
                   Image(systemName: "folder").font(.caption)
                   Text(group.title).font(.caption.weight(.semibold))
                   Spacer(minLength: 0)
+                  if group.needsYou && collapsedProjects.contains(group.path) {
+                    Circle().fill(TetherColors.accent).frame(width: 8, height: 8)
+                      .accessibilityLabel("A chat needs you")
+                  }
                 }
                 .foregroundStyle(TetherColors.textSecondary).frame(minHeight: 36).contentShape(Rectangle())
               }
@@ -713,25 +716,6 @@ public struct SSHTerminalView: View {
     .padding(.horizontal, 2).padding(.top, 10)
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(.isHeader)
-  }
-
-  private func endedDisclosure(count: Int, expanded: Bool) -> some View {
-    Button {
-      withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { endedExpanded = !expanded }
-    } label: {
-      HStack(spacing: 6) {
-        Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
-          .rotationEffect(.degrees(expanded ? 90 : 0))
-        Text("Ended · \(count)").font(.caption.monospaced())
-        Spacer()
-      }
-      .foregroundStyle(TetherColors.textFaint)
-      .padding(.horizontal, 4).frame(minHeight: 44).contentShape(Rectangle())
-    }
-    .buttonStyle(TetherPressStyle())
-    .accessibilityIdentifier("drawerEndedToggle")
-    .accessibilityLabel("Ended chats, \(count)")
-    .accessibilityValue(expanded ? "expanded" : "collapsed")
   }
 
   /// The one row shape for sessions and chats: the glyph and two lines on the left, only the kill control
@@ -924,7 +908,11 @@ public struct SSHTerminalView: View {
   private func updateChat(_ row: DrawerChatRow, patch: [String: Any], archive: Bool = false) {
     Task {
       if let failure = await controller.organizeChat(row.name, patch: patch) { promptNotice = failure }
-      else if archive { archivedChat = row }
+      else if archive {
+        archivedChat = row
+        try? await Task.sleep(for: .seconds(6))
+        if archivedChat?.name == row.name { archivedChat = nil }
+      }
     }
   }
 

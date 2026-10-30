@@ -94,7 +94,80 @@ final class ChatOrganizationTests: XCTestCase {
   }
 }
 
+extension ChatOrganizationTests {
+  func test_branching_a_branch_keeps_the_inherited_context_and_bounds_the_combined_text() throws {
+    let inherited = #"[{"role":"user","text":"Grandparent question"},{"role":"assistant","text":"Grandparent answer"}]"#
+    let items: [ChatItem] = [
+      .init(id: 1, kind: .user(text: "Branch prompt", offset: 0)),
+      .init(id: 2, kind: .assistant(text: "Branch answer", messageId: nil)),
+      .init(id: 3, kind: .user(text: "Next", offset: 1)),
+    ]
+    let point = try XCTUnwrap(ChatBranching.point(items: items, at: 3, inherited: inherited))
+    let order = ["Grandparent question", "Grandparent answer", "Branch prompt", "Branch answer"].map { point.earlier.range(of: $0)?.lowerBound }
+    XCTAssertFalse(order.contains { $0 == nil })
+    XCTAssertEqual(order.compactMap { $0 }, order.compactMap { $0 }.sorted())
+    XCTAssertNil(point.failure)
+
+    let big = String(repeating: "x", count: 100 * 1024)
+    let bigInherited = "[{\"role\":\"user\",\"text\":\"\(big)\"}]"
+    let small: [ChatItem] = [
+      .init(id: 1, kind: .user(text: big, offset: 0)), .init(id: 2, kind: .user(text: "Next", offset: 1)),
+    ]
+    XCTAssertNil(try XCTUnwrap(ChatBranching.point(items: small, at: 2)).failure)
+    XCTAssertNotNil(try XCTUnwrap(ChatBranching.point(items: small, at: 2, inherited: bigInherited)).failure)
+  }
+
+  func test_a_collapsed_project_can_tell_that_a_chat_needs_you() {
+    func row(_ name: String, _ state: DrawerChatState) -> DrawerChatRow {
+      DrawerChatRow(name: name, title: name, subtitle: "", state: state, cwd: "/w", agentKey: nil)
+    }
+    XCTAssertTrue(ChatProjectGroup(path: "/w", rows: [row("a", .idle), row("b", .waiting)]).needsYou)
+    XCTAssertFalse(ChatProjectGroup(path: "/w", rows: [row("a", .idle)]).needsYou)
+  }
+}
+
 final class ChatBranchDeliveryTests: XCTestCase {
+  func test_seed_and_draft_stay_stored_until_the_write_succeeds() async throws {
+    var journal = ChatJournal()
+    journal.sessionId = "session"
+    journal.branchSeed = "Earlier context"
+    journal.branchDraft = "edited prompt"
+    journal.branch = .init(parent: .init(name: "parent", title: "Source"), title: "Alternative", earlier: "[]")
+    let store = InMemoryChatJournalStore(journal)
+    let stream = BranchHeldWriteStream()
+    let client = ACPClient(stream: stream, store: store)
+    let first = Task { try await client.prompt(text: "edited prompt") }
+    for _ in 0..<100 {
+      if await stream.isWriting { break }
+      try await Task.sleep(nanoseconds: 1_000_000)
+    }
+    XCTAssertEqual(store.load().branchSeed, "Earlier context")
+    XCTAssertEqual(store.load().entries.last?.text, "edited prompt")
+    await stream.succeed()
+    try await first.value
+    XCTAssertNil(store.load().branchSeed)
+    XCTAssertNil(store.load().branchDraft)
+    await client.stop()
+  }
+
+  func test_the_client_owns_draft_persistence_and_ignores_non_branch_chats() async throws {
+    var journal = ChatJournal()
+    journal.sessionId = "session"
+    let plain = InMemoryChatJournalStore(journal)
+    let plainClient = ACPClient(stream: ScriptedByteStream(), store: plain)
+    await plainClient.saveBranchDraft("typed")
+    XCTAssertNil(plain.load().branchDraft)
+
+    journal.branch = .init(parent: .init(name: "parent", title: "Source"), title: "Alternative", earlier: "[]")
+    let store = InMemoryChatJournalStore(journal)
+    let client = ACPClient(stream: ScriptedByteStream(), store: store)
+    await client.saveBranchDraft("first")
+    await client.saveBranchDraft("second")
+    XCTAssertEqual(store.load().branchDraft, "second")
+    await client.stop()
+    await plainClient.stop()
+  }
+
   func test_first_send_carries_seed_once_without_polluting_visible_prompt_or_reconnect() async throws {
     var journal = ChatJournal()
     journal.sessionId = "session"
@@ -188,6 +261,7 @@ private actor BranchHeldWriteStream: TerminalByteStream {
   func write(_ data: Data) async throws {
     try await withCheckedThrowingContinuation { pending = $0 }
   }
+  func succeed() { pending?.resume(); pending = nil }
   func fail() { pending?.resume(throwing: ACPClientError.connectionLost); pending = nil }
   func close() async { fail() }
 }

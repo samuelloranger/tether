@@ -164,6 +164,15 @@ actor ACPClient {
     return loaded
   }
 
+  /// The only writer of the draft: the actor owns the journal, so the model asks it instead of saving itself.
+  func saveBranchDraft(_ text: String) {
+    guard journal.branch != nil, journal.branchDraft != text,
+      !journal.entries.contains(where: { $0.kind == .prompt })
+    else { return }
+    journal.branchDraft = text
+    store.save(journal)
+  }
+
   func prompt(text: String, images: [ChatImageAttachment] = []) async throws {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
     guard !ended else { throw ACPClientError.connectionLost }
@@ -178,8 +187,6 @@ actor ACPClient {
     let branchSeed = hasEarlierPrompt ? nil : journal.branchSeed
     branchSeedSending = branchSeed != nil
     defer { branchSeedSending = false }
-    journal.branchSeed = nil
-    journal.branchDraft = nil
     journal.entries.append(
       .init(kind: .prompt, offset: offset, text: text, requestId: requestId, imageCount: count, images: refs))
     builder.apply(.userPrompt(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))
@@ -190,13 +197,17 @@ actor ACPClient {
     if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
     do {
       try await send(method: "session/prompt", id: requestId, params: ["sessionId": sessionId, "prompt": blocks])
+      if journal.branchSeed != nil || journal.branchDraft != nil {
+        journal.branchSeed = nil
+        journal.branchDraft = nil
+        store.save(journal)
+      }
     } catch {
       if let index = journal.entries.lastIndex(where: {
         $0.kind == .prompt && $0.requestId == requestId
       }) {
         journal.entries.remove(at: index)
       }
-      journal.branchSeed = branchSeed
       if journal.branch != nil { journal.branchDraft = text }
       store.save(journal)
       builder.apply(.promptUndelivered(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))

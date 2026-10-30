@@ -7,14 +7,6 @@ enum DrawerLayout {
     rows.filter(isWaiting) + rows.filter { !isWaiting($0) }
   }
 
-  /// Ended chats fold into one disclosure once there are two of them.
-  static let endedCollapseThreshold = 2
-
-  static func splitEnded(_ rows: [DrawerChatRow]) -> (live: [DrawerChatRow], ended: [DrawerChatRow], collapsed: Bool) {
-    let ended = rows.filter { $0.state == .ended }
-    return (rows.filter { $0.state != .ended }, ended, ended.count >= endedCollapseThreshold)
-  }
-
   /// One line under the host name: "connected · 3 terminals · 4 chats". A count of zero is left out.
   static func summary(state: String, terminals: Int, chats: Int) -> String {
     var parts = [state]
@@ -34,11 +26,6 @@ enum DrawerLayout {
         let folder = ChatFormat.folderName(path)
         return (name, counts[folder, default: 0] > 1 ? homeRelative(path) : folder)
       }, uniquingKeysWith: { first, _ in first })
-  }
-
-  /// Whether the ended chats are listed: the user opened the fold, or the open chat is one of them.
-  static func showsEnded(expanded: Bool, ended: [DrawerChatRow], open: String?) -> Bool {
-    expanded || ended.contains { $0.name == open }
   }
 
   /// What a row's Git item opens, nil when it has nothing to read: the attached session follows its
