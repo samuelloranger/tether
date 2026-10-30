@@ -75,6 +75,11 @@ public struct SSHTerminalView: View {
   }
 
   public var body: some View {
+    presentations(core)
+  }
+
+  // Split from `presentations` so the type checker keeps up with the modifier chain.
+  private var core: some View {
     ZStack(alignment: .leading) {
       terminalStack
         .opacity(content.showsChat ? 0 : 1)
@@ -234,6 +239,10 @@ public struct SSHTerminalView: View {
     .onChange(of: ObjectIdentifier(controller)) { refocusOnMac() }
     .onAppear { refocusOnMac() }
     .focusedSceneValue(\.terminalMenuActions, menuActions)
+  }
+
+  private func presentations(_ base: some View) -> some View {
+    base
     .sheet(item: $answering, onDismiss: { Task { await controller.refreshAgentStatus() } }) { target in
       if let questionRunner {
         AgentQuestionSheet(target: target, runner: questionRunner) { answering = nil }
