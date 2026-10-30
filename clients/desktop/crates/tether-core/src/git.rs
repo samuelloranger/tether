@@ -82,12 +82,14 @@ pub fn readlink_cwd_command(pid: i64) -> Option<String> {
     (pid > 0).then(|| format!("readlink /proc/{pid}/cwd 2>/dev/null"))
 }
 
-const PR_LIST_FIELDS: &str =
+const OPEN_PR_FIELDS: &str =
     "number,title,headRefName,baseRefName,url,isDraft,changedFiles,reviewDecision,state";
+/// `changedFiles` is what makes a list slow; merged ones go without it.
+const MERGED_PR_FIELDS: &str = "number,title,headRefName,baseRefName,url,isDraft,state";
 
+/// The local git state only: the PR list is its own command, so the panel never waits on GitHub.
 pub fn workspace_command(dir: &RepoDir) -> String {
     let q = dir.q();
-    let missing = shell_quote(GH_MISSING);
     wrap(&format!(
         "if git -C {q} rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
          if git -C {q} rev-parse --verify -q HEAD >/dev/null 2>&1; then base=HEAD; else base=$(git -C {q} hash-object -t tree /dev/null); fi; \
@@ -96,11 +98,24 @@ pub fn workspace_command(dir: &RepoDir) -> String {
          u=$(git -C {q} rev-parse --abbrev-ref --symbolic-full-name '@{{u}}' 2>/dev/null) && c=$(git -C {q} rev-list --left-right --count 'HEAD...@{{u}}' 2>/dev/null) || {{ u=; c=; }}; \
          printf '%s\\n%s\\n\\035' \"$u\" \"$c\"; \
          git -C {q} --no-pager log -n 50 --format='%h%x1f%s%x1f%an%x1f%ct%x1e' 2>/dev/null; printf '\\035'; \
-         git -C {q} -c core.quotepath=off ls-files --others --exclude-standard --full-name -- ':/' 2>/dev/null | head -n 200; printf '\\035'; \
-         if command -v gh >/dev/null 2>&1; then (cd {q} && gh pr list --state all --limit 50 --json {PR_LIST_FIELDS} 2>&1); else printf '%s' {missing}; fi; \
-         else printf '%s\\035\\035\\035\\035' {nr}; fi",
+         git -C {q} -c core.quotepath=off ls-files --others --exclude-standard --full-name -- ':/' 2>/dev/null | head -n 200; \
+         else printf '%s\\035\\035\\035' {nr}; fi",
         nr = shell_quote(NOT_A_REPO),
         cap = PATCH_BYTE_CAP + 1,
+    ))
+}
+
+/// Open pull requests, then 0x1d, then the latest merged ones; both `gh` calls run at once.
+pub fn pull_requests_command(dir: &RepoDir) -> String {
+    wrap(&format!(
+        "if ! command -v gh >/dev/null 2>&1; then printf '%s' {missing}; \
+         elif cd {q} && t=$(mktemp); then \
+         gh pr list --state merged --limit 20 --json {MERGED_PR_FIELDS} >\"$t\" 2>&1 & \
+         gh pr list --state open --limit 50 --json {OPEN_PR_FIELDS} 2>&1; wait; \
+         printf '\\035'; cat \"$t\"; rm -f \"$t\"; \
+         else echo \"Couldn't open the repository folder.\"; fi",
+        missing = shell_quote(GH_MISSING),
+        q = dir.q(),
     ))
 }
 
@@ -193,8 +208,9 @@ pub struct PullRequest {
     pub url: String,
     #[serde(rename = "isDraft", default)]
     pub is_draft: bool,
+    /// Only the open list asks for it.
     #[serde(rename = "changedFiles", default)]
-    pub changed_files: u32,
+    pub changed_files: Option<u32>,
     #[serde(rename = "reviewDecision", default)]
     pub review_decision: Option<String>,
     /// Absent from detail JSON and older list output; missing reads as open.
@@ -218,6 +234,8 @@ fn pr_state(raw: &str) -> PrState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrList {
+    /// Asked for and not answered yet: only a first load shows this.
+    Loading,
     List(Vec<PullRequest>),
     ToolMissing,
     Failed(String),
@@ -298,21 +316,20 @@ pub fn default_method(methods: &[MergeMethod]) -> Option<MergeMethod> {
         .or_else(|| methods.first().copied())
 }
 
-/// The sections of the workspace command; `None` when the output is not five sections.
+/// The sections of the workspace command; `None` when the output is not four sections.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceSections<'a> {
     pub diff: &'a str,
     pub location: &'a str,
     pub commits: &'a str,
     pub untracked: &'a str,
-    pub pull_requests: &'a str,
 }
 
 /// The outer separator is 0x1d, not 0x1e: commit records already end in 0x1e. A patch may hold
 /// any byte, so it is split from the right and the patch takes whatever is left.
 pub fn workspace_sections(output: &str) -> Option<WorkspaceSections<'_>> {
-    let parts: Vec<&str> = output.rsplitn(5, '\u{1D}').collect();
-    let [pull_requests, untracked, commits, location, diff] = parts.as_slice() else {
+    let parts: Vec<&str> = output.rsplitn(4, '\u{1D}').collect();
+    let [untracked, commits, location, diff] = parts.as_slice() else {
         return None;
     };
     Some(WorkspaceSections {
@@ -320,7 +337,6 @@ pub fn workspace_sections(output: &str) -> Option<WorkspaceSections<'_>> {
         location,
         commits,
         untracked,
-        pull_requests,
     })
 }
 
@@ -422,22 +438,24 @@ pub fn parse_pull_requests(output: &str) -> Result<Vec<PullRequest>, serde_json:
 }
 
 /// "None open" and "could not ask" are different answers; never collapse both into an empty list.
+/// `output` is `pull_requests_command`'s: open, 0x1d, merged. Either part failing fails the list,
+/// so a half-read one never passes for the whole.
 pub fn pull_request_result(output: &str) -> PrList {
     let trimmed = output.trim();
     if trimmed == GH_MISSING {
         return PrList::ToolMissing;
     }
-    // The list fetches every state so merged ones show; closed-without-merge is noise.
-    if let Ok(pulls) = parse_pull_requests(trimmed) {
-        return PrList::List(
-            pulls
-                .into_iter()
-                .filter(|p| p.state() != PrState::Closed)
-                .collect(),
-        );
+    let mut pulls = Vec::new();
+    for part in trimmed.split('\u{1D}').map(str::trim) {
+        match parse_pull_requests(part) {
+            Ok(list) => pulls.extend(list),
+            // gh puts its reason on the first line.
+            Err(_) => return PrList::Failed(part.lines().next().unwrap_or(part).to_owned()),
+        }
     }
-    // gh puts its reason on the first line.
-    PrList::Failed(trimmed.lines().next().unwrap_or(trimmed).to_owned())
+    // Closed-without-merge is noise.
+    pulls.retain(|p| p.state() != PrState::Closed);
+    PrList::List(pulls)
 }
 
 pub fn parse_checks(json: &str) -> Vec<GitCheck> {
@@ -1231,22 +1249,20 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
     }
 
     #[test]
-    fn one_command_carries_all_five_sections() {
-        let out =
-            "PATCH\u{1D}/r\nfeat/x\n\u{1D}abc\u{1F}s\u{1F}a\u{1F}1\u{1E}\u{1D}new.txt\n\u{1D}[]";
+    fn one_command_carries_all_four_sections() {
+        let out = "PATCH\u{1D}/r\nfeat/x\n\u{1D}abc\u{1F}s\u{1F}a\u{1F}1\u{1E}\u{1D}new.txt\n";
         let s = workspace_sections(out).unwrap();
         assert_eq!(s.diff, "PATCH");
         assert_eq!(s.location, "/r\nfeat/x\n");
         assert_eq!(s.commits, "abc\u{1F}s\u{1F}a\u{1F}1\u{1E}");
         assert_eq!(parse_untracked(s.untracked), ["new.txt"]);
-        assert_eq!(s.pull_requests, "[]");
         assert!(workspace_sections("only\u{1D}two").is_none());
     }
 
     #[test]
     fn a_record_separator_inside_a_section_does_not_split_it() {
         let commits = "a\u{1F}s\u{1F}n\u{1F}1\u{1E}b\u{1F}t\u{1F}n\u{1F}2\u{1E}";
-        let out = format!("+a\u{1E}b\u{1D}/r\nmain\n\u{1D}{commits}\u{1D}\u{1D}[]");
+        let out = format!("+a\u{1E}b\u{1D}/r\nmain\n\u{1D}{commits}\u{1D}");
         let s = workspace_sections(&out).unwrap();
         assert_eq!(s.diff, "+a\u{1E}b");
         assert_eq!(s.commits, commits);
@@ -1313,11 +1329,11 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
 
     #[test]
     fn a_group_separator_inside_the_patch_stays_in_the_patch() {
-        let out = "+a\u{1D}b\u{1D}/r\nmain\n\u{1D}\u{1D}\u{1D}[]";
+        let out = "+a\u{1D}b\u{1D}/r\nmain\n\u{1D}\u{1D}new.txt\n";
         let s = workspace_sections(out).unwrap();
         assert_eq!(s.diff, "+a\u{1D}b");
         assert_eq!(s.location, "/r\nmain\n");
-        assert_eq!(s.pull_requests, "[]");
+        assert_eq!(s.untracked, "new.txt\n");
     }
 
     #[test]
@@ -1356,7 +1372,7 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
 
     #[test]
     fn the_not_a_repo_branch_still_yields_five_sections() {
-        let out = format!("{NOT_A_REPO}\u{1D}\u{1D}\u{1D}\u{1D}");
+        let out = format!("{NOT_A_REPO}\u{1D}\u{1D}\u{1D}");
         assert_eq!(workspace_sections(&out).unwrap().diff, NOT_A_REPO);
     }
 
@@ -1380,7 +1396,7 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
                 base: "main".into(),
                 url: "https://example.test/pr/196".into(),
                 is_draft: false,
-                changed_files: 12,
+                changed_files: Some(12),
                 review_decision: Some("REVIEW_REQUIRED".into()),
                 raw_state: None,
             }]
@@ -1425,6 +1441,54 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         let numbers: Vec<_> = pulls.iter().map(|p| p.number).collect();
         assert_eq!(numbers, [1, 2]);
         assert_eq!(pulls[1].state(), PrState::Merged);
+    }
+
+    #[test]
+    fn open_and_merged_lists_are_read_together_open_first() {
+        let merged = "[{\"number\":2,\"title\":\"m\",\"headRefName\":\"h\",\"baseRefName\":\"main\",\"url\":\"u\",\"isDraft\":false,\"state\":\"MERGED\"}]";
+        let out = format!("[{}]\n\u{1D}{merged}\n", pr_json(9, Some("OPEN"), false));
+        let PrList::List(pulls) = pull_request_result(&out) else {
+            panic!("expected a list");
+        };
+        let numbers: Vec<_> = pulls.iter().map(|p| p.number).collect();
+        assert_eq!(numbers, [9, 2]);
+        assert_eq!(pulls[0].changed_files, Some(1));
+        assert_eq!(pulls[1].changed_files, None);
+        assert_eq!(pulls[1].state(), PrState::Merged);
+        assert_eq!(pull_request_result("[]\u{1D}[]"), PrList::List(vec![]));
+    }
+
+    #[test]
+    fn either_half_failing_fails_the_whole_list() {
+        assert_eq!(
+            pull_request_result("[]\u{1D}HTTP 502: Bad Gateway\nmore"),
+            PrList::Failed("HTTP 502: Bad Gateway".into())
+        );
+        assert_eq!(
+            pull_request_result("gh: auth required\n\u{1D}[]"),
+            PrList::Failed("gh: auth required".into())
+        );
+        assert_eq!(
+            pull_request_result("Couldn't open the repository folder.\n"),
+            PrList::Failed("Couldn't open the repository folder.".into())
+        );
+    }
+
+    #[test]
+    fn the_pull_request_command_asks_open_and_merged_at_once() {
+        let command = pull_requests_command(&RepoDir::new("/r").unwrap());
+        assert!(
+            command.contains("--state merged --limit 20 --json number,title,headRefName,baseRefName,url,isDraft,state "),
+            "{command}"
+        );
+        assert!(
+            command.contains("--state open --limit 50 --json number,title,headRefName,baseRefName,url,isDraft,changedFiles,reviewDecision,state "),
+            "{command}"
+        );
+        assert!(command.contains(" & gh pr list --state open"), "{command}");
+        assert!(command.contains("; wait; "), "{command}");
+        assert!(command.contains(GH_MISSING), "{command}");
+        assert!(!workspace_command(&RepoDir::new("/r").unwrap()).contains("gh pr"));
     }
 
     #[test]
@@ -1674,6 +1738,7 @@ diff --git a/Sources/App.swift b/Sources/App.swift\n@@ -1,1 +1,1 @@\n-a\n+b";
         let dir = RepoDir::new("/home/u/it's here").unwrap();
         for command in [
             workspace_command(&dir),
+            pull_requests_command(&dir),
             pr_detail_command(&dir, 7),
             pr_diff_command(&dir, 7),
             merge_command(&dir, 7, MergeMethod::Squash),

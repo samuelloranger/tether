@@ -137,6 +137,39 @@ final class GitRepositoryModelTests: XCTestCase {
       .failed("failed to run git: fatal: not a git repository"))
   }
 
+  func test_open_and_merged_lists_are_read_together_open_first() {
+    let output = """
+    [{"number":9,"title":"o","headRefName":"h","baseRefName":"main","url":"u","isDraft":false,"changedFiles":4,"reviewDecision":null,"state":"OPEN"}]
+    \u{1D}[{"number":2,"title":"m","headRefName":"h","baseRefName":"main","url":"u","isDraft":false,"state":"MERGED"}]
+
+    """
+    guard case let .list(pulls) = GitRepositoryModel.pullRequestResult(from: output) else {
+      return XCTFail("expected a list")
+    }
+    XCTAssertEqual(pulls.map(\.number), [9, 2])
+    XCTAssertEqual(pulls.map(\.changedFiles), [4, nil])
+    XCTAssertEqual(pulls.map(\.state), [.open, .merged])
+    XCTAssertEqual(GitRepositoryModel.pullRequestResult(from: "[]\u{1D}[]"), .list([]))
+  }
+
+  func test_either_half_failing_fails_the_whole_list() {
+    XCTAssertEqual(
+      GitRepositoryModel.pullRequestResult(from: "[]\u{1D}HTTP 502: Bad Gateway\nmore"),
+      .failed("HTTP 502: Bad Gateway"))
+    XCTAssertEqual(
+      GitRepositoryModel.pullRequestResult(from: "gh: auth required\n\u{1D}[]"),
+      .failed("gh: auth required"))
+  }
+
+  func test_the_pull_request_script_asks_open_and_merged_at_once() {
+    let script = GitWorkspaceScript.pullRequests
+    XCTAssertTrue(script.contains("--state merged --limit 20 --json number,title,headRefName,baseRefName,url,isDraft,state "), script)
+    XCTAssertTrue(script.contains("--state open --limit 50 --json number,title,headRefName,baseRefName,url,isDraft,changedFiles,reviewDecision,state "), script)
+    XCTAssertTrue(script.contains(" & gh pr list --state open"), script)
+    XCTAssertTrue(script.contains("; wait; "), script)
+    XCTAssertTrue(script.contains(GitRepositoryModel.ghMissingSentinel), script)
+  }
+
   func test_a_populated_list_still_parses() {
     let json = """
     [{"number":7,"title":"Fix","headRefName":"fix/a","baseRefName":"main","url":"https://example.test/pr/7","isDraft":true,"changedFiles":1,"reviewDecision":null}]

@@ -47,6 +47,16 @@ pub async fn execute<R: Remote>(remote: &R, target: &GitTarget, job: GitJob) -> 
                 result: panel::workspace_result(raw),
             }
         }
+        GitJob::PullRequests { req, top } => {
+            let raw = match RepoDir::new(&top) {
+                Some(dir) => exec(remote, &git::pull_requests_command(&dir)).await,
+                None => Err(NO_DIRECTORY.into()),
+            };
+            GitDone::PullRequests {
+                req,
+                prs: panel::pull_requests_result(raw),
+            }
+        }
         GitJob::Docs { req, top } => {
             let raw = match RepoDir::new(&top) {
                 Some(dir) => exec(remote, &git::docs_command(&dir)).await,
