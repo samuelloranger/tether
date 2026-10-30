@@ -129,6 +129,12 @@ func pruneEnded(except string) {
 		if e.Name() == except {
 			continue
 		}
+		// Archive and pin are explicit requests to retain this conversation. A
+		// damaged organization file must not turn a retained chat into a prune.
+		organization, orgErr := readACPOrganization(e.Name())
+		if orgErr != nil || organization.Archived || organization.Pinned {
+			continue
+		}
 		m, err := readACPMeta(e.Name())
 		if err != nil || procUp(m.Pid) {
 			continue
@@ -144,8 +150,15 @@ func pruneEnded(except string) {
 		if time.Since(at) < keep {
 			continue
 		}
-		_ = os.RemoveAll(filepath.Dir(m.Sock))
-		_ = os.RemoveAll(acpDir(e.Name()))
+		_ = withSessionLock("acp-organization", func() error {
+			// An archive made after the earlier read wins over retention.
+			current, err := readACPOrganization(e.Name())
+			if err != nil || current.Archived || current.Pinned {
+				return nil
+			}
+			_ = os.RemoveAll(filepath.Dir(m.Sock))
+			return os.RemoveAll(acpDir(e.Name()))
+		})
 	}
 }
 

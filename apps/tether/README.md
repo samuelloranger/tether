@@ -121,7 +121,7 @@ agent. A client without `--client` is never echoed.
 
 ### Status and saved conversations
 
-`acp status` reads `meta.json` only, so it works without talking to the daemon. It prints one
+`acp status` reads the holder and organization metadata, so it works without talking to the daemon. It prints one
 JSON line per named session, or per session when no name is given (exit 3 for an unknown name):
 
     {"name":"chat1","state":"running","turn":"working","title":"Fix the thing","cwd":"/home/me/src/app","created":1790000000,"logBytes":4096,"endedReason":"","multiClient":true}
@@ -139,6 +139,44 @@ declared `_meta.terminal_output`) whose result named a `backgroundTaskId`, until
 turn the agent started itself sends the same quiet done push as a prompt's end. The daemon
 refreshes `title`, `turn` and `tasks` in `meta.json` as the stream moves, writing only when one of
 them changes. `acp ls` is unchanged.
+
+### Chat organization and account usage
+
+`acp organize NAME --json PATCH` merges selected organization fields without touching the
+agent's live state. For example:
+
+    tether acp organize chat1 --json '{"pinned":true,"title":"Review retry handling"}'
+    tether acp organize chat1 --json '{"archived":true}'
+    tether acp organize chat1 --json '{"archived":false}'
+
+Supported fields are `pinned`, `archived`, `title` (empty clears a custom name), and
+`parent: {"name":"source-chat","title":"Source title","method":"copy"}`. Titles and
+parents can be saved before a new holder starts; pin/archive changes require an existing
+holder record. Status adds `customTitle`, `pinned`, `archived`, `parent`, and `projectRoot`
+(the nearest `.git` directory or worktree marker, falling back to the working directory).
+These fields are additive; the original `title` still means the agent's title. Organization
+is stored in private sidecar files outside the holder directory, so daemon writes cannot
+overwrite it. Archive does not stop or delete a chat. Pinned and archived histories are
+exempt from automatic retention; restoring/unpinning makes normal retention apply again.
+
+`acp usage --json` reads the Claude and Codex accounts signed in on this host:
+
+    {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":1800000000},"weekly":null,"updatedAt":1799999000,"stale":false},"codex":{"fiveHour":null,"weekly":null,"updatedAt":0,"stale":false,"error":"codex is not available on this host"},"checkedAt":1799999000}
+
+The readings include all activity using those accounts, not just this chat. Missing windows
+are `null`; genuine zero usage is `usedPercent: 0`. Codex windows are matched by their reported
+duration (300 and 10080 minutes), rather than assuming primary always means five hours.
+Reset times are Unix seconds. A failed refresh retains a previous successful reading with its
+original `updatedAt`, `stale: true`, and an error. Refreshes, including failed attempts, are
+shared across devices and throttled to once per minute.
+
+The host queries `codex app-server` through `account/rateLimits/read`, and Claude's stream-JSON
+control protocol through `initialize` then `get_usage` with `skip_behaviors: true`. The Claude
+control is experimental and unavailable on older CLIs. Its helper disables hooks and MCP,
+does not persist a conversation, and never submits a prompt. Both helpers have a 12-second
+timeout and are terminated after the reading. Tether never reads or exports provider
+credentials. Unsupported CLIs/sign-in methods produce an unavailable state, not an estimate
+from token counts. Update the host tool and provider CLIs to enable these optional commands.
 
 `acp sessions <cwd> [--limit N]` starts the agent itself for a moment (not a holder session):
 the same `$SHELL -lc` path as the holder, `initialize`, then `session/list` with `{cwd}`
