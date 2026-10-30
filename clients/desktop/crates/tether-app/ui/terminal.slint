@@ -634,6 +634,35 @@ export component TerminalPage inherits Rectangle {
             }
         }
     }
+    actions-pop := Linger { open: ChatVm.actions-name != "" && !ChatVm.rename-open && !ChatVm.branch-open; duration: Motion.fast; }
+    if actions-pop.alive: TouchArea {
+        enabled: actions-pop.shown;
+        clicked => { ChatVm.actions-close(); }
+        pop := Rectangle {
+            // The chat it opened for, held so the labels don't flip while it fades out.
+            property <string> name;
+            property <bool> pinned;
+            property <bool> archived;
+            init => { self.name = ChatVm.actions-name; self.pinned = ChatVm.actions-pinned; self.archived = ChatVm.actions-archived; }
+            property <length> lift: actions-pop.shown ? 0 : 4px;
+            x: max(8px, min(ChatVm.actions-x - self.width, root.width - self.width - 8px));
+            y: min(ChatVm.actions-y, root.height - self.height - 8px) - self.lift;
+            opacity: actions-pop.shown ? 1 : 0;
+            animate opacity, lift { duration: Motion.fast; easing: ease-out; }
+            width: 200px;
+            height: pop-items.preferred-height;
+            background: Tokens.surface; border-radius: 10px; border-width: 1px; border-color: Tokens.border;
+            drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
+            pop-items := VerticalLayout {
+                padding: 4px;
+                MenuItem { text: pop.pinned ? "Unpin" : "Pin"; clicked => { ChatVm.pin(pop.name); } }
+                MenuItem { text: "Rename\u{2026}"; clicked => { ChatVm.rename(pop.name); } }
+                MenuItem { text: pop.archived ? "Restore" : "Archive"; clicked => { if (pop.archived) { ChatVm.restore(pop.name); } else { ChatVm.archive(pop.name); } } }
+                Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Tokens.border; } }
+                MenuItem { text: "Delete\u{2026}"; danger: true; clicked => { ChatVm.delete(pop.name); ChatVm.actions-close(); } }
+            }
+        }
+    }
     // Over the sidebar too, so the session it shows cannot change underneath it.
     history := Linger { open: HistoryVm.open; }
     palette := Linger { open: PaletteVm.open; }
