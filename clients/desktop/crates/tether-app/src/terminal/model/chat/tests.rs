@@ -2459,6 +2459,13 @@ fn branch_metadata_failure_keeps_parent_and_editable_prompt_without_spawning() {
         !h.take().iter().any(|j| matches!(j, ChatJob::Dial { .. })),
         "failed organization never spawns a child"
     );
+    assert!(!h.chats.organization_error.is_empty());
+    h.msg(ChatMsg::Escape);
+    assert!(h.chats.branch_dialog.is_none());
+    assert!(
+        h.chats.organization_error.is_empty(),
+        "escape leaves no stray error dialog"
+    );
 }
 
 #[test]

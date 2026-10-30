@@ -34,10 +34,12 @@ pub struct Branch {
 
 /// Only text from before the selected user turn is copied. Reject images instead of silently
 /// losing context. Bound the whole seed; truncating a transcript could reverse its meaning.
+/// `inherited` is the seed of a chat that is itself a branch: its items never show it.
 pub fn branch_before(
     items: &[Item],
     selected: i64,
     parent: Parent,
+    inherited: &str,
 ) -> Result<Branch, &'static str> {
     let index = items
         .iter()
@@ -52,7 +54,10 @@ pub fn branch_before(
     if *image_count > 0 {
         return Err("This prompt has images. Create a new chat and attach the images again.");
     }
-    let mut context = String::new();
+    let mut context = inherited.to_string();
+    if context.len() > 128 * 1024 {
+        return Err("Earlier context is too long to copy safely. Start a new chat with a summary.");
+    }
     for item in &items[..index] {
         let (role, text) = match &item.kind {
             ItemKind::User {
@@ -150,12 +155,32 @@ mod tests {
                 title: "Parent".into(),
                 method: "copy".into(),
             },
+            "",
         )
         .unwrap();
         assert!(b.context.contains("before"));
         assert!(!b.context.contains("selected"));
         assert!(!b.context.contains("later"));
         assert_eq!(b.draft, "selected");
+    }
+    #[test]
+    fn a_branch_of_a_branch_keeps_the_inherited_context_first() {
+        let parent = Parent {
+            name: "p".into(),
+            title: "Parent".into(),
+            method: "copy".into(),
+        };
+        let b = branch_before(
+            &[user(1, "before"), user(2, "selected")],
+            2,
+            parent.clone(),
+            "\nUser:\ngrandparent\n",
+        )
+        .unwrap();
+        assert!(b.context.starts_with("\nUser:\ngrandparent\n"));
+        assert!(b.context.contains("before"));
+        let huge = "x".repeat(128 * 1024 + 1);
+        assert!(branch_before(&[user(1, "selected")], 1, parent, &huge).is_err());
     }
     #[test]
     fn absent_windows_are_not_zero_and_expired_resets_are_not_negative() {

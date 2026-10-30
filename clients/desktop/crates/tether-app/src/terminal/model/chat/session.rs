@@ -1263,7 +1263,7 @@ impl Session {
         if let Some(branch) = self.branch.as_mut() {
             branch.draft.clear();
             if let Some(files) = ctx.files {
-                saved(files.save_branch(&self.name, branch));
+                saved(files.save_branch_draft(&self.name, &branch.draft));
             }
         }
         self.cursor = 0;
@@ -1319,7 +1319,7 @@ impl Session {
                 if let Some(branch) = self.branch.as_mut() {
                     branch.draft.clear();
                     if let Some(files) = ctx.files {
-                        saved(files.save_branch(&self.name, branch));
+                        saved(files.save_branch_draft(&self.name, &branch.draft));
                     }
                 }
                 self.write(
@@ -1600,7 +1600,7 @@ impl Session {
                 if let Some(branch) = self.branch.as_mut() {
                     branch.draft.clone_from(&self.draft);
                     if let Some(files) = ctx.files {
-                        saved(files.save_branch(&self.name, branch));
+                        saved(files.save_branch_draft(&self.name, &branch.draft));
                     }
                 }
                 self.cursor = cursor;

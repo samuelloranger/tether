@@ -1320,6 +1320,7 @@ impl Chats {
             || self.rename.take().is_some()
             || self.actions.take().is_some()
         {
+            self.organization_error.clear();
             return;
         }
         // Whatever closes, the keyboard goes back to the composer.

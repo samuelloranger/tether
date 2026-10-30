@@ -217,7 +217,8 @@ impl Chats {
                     title: title.clone(),
                     method: "copy".into(),
                 };
-                match organization::branch_before(&s.state().items, id, parent) {
+                let inherited = s.branch.as_ref().map_or("", |b| b.context.as_str());
+                match organization::branch_before(&s.state().items, id, parent, inherited) {
                     Ok(branch) => {
                         self.branch_dialog = Some(BranchDialog {
                             title: format!("{title} · alternative"),
