@@ -19,6 +19,7 @@ const SNAPSHOT: &str = "snapshot";
 const OUTBOX: &str = "outbox";
 const TITLE: &str = "title";
 const AGENT: &str = "agent";
+const BRANCH_DRAFT: &str = "branch-draft";
 
 /// Reversible percent-encoding, so two scopes or names never share a file.
 pub fn component(text: &str) -> String {
@@ -44,6 +45,22 @@ impl ChatFiles {
     pub fn new(root: PathBuf, scope: &str) -> Self {
         let directory = root.join(component(scope));
         Self { root, directory }
+    }
+
+    pub fn branch(&self, name: &str) -> Option<super::organization::Branch> {
+        let mut branch: super::organization::Branch = self.read(name, "branch")?;
+        if let Some(draft) = self.read(name, BRANCH_DRAFT) {
+            branch.draft = draft;
+        }
+        Some(branch)
+    }
+    pub fn save_branch(&self, name: &str, branch: &super::organization::Branch) -> io::Result<()> {
+        self.write(name, "branch", branch)?;
+        self.save_branch_draft(name, &branch.draft)
+    }
+    /// The draft changes per keystroke; the context, up to 128 KiB, is written once.
+    pub fn save_branch_draft(&self, name: &str, draft: &str) -> io::Result<()> {
+        self.write(name, BRANCH_DRAFT, draft)
     }
 
     pub fn directory(&self) -> &Path {
@@ -187,7 +204,15 @@ impl ChatFiles {
 
     /// Removes everything kept for a chat: journal, snapshot, outbox, title and images.
     pub fn clear(&self, name: &str) {
-        for kind in [JOURNAL, SNAPSHOT, OUTBOX, TITLE, AGENT] {
+        for kind in [
+            JOURNAL,
+            SNAPSHOT,
+            OUTBOX,
+            TITLE,
+            AGENT,
+            "branch",
+            BRANCH_DRAFT,
+        ] {
             self.remove(name, kind);
         }
         let _ = fs::remove_dir_all(self.images_directory(name));
@@ -217,6 +242,27 @@ mod tests {
             &journal,
             builder.state().clone(),
         )
+    }
+
+    #[test]
+    fn branch_context_and_draft_survive_reopen_and_clear_with_chat() {
+        let (_dir, files) = files();
+        let branch = super::super::organization::Branch {
+            parent: super::super::organization::Parent {
+                name: "parent".into(),
+                title: "Parent".into(),
+                method: "copy".into(),
+            },
+            context: "history".into(),
+            draft: "edited prompt".into(),
+        };
+        files.save_branch("child", &branch).unwrap();
+        assert_eq!(files.branch("child"), Some(branch.clone()));
+        files.save_branch_draft("child", "retyped").unwrap();
+        assert_eq!(files.branch("child").unwrap().draft, "retyped");
+        assert_eq!(files.branch("child").unwrap().context, branch.context);
+        files.clear("child");
+        assert!(files.branch("child").is_none());
     }
 
     #[test]

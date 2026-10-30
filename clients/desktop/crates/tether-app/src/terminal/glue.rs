@@ -176,6 +176,10 @@ fn dev_chat() {
     if let Some(agent) = crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE") {
         slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
             send(Msg::Chat(ChatMsg::DevSample(agent)));
+            if let Some(app) = app() {
+                app.router.go(Page::Terminal);
+                app.refresh_router();
+            }
         });
         if let Some(dialog) = crate::app::dev_env("TETHER_DEV_CHAT_DIALOG") {
             slint::Timer::single_shot(std::time::Duration::from_secs(4), move || {
