@@ -39,7 +39,12 @@ struct EmbeddedChat: View {
           case let .failed(message): return message
           case let .ready(route): onOpenChat?(route); return nil
           }
-        }, onOpenParent: { parent in
+        }, onReopen: model.agent == ChatAgents.hermes ? {
+          switch await controller.newChat(cwdText: "~", request: .init(agent: ChatAgents.hermes)) {
+          case let .failed(message): return message
+          case let .ready(route): onOpenChat?(route); return nil
+          }
+        } : nil, onOpenParent: { parent in
           onOpenChat?(ChatRoute.opening(name: parent.name, chats: controller.chats,
             journal: UserDefaultsChatJournalStore(name: parent.name).load(), localAgent: model.agent?.key))
         })

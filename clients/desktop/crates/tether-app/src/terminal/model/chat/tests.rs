@@ -2687,6 +2687,43 @@ fn hermes_probe_runs_once_per_window_and_retries_sooner_after_a_failure() {
 }
 
 #[test]
+fn an_open_hermes_whose_holder_stopped_is_started_again_on_the_tick() {
+    let mut h = Harness::new();
+    h.chats.scope = "devbox.local:22".into();
+    h.exec(|t| *t == ExecTag::Status, HERMES_LINE);
+    h.msg(ChatMsg::Select("hermes-x".into()));
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Status,
+        result: Ok(HERMES_LINE.replace("running", "ended")),
+    });
+    h.take();
+    h.run(|c, now, out| c.on_tick(now, out));
+    let starts = |jobs: &[ChatJob]| {
+        jobs.iter()
+            .filter(|j| {
+                matches!(
+                    j,
+                    ChatJob::Exec {
+                        tag: ExecTag::HermesStart,
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    assert_eq!(starts(&h.take()), 1);
+    assert_eq!(
+        h.screen()
+            .tabs
+            .iter()
+            .find(|t| t.name == "hermes-x")
+            .map(|t| t.label.as_str()),
+        Some("idle"),
+        "Hermes never reads ended"
+    );
+}
+
+#[test]
 fn picking_an_ended_hermes_chat_or_the_start_entry_prepares_it() {
     let mut h = Harness::new();
     h.chats.scope = "devbox.local:22".into();

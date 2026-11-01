@@ -434,11 +434,16 @@ pub fn drawer_rows(
                 };
                 (title, subtitle)
             };
+            let state = match DrawerChatState::of(chat) {
+                // Hermes never ends: a stopped holder is started again when the chat is opened.
+                DrawerChatState::Ended if agent == Some(&agent::HERMES) => DrawerChatState::Idle,
+                state => state,
+            };
             DrawerChatRow {
                 name: chat.name.clone(),
                 title,
                 subtitle,
-                state: DrawerChatState::of(chat),
+                state,
                 cwd: chat.cwd.clone(),
                 tasks: chat.tasks,
                 archived: chat.organization.archived,

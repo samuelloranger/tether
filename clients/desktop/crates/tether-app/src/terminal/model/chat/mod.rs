@@ -345,6 +345,7 @@ pub struct Chats {
     /// The host's answer to the Hermes probe; `None` until it gave one.
     hermes_configured: Option<bool>,
     hermes_due: Duration,
+    hermes_revive_due: Duration,
     hermes_probing: bool,
     hermes_starting: bool,
     pub(super) usage_visible: bool,
@@ -452,6 +453,7 @@ impl Chats {
             usage_loading: false,
             hermes_configured: None,
             hermes_due: Duration::ZERO,
+            hermes_revive_due: Duration::ZERO,
             hermes_probing: false,
             hermes_starting: false,
             usage_visible: true,
@@ -581,6 +583,7 @@ impl Chats {
     pub fn on_tick(&mut self, now: Duration, out: &mut Out) {
         self.poll_usage(now, out);
         self.poll_hermes(now, out);
+        self.revive_hermes(now, out);
         let every = if self.has_chats() {
             POLL_WITH_CHATS
         } else {
@@ -983,6 +986,18 @@ impl Chats {
             .into_iter()
             .find(|c| c.name == name)
             .is_some_and(|c| !c.is_running && self.agent_of(c) == Some(&agent::HERMES))
+    }
+
+    /// The open chat is a Hermes whose holder stopped: start it again rather than show it ended.
+    fn revive_hermes(&mut self, now: Duration, out: &mut Out) {
+        let Some(name) = self.active.clone() else {
+            return;
+        };
+        if now < self.hermes_revive_due || !self.is_ended_hermes(&name) {
+            return;
+        }
+        self.hermes_revive_due = now + HERMES_RETRY;
+        self.start_hermes(out);
     }
 
     fn poll_hermes(&mut self, now: Duration, out: &mut Out) {

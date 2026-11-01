@@ -93,6 +93,29 @@ final class ChatOrganizationTests: XCTestCase {
     XCTAssertEqual(ChatOrganization.hermes(rows, conversation: "hermes-mine", configured: false)?.row?.name, "hermes-other")
   }
 
+  func test_an_ended_hermes_reads_idle_and_is_started_again() {
+    let rows = DrawerChatRows.rows(chats: ACPChatStatusListing.parse("""
+      {"name":"h","state":"ended","endedReason":"exited","cwd":"/home/dev","spawn":"tether hermes"}
+      {"name":"c","state":"ended","cwd":"/srv/a","spawn":"claude"}
+      """).chats, titles: [:])
+    XCTAssertEqual(rows[0].state, .idle)
+    XCTAssertTrue(rows[0].hostEnded)
+    XCTAssertEqual(rows[1].state, .ended, "Other agents still end")
+    XCTAssertFalse(rows[1].hostEnded)
+  }
+
+  func test_a_restarted_chat_with_the_same_name_gets_a_new_view() {
+    var content = DrawerContent()
+    content.open(ChatRoute(existing: "h", cwd: "/", journal: ChatJournal(), multiClient: true))
+    let before = content.viewID
+    content.open(ChatRoute(existing: "h", cwd: "/", journal: ChatJournal(), multiClient: true))
+    XCTAssertEqual(content.viewID, before, "Opening the same chat again keeps its connection")
+    var restarted = ChatRoute(name: "h", cwd: "/", readOnly: false)
+    restarted.startedHere = true
+    content.open(restarted)
+    XCTAssertNotEqual(content.viewID, before)
+  }
+
   func test_hermes_shows_only_where_it_is_set_up() {
     XCTAssertEqual(ChatOrganization.hermes([], conversation: "h", configured: true), .start)
     XCTAssertNil(ChatOrganization.hermes([], conversation: "h", configured: false))

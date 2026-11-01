@@ -27,6 +27,8 @@ struct ChatView: View {
   /// Where finished uploads wait for their chat to be on screen.
   var uploads: ChatUploadInbox?
   var onBranch: ((ChatBranchPoint, String, String) async -> String?)?
+  /// Starts the agent again when its holder ended; Hermes has one, since it never ends.
+  var onReopen: (() async -> String?)?
   var onOpenParent: ((ChatParent) -> Void)?
   var seedAttachments = false
   #if DEBUG
@@ -50,6 +52,8 @@ struct ChatView: View {
   @State private var questionTyping = false
   @State private var showingControls = false
   @State private var hermesCommands = false
+  @State private var reopening = false
+  @State private var reopenError: String?
   @State private var hermesCommand: ACPCommand?
   @State private var hermesCommandDraft: String?
   @State private var hermesNewCommand = "/new"
@@ -698,6 +702,19 @@ struct ChatView: View {
         Label("Started on another device. Read only.", systemImage: "eye")
           .font(.footnote).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
+      } else if model.hasEnded, onReopen != nil {
+        HStack(spacing: 8) {
+          if let reopenError {
+            Text(reopenError).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+            Button("Try again") { Task { await reopen() } }.font(.footnote.weight(.semibold))
+          } else {
+            ProgressView().controlSize(.small)
+            Text("Reconnecting to Hermes…").font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 6)
+        .accessibilityIdentifier("chatReopening")
+        .task { await reopen() }
       } else if model.hasEnded {
         Label("This chat has ended. You can still read it.", systemImage: "moon.zzz")
           .font(.footnote).foregroundStyle(TetherColors.textSecondary)
@@ -919,6 +936,14 @@ struct ChatView: View {
   private var glyphColor: Color {
     if stopping { return TetherColors.danger }
     return canSendNow ? TetherColors.onAccent : TetherColors.textSecondary
+  }
+
+  private func reopen() async {
+    guard let onReopen, !reopening else { return }
+    reopening = true
+    reopenError = nil
+    reopenError = await onReopen()
+    reopening = false
   }
 
   private func sendMessage() {
