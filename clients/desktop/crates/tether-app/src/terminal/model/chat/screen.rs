@@ -83,6 +83,23 @@ fn char_to_byte(text: &str, chars: usize) -> usize {
         .map_or(text.len(), |(b, _)| b)
 }
 
+fn push_hermes_start(sidebar: &mut Vec<SidebarView>) {
+    sidebar.push(SidebarView {
+        section: "Assistant".into(),
+        project_key: "Assistant".into(),
+        collapsed: false,
+        tab: None,
+        hermes_start: false,
+    });
+    sidebar.push(SidebarView {
+        section: String::new(),
+        project_key: String::new(),
+        collapsed: false,
+        tab: None,
+        hermes_start: true,
+    });
+}
+
 pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let mut screen = ChatScreen {
         active: chats.active.is_some(),
@@ -94,7 +111,21 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let names: Vec<String> = ordered.iter().map(|c| c.name.clone()).collect();
     let titles = chats.stored_titles(&names);
     let local_agents = chats.local_agents(&names);
-    for mut row in host::drawer_rows(&ordered, &titles, &local_agents) {
+    let rows = host::drawer_rows(&ordered, &titles, &local_agents);
+    let entry = (!chats.archived)
+        .then(|| {
+            host::hermes_entry(
+                &rows,
+                &tether_core::acp::agent::hermes_conversation_name(&chats.scope),
+                chats.hermes_configured,
+            )
+        })
+        .flatten();
+    let hermes_name = match &entry {
+        Some(host::HermesEntry::Chat(name)) => Some(name.clone()),
+        _ => None,
+    };
+    for mut row in rows.clone() {
         // An open chat knows its own commands sooner than the host's next status read.
         if let Some(open) = chats.sessions.get(&row.name)
             && !open.has_ended()
@@ -138,23 +169,31 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         if c.organization.archived && c.turn == host::HostTurn::Waiting && !chats.archived {
             return (0, "Needs you · archived".into());
         }
+        if hermes_name.as_deref() == Some(c.name.as_str()) {
+            return (1, "Assistant".into());
+        }
         if c.organization.pinned && !chats.archived {
-            return (1, "Pinned".into());
+            return (2, "Pinned".into());
         }
         let path = if c.organization.project_root.is_empty() {
             &c.cwd
         } else {
             &c.organization.project_root
         };
-        (2, path.clone())
+        (3, path.clone())
     };
     sidebar.sort_by_key(|c| (group(c), std::cmp::Reverse(c.created)));
     let mut previous = None;
+    let mut start_pending = entry == Some(host::HermesEntry::Start);
     for c in sidebar {
         let key = group(c);
-        let collapsed = chats.collapsed_projects.contains(&key.1);
+        if start_pending && key.0 >= 2 {
+            push_hermes_start(&mut screen.sidebar);
+            start_pending = false;
+        }
+        let collapsed = key.0 != 1 && chats.collapsed_projects.contains(&key.1);
         if previous.as_ref() != Some(&key) {
-            let label = if key.0 < 2 {
+            let label = if key.0 < 3 {
                 key.1.clone()
             } else {
                 tether_core::acp::format::folder_name(&key.1)
@@ -164,6 +203,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 project_key: key.1.clone(),
                 collapsed,
                 tab: None,
+                hermes_start: false,
             });
             previous = Some(key);
         }
@@ -177,12 +217,17 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 project_key: String::new(),
                 collapsed: false,
                 tab: Some(tab),
+                hermes_start: false,
             });
         }
+    }
+    if start_pending {
+        push_hermes_start(&mut screen.sidebar);
     }
     if let Some(name) = &chats.actions
         && let Some(c) = ordered.iter().find(|c| &c.name == name)
     {
+        screen.actions_hermes = rows.iter().any(|r| r.name == *name && r.is_hermes());
         screen.actions = Some((
             name.clone(),
             chats.title_of(c),

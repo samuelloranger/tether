@@ -74,6 +74,24 @@ pub fn probe_job() -> ChatJob {
     }
 }
 
+/// `tether hermes --prepare` for this host's one conversation.
+pub fn hermes_prepare_command(name: &str) -> String {
+    format!(
+        "PATH=\"$HOME/.local/bin:$PATH\" tether hermes --prepare {}",
+        tether_core::zmx::shell_quote(name)
+    )
+}
+
+/// The prepared conversation's name, folder and whether it starts fresh.
+pub fn parse_prepared(text: &str) -> Option<(String, String, bool)> {
+    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    Some((
+        value["name"].as_str()?.into(),
+        value["cwd"].as_str()?.into(),
+        value["fresh"].as_bool()?,
+    ))
+}
+
 fn exec(request: u64, step: Step, command: String) -> ChatJob {
     ChatJob::Exec {
         tag: ExecTag::NewChat { request, step },
@@ -263,11 +281,11 @@ impl NewChat {
                 self.multi = result.as_ref().is_ok_and(|o| host::host_multi_client(o));
                 if self.agent == &agent::HERMES {
                     let name = agent::hermes_conversation_name(host_name);
-                    let command = format!(
-                        "PATH=\"$HOME/.local/bin:$PATH\" tether hermes --prepare {}",
-                        tether_core::zmx::shell_quote(&name)
-                    );
-                    return Next::Job(exec(self.request, Step::HermesPrepared, command));
+                    return Next::Job(exec(
+                        self.request,
+                        Step::HermesPrepared,
+                        hermes_prepare_command(&name),
+                    ));
                 }
                 if host::needs_home(&self.folder) {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
@@ -275,21 +293,8 @@ impl NewChat {
                 self.open_next(host::expand_cwd(&self.folder, ""))
             }
             Step::HermesPrepared => {
-                let prepared = result
-                    .ok()
-                    .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
-                if let Some(value) = prepared
-                    && let (Some(name), Some(cwd), Some(fresh)) = (
-                        value["name"].as_str(),
-                        value["cwd"].as_str(),
-                        value["fresh"].as_bool(),
-                    )
-                {
-                    return Next::Hermes {
-                        name: name.into(),
-                        cwd: cwd.into(),
-                        fresh,
-                    };
+                if let Some((name, cwd, fresh)) = result.ok().and_then(|t| parse_prepared(&t)) {
+                    return Next::Hermes { name, cwd, fresh };
                 }
                 self.stop("Couldn't open Hermes. Update tether on the host and run tether hermes --check.".into())
             }

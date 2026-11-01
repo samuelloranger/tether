@@ -476,6 +476,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                 section: r.section.as_str().into(),
                 project_key: r.project_key.as_str().into(),
                 collapsed: r.collapsed,
+                hermes_start: r.hermes_start,
                 tab: r
                     .tab
                     .as_ref()
@@ -499,6 +500,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_actions_title(title.into());
     vm.set_actions_pinned(pinned);
     vm.set_actions_archived(archived);
+    vm.set_actions_hermes(s.actions_hermes);
     vm.set_rename_open(s.rename.is_some());
     if !RENAME_SHOWN.replace(s.rename.is_some()) {
         vm.set_rename_title(s.rename_title.as_str().into());
@@ -925,6 +927,7 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_parent(|| send(ChatMsg::Parent));
     vm.on_refresh_usage(|| send(ChatMsg::RefreshUsage));
     vm.on_select(|n| send(ChatMsg::Select(n.into())));
+    vm.on_start_hermes(|| send(ChatMsg::StartHermes));
     vm.on_delete(|n| send(ChatMsg::Delete(n.into())));
     vm.on_delete_confirmed(|| send(ChatMsg::DeleteConfirmed));
     vm.on_delete_cancelled(|| send(ChatMsg::DeleteCancelled));

@@ -65,10 +65,10 @@ export struct ChatTabVm {
     state: int,
     label: string,
     active: bool,
-    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, -1 an agent not known here
+    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, 4 Hermes, -1 an agent not known here
 }
 
-export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, }
+export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, hermes-start: bool, }
 export struct PlanUsageVm { provider: string, window: string, used: float, value: string, reset: string, }
 
 export struct NcChoiceVm {
@@ -195,6 +195,7 @@ export global ChatVm {
     in property <string> actions-name;
     in property <string> actions-title;
     in property <bool> actions-pinned;
+    in property <bool> actions-hermes;
     in property <bool> actions-archived;
     in property <bool> rename-open;
     in-out property <string> rename-title;
@@ -348,6 +349,7 @@ export global ChatVm {
     in property <string> delete-title;
 
     callback select(string);
+    callback start-hermes();
     callback delete(string);
     callback delete-confirmed();
     callback delete-cancelled();
@@ -2583,6 +2585,8 @@ export component NewChatDialog inherits Rectangle {
 // One chat in the sidebar's Chats section.
 export component ChatSidebarRow inherits Rectangle {
     in property <ChatTabVm> tab;
+    // Hermes on a host where it is set up but has no conversation yet: no chat, so no menu.
+    in property <bool> start;
     callback picked();
     height: 30px;
     border-radius: 8px;
@@ -2621,9 +2625,9 @@ export component ChatSidebarRow inherits Rectangle {
     }
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { ChatVm.select(root.tab.name); root.picked(); }
+        clicked => { if (root.start) { ChatVm.start-hermes(); } else { ChatVm.select(root.tab.name); } root.picked(); }
     }
-    if touch.has-hover || close-touch.has-hover: Rectangle {
+    if !root.start && (touch.has-hover || close-touch.has-hover): Rectangle {
         x: parent.width - 8px - 16px;
         y: (parent.height - 16px) / 2;
         width: 16px;
@@ -2642,6 +2646,7 @@ export component ChatSidebarRow inherits Rectangle {
         }
     }
     close-touch := TouchArea {
+        enabled: !root.start;
         x: parent.width - 8px - 16px;
         y: (parent.height - 16px) / 2;
         width: 16px;

@@ -457,6 +457,8 @@ pub struct ChatScreen {
     pub archived: bool,
     pub archived_count: usize,
     pub actions: Option<(String, String, bool, bool)>,
+    /// The chat in the actions menu is Hermes, which has no folder to pin it by.
+    pub actions_hermes: bool,
     pub rename: Option<String>,
     pub rename_title: String,
     pub branch: Option<(String, String, String)>,
@@ -497,6 +499,8 @@ pub struct SidebarView {
     pub project_key: String,
     pub collapsed: bool,
     pub tab: Option<TabView>,
+    /// The Assistant line's entry to start Hermes, where the host has none yet.
+    pub hermes_start: bool,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageView {

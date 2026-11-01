@@ -363,6 +363,7 @@ pub struct DrawerChatRow {
     pub state: DrawerChatState,
     pub cwd: String,
     pub tasks: u32,
+    pub archived: bool,
     /// `None` is an agent this build does not know.
     pub agent: Option<&'static AgentProfile>,
 }
@@ -381,6 +382,10 @@ impl DrawerChatRow {
         self.state != DrawerChatState::Ended
     }
 
+    pub fn is_hermes(&self) -> bool {
+        self.agent == Some(&agent::HERMES)
+    }
+
     pub fn state_label(&self) -> &'static str {
         self.state.label()
     }
@@ -388,7 +393,8 @@ impl DrawerChatRow {
 
 /// The host's title, else the stored agent title, else the folder name. The subtitle is the
 /// folder, or the path above it when the folder is already the title; a chat with another agent
-/// than Claude leads it with the agent's name. `local_agents` holds the agent key this device
+/// than Claude leads it with the agent's name. Hermes is one conversation per host, not a folder's
+/// chat: it is titled Hermes unless renamed and has no subtitle. `local_agents` holds the agent key this device
 /// recorded for the chats it started.
 pub fn drawer_rows(
     chats: &[ChatSummary],
@@ -398,26 +404,35 @@ pub fn drawer_rows(
     chats
         .iter()
         .map(|chat| {
-            let folder = folder_name(&chat.cwd);
-            let stored = titles.get(&chat.name).filter(|t| !t.is_empty());
-            let title = (!chat.organization.custom_title.is_empty())
-                .then(|| chat.organization.custom_title.clone())
-                .or_else(|| chat.host_title.clone())
-                .or_else(|| stored.cloned())
-                .unwrap_or_else(|| folder.clone());
-            let subtitle = if title == folder {
-                super::format::parent_path(&chat.cwd).unwrap_or_else(|| chat.cwd.clone())
-            } else {
-                folder
-            };
             let agent = agent::resolve(
                 local_agents.get(&chat.name).map(String::as_str),
                 &chat.spawn,
             );
-            let subtitle = if agent == Some(&CLAUDE) {
-                subtitle
+            let custom = (!chat.organization.custom_title.is_empty())
+                .then(|| chat.organization.custom_title.clone());
+            let (title, subtitle) = if agent == Some(&agent::HERMES) {
+                (
+                    custom.unwrap_or_else(|| agent::HERMES.label.to_string()),
+                    String::new(),
+                )
             } else {
-                format!("{} \u{b7} {subtitle}", agent::label(agent))
+                let folder = folder_name(&chat.cwd);
+                let stored = titles.get(&chat.name).filter(|t| !t.is_empty());
+                let title = custom
+                    .or_else(|| chat.host_title.clone())
+                    .or_else(|| stored.cloned())
+                    .unwrap_or_else(|| folder.clone());
+                let subtitle = if title == folder {
+                    super::format::parent_path(&chat.cwd).unwrap_or_else(|| chat.cwd.clone())
+                } else {
+                    folder
+                };
+                let subtitle = if agent == Some(&CLAUDE) {
+                    subtitle
+                } else {
+                    format!("{} \u{b7} {subtitle}", agent::label(agent))
+                };
+                (title, subtitle)
             };
             DrawerChatRow {
                 name: chat.name.clone(),
@@ -426,10 +441,56 @@ pub fn drawer_rows(
                 state: DrawerChatState::of(chat),
                 cwd: chat.cwd.clone(),
                 tasks: chat.tasks,
+                archived: chat.organization.archived,
                 agent,
             }
         })
         .collect()
+}
+
+/// What the sidebar's Assistant line shows: the host's Hermes conversation, or a way to start it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HermesEntry {
+    Chat(String),
+    Start,
+}
+
+/// `conversation` is the name this device gives the host's Hermes chat; another Hermes chat stands
+/// in for it. `configured` is the host's answer to `tether hermes --available`, `None` until asked.
+pub fn hermes_entry(
+    rows: &[DrawerChatRow],
+    conversation: &str,
+    configured: Option<bool>,
+) -> Option<HermesEntry> {
+    let mut candidates = rows.iter().filter(|r| r.is_hermes() && !r.archived);
+    let first = candidates.clone().find(|r| r.name == conversation);
+    if let Some(row) = first.or_else(|| candidates.next()) {
+        return Some(HermesEntry::Chat(row.name.clone()));
+    }
+    (configured == Some(true)).then_some(HermesEntry::Start)
+}
+
+/// The control exec returns no exit status, so the answer is a line.
+pub fn hermes_available_command() -> String {
+    format!(
+        "sh -c {}",
+        shell_quote(concat!(
+            "PATH=\"$HOME/.local/bin:$PATH\"; if tether hermes --available </dev/null >/dev/null 2>&1; ",
+            "then echo hermes=ok; else echo hermes=missing; fi"
+        ))
+    )
+}
+
+/// `None` when the output is neither answer, as from a host that could not be asked.
+pub fn hermes_configured(output: &str) -> Option<bool> {
+    let lines: Vec<&str> = lines_of(output).map(str::trim).collect();
+    if lines.contains(&"hermes=ok") {
+        Some(true)
+    } else if lines.contains(&"hermes=missing") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// A chat other than the open one is waiting on an answer; the drawer button says so because
@@ -1008,6 +1069,66 @@ mod tests {
         assert_eq!(rows[1].subtitle, "/srv");
         assert_eq!(rows[2].subtitle, "opencode \u{b7} /srv");
         assert_eq!(rows[3].subtitle, "Agent \u{b7} /srv");
+    }
+
+    #[test]
+    fn hermes_rows_are_titled_hermes_without_a_folder() {
+        let mut hermes = ChatSummary::new("hermes-1", "/home/dev");
+        hermes.spawn = agent::HERMES.spawn.to_string();
+        hermes.host_title = Some("Weekend plans".into());
+        let mut renamed = ChatSummary::new("hermes-2", "/home/dev");
+        renamed.spawn = agent::HERMES.spawn.to_string();
+        renamed.organization.custom_title = "Jarvis".into();
+        let rows = drawer_rows(&[hermes, renamed], &HashMap::new(), &HashMap::new());
+        assert_eq!(
+            (rows[0].title.as_str(), rows[0].subtitle.as_str()),
+            ("Hermes", "")
+        );
+        assert_eq!(
+            (rows[1].title.as_str(), rows[1].subtitle.as_str()),
+            ("Jarvis", "")
+        );
+        assert!(rows[0].is_hermes());
+    }
+
+    fn hermes_row(name: &str, archived: bool) -> DrawerChatRow {
+        let mut chat = ChatSummary::new(name, "/home/dev");
+        chat.spawn = agent::HERMES.spawn.to_string();
+        chat.organization.archived = archived;
+        drawer_rows(&[chat], &HashMap::new(), &HashMap::new()).remove(0)
+    }
+
+    #[test]
+    fn hermes_entry_prefers_this_devices_conversation_and_needs_a_setup_to_start() {
+        let rows = [
+            hermes_row("hermes-other", false),
+            hermes_row("hermes-mine", false),
+        ];
+        assert_eq!(
+            hermes_entry(&rows, "hermes-mine", None),
+            Some(HermesEntry::Chat("hermes-mine".into()))
+        );
+        assert_eq!(
+            hermes_entry(&rows, "hermes-gone", Some(false)),
+            Some(HermesEntry::Chat("hermes-other".into())),
+            "A Hermes chat on the host is enough: Hermes is set up there"
+        );
+        assert_eq!(hermes_entry(&[], "h", Some(true)), Some(HermesEntry::Start));
+        assert_eq!(hermes_entry(&[], "h", Some(false)), None);
+        assert_eq!(hermes_entry(&[], "h", None), None);
+        assert_eq!(
+            hermes_entry(&[hermes_row("h", true)], "h", Some(true)),
+            Some(HermesEntry::Start)
+        );
+    }
+
+    #[test]
+    fn hermes_probe_output_is_ok_missing_or_unknown() {
+        assert_eq!(hermes_configured("hermes=ok\n"), Some(true));
+        assert_eq!(hermes_configured("motd\r\n hermes=missing \n"), Some(false));
+        assert_eq!(hermes_configured(""), None);
+        assert_eq!(hermes_configured("tether: not found"), None);
+        assert!(hermes_available_command().starts_with("sh -c "));
     }
 
     #[test]
