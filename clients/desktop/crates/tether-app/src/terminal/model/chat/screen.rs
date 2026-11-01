@@ -94,7 +94,21 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let names: Vec<String> = ordered.iter().map(|c| c.name.clone()).collect();
     let titles = chats.stored_titles(&names);
     let local_agents = chats.local_agents(&names);
-    for mut row in host::drawer_rows(&ordered, &titles, &local_agents) {
+    let rows = host::drawer_rows(&ordered, &titles, &local_agents);
+    let entry = (!chats.archived)
+        .then(|| {
+            host::hermes_entry(
+                &rows,
+                &tether_core::acp::agent::hermes_conversation_name(&chats.scope),
+                chats.hermes_configured,
+            )
+        })
+        .flatten();
+    let hermes_name = match &entry {
+        Some(host::HermesEntry::Chat(name)) => Some(name.clone()),
+        _ => None,
+    };
+    for mut row in rows.clone() {
         // An open chat knows its own commands sooner than the host's next status read.
         if let Some(open) = chats.sessions.get(&row.name)
             && !open.has_ended()
@@ -133,6 +147,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 !c.organization.archived || c.turn == host::HostTurn::Waiting
             }
         })
+        .filter(|c| hermes_name.as_deref() != Some(c.name.as_str()))
         .collect::<Vec<_>>();
     let group = |c: &host::ChatSummary| -> (u8, String) {
         if c.organization.archived && c.turn == host::HostTurn::Waiting && !chats.archived {
@@ -180,9 +195,20 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             });
         }
     }
+    screen.hermes = match entry {
+        Some(host::HermesEntry::Chat(name)) => screen
+            .tabs
+            .iter()
+            .find(|t| t.name == name)
+            .cloned()
+            .map(HermesLine::Chat),
+        Some(host::HermesEntry::Start) => Some(HermesLine::Start),
+        None => None,
+    };
     if let Some(name) = &chats.actions
         && let Some(c) = ordered.iter().find(|c| &c.name == name)
     {
+        screen.actions_hermes = rows.iter().any(|r| r.name == *name && r.is_hermes());
         screen.actions = Some((
             name.clone(),
             chats.title_of(c),

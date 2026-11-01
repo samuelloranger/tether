@@ -4,7 +4,7 @@ use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::connect::ConnectError;
 
-use super::view::{ChatScreen, RowBody};
+use super::view::{ChatScreen, HermesLine, RowBody};
 use super::*;
 
 fn t(ms: u64) -> Duration {
@@ -2589,4 +2589,129 @@ fn hermes_prepares_one_scoped_conversation_and_reuses_it() {
     );
     assert_eq!(h.chats.active(), Some("hermes-test"));
     assert_eq!(h.chats.sessions.len(), 1);
+}
+
+const HERMES_LINE: &str = r#"{"name":"hermes-x","state":"running","cwd":"/home/sam","created":5,"pinned":true,"spawn":"tether hermes"}"#;
+const PROJECT_LINE: &str =
+    r#"{"name":"c","state":"running","cwd":"/srv/a","created":1,"spawn":"claude"}"#;
+
+fn sections(s: &ChatScreen) -> Vec<String> {
+    s.sidebar
+        .iter()
+        .map(|r| match &r.tab {
+            Some(t) => format!("  {}", t.name),
+            None => r.section.clone(),
+        })
+        .collect()
+}
+
+#[test]
+fn hermes_sits_on_its_own_line_never_pinned_or_in_a_project() {
+    let mut h = Harness::new();
+    h.chats.scope = "devbox.local:22".into();
+    h.exec(
+        |t| *t == ExecTag::Status,
+        &format!("{HERMES_LINE}\n{PROJECT_LINE}"),
+    );
+    let s = h.screen();
+    assert_eq!(sections(&s), ["a", "  c"]);
+    let Some(HermesLine::Chat(tab)) = &s.hermes else {
+        panic!("no Hermes line: {:?}", s.hermes);
+    };
+    assert_eq!(
+        (tab.name.as_str(), tab.title.as_str()),
+        ("hermes-x", "Hermes")
+    );
+}
+
+#[test]
+fn hermes_start_entry_needs_a_configured_host_and_no_live_hermes_chat() {
+    let mut h = Harness::new();
+    h.exec(|t| *t == ExecTag::Status, PROJECT_LINE);
+    assert_eq!(h.screen().hermes, None, "not asked yet");
+    h.chats.hermes_configured = Some(false);
+    assert_eq!(h.screen().hermes, None);
+    h.chats.hermes_configured = Some(true);
+    assert_eq!(h.screen().hermes, Some(HermesLine::Start));
+    assert_eq!(sections(&h.screen()), ["a", "  c"]);
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Status,
+        result: Ok(format!("{PROJECT_LINE}\n{HERMES_LINE}")),
+    });
+    assert!(matches!(h.screen().hermes, Some(HermesLine::Chat(_))));
+    h.msg(ChatMsg::Archived(true));
+    assert_eq!(h.screen().hermes, None);
+}
+
+#[test]
+fn hermes_probe_runs_once_per_window_and_retries_sooner_after_a_failure() {
+    let mut h = Harness::new();
+    let probes = |h: &mut Harness| {
+        h.take()
+            .iter()
+            .filter(|j| {
+                matches!(
+                    j,
+                    ChatJob::Exec {
+                        tag: ExecTag::HermesProbe,
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    assert_eq!(probes(&mut h), 1);
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::HermesProbe,
+        result: Ok("hermes=ok\n".into()),
+    });
+    assert_eq!(h.chats.hermes_configured, Some(true));
+    h.now += 60_000;
+    h.run(|c, now, out| c.on_tick(now, out));
+    assert_eq!(probes(&mut h), 0);
+    h.now += 600_000;
+    h.run(|c, now, out| c.on_tick(now, out));
+    assert_eq!(probes(&mut h), 1);
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::HermesProbe,
+        result: Ok("garbled".into()),
+    });
+    assert_eq!(
+        h.chats.hermes_configured,
+        Some(true),
+        "A bad answer keeps the last good one"
+    );
+    h.now += 31_000;
+    h.run(|c, now, out| c.on_tick(now, out));
+    assert_eq!(probes(&mut h), 1);
+}
+
+#[test]
+fn picking_an_ended_hermes_chat_or_the_start_entry_prepares_it() {
+    let mut h = Harness::new();
+    h.chats.scope = "devbox.local:22".into();
+    h.exec(
+        |t| *t == ExecTag::Status,
+        &HERMES_LINE.replace("running", "ended"),
+    );
+    h.take();
+    h.msg(ChatMsg::Select("hermes-x".into()));
+    let expected = tether_core::acp::agent::hermes_conversation_name("devbox.local:22");
+    let jobs = h.take();
+    assert!(jobs.iter().any(|j| matches!(j, ChatJob::Exec { tag: ExecTag::HermesStart, command } if command.contains(&expected))));
+    h.jobs = jobs;
+    assert_eq!(h.chats.active(), None);
+    h.exec(
+        |t| *t == ExecTag::HermesStart,
+        r#"{"name":"hermes-x","cwd":"/home/sam","fresh":false}"#,
+    );
+    assert_eq!(h.chats.active(), Some("hermes-x"));
+    h.msg(ChatMsg::StartHermes);
+    assert!(h.take().iter().any(|j| matches!(
+        j,
+        ChatJob::Exec {
+            tag: ExecTag::HermesStart,
+            ..
+        }
+    )));
 }

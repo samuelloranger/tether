@@ -336,6 +336,7 @@ component Sidebar inherits Rectangle {
             rows := VerticalLayout {
                 alignment: start;
                 spacing: 2px;
+                if ChatVm.hermes-shown: ChatSidebarRow { tab: ChatVm.hermes-tab; start: ChatVm.hermes-start; picked => { root.picked(); } }
                 SectionHeader {
                     text: "TERMINALS";
                     add(x, y) => { TerminalVm.new-session(); }
@@ -667,7 +668,8 @@ export component TerminalPage inherits Rectangle {
             property <string> name;
             property <bool> pinned;
             property <bool> archived;
-            init => { self.name = ChatVm.actions-name; self.pinned = ChatVm.actions-pinned; self.archived = ChatVm.actions-archived; }
+            property <bool> hermes;
+            init => { self.hermes = ChatVm.actions-hermes; self.name = ChatVm.actions-name; self.pinned = ChatVm.actions-pinned; self.archived = ChatVm.actions-archived; }
             property <length> lift: actions-pop.shown ? 0 : 4px;
             x: max(8px, min(ChatVm.actions-x - self.width, root.width - self.width - 8px));
             y: min(ChatVm.actions-y, root.height - self.height - 8px) - self.lift;
@@ -679,7 +681,7 @@ export component TerminalPage inherits Rectangle {
             drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
             pop-items := VerticalLayout {
                 padding: 4px;
-                MenuItem { text: pop.pinned ? "Unpin" : "Pin"; clicked => { ChatVm.pin(pop.name); } }
+                if !pop.hermes: MenuItem { text: pop.pinned ? "Unpin" : "Pin"; clicked => { ChatVm.pin(pop.name); } }
                 MenuItem { text: "Rename\u{2026}"; clicked => { ChatVm.rename(pop.name); } }
                 MenuItem { text: pop.archived ? "Restore" : "Archive"; clicked => { if (pop.archived) { ChatVm.restore(pop.name); } else { ChatVm.archive(pop.name); } } }
                 Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Tokens.border; } }

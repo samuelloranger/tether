@@ -84,9 +84,33 @@ struct ChatProjectGroup: Identifiable {
   var needsYou: Bool { rows.contains { $0.state == .waiting } }
 }
 
+/// The drawer's Hermes line, above Pinned and Projects: the host's Hermes conversation, or a way to
+/// start it on a host where Hermes is set up but has none yet.
+enum DrawerHermesEntry: Equatable {
+  case chat(DrawerChatRow)
+  case start
+
+  var row: DrawerChatRow? {
+    if case let .chat(row) = self { row } else { nil }
+  }
+}
+
 enum ChatOrganization {
-  static func groups(_ rows: [DrawerChatRow]) -> [ChatProjectGroup] {
-    let grouped = Dictionary(grouping: rows.filter { !$0.archived && !$0.pinned }) {
+  /// `conversation` is the name this device gives the host's Hermes chat; another Hermes chat stands
+  /// in for it. `configured` is the host's answer to `tether hermes --available`, nil until asked.
+  static func hermes(_ rows: [DrawerChatRow], conversation: String, configured: Bool?) -> DrawerHermesEntry? {
+    let candidates = rows.filter { $0.isHermes && !$0.archived }
+    if let row = candidates.first(where: { $0.name == conversation }) ?? candidates.first { return .chat(row) }
+    return configured == true ? .start : nil
+  }
+
+  /// `excluding` names a chat shown on its own line, such as the Hermes entry.
+  static func pinned(_ rows: [DrawerChatRow], excluding: String? = nil) -> [DrawerChatRow] {
+    rows.filter { $0.pinned && !$0.archived && $0.name != excluding }
+  }
+
+  static func groups(_ rows: [DrawerChatRow], excluding: String? = nil) -> [ChatProjectGroup] {
+    let grouped = Dictionary(grouping: rows.filter { !$0.archived && !$0.pinned && $0.name != excluding }) {
       $0.projectRoot.flatMap { $0.isEmpty ? nil : $0 } ?? $0.cwd
     }
     return grouped.keys.sorted().map { ChatProjectGroup(path: $0, rows: grouped[$0] ?? []) }
@@ -139,6 +163,18 @@ struct ChatPlanUsage: Codable, Equatable, Sendable {
 
 extension ACPHostCommand {
   static let usage = "PATH=\"$HOME/.local/bin:$PATH\" tether acp usage --json 2>&1"
+  /// The control exec returns no exit status, so the answer is a line.
+  static let hermesAvailable = "sh -c " + shellQuote(
+    "PATH=\"$HOME/.local/bin:$PATH\"; if tether hermes --available </dev/null >/dev/null 2>&1; "
+      + "then echo hermes=ok; else echo hermes=missing; fi")
+
+  /// nil when the output is neither answer, as from a host that could not be asked.
+  static func hermesConfigured(_ output: String) -> Bool? {
+    let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+    if lines.contains("hermes=ok") { return true }
+    if lines.contains("hermes=missing") { return false }
+    return nil
+  }
 
   static func organize(name: String, patch: [String: Any]) -> String? {
     guard let data = try? JSONSerialization.data(withJSONObject: patch, options: [.sortedKeys]),
