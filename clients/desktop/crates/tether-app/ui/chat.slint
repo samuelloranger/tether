@@ -1563,12 +1563,6 @@ component Composer inherits VerticalLayout {
         input.set-selection-offsets(ChatVm.caret, ChatVm.caret);
     }
     if ChatVm.palette-kind != 0: PaletteList { }
-    if ChatVm.catching-up: HorizontalLayout {
-        padding-left: 6px;
-        spacing: 6px;
-        VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; border-radius: 3px; background: Tokens.warning; } }
-        Text { text: "Catching up\u{2026}"; font-size: 11.5px; color: Tokens.text-faint; }
-    }
     if ChatVm.attach-error != "": HorizontalLayout {
         padding-left: 6px;
         spacing: 8px;
@@ -1671,7 +1665,8 @@ component Composer inherits VerticalLayout {
             if input.text == "": Text {
                 x: 17px;
                 height: 44px;
-                text: ChatVm.placeholder;
+                // The catch-up note lives in the placeholder: a row of its own made the composer jump.
+                text: ChatVm.catching-up ? "Catching up\u{2026}" : ChatVm.placeholder;
                 font-size: 14px;
                 color: Tokens.placeholder;
                 vertical-alignment: center;
