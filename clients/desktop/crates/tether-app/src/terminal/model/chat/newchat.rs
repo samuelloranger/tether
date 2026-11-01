@@ -21,6 +21,7 @@ pub enum Step {
     Home,
     ListHome,
     Sessions,
+    HermesPrepared,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +33,11 @@ pub enum Listing {
 
 pub enum Next {
     Nothing,
+    Hermes {
+        name: String,
+        cwd: String,
+        fresh: bool,
+    },
     Job(ChatJob),
     /// `multi`: the host's holders take several clients, so this one names itself.
     Open {
@@ -90,7 +96,7 @@ impl NewChat {
         options: OptionsDraft,
     ) -> Self {
         Self {
-            mode,
+            mode: if agent == &agent::HERMES { 0 } else { mode },
             folder,
             busy: false,
             error: None,
@@ -126,7 +132,11 @@ impl NewChat {
     }
 
     pub fn set_mode(&mut self, mode: u8, now: Duration) -> Option<ChatJob> {
-        self.mode = mode;
+        self.mode = if self.agent == &agent::HERMES {
+            0
+        } else {
+            mode
+        };
         self.error = None;
         self.reload(now)
     }
@@ -146,6 +156,9 @@ impl NewChat {
             return None;
         }
         self.agent = agent;
+        if agent == &agent::HERMES {
+            self.mode = 0;
+        }
         self.options = options;
         self.error = None;
         self.reload(now)
@@ -233,7 +246,9 @@ impl NewChat {
         host_name: &str,
     ) -> Next {
         match step {
-            Step::Check | Step::Home if request != self.request => Next::Nothing,
+            Step::Check | Step::Home | Step::HermesPrepared if request != self.request => {
+                Next::Nothing
+            }
             Step::ListHome | Step::Sessions if request != self.list_request => Next::Nothing,
             // A host that cannot be checked is left to the chat's own dial to report.
             Step::Check => {
@@ -246,10 +261,37 @@ impl NewChat {
                     return self.stop(message);
                 }
                 self.multi = result.as_ref().is_ok_and(|o| host::host_multi_client(o));
+                if self.agent == &agent::HERMES {
+                    let name = agent::hermes_conversation_name(host_name);
+                    let command = format!(
+                        "PATH=\"$HOME/.local/bin:$PATH\" tether hermes --prepare {}",
+                        tether_core::zmx::shell_quote(&name)
+                    );
+                    return Next::Job(exec(self.request, Step::HermesPrepared, command));
+                }
                 if host::needs_home(&self.folder) {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
                 }
                 self.open_next(host::expand_cwd(&self.folder, ""))
+            }
+            Step::HermesPrepared => {
+                let prepared = result
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+                if let Some(value) = prepared
+                    && let (Some(name), Some(cwd), Some(fresh)) = (
+                        value["name"].as_str(),
+                        value["cwd"].as_str(),
+                        value["fresh"].as_bool(),
+                    )
+                {
+                    return Next::Hermes {
+                        name: name.into(),
+                        cwd: cwd.into(),
+                        fresh,
+                    };
+                }
+                self.stop("Couldn't open Hermes. Update tether on the host and run tether hermes --check.".into())
             }
             Step::Home => match result {
                 Ok(home) if home.trim().starts_with('/') => {

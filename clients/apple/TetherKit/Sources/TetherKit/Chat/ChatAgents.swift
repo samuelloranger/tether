@@ -43,7 +43,12 @@ enum ChatAgents {
     rememberedIds: ["model", "reasoning_effort", "mode"], iconAsset: "agent-copilot", tintsIcon: true,
     signInCommand: "copilot login", needsNode: false)
 
-  static let all = [claude, codex, opencode, copilot]
+  static let hermes = ChatAgentProfile(
+    key: "hermes", label: "Hermes", spawn: "tether hermes", marker: "tether hermes",
+    rememberedIds: ["model", "mode"], iconAsset: "agent-hermes", tintsIcon: true,
+    signInCommand: "hermes model", needsNode: false)
+
+  static let all = [claude, codex, opencode, copilot, hermes]
 
   static func profile(forKey key: String?) -> ChatAgentProfile? {
     guard let key else { return nil }

@@ -26,6 +26,7 @@ extension SSHTerminalController {
   func branchChat(source: ChatSessionModel, point: ChatBranchPoint, title: String, prompt: String) async -> ChatStart {
     if let failure = point.failure { return .failed(failure) }
     guard let agent = source.agent else { return .failed("This chat's agent is not supported.") }
+    guard agent != ChatAgents.hermes else { return .failed("Hermes uses one conversation on this host. Use /new to start fresh.") }
     let result = await newChat(cwdText: source.cwd, request: .init(agent: agent))
     guard case let .ready(route) = result else { return result }
     let parent = ChatParent(name: source.chatName, title: source.title)
@@ -83,10 +84,14 @@ extension SSHTerminalController {
   }
 
   func newChat(cwdText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)) async -> ChatStart {
-    await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed
+    let result = await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed, persistentScope: ChatTitleStore.scope(for: config)
     ) {
       try await self.control.exec($0)
     }
+    if request.agent == ChatAgents.hermes, case let .ready(route) = result, route.startedHere {
+      ChatLocalFiles(scope: ChatTitleStore.scope(for: config)).clear(route.name)
+    }
+    return result
   }
 
   /// Agent key → why this host can't run it; a host that could not be checked dims nothing.

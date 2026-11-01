@@ -461,7 +461,8 @@ component AgentMark inherits Rectangle {
     if root.agent == 1: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-codex.svg"); colorize: root.ink; }
     if root.agent == 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-opencode.svg"); colorize: root.ink; }
     if root.agent == 3: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-copilot.svg"); colorize: root.ink; }
-    if root.agent < 0 || root.agent > 3: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
+    if root.agent == 4: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-hermes.svg"); colorize: root.ink; }
+    if root.agent < 0 || root.agent > 4: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
 }
 
 component Glyph inherits Image {
@@ -2404,7 +2405,7 @@ export component NewChatDialog inherits Rectangle {
                 Text { horizontal-stretch: 1; text: ChatVm.nc-mode == 0 ? "New chat" : "Continue a chat"; font-size: 16px; font-weight: 650; color: Tokens.text; vertical-alignment: center; }
                 IconButton { flat: true; size: 28px; icon: @image-url("icons/close.svg"); tooltip: "Cancel · Esc"; clicked => { ChatVm.nc-cancel(); } }
             }
-            Segment {
+            if ChatVm.nc-agent != 4: Segment {
                 options: ["New", "Continue"];
                 selected <=> ChatVm.nc-mode;
                 changed(i) => { ChatVm.nc-mode-changed(i); }
@@ -2421,7 +2422,7 @@ export component NewChatDialog inherits Rectangle {
                     HorizontalLayout {
                         padding: 3px;
                         spacing: 3px;
-                        for label[i] in ["Claude", "Codex", "opencode", "Copilot"]: Rectangle {
+                        for label[i] in ["Claude", "Codex", "opencode", "Copilot", "Hermes"]: Rectangle {
                             horizontal-stretch: 1;
                             opacity: ChatVm.nc-unavailable[i] ? 0.4 : 1;
                             border-radius: 8px;
@@ -2438,7 +2439,7 @@ export component NewChatDialog inherits Rectangle {
                     }
                 }
             }
-            VerticalLayout {
+            if ChatVm.nc-agent != 4: VerticalLayout {
                 spacing: 5px;
                 Text { text: "Working folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
                 Rectangle {
@@ -2468,9 +2469,10 @@ export component NewChatDialog inherits Rectangle {
                         }
                     }
                 }
-                if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
             }
-            Rectangle {
+            if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
+            if ChatVm.nc-agent == 4: Wrapped { text: "One persistent conversation on this host. Manage models, skills and settings from chat commands."; font-size: 13px; ink: Tokens.text-secondary; }
+            if ChatVm.nc-agent != 4: Rectangle {
                 background: Tokens.surface;
                 border-radius: 10px;
                 border-width: 1px;
@@ -2527,7 +2529,7 @@ export component NewChatDialog inherits Rectangle {
                 alignment: end;
                 spacing: 8px;
                 SmallAction { text: "Cancel"; clicked => { ChatVm.nc-cancel(); } }
-                SmallAction { text: ChatVm.nc-busy ? "Starting\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
+                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : ChatVm.nc-agent == 4 ? "Open Hermes" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 0: HorizontalLayout {
                 spacing: 8px;
