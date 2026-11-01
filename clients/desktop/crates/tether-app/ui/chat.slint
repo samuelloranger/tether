@@ -68,7 +68,7 @@ export struct ChatTabVm {
     agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, 4 Hermes, -1 an agent not known here
 }
 
-export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, hermes-start: bool, }
+export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, }
 export struct PlanUsageVm { provider: string, window: string, used: float, value: string, reset: string, }
 
 export struct NcChoiceVm {
@@ -196,6 +196,10 @@ export global ChatVm {
     in property <string> actions-title;
     in property <bool> actions-pinned;
     in property <bool> actions-hermes;
+    // Hermes's line above the terminals; `hermes-start` when the host has no conversation yet.
+    in property <bool> hermes-shown;
+    in property <bool> hermes-start;
+    in property <ChatTabVm> hermes-tab;
     in property <bool> actions-archived;
     in property <bool> rename-open;
     in-out property <string> rename-title;

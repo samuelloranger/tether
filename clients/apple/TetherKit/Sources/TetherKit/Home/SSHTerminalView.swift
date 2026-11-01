@@ -587,6 +587,9 @@ public struct SSHTerminalView: View {
       Divider().overlay(TetherColors.border)
       ScrollView {
         VStack(spacing: 8) {
+          if let hermes, !showingArchive {
+            Group { if let row = hermes.row { chatRow(row) } else { hermesStartRow } }.padding(.top, 10)
+          }
           if !sessions.isEmpty { sectionHeader("Terminals", count: sessions.count) }
           ForEach(sessions) { sessionRow($0, folder: folders[$0.name]) }
           if sessions.isEmpty && chatRows.isEmpty && hermes == nil {
@@ -607,10 +610,6 @@ public struct SSHTerminalView: View {
             if !attention.isEmpty {
               sectionHeader("Needs you · archived", count: attention.count)
               ForEach(attention) { chatRow($0) }
-            }
-            if let hermes {
-              sectionHeader("Assistant")
-              if let row = hermes.row { chatRow(row) } else { hermesStartRow }
             }
             if !pinned.isEmpty {
               sectionHeader("Pinned", count: pinned.count)
@@ -713,10 +712,10 @@ public struct SSHTerminalView: View {
     .padding(.leading, 14).padding(.trailing, 6).padding(.top, 4)
   }
 
-  private func sectionHeader(_ title: String, count: Int? = nil) -> some View {
+  private func sectionHeader(_ title: String, count: Int) -> some View {
     HStack(spacing: 6) {
       Text(title)
-      if let count { Text("\(count)") }
+      Text("\(count)")
     }
     .font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
     .foregroundStyle(TetherColors.textFaint)

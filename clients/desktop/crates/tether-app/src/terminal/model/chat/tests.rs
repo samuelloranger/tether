@@ -4,7 +4,7 @@ use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::connect::ConnectError;
 
-use super::view::{ChatScreen, RowBody};
+use super::view::{ChatScreen, HermesLine, RowBody};
 use super::*;
 
 fn t(ms: u64) -> Duration {
@@ -2600,14 +2600,13 @@ fn sections(s: &ChatScreen) -> Vec<String> {
         .iter()
         .map(|r| match &r.tab {
             Some(t) => format!("  {}", t.name),
-            None if r.hermes_start => "  <start>".into(),
             None => r.section.clone(),
         })
         .collect()
 }
 
 #[test]
-fn hermes_sits_in_its_own_assistant_section_never_pinned_or_in_a_project() {
+fn hermes_sits_on_its_own_line_never_pinned_or_in_a_project() {
     let mut h = Harness::new();
     h.chats.scope = "devbox.local:22".into();
     h.exec(
@@ -2615,35 +2614,33 @@ fn hermes_sits_in_its_own_assistant_section_never_pinned_or_in_a_project() {
         &format!("{HERMES_LINE}\n{PROJECT_LINE}"),
     );
     let s = h.screen();
-    assert_eq!(sections(&s), ["Assistant", "  hermes-x", "a", "  c"]);
-    assert_eq!(s.sidebar[1].tab.as_ref().unwrap().title, "Hermes");
+    assert_eq!(sections(&s), ["a", "  c"]);
+    let Some(HermesLine::Chat(tab)) = &s.hermes else {
+        panic!("no Hermes line: {:?}", s.hermes);
+    };
+    assert_eq!(
+        (tab.name.as_str(), tab.title.as_str()),
+        ("hermes-x", "Hermes")
+    );
 }
 
 #[test]
 fn hermes_start_entry_needs_a_configured_host_and_no_live_hermes_chat() {
     let mut h = Harness::new();
     h.exec(|t| *t == ExecTag::Status, PROJECT_LINE);
-    assert_eq!(sections(&h.screen()), ["a", "  c"]);
+    assert_eq!(h.screen().hermes, None, "not asked yet");
     h.chats.hermes_configured = Some(false);
-    assert_eq!(sections(&h.screen()), ["a", "  c"]);
+    assert_eq!(h.screen().hermes, None);
     h.chats.hermes_configured = Some(true);
-    assert_eq!(
-        sections(&h.screen()),
-        ["Assistant", "  <start>", "a", "  c"]
-    );
+    assert_eq!(h.screen().hermes, Some(HermesLine::Start));
+    assert_eq!(sections(&h.screen()), ["a", "  c"]);
     h.msg(ChatMsg::ExecDone {
         tag: ExecTag::Status,
         result: Ok(format!("{PROJECT_LINE}\n{HERMES_LINE}")),
     });
-    assert_eq!(
-        sections(&h.screen())
-            .iter()
-            .filter(|r| *r == "  <start>")
-            .count(),
-        0
-    );
+    assert!(matches!(h.screen().hermes, Some(HermesLine::Chat(_))));
     h.msg(ChatMsg::Archived(true));
-    assert!(!sections(&h.screen()).contains(&"Assistant".to_string()));
+    assert_eq!(h.screen().hermes, None);
 }
 
 #[test]

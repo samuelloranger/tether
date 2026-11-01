@@ -83,23 +83,6 @@ fn char_to_byte(text: &str, chars: usize) -> usize {
         .map_or(text.len(), |(b, _)| b)
 }
 
-fn push_hermes_start(sidebar: &mut Vec<SidebarView>) {
-    sidebar.push(SidebarView {
-        section: "Assistant".into(),
-        project_key: "Assistant".into(),
-        collapsed: false,
-        tab: None,
-        hermes_start: false,
-    });
-    sidebar.push(SidebarView {
-        section: String::new(),
-        project_key: String::new(),
-        collapsed: false,
-        tab: None,
-        hermes_start: true,
-    });
-}
-
 pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let mut screen = ChatScreen {
         active: chats.active.is_some(),
@@ -164,36 +147,29 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 !c.organization.archived || c.turn == host::HostTurn::Waiting
             }
         })
+        .filter(|c| hermes_name.as_deref() != Some(c.name.as_str()))
         .collect::<Vec<_>>();
     let group = |c: &host::ChatSummary| -> (u8, String) {
         if c.organization.archived && c.turn == host::HostTurn::Waiting && !chats.archived {
             return (0, "Needs you · archived".into());
         }
-        if hermes_name.as_deref() == Some(c.name.as_str()) {
-            return (1, "Assistant".into());
-        }
         if c.organization.pinned && !chats.archived {
-            return (2, "Pinned".into());
+            return (1, "Pinned".into());
         }
         let path = if c.organization.project_root.is_empty() {
             &c.cwd
         } else {
             &c.organization.project_root
         };
-        (3, path.clone())
+        (2, path.clone())
     };
     sidebar.sort_by_key(|c| (group(c), std::cmp::Reverse(c.created)));
     let mut previous = None;
-    let mut start_pending = entry == Some(host::HermesEntry::Start);
     for c in sidebar {
         let key = group(c);
-        if start_pending && key.0 >= 2 {
-            push_hermes_start(&mut screen.sidebar);
-            start_pending = false;
-        }
-        let collapsed = key.0 != 1 && chats.collapsed_projects.contains(&key.1);
+        let collapsed = chats.collapsed_projects.contains(&key.1);
         if previous.as_ref() != Some(&key) {
-            let label = if key.0 < 3 {
+            let label = if key.0 < 2 {
                 key.1.clone()
             } else {
                 tether_core::acp::format::folder_name(&key.1)
@@ -203,7 +179,6 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 project_key: key.1.clone(),
                 collapsed,
                 tab: None,
-                hermes_start: false,
             });
             previous = Some(key);
         }
@@ -217,13 +192,19 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 project_key: String::new(),
                 collapsed: false,
                 tab: Some(tab),
-                hermes_start: false,
             });
         }
     }
-    if start_pending {
-        push_hermes_start(&mut screen.sidebar);
-    }
+    screen.hermes = match entry {
+        Some(host::HermesEntry::Chat(name)) => screen
+            .tabs
+            .iter()
+            .find(|t| t.name == name)
+            .cloned()
+            .map(HermesLine::Chat),
+        Some(host::HermesEntry::Start) => Some(HermesLine::Start),
+        None => None,
+    };
     if let Some(name) = &chats.actions
         && let Some(c) = ordered.iter().find(|c| &c.name == name)
     {

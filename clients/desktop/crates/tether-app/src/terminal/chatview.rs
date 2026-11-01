@@ -476,7 +476,6 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                 section: r.section.as_str().into(),
                 project_key: r.project_key.as_str().into(),
                 collapsed: r.collapsed,
-                hermes_start: r.hermes_start,
                 tab: r
                     .tab
                     .as_ref()
@@ -492,6 +491,26 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             })
             .collect(),
     ));
+    vm.set_hermes_shown(s.hermes.is_some());
+    vm.set_hermes_start(s.hermes == Some(HermesLine::Start));
+    let hermes_tab = match &s.hermes {
+        Some(HermesLine::Chat(t)) => ChatTabVm {
+            name: t.name.as_str().into(),
+            title: t.title.as_str().into(),
+            state: i32::from(t.state),
+            label: t.label.as_str().into(),
+            active: t.active,
+            agent: i32::from(t.agent),
+        },
+        _ => ChatTabVm {
+            title: "Hermes".into(),
+            state: 2,
+            label: "personal agent".into(),
+            agent: 4,
+            ..Default::default()
+        },
+    };
+    vm.set_hermes_tab(hermes_tab);
     vm.set_archived(s.archived);
     vm.set_archived_count(s.archived_count as i32);
     vm.set_organization_error(s.organization_error.as_str().into());
