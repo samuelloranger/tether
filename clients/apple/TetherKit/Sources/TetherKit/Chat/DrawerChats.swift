@@ -18,6 +18,9 @@ struct DrawerChatRow: Equatable, Identifiable {
 
   var agent: ChatAgentProfile? { ChatAgents.profile(forKey: agentKey) }
   var isHermes: Bool { agentKey == ChatAgents.hermes.key }
+  /// Hermes's holder stopped on the host (a reboot, say). Hermes itself never ends, so the row
+  /// reads idle and opening it starts the holder again.
+  var hostEnded = false
   /// Only a chat that is not Claude's names its agent: Claude rows look as they always did. A Hermes
   /// row is titled Hermes already.
   var agentLabel: String? { agentKey == ChatAgents.claude.key || isHermes ? nil : ChatAgents.label(of: agent) }
@@ -46,17 +49,22 @@ enum DrawerChatRows {
       let stored = titles[chat.name].flatMap { $0.isEmpty ? nil : $0 }
       let title: String
       let subtitle: String
+      var state = DrawerChatState(chat)
+      var hostEnded = false
       if agentKey == ChatAgents.hermes.key {
         title = chat.customTitle ?? ChatAgents.hermes.label
         subtitle = ""
+        if state == .ended { (state, hostEnded) = (.idle, true) }
       } else {
         title = chat.customTitle ?? chat.hostTitle ?? stored ?? folder
         subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
       }
-      return DrawerChatRow(
-        name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd,
+      var row = DrawerChatRow(
+        name: chat.name, title: title, subtitle: subtitle, state: state, cwd: chat.cwd,
         multiClient: chat.multiClient, pinned: chat.pinned, archived: chat.archived, projectRoot: chat.projectRoot, customTitle: chat.customTitle, parent: chat.parent,
         agentKey: agentKey)
+      row.hostEnded = hostEnded
+      return row
     }
   }
 }
@@ -72,12 +80,18 @@ extension DrawerChatRows {
 /// What the terminal screen's main area shows: the terminal, or one chat swapped in over it.
 struct DrawerContent: Equatable {
   private(set) var chat: ChatRoute?
+  /// Counts chats started here: a restarted Hermes keeps its name, and its view must still be rebuilt.
+  private(set) var fresh = 0
 
   var showsChat: Bool { chat != nil }
+  var viewID: String { "\(chat?.name ?? "")#\(fresh)" }
 
   func isSelected(chat name: String) -> Bool { chat?.name == name }
 
-  mutating func open(_ route: ChatRoute) { chat = route }
+  mutating func open(_ route: ChatRoute) {
+    if route.startedHere { fresh += 1 }
+    chat = route
+  }
   mutating func showTerminal() { chat = nil }
 
   mutating func chatKilled(_ name: String) {

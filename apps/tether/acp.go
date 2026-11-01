@@ -489,7 +489,8 @@ func acpDaemon(name string) error {
 
 	logMax := acpLogMax()
 	idleStop := make(chan struct{})
-	if idle := acpDuration("TETHER_ACP_IDLE", defaultACPIdle); idle > 0 && startErr == nil {
+	// Hermes is one standing conversation, not a task: it never ends for being quiet.
+	if idle := acpDuration("TETHER_ACP_IDLE", defaultACPIdle); idle > 0 && startErr == nil && !isHermesSpawn(m.Spawn) {
 		go s.idleLoop(idle, idleStop)
 	}
 	readDone := make(chan struct{})

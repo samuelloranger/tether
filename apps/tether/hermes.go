@@ -103,6 +103,8 @@ func checkHermes(out io.Writer) error {
 	return nil
 }
 
+func isHermesSpawn(spawn string) bool { return strings.Contains(spawn, "tether hermes") }
+
 func runHermes(args []string) error {
 	switch {
 	case len(args) == 2 && args[0] == "--prepare":
@@ -114,13 +116,26 @@ func runHermes(args []string) error {
 	case len(args) != 0:
 		return fmt.Errorf("usage: tether hermes [--check | --available | --prepare NAME]")
 	}
+	return newHermesSupervisor(os.Stdout, spawnHermesAdapter).run(os.Stdin)
+}
+
+func spawnHermesAdapter() (*hermesProc, error) {
 	bin, argv := hermesInvocation(hermesSettings(5 * time.Second))
 	cmd := exec.Command(bin, argv...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Hermes could not start: %w; start its gateway and check TETHER_HERMES_CONTAINER or TETHER_HERMES_PYTHON", err)
+	cmd.Stderr = os.Stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Hermes could not start: %v; start its gateway and check TETHER_HERMES_CONTAINER or TETHER_HERMES_PYTHON\n", err)
+		return nil, err
+	}
+	return &hermesProc{stdin: stdin, stdout: stdout, wait: cmd.Wait}, nil
 }
 
 // hermesPrecheck runs before a fresh holder is spawned; a variable so tests need no Hermes.
@@ -139,12 +154,12 @@ func prepareHermesTo(name string, out io.Writer) error {
 		}
 		for _, entry := range entries {
 			m, err := readACPMeta(entry.Name())
-			if err == nil && strings.Contains(m.Spawn, "tether hermes") && metaRunning(m) {
+			if err == nil && isHermesSpawn(m.Spawn) && metaRunning(m) {
 				return json.NewEncoder(out).Encode(map[string]any{"name": m.Name, "cwd": m.Cwd, "fresh": false})
 			}
 		}
 		if m, err := readACPMeta(name); err == nil {
-			if !strings.Contains(m.Spawn, "tether hermes") {
+			if !isHermesSpawn(m.Spawn) {
 				return fmt.Errorf("the requested name belongs to another agent")
 			}
 			if err := hermesPrecheck(); err != nil {

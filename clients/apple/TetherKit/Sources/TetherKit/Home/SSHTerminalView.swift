@@ -91,7 +91,7 @@ public struct SSHTerminalView: View {
           route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) },
           onContinueInTerminal: { id, cwd in await continueInTerminal(chat: route.name, sessionId: id, cwd: cwd) },
           onOpenChat: openChat)
-          .id(route.name)
+          .id(content.viewID)
       }
       if drawerProgress > 0 {
         Color.black.opacity(0.5 * min(drawerProgress, 1)).ignoresSafeArea()
@@ -225,6 +225,11 @@ public struct SSHTerminalView: View {
     .onChange(of: controller.requestedChat, initial: true) { _, name in
       guard let name else { return }
       controller.requestedChat = nil
+      if let chat = controller.chats.first(where: { $0.name == name }), !chat.isRunning,
+        ChatAgents.resolve(localKey: controller.chatTitles.agent(for: name), statusSpawn: chat.spawn) == ChatAgents.hermes {
+        startHermes()
+        return
+      }
       openChat(ChatRoute.opening(
         name: name, chats: controller.chats, journal: UserDefaultsChatJournalStore(name: name).load(),
         localAgent: controller.chatTitles.agent(for: name)))
@@ -853,7 +858,7 @@ public struct SSHTerminalView: View {
       onKill: { chatActions = row }
     ) {
       Button {
-        if row.isHermes && ended { startHermes() } else { openChat(controller.chatRoute(for: row)) }
+        if row.hostEnded { startHermes() } else { openChat(controller.chatRoute(for: row)) }
       } label: {
         HStack(alignment: .top, spacing: 10) {
           ChatAgentMark(agent: row.agent, size: glyphSlot + 2)
