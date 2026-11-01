@@ -753,13 +753,6 @@ struct ChatView: View {
           composerFocused = true
         }
       }
-      if model.link.phase == .catchingUp || model.link.phase == .connecting {
-        HStack(spacing: 6) {
-          ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
-          Text("Catching up…").font(.caption).foregroundStyle(TetherColors.textFaint)
-        }
-        .padding(.leading, 6)
-      }
       if let error = attachments.error {
         AttachmentErrorRow(message: error) { attachments.error = nil }
       }
@@ -784,7 +777,9 @@ struct ChatView: View {
   }
 
   private var composerPrompt: Text {
-    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { $0.key == ChatAgents.claude.key ? "Message the agent" : "Message \($0.label)" } ?? "Message the agent")
+    // The catch-up note lives in the placeholder: a row of its own pushed the composer up and back.
+    Text(model.link.phase == .catchingUp || model.link.phase == .connecting ? "Catching up…"
+      : permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { $0.key == ChatAgents.claude.key ? "Message the agent" : "Message \($0.label)" } ?? "Message the agent")
       .foregroundStyle(TetherColors.placeholder)
   }
 
