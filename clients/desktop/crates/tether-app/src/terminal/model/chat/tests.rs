@@ -1896,7 +1896,7 @@ fn the_dialog_dims_the_agents_the_host_cannot_run_and_will_not_pick_them() {
         "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\nopencode=missing\ncopilot=missing\n",
     );
     let dialog = h.dialog();
-    assert_eq!(dialog.unavailable, [false, false, true, true]);
+    assert_eq!(dialog.unavailable, [false, false, true, true, false]);
     assert_eq!(dialog.error, "");
     h.msg(ChatMsg::NewChatAgent("copilot".into()));
     let dialog = h.dialog();
@@ -1923,7 +1923,7 @@ fn a_dialog_opening_on_an_agent_the_host_lacks_says_why() {
         "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=missing\nopencode=missing\n",
     );
     let dialog = h.dialog();
-    assert_eq!(dialog.unavailable, [true, true, true, false]);
+    assert_eq!(dialog.unavailable, [true, true, true, false, false]);
     assert!(
         dialog.error.contains("Install opencode"),
         "{}",
@@ -2521,4 +2521,72 @@ fn an_organize_reply_keeps_the_project_from_status() {
     let chat = h.chats.listed.iter().find(|c| c.name == "chat").unwrap();
     assert!(chat.organization.pinned);
     assert_eq!(chat.organization.project_root, "/home/sam/api");
+}
+
+#[test]
+fn hermes_prepares_one_scoped_conversation_and_reuses_it() {
+    let mut h = Harness::new();
+    h.chats.scope = "devbox.local:2222".into();
+    h.run(|c, now, out| c.open_new_chat(1, "~".into(), now, out));
+    h.msg(ChatMsg::NewChatAgent("hermes".into()));
+    assert_eq!(h.chats.new_chat.as_ref().unwrap().mode, 0);
+    h.msg(ChatMsg::NewChatStart);
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::Check,
+                    ..
+                }
+            )
+        },
+        CHECK_OK,
+    );
+    let jobs = h.take();
+    let expected = tether_core::acp::agent::hermes_conversation_name("devbox.local:2222");
+    assert!(jobs.iter().any(|j| matches!(j, ChatJob::Exec { tag: ExecTag::NewChat { step: newchat::Step::HermesPrepared, .. }, command } if command.contains(&expected))));
+    h.jobs = jobs;
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::HermesPrepared,
+                    ..
+                }
+            )
+        },
+        r#"{"name":"hermes-test","cwd":"/home/sam","fresh":true}"#,
+    );
+    assert_eq!(h.chats.active(), Some("hermes-test"));
+    assert_eq!(h.chats.sessions.len(), 1);
+    h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
+    h.msg(ChatMsg::NewChatStart);
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::Check,
+                    ..
+                }
+            )
+        },
+        CHECK_OK,
+    );
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::HermesPrepared,
+                    ..
+                }
+            )
+        },
+        r#"{"name":"hermes-test","cwd":"/home/sam","fresh":false}"#,
+    );
+    assert_eq!(h.chats.active(), Some("hermes-test"));
+    assert_eq!(h.chats.sessions.len(), 1);
 }

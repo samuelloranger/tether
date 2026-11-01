@@ -110,7 +110,7 @@ struct ACPConfigOption: Codable, Equatable, Sendable, Identifiable {
   var choices: [ACPConfigChoice]
 }
 
-struct ACPCommand: Codable, Equatable, Sendable, Identifiable {
+struct ACPCommand: Codable, Hashable, Sendable, Identifiable {
   var name: String
   var description: String
   /// Present when the command takes arguments.

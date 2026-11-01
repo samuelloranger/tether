@@ -721,6 +721,7 @@ pub enum HostProblem {
     NodeMissing,
     OpencodeMissing,
     CopilotMissing,
+    HermesMissing,
 }
 
 /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter.
@@ -744,6 +745,7 @@ pub const HOST_CHECK_SCRIPT: &str = concat!(
     "if command -v copilot >/dev/null 2>&1 ",
     "|| $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; ",
     "then echo copilot=ok; else echo copilot=missing; fi",
+    "; if $T tether hermes --available </dev/null >/dev/null 2>&1; then echo hermes=ok; else echo hermes=missing; fi",
 );
 
 pub fn host_check_command() -> String {
@@ -785,6 +787,9 @@ pub fn host_problems(output: &str) -> Vec<HostProblem> {
     if lines.contains(&"copilot=missing") {
         found.push(HostProblem::CopilotMissing);
     }
+    if lines.contains(&"hermes=missing") {
+        found.push(HostProblem::HermesMissing);
+    }
     found
 }
 
@@ -795,6 +800,7 @@ pub fn host_problems_for(output: &str, agent: &AgentProfile) -> Vec<HostProblem>
         .filter(|p| match p {
             HostProblem::OpencodeMissing => agent.key == agent::OPENCODE.key,
             HostProblem::CopilotMissing => agent.key == agent::COPILOT.key,
+            HostProblem::HermesMissing => agent.key == agent::HERMES.key,
             HostProblem::NodeMissing => agent.needs_node,
             _ => true,
         })
@@ -812,6 +818,7 @@ pub fn agent_unavailable(output: &str, agent: &AgentProfile, host: &str) -> Opti
                 HostProblem::NodeMissing
                     | HostProblem::OpencodeMissing
                     | HostProblem::CopilotMissing
+                    | HostProblem::HermesMissing
             )
         })
         .collect();
@@ -856,6 +863,9 @@ pub fn host_problem_message(problems: &[HostProblem], host: &str) -> Option<Stri
         parts.push(format!(
             "Install the GitHub Copilot CLI on {host}, or check it is on the PATH of a login shell."
         ));
+    }
+    if problems.contains(&HostProblem::HermesMissing) {
+        parts.push(format!("Update tether and start the Hermes gateway on {host}. Run tether hermes --check there to check its setup."));
     }
     Some(parts.join(" "))
 }
@@ -1396,6 +1406,7 @@ mod tests {
                 "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
                 "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] || PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; then echo opencode=ok; else echo opencode=missing; fi",
                 "if command -v copilot >/dev/null 2>&1 || $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; then echo copilot=ok; else echo copilot=missing; fi",
+                "if $T tether hermes --available </dev/null >/dev/null 2>&1; then echo hermes=ok; else echo hermes=missing; fi",
             ]
             .join("; ")
         );

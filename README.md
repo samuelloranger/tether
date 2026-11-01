@@ -21,6 +21,7 @@ A native terminal for your own machines, on iOS, Windows and Linux, plus a Claud
 - **On-device key vault** — generate ed25519 keys in the Keychain, import or paste existing ones, see each key's SSH randomart and fingerprint. Private halves never leave the device except in memory, to libssh2.
 - **Trust on first use** — an unknown host key is pinned on first connect; a later change is refused.
 - **Chat (iPhone)** — talk to Claude Code on a host from a native chat screen, over the Agent Client Protocol (ACP) through the same SSH connection. Tool calls group into rows with diffs, permission and plan requests become approval cards, the agent's questions become choice cards, and you pick mode, model and effort, run subagents, or continue an earlier chat. The host needs Node.js and the `tether` tool.
+- **Hermes personal agent** — one persistent conversation per host, live commands and skills, native `/new` and model controls, and the existing encrypted notification path. [Setup and behavior](apps/tether/HERMES.md).
 - **Built in** — git diff of the session's working directory, send a file or photo (SCP), kill a session, and encrypted push when an agent needs you.
 
 ## Screenshots

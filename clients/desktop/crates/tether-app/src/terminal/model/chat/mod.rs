@@ -1013,11 +1013,47 @@ impl Chats {
                 tag: ExecTag::NewChat { request, step },
                 result,
             } => {
-                let host = self.host.clone();
                 let Some(nc) = self.new_chat.as_mut() else {
                     return;
                 };
+                let host = if nc.agent == &agent::HERMES {
+                    self.scope.clone()
+                } else {
+                    self.host.clone()
+                };
                 match nc.on_exec(request, step, result, &host) {
+                    newchat::Next::Hermes { name, cwd, fresh } => {
+                        self.new_chat = None;
+                        if fresh {
+                            if let Some(files) = &self.files {
+                                files.clear(&name);
+                            }
+                            self.sessions.remove(&name);
+                            self.listed.retain(|c| c.name != name);
+                            self.provisional.retain(|c| c.name != name);
+                            if self.active.as_deref() == Some(&name) {
+                                self.active = None;
+                            }
+                            self.open_route(
+                                name,
+                                cwd,
+                                None,
+                                true,
+                                &agent::HERMES,
+                                StartOptions::Reset,
+                                now,
+                                out,
+                            );
+                        } else {
+                            if !self.ordered().iter().any(|c| c.name == name) {
+                                let mut row = ChatSummary::new(&name, &cwd);
+                                row.spawn = agent::HERMES.spawn.into();
+                                row.multi_client = true;
+                                self.provisional.push(row);
+                            }
+                            self.select(&name, now, out);
+                        }
+                    }
                     newchat::Next::Nothing => {}
                     newchat::Next::Job(job) => out.jobs.push(job),
                     newchat::Next::Open {
@@ -1028,16 +1064,8 @@ impl Chats {
                         start,
                     } => {
                         self.new_chat = None;
-                        self.open_route(
-                            host::new_chat_name(),
-                            cwd,
-                            load,
-                            multi,
-                            agent,
-                            start,
-                            now,
-                            out,
-                        );
+                        let name = host::new_chat_name();
+                        self.open_route(name, cwd, load, multi, agent, start, now, out);
                     }
                 }
             }

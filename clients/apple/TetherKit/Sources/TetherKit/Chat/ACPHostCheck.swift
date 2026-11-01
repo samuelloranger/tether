@@ -15,6 +15,7 @@ enum ACPHostCheck {
     case nodeMissing
     case opencodeMissing
     case copilotMissing
+    case hermesMissing
   }
 
   /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter. It
@@ -33,6 +34,7 @@ enum ACPHostCheck {
     "if command -v copilot >/dev/null 2>&1 "
       + "|| $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; "
       + "then echo copilot=ok; else echo copilot=missing; fi",
+    "if $T tether hermes --available </dev/null >/dev/null 2>&1; then echo hermes=ok; else echo hermes=missing; fi",
   ].joined(separator: "; ")
 
   static var command: String { "sh -c \(shellQuote(script))" }
@@ -64,6 +66,7 @@ enum ACPHostCheck {
     if lines.contains("node=missing") { found.append(.nodeMissing) }
     if lines.contains("opencode=missing") { found.append(.opencodeMissing) }
     if lines.contains("copilot=missing") { found.append(.copilotMissing) }
+    if lines.contains("hermes=missing") { found.append(.hermesMissing) }
     return found
   }
 
@@ -83,6 +86,7 @@ enum ACPHostCheck {
       switch $0 {
       case .opencodeMissing: agent.key == ChatAgents.opencode.key
       case .copilotMissing: agent.key == ChatAgents.copilot.key
+      case .hermesMissing: agent.key == ChatAgents.hermes.key
       case .nodeMissing: agent.needsNode
       default: true
       }
@@ -92,7 +96,7 @@ enum ACPHostCheck {
   /// Agent key → why the New chat picker can't offer it: the tool it runs on is missing. A missing
   /// or old `tether` blocks every agent alike, so Start reports that instead.
   static func unavailable(in output: String, host: String) -> [String: String] {
-    let tools: [Problem] = [.nodeMissing, .opencodeMissing, .copilotMissing]
+    let tools: [Problem] = [.nodeMissing, .opencodeMissing, .copilotMissing, .hermesMissing]
     let found = problems(in: output).filter(tools.contains)
     var reasons: [String: String] = [:]
     for agent in ChatAgents.all {
@@ -121,6 +125,9 @@ enum ACPHostCheck {
     if problems.contains(.copilotMissing) {
       parts.append("Install the GitHub Copilot CLI on \(host), or check it is on the PATH of a login shell.")
     }
+    if problems.contains(.hermesMissing) {
+      parts.append("Update tether and start the Hermes gateway on \(host). Run tether hermes --check there to check its setup.")
+    }
     return parts.joined(separator: " ")
   }
 
@@ -145,10 +152,26 @@ extension ChatRoute {
   /// A fresh chat, after the host checks. The failure text is for the new-chat UI as it stands.
   static func start(
     cwdText: String, host: String, agent: ChatAgentProfile = ChatAgents.claude, picks: [String: String]? = nil,
-    changed: Set<String> = [], exec: (String) async throws -> String
+    changed: Set<String> = [], persistentScope: String? = nil, exec: (String) async throws -> String
   ) async -> ChatStart {
     let check = await ACPHostCheck.verify(host: host, agent: agent, exec: exec)
     if let message = check.problem { return .failed(message) }
+    if agent == ChatAgents.hermes {
+      struct Prepared: Decodable { var name: String; var cwd: String; var fresh: Bool }
+      let name = ChatHermes.conversationName(scope: persistentScope ?? host)
+      let command = "PATH=\"$HOME/.local/bin:$PATH\" tether hermes --prepare \(shellQuote(name))"
+      guard let output = try? await exec(command), let data = output.data(using: .utf8),
+        let prepared = try? JSONDecoder().decode(Prepared.self, from: data) else {
+        return .failed("Couldn't open Hermes. Update tether on the host and run tether hermes --check.")
+      }
+      let store = UserDefaultsChatJournalStore(name: prepared.name)
+      if prepared.fresh { store.save(ChatJournal()) }
+      var route = prepared.fresh
+        ? ChatRoute(name: prepared.name, cwd: prepared.cwd, readOnly: false, multiClient: true, agentKey: agent.key)
+        : ChatRoute(existing: prepared.name, cwd: prepared.cwd, journal: store.load(), multiClient: true, agentKey: agent.key)
+      route.startedHere = prepared.fresh
+      return .ready(route)
+    }
     guard var route = await fresh(cwdText: cwdText, exec: exec) else {
       return .failed("Couldn't read the host's home folder.")
     }

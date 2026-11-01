@@ -65,7 +65,24 @@ pub const COPILOT: AgentProfile = AgentProfile {
 };
 
 /// In the order the New chat picker lists them.
-pub const ALL: [&AgentProfile; 4] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT];
+pub const HERMES: AgentProfile = AgentProfile {
+    key: "hermes",
+    label: "Hermes",
+    spawn: "tether hermes",
+    marker: "tether hermes",
+    remembered: ["model", "mode", ""],
+    sign_in_command: "hermes model",
+    needs_node: false,
+};
+
+pub const ALL: [&AgentProfile; 5] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &HERMES];
+
+pub fn hermes_conversation_name(scope: &str) -> String {
+    let hash = scope.bytes().fold(14_695_981_039_346_656_037_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(1_099_511_628_211)
+    });
+    format!("hermes-{hash:x}")
+}
 
 /// What a chat with an agent this build does not know is called.
 pub const GENERIC_LABEL: &str = "Agent";
@@ -134,6 +151,25 @@ pub fn spinner_verbs<'a>(agent: Option<&AgentProfile>, claude_verbs: &'a [String
 mod tests {
     use super::*;
     use crate::acp::host;
+
+    #[test]
+    fn hermes_is_one_scoped_conversation_without_node() {
+        assert_eq!(for_spawn("tether hermes"), Some(&HERMES));
+        assert!(!for_spawn("tether hermes").unwrap().needs_node);
+        assert_eq!(
+            hermes_conversation_name("server:22"),
+            "hermes-6d10ccc02fbceea4"
+        );
+        assert_ne!(
+            hermes_conversation_name("server:22"),
+            hermes_conversation_name("server:2222")
+        );
+        assert!(super::super::host::host_problems_for("node=missing", &HERMES).is_empty());
+        assert_eq!(
+            super::super::host::host_problems_for("hermes=missing", &HERMES),
+            vec![super::super::host::HostProblem::HermesMissing]
+        );
+    }
 
     #[test]
     fn the_claude_profile_is_the_pinned_adapter() {
