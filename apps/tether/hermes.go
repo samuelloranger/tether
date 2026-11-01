@@ -51,7 +51,7 @@ func hermesSettings() (python, container string) {
 }
 
 func hermesLoginSettings() (python, container string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	script := `printf '%s\n%s\n%s\n' ` + hermesLoginMarker + ` "$TETHER_HERMES_PYTHON" "$TETHER_HERMES_CONTAINER"`
 	out, err := exec.CommandContext(ctx, acpShell(), "-lc", script).Output()
@@ -69,6 +69,7 @@ func hermesLoginSettings() (python, container string) {
 
 // hermesAvailable is the quick probe for the app's shared host check, which runs before every new
 // chat with any agent: it finds the interpreter or the running container without starting Hermes.
+// Its two probes take at most 2 s each, inside the 5 s the host check allows.
 func hermesAvailable() error {
 	python, container := hermesSettings()
 	if python != "" {
@@ -80,7 +81,7 @@ func hermesAvailable() error {
 	if container == "" {
 		container = hermesDefaultContainer
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", container).Output()
 	if err != nil || strings.TrimSpace(string(out)) != "true" {

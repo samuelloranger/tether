@@ -33,7 +33,7 @@ This integration does not import transcripts from other Hermes front ends. Messa
 
 ## Validation
 
-- `go test ./...` and `go vet ./...` in `apps/tether`. The embedded adapter also has nine isolated async Python regressions in `hermes_adapter_test.py`; run them with Hermes’s virtualenv (`python -m unittest hermes_adapter_test`) after making both Python files available on that interpreter’s import path.
+- `go test ./...` and `go vet ./...` in `apps/tether`. The embedded adapter also has ten isolated async Python regressions in `hermes_adapter_test.py`; run them with Hermes’s virtualenv (`python -m unittest hermes_adapter_test`) after making both Python files available on that interpreter’s import path.
 - `macbuild sync`, `macbuild build`, and `macbuild test` from this checkout. `ChatHermesTests` covers command routing, profile checks and persistent conversation selection.
 - `cargo test -p tether-core --lib`, `cargo test -p tether-app`, and `cargo clippy --workspace --all-targets -- -D warnings` in `clients/desktop`.
 - DEBUG screenshot fixtures: `TETHER_DEBUG_CHAT_FIXTURE=hermes`, `hermes-commands`, `hermes-model`, `hermes-new`.

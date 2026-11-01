@@ -144,14 +144,16 @@ class TetherHermesAgent(GatewayACPAgent):
         if not stripped.startswith("/"):
             return await super()._run_slash(held_id, session_id, text)
         previous = {c.name for c in catalog_commands(self._tether_catalogs.get(session_id, {}))}
+        token = stripped.split(None, 1)[0] if stripped else ""
+        name = token[1:] if token.startswith("/") else ""
         try:
             catalog = await self._catalog(session_id, held_id)
         except Exception:
-            if _slash_command(stripped) is not None:
+            # Only a command discovery last listed is reported as unavailable; anything else, such as
+            # a message that starts with a path, still reaches Hermes.
+            if _slash_command(stripped) is not None or name not in previous or name == "new":
                 return await super()._run_slash(held_id, session_id, text)
             raise
-        token = stripped.split(None, 1)[0] if stripped else ""
-        name = token[1:] if token.startswith("/") else ""
         canon = (catalog.get("canon") or {}).get("/" + name.lower(), "/" + name)
         known = {c.name for c in catalog_commands(catalog)}
         if name in previous and name not in known:
