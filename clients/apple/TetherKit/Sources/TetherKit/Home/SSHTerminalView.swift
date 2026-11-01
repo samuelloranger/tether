@@ -27,6 +27,7 @@ public struct SSHTerminalView: View {
   @State private var gitOverride: GitTarget?
   @State private var collapsedProjects: Set<String> = []
   @State private var showingArchive = false
+  @State private var hermesStarting = false
   @State private var chatActions: DrawerChatRow?
   @State private var renamingChat: DrawerChatRow?
   @State private var chatNewTitle = ""
@@ -213,6 +214,7 @@ public struct SSHTerminalView: View {
     .task(id: "usage-\(drawerOpen)-\(scenePhase == .active)-\(controller.status == .connected)") {
       guard drawerOpen, scenePhase == .active, controller.status == .connected else { return }
       while !Task.isCancelled {
+        await controller.refreshHermesConfigured()
         await controller.refreshPlanUsage()
         try? await Task.sleep(nanoseconds: 120_000_000_000)
       }
@@ -575,8 +577,10 @@ public struct SSHTerminalView: View {
     let folders = DrawerLayout.sessionFolders(controller.sessions)
     let visible = chatRows.filter { !$0.archived }
     let archived = chatRows.filter(\.archived)
-    let pinned = visible.filter(\.pinned)
-    let groups = ChatOrganization.groups(chatRows)
+    let hermes = ChatOrganization.hermes(
+      chatRows, conversation: controller.hermesConversation, configured: controller.hermesConfigured)
+    let pinned = ChatOrganization.pinned(chatRows, excluding: hermes?.row?.name)
+    let groups = ChatOrganization.groups(chatRows, excluding: hermes?.row?.name)
     let attention = ChatOrganization.attention(chatRows)
     return VStack(alignment: .leading, spacing: 0) {
       drawerHeader(terminals: sessions.count, chats: visible.count)
@@ -585,7 +589,7 @@ public struct SSHTerminalView: View {
         VStack(spacing: 8) {
           if !sessions.isEmpty { sectionHeader("Terminals", count: sessions.count) }
           ForEach(sessions) { sessionRow($0, folder: folders[$0.name]) }
-          if sessions.isEmpty && chatRows.isEmpty {
+          if sessions.isEmpty && chatRows.isEmpty && hermes == nil {
             Text("Nothing running yet. Use + to start a terminal or a chat.")
               .font(.caption.monospaced()).multilineTextAlignment(.leading)
               .foregroundStyle(TetherColors.textFaint).padding(.top, 4)
@@ -603,6 +607,10 @@ public struct SSHTerminalView: View {
             if !attention.isEmpty {
               sectionHeader("Needs you · archived", count: attention.count)
               ForEach(attention) { chatRow($0) }
+            }
+            if let hermes {
+              sectionHeader("Assistant")
+              if let row = hermes.row { chatRow(row) } else { hermesStartRow }
             }
             if !pinned.isEmpty {
               sectionHeader("Pinned", count: pinned.count)
@@ -705,10 +713,10 @@ public struct SSHTerminalView: View {
     .padding(.leading, 14).padding(.trailing, 6).padding(.top, 4)
   }
 
-  private func sectionHeader(_ title: String, count: Int) -> some View {
+  private func sectionHeader(_ title: String, count: Int? = nil) -> some View {
     HStack(spacing: 6) {
       Text(title)
-      Text("\(count)")
+      if let count { Text("\(count)") }
     }
     .font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
     .foregroundStyle(TetherColors.textFaint)
@@ -828,7 +836,7 @@ public struct SSHTerminalView: View {
         Text(agentLabel).foregroundStyle(TetherColors.textFaint).lineLimit(1).fixedSize()
         Text("·").foregroundStyle(TetherColors.textFaint)
       }
-      if folder {
+      if folder && !row.subtitle.isEmpty {
         Text(row.subtitle).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.middle)
         Text("·").foregroundStyle(TetherColors.textFaint)
       }
@@ -846,7 +854,7 @@ public struct SSHTerminalView: View {
       onKill: { chatActions = row }
     ) {
       Button {
-        openChat(controller.chatRoute(for: row))
+        if row.isHermes && ended { startHermes() } else { openChat(controller.chatRoute(for: row)) }
       } label: {
         HStack(alignment: .top, spacing: 10) {
           ChatAgentMark(agent: row.agent, size: glyphSlot + 2)
@@ -881,27 +889,74 @@ public struct SSHTerminalView: View {
       }
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("chatRow_\(row.name)")
-      .accessibilityLabel("Chat \(row.title), \(row.agentLabel.map { "\($0), " } ?? "")\(row.stateLabel), \(row.subtitle)")
+      .accessibilityLabel(
+        (["Chat \(row.title)", row.agentLabel, row.stateLabel, row.subtitle].compactMap { $0 }.filter { !$0.isEmpty })
+          .joined(separator: ", "))
       .accessibilityHint(isSelected ? "Already open" : "Opens this chat")
       .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
     .contextMenu {
       Button { openChat(controller.chatRoute(for: row)) } label: { Label("Open", systemImage: "bubble.left") }
-      Button {
-        acknowledgeCopy(row.cwd, announce: "Folder copied", into: $showCopyConfirmation)
-      } label: { Label("Copy folder", systemImage: "folder") }
-      if let git = DrawerLayout.gitTarget(cwd: row.cwd, isAttached: false) {
-        Button { openGit(git) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
-      }
-      ContinueInTerminalItem(row: row) { pendingContinue = $0 }
-      Button { updateChat(row, patch: ["pinned": !row.pinned]) } label: {
-        Label(row.pinned ? "Unpin chat" : "Pin chat", systemImage: row.pinned ? "pin.slash" : "pin")
+      if !row.isHermes {
+        Button {
+          acknowledgeCopy(row.cwd, announce: "Folder copied", into: $showCopyConfirmation)
+        } label: { Label("Copy folder", systemImage: "folder") }
+        if let git = DrawerLayout.gitTarget(cwd: row.cwd, isAttached: false) {
+          Button { openGit(git) } label: { Label("Git", systemImage: "arrow.triangle.branch") }
+        }
+        ContinueInTerminalItem(row: row) { pendingContinue = $0 }
+        Button { updateChat(row, patch: ["pinned": !row.pinned]) } label: {
+          Label(row.pinned ? "Unpin chat" : "Pin chat", systemImage: row.pinned ? "pin.slash" : "pin")
+        }
       }
       Button { chatNewTitle = row.title; renamingChat = row } label: { Label("Rename…", systemImage: "pencil") }
       Button { updateChat(row, patch: ["archived": !row.archived], archive: !row.archived) } label: {
         Label(row.archived ? "Restore chat" : "Archive chat", systemImage: row.archived ? "arrow.uturn.backward" : "archivebox")
       }
       Button(role: .destructive) { pendingChatKill = row } label: { Label("Delete", systemImage: "trash") }
+    }
+  }
+
+  /// Hermes set up on the host but without a conversation yet, or one whose agent ended.
+  private var hermesStartRow: some View {
+    Button(action: startHermes) {
+      HStack(alignment: .top, spacing: 10) {
+        ChatAgentMark(agent: ChatAgents.hermes, size: glyphSlot + 2)
+          .frame(width: glyphSlot).padding(.top, 1)
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(ChatAgents.hermes.label).font(.subheadline.weight(.semibold))
+            .foregroundStyle(TetherColors.textPrimary)
+          Text(hermesStarting ? "starting…" : "personal agent")
+            .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
+            .accessibilityHidden(true)
+        }
+        Spacer(minLength: 4)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(TetherPressStyle())
+    .disabled(hermesStarting)
+    .padding(.horizontal, 12).padding(.vertical, 10)
+    .frame(minHeight: 44)
+    .modifier(DrawerRowChrome(selected: false, needsYou: false, ended: false))
+    .accessibilityIdentifier("hermesStart")
+    .accessibilityLabel(hermesStarting ? "Hermes, starting" : "Hermes")
+    .accessibilityHint("Opens your Hermes conversation")
+  }
+
+  private func startHermes() {
+    guard !hermesStarting else { return }
+    hermesStarting = true
+    Task {
+      defer { hermesStarting = false }
+      switch await controller.newChat(cwdText: "~", request: .init(agent: ChatAgents.hermes)) {
+      case let .ready(route):
+        openChat(route)
+        await controller.refreshChats()
+      case let .failed(message):
+        promptNotice = message
+      }
     }
   }
 

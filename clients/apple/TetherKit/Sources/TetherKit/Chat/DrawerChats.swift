@@ -17,8 +17,10 @@ struct DrawerChatRow: Equatable, Identifiable {
   var agentKey: String? = ChatAgents.claude.key
 
   var agent: ChatAgentProfile? { ChatAgents.profile(forKey: agentKey) }
-  /// Only a chat that is not Claude's names its agent: Claude rows look as they always did.
-  var agentLabel: String? { agentKey == ChatAgents.claude.key ? nil : ChatAgents.label(of: agent) }
+  var isHermes: Bool { agentKey == ChatAgents.hermes.key }
+  /// Only a chat that is not Claude's names its agent: Claude rows look as they always did. A Hermes
+  /// row is titled Hermes already.
+  var agentLabel: String? { agentKey == ChatAgents.claude.key || isHermes ? nil : ChatAgents.label(of: agent) }
 
   var id: String { name }
   var isRunning: Bool { state != .ended }
@@ -34,18 +36,27 @@ struct DrawerChatRow: Equatable, Identifiable {
 
 enum DrawerChatRows {
   /// The host's title, else the stored agent title, else the folder name. The subtitle is the folder,
-  /// or the path above it when the folder is already the title.
+  /// or the path above it when the folder is already the title. Hermes is not tied to a folder: its
+  /// title is Hermes unless renamed, and it has no subtitle.
   /// `agents` holds the keys this device recorded for the chats it started; the host's spawn command covers the rest.
   static func rows(chats: [ACPChatSummary], titles: [String: String], agents: [String: String] = [:]) -> [DrawerChatRow] {
     chats.map { chat in
+      let agentKey = ChatAgents.resolve(localKey: agents[chat.name], statusSpawn: chat.spawn)?.key
       let folder = ChatFormat.folderName(chat.cwd)
       let stored = titles[chat.name].flatMap { $0.isEmpty ? nil : $0 }
-      let title = chat.customTitle ?? chat.hostTitle ?? stored ?? folder
-      let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
+      let title: String
+      let subtitle: String
+      if agentKey == ChatAgents.hermes.key {
+        title = chat.customTitle ?? ChatAgents.hermes.label
+        subtitle = ""
+      } else {
+        title = chat.customTitle ?? chat.hostTitle ?? stored ?? folder
+        subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
+      }
       return DrawerChatRow(
         name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd,
         multiClient: chat.multiClient, pinned: chat.pinned, archived: chat.archived, projectRoot: chat.projectRoot, customTitle: chat.customTitle, parent: chat.parent,
-        agentKey: ChatAgents.resolve(localKey: agents[chat.name], statusSpawn: chat.spawn)?.key)
+        agentKey: agentKey)
     }
   }
 }

@@ -122,6 +122,9 @@ public final class SSHTerminalController {
   var planUsage = ChatPlanUsage()
   var planUsageLoading = false
   @ObservationIgnored var planUsageReadAt: Date?
+  /// The host's answer to `tether hermes --available`; nil until it gave one.
+  var hermesConfigured: Bool?
+  @ObservationIgnored var hermesCheckedAt: Date?
   /// False once the host answered `acp status` as an unknown command.
   @ObservationIgnored var chatStatusSupported = true
   /// A chat a notification tap asked for; the terminal screen swaps it in and clears this.
