@@ -149,9 +149,9 @@ class TetherHermesAgent(GatewayACPAgent):
         try:
             catalog = await self._catalog(session_id, held_id)
         except Exception:
-            # Only a command discovery last listed is reported as unavailable; anything else, such as
-            # a message that starts with a path, still reaches Hermes.
-            if _slash_command(stripped) is not None or name not in previous or name == "new":
+            # A first word with another "/" is a path, not a command, so the message still reaches
+            # Hermes; /new is Tether's fresh-context command and never depends on discovery.
+            if _slash_command(stripped) is not None or "/" in name or name.lower() == "new":
                 return await super()._run_slash(held_id, session_id, text)
             raise
         canon = (catalog.get("canon") or {}).get("/" + name.lower(), "/" + name)

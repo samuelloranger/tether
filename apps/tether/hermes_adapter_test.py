@@ -39,13 +39,14 @@ class HermesAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_message_starting_with_a_path_survives_failed_discovery(self):
         agent = self.viewer()
-        agent._tether_catalogs["sid"] = {"pairs": [["/custom-plugin", "Plugin"]]}
         agent._catalog = AsyncMock(side_effect=RuntimeError("plugin failed"))
         text = "/var/log/app is full"
-        with patch.object(GatewayACPAgent, "_run_slash", AsyncMock(return_value=(False, text))):
+        with patch.object(GatewayACPAgent, "_run_slash", AsyncMock(return_value=(False, text))) as parent:
             self.assertEqual(await agent._run_slash("held", "sid", text), (False, text))
-        with self.assertRaises(RuntimeError):
-            await agent._run_slash("held", "sid", "/custom-plugin")
+            # Never discovered, still command-shaped: refused rather than sent to the model as text.
+            with self.assertRaises(RuntimeError):
+                await agent._run_slash("held", "sid", "/custom-plugin arg")
+            parent.assert_awaited_once()
 
     async def test_refresh_failure_does_not_fail_a_successful_command(self):
         agent = self.viewer()

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHermesInvocationKeepsDockerUnprivilegedAndStdio(t *testing.T) {
@@ -77,7 +78,7 @@ func TestHermesSettingsReadPastLoginProfileNoise(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SHELL", shell)
-	if python, container := hermesSettings(); python != "" || container != "from-login" {
+	if python, container := hermesSettings(5 * time.Second); python != "" || container != "from-login" {
 		t.Fatalf("login override not used: %q %q", python, container)
 	}
 }

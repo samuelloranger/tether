@@ -34,10 +34,10 @@ func hermesInvocation(python, container string) (string, []string) {
 
 // hermesSettings resolves the interpreter or container. The holder runs under a login shell while
 // the app's checks run under plain sh, so overrides set only in the login profile are read from it.
-func hermesSettings() (python, container string) {
+func hermesSettings(loginWait time.Duration) (python, container string) {
 	python, container = os.Getenv("TETHER_HERMES_PYTHON"), os.Getenv("TETHER_HERMES_CONTAINER")
 	if python == "" && container == "" {
-		python, container = hermesLoginSettings()
+		python, container = hermesLoginSettings(loginWait)
 	}
 	if python == "" && container == "" {
 		home, _ := os.UserHomeDir()
@@ -50,8 +50,8 @@ func hermesSettings() (python, container string) {
 	return python, container
 }
 
-func hermesLoginSettings() (python, container string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+func hermesLoginSettings(wait time.Duration) (python, container string) {
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	script := `printf '%s\n%s\n%s\n' ` + hermesLoginMarker + ` "$TETHER_HERMES_PYTHON" "$TETHER_HERMES_CONTAINER"`
 	out, err := exec.CommandContext(ctx, acpShell(), "-lc", script).Output()
@@ -69,9 +69,9 @@ func hermesLoginSettings() (python, container string) {
 
 // hermesAvailable is the quick probe for the app's shared host check, which runs before every new
 // chat with any agent: it finds the interpreter or the running container without starting Hermes.
-// Its two probes take at most 2 s each, inside the 5 s the host check allows.
+// The login-shell and docker probes take at most 2 s each, inside the 5 s the host check allows.
 func hermesAvailable() error {
-	python, container := hermesSettings()
+	python, container := hermesSettings(2 * time.Second)
 	if python != "" {
 		if st, err := os.Stat(python); err != nil || st.Mode()&0o111 == 0 {
 			return fmt.Errorf("no Hermes interpreter at %s", python)
@@ -92,7 +92,7 @@ func hermesAvailable() error {
 
 // checkHermes starts the adapter far enough to prove its Hermes imports still exist.
 func checkHermes(out io.Writer) error {
-	bin, argv := hermesInvocation(hermesSettings())
+	bin, argv := hermesInvocation(hermesSettings(5 * time.Second))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, append(argv, "--check")...)
@@ -114,7 +114,7 @@ func runHermes(args []string) error {
 	case len(args) != 0:
 		return fmt.Errorf("usage: tether hermes [--check | --available | --prepare NAME]")
 	}
-	bin, argv := hermesInvocation(hermesSettings())
+	bin, argv := hermesInvocation(hermesSettings(5 * time.Second))
 	cmd := exec.Command(bin, argv...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
