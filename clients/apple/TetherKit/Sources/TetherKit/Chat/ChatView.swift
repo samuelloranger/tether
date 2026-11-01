@@ -727,9 +727,30 @@ struct ChatView: View {
     .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
     .background(TetherColors.background.ignoresSafeArea(.all, edges: .bottom))
     .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+    // Floats above the bar: anything in the bar's own stack would resize it while a chat reconnects.
+    .overlay(alignment: .top) {
+      if catchingUp {
+        HStack(spacing: 6) {
+          ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
+          Text("Catching up…").font(.caption).foregroundStyle(TetherColors.textSecondary)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(TetherColors.surfaceRaised, in: Capsule())
+        .overlay(Capsule().strokeBorder(TetherColors.border, lineWidth: 0.5))
+        .padding(.bottom, 8)
+        .frame(height: 0, alignment: .bottom)
+        .transition(.opacity.combined(with: .offset(y: 6)))
+        .allowsHitTesting(false)
+        .accessibilityLabel("Catching up")
+        .accessibilityIdentifier("chatCatchingUp")
+      }
+    }
+    .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: catchingUp)
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: model.state.pendingPermissions.first?.requestId)
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: pendingQuestion?.requestId)
   }
+
+  private var catchingUp: Bool { model.link.phase == .catchingUp || model.link.phase == .connecting }
 
   private var composer: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -794,9 +815,7 @@ struct ChatView: View {
   }
 
   private var composerPrompt: Text {
-    // The catch-up note lives in the placeholder: a row of its own pushed the composer up and back.
-    Text(model.link.phase == .catchingUp || model.link.phase == .connecting ? "Catching up…"
-      : permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { $0.key == ChatAgents.claude.key ? "Message the agent" : "Message \($0.label)" } ?? "Message the agent")
+    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { $0.key == ChatAgents.claude.key ? "Message the agent" : "Message \($0.label)" } ?? "Message the agent")
       .foregroundStyle(TetherColors.placeholder)
   }
 
