@@ -118,6 +118,16 @@ impl Platform for LinuxPlatform {
         }
         crate::terminal::clip::snapshot(&clipboard::ArboardSource::default(), &std::thread::sleep)
     }
+    fn copy_image(&self, image: arboard::ImageData<'_>) -> Result<(), String> {
+        let mut slot = self.clipboard.lock().unwrap();
+        if slot.is_none() {
+            *slot = Some(arboard::Clipboard::new().map_err(|e| e.to_string())?);
+        }
+        slot.as_mut()
+            .unwrap()
+            .set_image(image)
+            .map_err(|e| e.to_string())
+    }
     fn bring_to_front(&self) {
         // The protocol has no reply, so a token the compositor rejects cannot be told from one it
         // honoured; only a failed request falls through to the plain focus attempt.

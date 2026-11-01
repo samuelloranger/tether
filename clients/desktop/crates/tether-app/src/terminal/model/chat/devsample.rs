@@ -4,6 +4,22 @@ use tether_core::acp::message::{AcpId, ConfigChoice, ConfigOption, decode};
 use tether_core::acp::reducer::{ChatEvent, ChatState, reduce};
 use tether_core::acp::workflows::{self, Run};
 
+pub fn card_image() -> Vec<u8> {
+    let pixels = image::RgbImage::from_fn(1200, 800, |x, y| {
+        let light = 40 + (x * 100 / 1200 + y * 60 / 800) as u8;
+        if (x as i32 - 320).pow(2) + (y as i32 - 280).pow(2) < 120_i32.pow(2) {
+            image::Rgb([225, 230, 245])
+        } else {
+            image::Rgb([light / 2, light, light.saturating_add(40)])
+        }
+    });
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(pixels)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
 fn line(state: &mut ChatState, text: &str) {
     reduce(state, ChatEvent::Message(decode(text.as_bytes(), None)));
 }
@@ -79,6 +95,22 @@ pub fn workflow_runs(kind: &str, now: i64) -> Vec<Run> {
 
 /// `workflow`: the sample's chat also launched a Workflow (see `workflow_runs`).
 pub fn state(workflow: bool) -> ChatState {
+    if let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_CARD") {
+        let values: Vec<serde_json::Value> = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-cards.json"
+        )))
+        .unwrap();
+        let mut state = ChatState::default();
+        for card in values
+            .iter()
+            .filter(|c| c["kind"].as_str() == Some(kind.as_str()))
+        {
+            let update = serde_json::json!({"sessionUpdate":"tool_call_update", "toolCallId":"preview", "status":"completed", "_meta":{"tether":{"card":true}}, "rawOutput":format!("TETHER_CARD_V1\n{card}")});
+            self::update(&mut state, &update.to_string());
+        }
+        return state;
+    }
     let mut s = ChatState::default();
     line(
         &mut s,

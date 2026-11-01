@@ -156,6 +156,7 @@ struct ChatItem: Codable, Equatable, Identifiable, Sendable {
     case assistant(text: String, messageId: String?)
     /// Pictures the agent sent in its message, in order with the text around them.
     case images([ChatImageRef], messageId: String?)
+    case card(ChatCard)
     case thought(text: String)
     case tool(ChatToolCall)
     case permission(ChatPermission)
@@ -206,6 +207,8 @@ struct ChatState: Codable, Equatable, Sendable {
   fileprivate var hostAnswers: [ACPID: String] = [:]
   /// The question tool's own calls: the question row stands for them.
   fileprivate var questionToolIds: Set<String> = []
+  /// Calls their adapter named as the card tool; a card in any other call's output is ignored.
+  fileprivate var cardToolIds: Set<String> = []
   /// The id of the replayed user message the last user row came from, so two messages in a row stay two rows.
   fileprivate var lastUserMessageId: String?
   /// The turn was started by the agent itself (a finished background command), not by a prompt.
@@ -221,6 +224,16 @@ struct ChatState: Codable, Equatable, Sendable {
   }
 
   func isQueued(_ itemId: Int) -> Bool { queuedItemIds.contains(itemId) }
+
+  func cardActionPending(_ id: String) -> Bool {
+    guard let card = items.compactMap({ if case let .card(card) = $0.kind, card.id == id { return card }; return nil }).first else { return false }
+    let requests = Set(card.actionRequests)
+    let pending = Set(inFlight.map(\.itemId))
+    return items.contains {
+      guard pending.contains($0.id), case let .user(text, _, _, _) = $0.kind else { return false }
+      return requests.contains(text)
+    }
+  }
 
   /// What a Stop sends again: the waiting messages' text as one prompt. Their pictures are not
   /// kept for it, so they are only counted, for the notice that says so.
@@ -306,6 +319,7 @@ extension ChatState {
     silentRequestIds = try c.decode(Set<ACPID>.self, forKey: .silentRequestIds)
     hostAnswers = try c.decode([ACPID: String].self, forKey: .hostAnswers)
     questionToolIds = try c.decode(Set<String>.self, forKey: .questionToolIds)
+    cardToolIds = try c.decodeIfPresent(Set<String>.self, forKey: .cardToolIds) ?? []
     lastUserMessageId = try c.decodeIfPresent(String.self, forKey: .lastUserMessageId)
     agentStarted = try c.decodeIfPresent(Bool.self, forKey: .agentStarted) ?? false
     loading = try c.decodeIfPresent(Bool.self, forKey: .loading) ?? false
@@ -554,12 +568,14 @@ enum ChatReducer {
       state.lastUserMessageId = messageId
     case let .toolCall(fields):
       startQueued(in: &state)
+      applyCard(fields, in: &state)
       if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }
       if state.questionToolIds.contains(fields.id) { return }
       startAgentTurn(in: &state)
       mergeTool(fields, creating: true, into: &state)
     case let .toolCallUpdate(fields):
       startQueued(in: &state)
+      applyCard(fields, in: &state)
       if fields.toolName == ChatQuestion.toolName { state.questionToolIds.insert(fields.id) }
       if state.questionToolIds.contains(fields.id) { return }
       mergeTool(fields, creating: true, into: &state)
@@ -620,6 +636,19 @@ enum ChatReducer {
       if let modelId { state.modelId = modelId }
     case .unknown:
       break
+    }
+  }
+
+  private static func applyCard(_ fields: ACPToolFields, in state: inout ChatState) {
+    if fields.cardPublisher { state.cardToolIds.insert(fields.id) }
+    if let card = fields.card, state.cardToolIds.contains(fields.id) { updateCard(card, in: &state) }
+  }
+
+  private static func updateCard(_ card: ChatCard, in state: inout ChatState) {
+    if let index = state.items.firstIndex(where: { if case let .card(old) = $0.kind { return old.id == card.id }; return false }) {
+      if case let .card(old) = state.items[index].kind, card.revision > old.revision { state.items[index].kind = .card(card) }
+    } else {
+      append(.card(card), to: &state)
     }
   }
 

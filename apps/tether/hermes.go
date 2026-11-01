@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,13 +24,14 @@ const hermesDefaultContainer = "hermes"
 const hermesLoginMarker = "tether-hermes-settings"
 
 func hermesInvocation(python, container string) (string, []string) {
+	adapter := "import sys, types, base64\n_cards = types.ModuleType('chat_cards')\nexec(base64.b64decode('" + base64.StdEncoding.EncodeToString([]byte(chatCardsSource)) + "'), _cards.__dict__)\nsys.modules['chat_cards'] = _cards\n" + hermesAdapter
 	if python != "" {
-		return python, []string{"-c", hermesAdapter}
+		return python, []string{"-c", adapter}
 	}
 	if container == "" {
 		container = hermesDefaultContainer
 	}
-	return "docker", []string{"exec", "-i", "--user", "hermes", "--env", "HOME=/opt/data", "--workdir", "/opt/hermes", container, "/opt/hermes/.venv/bin/python", "-c", hermesAdapter}
+	return "docker", []string{"exec", "-i", "--user", "hermes", "--env", "HOME=/opt/data", "--workdir", "/opt/hermes", container, "/opt/hermes/.venv/bin/python", "-c", adapter}
 }
 
 // hermesSettings resolves the interpreter or container. The holder runs under a login shell while

@@ -78,6 +78,7 @@ struct ChatView: View {
   var body: some View {
     scroller
     .environment(\.chatImages, model.imageLibrary)
+    .environment(\.chatCardActions, ChatCardActions(enabled: model.canSend, pending: { model.cardActionPending($0) }, send: { model.sendCardAction($0, action: $1, container: $2) }))
     .onChange(of: atBottom) { _, near in windowFollowing(near) }
     #if DEBUG
     .coordinateSpace(name: "probe-viewport")

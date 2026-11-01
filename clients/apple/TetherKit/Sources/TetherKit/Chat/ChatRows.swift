@@ -93,6 +93,8 @@ struct ChatItemRow: View, Equatable {
       AssistantTextView(text: text)
     case let .images(refs, _):
       ChatImagesRow(refs: refs)
+    case let .card(card):
+      ChatCardView(card: card)
     case let .thought(text):
       ThoughtRow(text: text, expanded: expanded, toggle: toggle)
     case .tool, .permission:

@@ -99,6 +99,10 @@ pub struct AcpDiff {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolFields {
     pub id: String,
+    pub card: Option<super::cards::Card>,
+    /// The adapter names this call as Tether's card tool; only such a call may show a card.
+    #[serde(default)]
+    pub card_publisher: bool,
     pub title: Option<String>,
     pub kind: Option<ToolKind>,
     pub status: Option<ToolStatus>,
@@ -666,6 +670,7 @@ fn tool_fields(
     let outer_meta = object(object_.get("_meta"));
     let meta = outer_meta.and_then(|m| object(m.get("claudeCode")));
     fields.tool_name = meta.and_then(|m| string(m.get("toolName")));
+    fields.card_publisher = super::cards::is_publisher(object_);
     fields.parent_id = meta.and_then(|m| string(m.get("parentToolUseId")));
     fields.background_task_id = meta
         .and_then(|m| object(m.get("toolResponse")))
@@ -730,6 +735,28 @@ fn tool_fields(
     }
     if !refs.is_empty() {
         fields.images = Some(refs);
+    }
+    if collect_images && fields.status == Some(ToolStatus::Completed) {
+        fields.card = super::cards::Card::decode(
+            &Value::Object(object_.clone()),
+            fields.images.as_deref().unwrap_or_default(),
+        );
+        if let Some(card) = &mut fields.card {
+            if card.supported()
+                && card.kind == "image"
+                && card.image.is_none()
+                && let Some(block) = object_
+                    .get("rawOutput")
+                    .and_then(|v| super::cards::image_block(v, 0))
+                && let Some(block) = block.as_object()
+                && let Some(image) = image_ref(block, sink)
+            {
+                card.image = Some(image.clone());
+                fields.images = Some(vec![image]);
+            }
+            fields.text = Some(card.fallback.clone());
+            return Some(fields);
+        }
     }
     match object_.get("rawOutput") {
         Some(Value::String(text)) => {

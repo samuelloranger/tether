@@ -21,7 +21,7 @@ zeroize.workspace = true
 thiserror.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rfd = "0.15"
-arboard = { version = "3.6", default-features = false }
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

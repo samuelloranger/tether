@@ -42,6 +42,19 @@ Soft, consistent radii (cards and sheets ~12, controls ~9–11), hairline border
 - **Add server / key entry:** underlined-feel inset fields, a password | private-key segment, a TOFU note ("first connect pins this host's key").
 - **Terminal:** header with the machine + session and a heat status lamp, a left slide-over session drawer, git / history / send overlays that cover the grid.
 
+## Components
+
+### Agent-published transcript cards
+
+Weather, image, and Docker cards extend the existing chat surface. They use the active theme's surface, border, and text roles; no independent card palette. Native platform sans remains the default, with SF Symbols on Apple and existing Slint controls on desktop.
+
+- **Container:** full available transcript width, softly rounded corners (12), inset content (14), and a quiet border (0.5pt on Apple; 1px on desktop). A semibold title leads; source and fetch time remain visible in faint text below the content. Apple uses semantic SwiftUI type, with subheadline titles, caption metadata, and title-sized weather temperature; desktop uses its existing text hierarchy.
+- **Weather:** lead with location, temperature with units, and conditions. Apple presents hourly forecasts in a horizontal strip; desktop stacks the forecast rows. Forecast times use the location's time zone. Missing temperatures read “Unavailable”; optional observations stay absent.
+- **Images:** reuse the chat image preview and viewer, including zoom, save, and share. Keep caption/alt text with the image and show the existing placeholder when image bytes are unavailable. Desktop shares through Copy to share and original-file export; Apple uses its native share sheet.
+- **Docker:** show the host and listed/healthy counts before container rows. Expand a row for its ID, CPU, memory, optional detail, and actions. Health and metrics that were not supplied remain explicitly unavailable; disclose partial lists. Apple action rows fall back to a vertical stack when horizontal space is insufficient.
+- **Actions:** “Refresh”, “Show logs”, and “Request restart” submit readable requests into the conversation through the agent's normal permission flow. Apple uses semibold caption labels (12pt at the default text size) in `textPrimary` and a minimum 44 × 44pt frame **inside the button label**. Docker actions paint a compact rounded label inside that unpainted touch area, with a subtle accent tint and plain button style; weather retains its bordered style. Desktop reuses `SecondaryButton` with primary text and its existing hover/focus treatment. Disable actions when submission is unavailable or a request for the card is pending; show “Requested · see conversation” after submission rather than implying completion.
+- **History:** updated cards retain their transcript position. Unsupported versions or kinds display their plain-text fallback. Reopening a card does not submit an action.
+
 ## Motion
 
 Operate defaults: short state transitions only. No page-load choreography, no loops, no idle ambient movement. Tokens live in `TetherMotion` (`clients/apple`).

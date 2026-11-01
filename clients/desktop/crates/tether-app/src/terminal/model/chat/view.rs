@@ -123,6 +123,13 @@ pub enum Icon {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowBody {
+    Card {
+        card: Box<tether_core::acp::cards::Card>,
+        images: Vec<Picture>,
+        expanded: Vec<String>,
+        enabled: bool,
+        pending: bool,
+    },
     User {
         text: String,
         images: Vec<Picture>,
@@ -451,6 +458,7 @@ pub struct WorkflowSheetView {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChatScreen {
+    pub viewer_path: Option<std::path::PathBuf>,
     pub active: bool,
     pub tabs: Vec<TabView>,
     pub sidebar: Vec<SidebarView>,

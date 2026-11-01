@@ -80,6 +80,7 @@ final class ChatSessionModel {
   private let workflowInterval: Duration
   private var workflowTask: Task<Void, Never>?
   private var verbsAsked = false
+  private var pendingCardActions: Set<String> = []
   /// Empty until the host answered; Tether's own words stand in meanwhile.
   private(set) var verbs: [String] = []
   /// The chat's picture files and how to show them; nil where nothing is kept.
@@ -381,6 +382,20 @@ final class ChatSessionModel {
 
   @discardableResult
   func send(_ text: String) -> Bool { send(text: text, images: []) }
+
+  func cardActionPending(_ id: String) -> Bool {
+    pendingCardActions.contains(id) || state.cardActionPending(id)
+  }
+
+  func sendCardAction(_ card: ChatCard, action: String, container: ChatCard.Container?) -> Bool {
+    guard canSend, !cardActionPending(card.id), let text = card.request(action, container: container) else { return false }
+    pendingCardActions.insert(card.id)
+    Task {
+      await deliver(text, [])
+      pendingCardActions.remove(card.id)
+    }
+    return true
+  }
 
   @discardableResult
   func send(text: String, images: [ChatImageAttachment] = []) -> Bool {

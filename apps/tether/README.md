@@ -79,7 +79,49 @@ can see:
 
 `acp` keeps an ACP agent (for example `npx -y @agentclientprotocol/claude-agent-acp`)
 alive on the host while the SSH connection comes and goes. The stream stays plain
-newline-delimited JSON-RPC; nothing is injected into it.
+newline-delimited JSON-RPC. The holder registers Tether's card publishing tool for
+Claude, Codex, and Hermes when a session is created or loaded, and records client
+echoes for replay as described below.
+
+### Agent-published chat cards
+
+Weather, image, and Docker cards appear in the conversation when the agent chooses
+to publish them. The host needs **Python 3.9 or later** (`python3` on PATH); the
+publisher uses only the standard library and opens no network listener. Hermes's
+publisher runs alongside its gateway, including inside its existing container.
+Update the host tool and start or continue a chat to register the tool. A running
+holder started with an older binary keeps its original tool configuration.
+
+The holder adds a session-scoped stdio MCP server named `tether-cards`, preserving
+the other MCP servers. The agent learns the presentation rules and calls
+`tether_publish_card` with observations obtained through its existing tools. The
+publisher does not fetch forecasts, manage Docker, or generate images itself.
+Weather includes source, fetch time, explicit units and a location time zone;
+missing metrics remain unavailable. Docker actions submit ordinary requests back
+to the owning agent and retain its usual permission policy.
+
+The tool returns a `TETHER_CARD_V1` text envelope and, for images, a standard MCP
+image block. Native clients validate the envelope and render it as a card, only for a call its
+adapter names as `tether_publish_card` (Claude's tool name, Codex's title, or the
+`_meta` mark Tether's Hermes adapter adds): the same text in another tool's output
+stays text. A
+card ID with a higher revision updates in place; duplicates and older revisions
+are ignored. Unknown versions use the envelope's readable fallback. Images are
+imported from an HTTPS URL on a public host (no LAN, loopback or link-local
+address, 30 s overall) or a regular file in the chat's folder or the temp folder,
+outside hidden folders (PNG, JPEG, GIF or WebP, at most 5 MiB) and carried in the existing SSH replay log, so an expiring URL is not the
+only copy. Client snapshots keep image references, and the existing protected
+image stores keep the bytes.
+
+No background polling is added. Refresh asks the agent for fresh data. Reopening
+the original holder replays its cards; continuing the agent conversation in a new
+holder can display earlier publications as text, with new results rendered as
+cards. Old clients still receive readable tool results.
+
+Publisher tests: `python3 -m unittest chat_cards_test`. The Swift and Rust card
+tests share `clients/apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-cards.json`.
+
+### Attaching and replay
 
     # run as a non-PTY ssh exec; stdin/stdout are the agent's, byte for byte
     tether acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
