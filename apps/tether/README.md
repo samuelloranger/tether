@@ -309,6 +309,14 @@ as a string id). Exit 3 means the request is not outstanding (answered from else
 the agent moved on); `answers` prints the recorded answers (`{}` when none) so a
 reconnecting client can merge them into its transcript.
 
+    echo "Morning briefing" | tether acp prompt chat1
+
+`prompt` sends the message on stdin (up to 64 KiB) into a running chat as the client `host`,
+for the session the log last names, then leaves once the holder has echoed it: attached
+clients see it like one of their own prompts, and the answer gets the usual push when nobody
+is attached. A chat in a turn, or one no client has started a session in yet, is refused.
+Scheduled jobs use it to land their output in a conversation.
+
 ### Elicitation (the agent's multiple-choice questions)
 
 When the client advertises `elicitation: {form: {}}` the agent asks questions with an
