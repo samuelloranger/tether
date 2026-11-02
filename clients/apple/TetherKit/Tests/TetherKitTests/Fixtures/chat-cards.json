@@ -1,0 +1,74 @@
+[
+  {
+    "version": 1,
+    "revision": 1,
+    "fetchedAt": "2026-11-01T08:00:00-05:00",
+    "source": "Fixture data, not live observations",
+    "id": "weather-montreal",
+    "kind": "weather",
+    "title": "Montréal weather",
+    "fallback": "Montréal: 4°C, light rain.",
+    "payload": {
+      "location": "Montréal, QC",
+      "timeZone": "America/Toronto",
+      "unit": "C",
+      "temperature": 4,
+      "feelsLike": 1,
+      "conditions": "Light rain",
+      "hourly": [
+        {
+          "time": "2026-11-01T09:00:00-05:00",
+          "label": "Sun 09:00",
+          "temperature": 5,
+          "conditions": "Cloudy",
+          "precipitation": 20
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "revision": 1,
+    "fetchedAt": "2026-11-01T08:00:00-05:00",
+    "source": "Fixture data, not live observations",
+    "id": "docker-lab",
+    "kind": "docker",
+    "title": "Homelab containers",
+    "fallback": "2 containers, one unhealthy.",
+    "payload": {
+      "host": "homelab · fixture",
+      "total": 3,
+      "containers": [
+        {
+          "id": "a123",
+          "name": "jellyfin",
+          "state": "running",
+          "health": "healthy",
+          "cpuPercent": 2.3,
+          "memoryBytes": 268435456,
+          "detail": "Fixture service, port 8096"
+        },
+        {
+          "id": "b456",
+          "name": "immich-machine-learning",
+          "state": "running",
+          "health": "unhealthy",
+          "detail": "Worker latency · fixture observation"
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "revision": 1,
+    "fetchedAt": "2026-11-01T08:00:00-05:00",
+    "source": "Fixture data, not live observations",
+    "id": "image-1",
+    "kind": "image",
+    "title": "Image preview",
+    "fallback": "A small fixture image.",
+    "payload": {
+      "alt": "A tiny PNG used to verify image delivery."
+    }
+  }
+]

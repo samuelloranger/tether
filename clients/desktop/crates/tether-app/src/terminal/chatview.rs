@@ -11,13 +11,15 @@ use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
-    AttachmentVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm, ChatTaskVm, ChatVm,
-    ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm,
-    NcChoiceVm, NcMenuVm, PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm,
-    SavedSessionVm, WfAgentVm, WfPhaseVm,
+    AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
+    ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
+    MdItemVm, MdLinkVm, NcChoiceVm, NcMenuVm, PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm,
+    QFieldVm, QueuedVm, SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 
 thread_local! {
+    static VIEWER_PATH: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
+    static VIEWER_PIXELS: RefCell<Option<Arc<Pixels>>> = const { RefCell::new(None) };
     static IMAGES: RefCell<HashMap<usize, slint::Image>> = RefCell::new(HashMap::new());
     static ROWS: RefCell<Vec<Row>> = const { RefCell::new(Vec::new()) };
     static FIELDS: RefCell<Vec<FieldView>> = const { RefCell::new(Vec::new()) };
@@ -214,6 +216,118 @@ fn row_vm(r: &Row) -> ChatRowVm {
         ..Default::default()
     };
     match &r.body {
+        RowBody::Card {
+            card,
+            images,
+            expanded,
+            enabled,
+            pending,
+        } => {
+            vm.kind = 17;
+            vm.card_id = card.id.as_str().into();
+            vm.card_kind = card.kind.as_str().into();
+            vm.card_enabled = *enabled;
+            vm.card_pending = *pending;
+            vm.flag = card.supported();
+            vm.text = card.title.as_str().into();
+            vm.meta = format!("{}\nFetched {}", card.source, card.fetched_at).into();
+            vm.images = pictures(images);
+            let p = &card.payload;
+            let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+            let temp = |v: &serde_json::Value| {
+                v.as_f64()
+                    .map_or("Unavailable".into(), |n| format!("{n}°{}", s(&p["unit"])))
+            };
+            let mut entries = Vec::new();
+            if !card.supported() {
+                vm.detail = card.fallback.as_str().into();
+            } else if card.kind == "weather" {
+                vm.detail = format!(
+                    "{}\n{} · {}{}\n{}",
+                    s(&p["location"]),
+                    temp(&p["temperature"]),
+                    s(&p["conditions"]),
+                    p["feelsLike"].as_f64().map_or(String::new(), |_| format!(
+                        " · Feels like {}",
+                        temp(&p["feelsLike"])
+                    )),
+                    s(&p["timeZone"])
+                )
+                .into();
+                for h in p["hourly"].as_array().into_iter().flatten() {
+                    entries.push(ChatCardEntryVm {
+                        title: format!(
+                            "{} · {}",
+                            h["label"]
+                                .as_str()
+                                .unwrap_or(h["time"].as_str().unwrap_or("")),
+                            temp(&h["temperature"])
+                        )
+                        .into(),
+                        detail: format!(
+                            "{}{}",
+                            s(&h["conditions"]),
+                            h["precipitation"]
+                                .as_f64()
+                                .map_or(String::new(), |n| format!(" · {n}% rain"))
+                        )
+                        .into(),
+                        ..Default::default()
+                    });
+                }
+            } else if card.kind == "docker" {
+                let rows = p["containers"].as_array().cloned().unwrap_or_default();
+                let healthy = rows.iter().filter(|c| c["health"] == "healthy").count();
+                vm.detail = format!(
+                    "{}\n{} listed · {} healthy · {} total{}",
+                    s(&p["host"]),
+                    rows.len(),
+                    healthy,
+                    p["total"],
+                    if rows.is_empty() {
+                        "\nNo containers"
+                    } else {
+                        ""
+                    }
+                )
+                .into();
+                for c in rows {
+                    let id = s(&c["id"]);
+                    let key = format!("card:{}:{id}", card.id);
+                    entries.push(ChatCardEntryVm {
+                        id: id.clone().into(),
+                        key: key.as_str().into(),
+                        title: s(&c["name"]).into(),
+                        detail: format!(
+                            "{} · {}",
+                            s(&c["state"]),
+                            c["health"].as_str().unwrap_or("Health unavailable")
+                        )
+                        .into(),
+                        meta: format!(
+                            "{id}\nCPU: {}\nMemory: {}{}",
+                            c["cpuPercent"]
+                                .as_f64()
+                                .map_or("Unavailable".into(), |n| format!("{n}%")),
+                            c["memoryBytes"]
+                                .as_f64()
+                                .map_or("Unavailable".into(), |n| format!(
+                                    "{:.1} MiB",
+                                    n / 1048576.0
+                                )),
+                            c["detail"]
+                                .as_str()
+                                .map_or(String::new(), |t| format!("\n{t}"))
+                        )
+                        .into(),
+                        open: expanded.contains(&key),
+                    });
+                }
+            } else {
+                vm.detail = s(&p["alt"]).into();
+            }
+            vm.card_rows = model(entries);
+        }
         RowBody::User {
             text,
             images,
@@ -899,6 +1013,14 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
         None => vm.set_review_open(false),
     }
 
+    VIEWER_PATH.with(|slot| *slot.borrow_mut() = s.viewer_path.clone());
+    VIEWER_PIXELS.with(|slot| {
+        *slot.borrow_mut() = s
+            .viewer
+            .as_ref()
+            .and_then(|p| p.as_ref())
+            .and_then(|p| p.pixels.clone())
+    });
     match &s.viewer {
         Some(Some(p)) => {
             vm.set_viewer_open(true);
@@ -952,12 +1074,79 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_delete_cancelled(|| send(ChatMsg::DeleteCancelled));
     vm.on_new_chat(|mode| send(ChatMsg::NewChat(u8::try_from(mode).unwrap_or(0))));
     vm.on_toggle(|k| send(ChatMsg::Toggle(k.into())));
+    vm.on_card_action(|id, container, action| {
+        send(ChatMsg::CardAction {
+            id: id.into(),
+            container: container.into(),
+            action: action.into(),
+        })
+    });
     vm.on_task_open(|k| send(ChatMsg::OpenTool(k.into())));
     vm.on_workflow_open(|id| send(ChatMsg::OpenWorkflow(id.into())));
     vm.on_close_workflow(|| send(ChatMsg::CloseWorkflow));
     vm.on_open_link(|url| send(ChatMsg::OpenLink(url.into())));
-    vm.on_open_image(|id| send(ChatMsg::OpenImage(id.into())));
+    let weak = ui.as_weak();
+    vm.on_open_image(move |id| {
+        if let Some(ui) = weak.upgrade() {
+            ui.global::<ChatVm>().set_viewer_status("".into());
+        }
+        send(ChatMsg::OpenImage(id.into()));
+    });
     vm.on_close_viewer(|| send(ChatMsg::CloseViewer));
+    let weak = ui.as_weak();
+    vm.on_save_image(move || {
+        let source = VIEWER_PATH.with(|slot| slot.borrow().clone());
+        let weak = weak.clone();
+        if let Some(source) = source {
+            let _ = slint::spawn_local(async move {
+                let result = crate::terminal::chatmedia::read_source(&source)
+                    .map_err(|e| e.message().to_string());
+                let Ok(bytes) = result else {
+                    if let Some(w) = weak.upgrade() {
+                        w.global::<ChatVm>().set_viewer_status(
+                            "Image could not be read. Reopen it and try again.".into(),
+                        );
+                    }
+                    return;
+                };
+                let ext = image::guess_format(&bytes)
+                    .ok()
+                    .and_then(|f| f.extensions_str().first().copied())
+                    .unwrap_or("png");
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_title("Save image")
+                    .set_file_name(format!("tether-image.{ext}"))
+                    .save_file()
+                    .await
+                {
+                    let result = file.write(&bytes).await;
+                    if let Some(w) = weak.upgrade() {
+                        w.global::<ChatVm>().set_viewer_status(if result.is_ok() {
+                            "Image saved".into()
+                        } else {
+                            "Image could not be saved. Try another location.".into()
+                        });
+                    }
+                }
+            });
+        }
+    });
+    let weak = ui.as_weak();
+    vm.on_copy_image(move || {
+        let pixels = VIEWER_PIXELS.with(|slot| slot.borrow().clone());
+        if let (Some(p), Some(w)) = (pixels, weak.upgrade()) {
+            let result = crate::terminal::glue::platform().copy_image(arboard::ImageData {
+                width: p.width as usize,
+                height: p.height as usize,
+                bytes: std::borrow::Cow::Borrowed(&p.rgba),
+            });
+            w.global::<ChatVm>().set_viewer_status(if result.is_ok() {
+                "Image copied · paste it to share".into()
+            } else {
+                "Image could not be copied. Save it to share instead.".into()
+            });
+        }
+    });
     vm.on_copy_folder(|| send(ChatMsg::CopyFolder));
     vm.on_earlier(|| send(ChatMsg::Earlier));
     vm.on_following(|at_end| send(ChatMsg::Following(at_end)));

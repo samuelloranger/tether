@@ -183,6 +183,60 @@ fn rows(s: &ChatScreen) -> Vec<&RowBody> {
 }
 
 #[test]
+fn card_actions_send_one_agent_prompt_and_respect_busy_and_disconnected_states() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    let fixtures: Vec<serde_json::Value> = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-cards.json"
+    )))
+    .unwrap();
+    let update = serde_json::json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
+        "sessionUpdate":"tool_call_update","toolCallId":"publish","status":"completed","_meta":{"tether":{"card":true}},"rawOutput":format!("TETHER_CARD_V1\n{}",fixtures[1])}}});
+    h.feed(&name, generation, &update.to_string());
+    h.writes();
+    let action = || ChatMsg::CardAction {
+        id: "docker-lab".into(),
+        container: "a123".into(),
+        action: "restart".into(),
+    };
+    h.msg(action());
+    let written = h.writes();
+    assert_eq!(written.len(), 1);
+    let prompt: serde_json::Value = serde_json::from_str(&written[0]).unwrap();
+    assert_eq!(prompt["method"], "session/prompt");
+    assert!(written[0].contains("jellyfin") && written[0].contains("a123"));
+    h.msg(action());
+    assert!(
+        h.writes().is_empty(),
+        "a repeated tap must not send another restart"
+    );
+    h.feed(
+        &name,
+        generation,
+        &serde_json::json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}})
+            .to_string(),
+    );
+    h.msg(ChatMsg::DraftEdited {
+        text: "Another request".into(),
+        cursor_byte: 15,
+    });
+    h.msg(ChatMsg::Send);
+    h.writes();
+    h.msg(action());
+    assert_eq!(
+        h.writes().len(),
+        1,
+        "a card action queues behind an existing prompt"
+    );
+    assert_eq!(h.screen().queued.len(), 1);
+    h.msg(ChatMsg::Closed { name, generation });
+    h.writes();
+    h.msg(action());
+    assert!(h.writes().is_empty(), "a disconnected card must not submit");
+}
+
+#[test]
 fn connecting_reads_the_hosts_chat_status() {
     let mut h = Harness::new();
     let jobs = h.take();

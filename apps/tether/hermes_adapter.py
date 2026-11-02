@@ -13,6 +13,30 @@ from acp.schema import AvailableCommand, AvailableCommandsUpdate, NewSessionResp
 from acp_adapter.entry import _load_env, _setup_logging
 from acp_adapter.gateway_server import GatewayACPAgent, _slash_command
 from hermes_cli.gateway_client import GatewayRPCError
+from chat_cards import MARKER, find_card, import_image
+
+CARD_CONTEXT = ("\n\n[Tether presentation context]\n"
+                "This conversation can display native weather, image and Docker cards. "
+                "When answering about these, use tool_search to discover tether_publish_card, then publish the relevant card with the available MCP tool. "
+                "Choose cards without requiring the user to ask for a format. Obtain observations with your usual tools or use clearly labelled supplied fixtures. "
+                "Presenting a card grants no extra data access; Docker actions follow your normal permissions. "
+                "Keep explanatory prose useful.\n[/Tether presentation context]")
+
+
+class CardConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    async def session_update(self, *, session_id, update, **kwargs):
+        if getattr(update, "session_update", None) == "user_message_chunk":
+            content = getattr(update, "content", None)
+            value = getattr(content, "text", None)
+            if isinstance(value, str) and value.endswith(CARD_CONTEXT):
+                update = update.model_copy(update={"content": content.model_copy(update={"text": value[:-len(CARD_CONTEXT)]})})
+        return await self._connection.session_update(session_id=session_id, update=update, **kwargs)
 
 
 def catalog_commands(catalog):
@@ -34,12 +58,63 @@ def catalog_commands(catalog):
 
 
 class TetherHermesAgent(GatewayACPAgent):
+    def on_connect(self, conn):
+        super().on_connect(CardConnection(conn))
+
+    def _remember_card_server(self, servers):
+        self._tether_cards = any((s.get("name") if isinstance(s, dict) else getattr(s, "name", None)) == "tether-cards" for s in servers or [])
+
+    async def _resume(self, cwd, held_id, mcp_servers):
+        self._remember_card_server(mcp_servers)
+        return await super()._resume(cwd, held_id, mcp_servers)
+
+    async def _prepare_submit(self, session_id, prompt):
+        prepared = await super()._prepare_submit(session_id, prompt)
+        if prepared is None or not self._tether_cards:
+            return prepared
+        retry_key, input_id, (text, attachments) = prepared
+        if not text.lstrip().startswith("/") and not text.endswith(CARD_CONTEXT):
+            text += CARD_CONTEXT
+        return retry_key, input_id, (text, attachments)
+
+    async def _project_tool(self, kind, sid, editor_id, aid, payload):
+        held = self._tool_args.get((sid, payload.get("tool_call_id")))
+        name = held[0] if held else payload.get("tool_name", payload.get("name", ""))
+        if kind != "tool.complete" or "tether_publish_card" not in name or payload.get("is_error"):
+            return await super()._project_tool(kind, sid, editor_id, aid, payload)
+        # Hermes normally prettifies JSON tool results, which loses the typed card envelope.
+        card = find_card(payload.get("result"))
+        if not isinstance(card, dict):
+            return await super()._project_tool(kind, sid, editor_id, aid, payload)
+        content = []
+        if card.get("kind") == "image":
+            args = held[1] if held else {}
+            try:
+                image = await asyncio.to_thread(import_image, args["payload"]["imageSource"])
+                content.append({"type": "content", "content": image})
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                self._tool_args.pop((sid, payload["tool_call_id"]), None)
+                if self._conn:
+                    await self._conn.session_update(session_id=editor_id, update=acp.update_tool_call(
+                        payload["tool_call_id"], status="failed",
+                        content=[{"type": "content", "content": {"type": "text", "text": "Image could not be imported: " + str(exc)}}]))
+                return
+        self._tool_args.pop((sid, payload["tool_call_id"]), None)
+        if self._conn:
+            # Clients render a card only from a call its adapter marks: tool output alone cannot claim one.
+            update = acp.update_tool_call(payload["tool_call_id"], status="completed", content=content,
+                                          raw_output=MARKER + json.dumps(card))
+            await self._conn.session_update(session_id=editor_id, update=update.model_copy(
+                update={"field_meta": {"tether": {"card": True}}}))
+
     def __init__(self):
         super().__init__()
+        self._tether_cards = False
         self._tether_catalogs = {}
         self._tether_pointer = self._home / "tether-conversation.json"
 
     async def new_session(self, cwd, mcp_servers=None, **kwargs):
+        self._remember_card_server(mcp_servers)
         workspace = self._workspace(cwd)
         lock_path = self._tether_pointer.with_suffix(".lock")
         with open(lock_path, "a", opener=lambda path, flags: os.open(path, flags, 0o600)) as lock:

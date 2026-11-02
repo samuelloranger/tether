@@ -42,7 +42,21 @@ export struct ChatEntryVm {
 // 6 notice, 7 error, 8 divider, 9 signed out, 10 answered question, 11 not sent, 12 working,
 // 13 earlier messages, 14 empty state, 15 agent notice (state = severity), 16 compaction
 // (state: 0 compacting, 1 done, 2 failed, 3 cancelled; flag = has a summary; open = summary shown).
+export struct ChatCardEntryVm {
+    id: string,
+    key: string,
+    title: string,
+    detail: string,
+    meta: string,
+    open: bool,
+}
+
 export struct ChatRowVm {
+    card-id: string,
+    card-kind: string,
+    card-rows: [ChatCardEntryVm],
+    card-enabled: bool,
+    card-pending: bool,
     kind: int,
     key: string,
     text: string,
@@ -320,6 +334,7 @@ export global ChatVm {
     in property <bool> viewer-open;
     in property <image> viewer-image;
     in property <bool> viewer-missing;
+    in-out property <string> viewer-status;
     // One Workflow run in full.
     in property <bool> wf-open;
     in property <bool> wf-missing;
@@ -359,12 +374,15 @@ export global ChatVm {
     callback delete-cancelled();
     callback new-chat(int);
     callback toggle(string);
+    callback card-action(string, string, string);
     callback task-open(string);
     callback workflow-open(string);
     callback close-workflow();
     callback open-link(string);
     callback open-image(string);
     callback close-viewer();
+    callback save-image();
+    callback copy-image();
     callback copy-folder();
     callback earlier();
     // The reader left the end of the transcript (false) or came back to it (true).
@@ -887,6 +905,52 @@ component QuietRow inherits HorizontalLayout {
 
 component Row inherits VerticalLayout {
     in property <ChatRowVm> r;
+    if root.r.kind == 17: Rectangle {
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: Tokens.border;
+        background: Tokens.surface;
+        VerticalLayout {
+            padding: 14px;
+            spacing: 12px;
+            Text { text: root.r.text; font-size: 15px; font-weight: 600; color: Tokens.text; wrap: word-wrap; }
+            Text { text: root.r.detail; font-size: 14px; color: Tokens.text-secondary; wrap: word-wrap; }
+            if root.r.images.length > 0: Thumbs { images: root.r.images; }
+            for entry in root.r.card-rows: VerticalLayout {
+                spacing: 8px;
+                Rectangle { height: 1px; background: Tokens.border; }
+                Pressable {
+                    enabled: root.r.card-kind == "docker";
+                    clicked => { ChatVm.toggle(entry.key); }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: entry.title; font-size: 14px; font-weight: 600; color: Tokens.text; wrap: word-wrap; }
+                            Text { text: entry.detail; font-size: 12px; color: Tokens.text-secondary; wrap: word-wrap; }
+                        }
+                        if root.r.card-kind == "docker": Chevron { open: entry.open; }
+                    }
+                }
+                if entry.open: VerticalLayout {
+                    spacing: 10px;
+                    Text { text: entry.meta; font-size: 12px; color: Tokens.text-secondary; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        SecondaryButton { text: "Show logs"; enabled: root.r.card-enabled; clicked => { ChatVm.card-action(root.r.card-id, entry.id, "logs"); } }
+                        SecondaryButton { text: "Request restart"; enabled: root.r.card-enabled; clicked => { ChatVm.card-action(root.r.card-id, entry.id, "restart"); } }
+                    }
+                }
+            }
+            Text { text: root.r.meta; font-size: 11px; color: Tokens.text-faint; wrap: word-wrap; }
+            if root.r.flag && root.r.card-kind != "image": HorizontalLayout {
+                alignment: start;
+                SecondaryButton { text: "Refresh"; enabled: root.r.card-enabled; clicked => { ChatVm.card-action(root.r.card-id, "", "refresh"); } }
+            }
+            if root.r.card-pending: Text { text: "Requested · see conversation"; font-size: 12px; color: Tokens.text-secondary; }
+        }
+    }
     // User: a quiet surface inset from the left, so the agent's prose keeps the full measure.
     // Branch & edit waits in the left gutter until the message is hovered.
     if root.r.kind == 0: user := TouchArea {
@@ -2275,17 +2339,36 @@ export component ChatViewer inherits Rectangle {
     background: #000000e0;
     // Set by a Linger where it is used, so it fades out as well as in.
     in property <bool> shown: true;
+    property <float> zoom: 1;
     opacity: root.shown ? 1 : 0;
     animate opacity { duration: Motion.base; easing: ease-out; }
     TouchArea { enabled: root.shown; clicked => { ChatVm.close-viewer(); } }
-    // At most the picture's own size: a small screenshot is not blown up to the window.
-    if !ChatVm.viewer-missing: Image {
-        property <float> fit: min(1, min((parent.width - 48px) / max(1px, self.source.width * 1px), (parent.height - 48px) / max(1px, self.source.height * 1px)));
-        width: self.source.width * 1px * self.fit;
-        height: self.source.height * 1px * self.fit;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        source: ChatVm.viewer-image;
+    if !ChatVm.viewer-missing: Flickable {
+        x: 12px; y: 60px; width: parent.width - 24px; height: parent.height - 140px;
+        property <float> fit: min(1, min(self.width / max(1px, ChatVm.viewer-image.width * 1px), self.height / max(1px, ChatVm.viewer-image.height * 1px)));
+        content-width: max(self.width, ChatVm.viewer-image.width * 1px * self.fit * root.zoom);
+        content-height: max(self.height, ChatVm.viewer-image.height * 1px * self.fit * root.zoom);
+        Image {
+            width: self.source.width * 1px * parent.fit * root.zoom;
+            height: self.source.height * 1px * parent.fit * root.zoom;
+            x: (parent.content-width - self.width) / 2;
+            y: (parent.content-height - self.height) / 2;
+            source: ChatVm.viewer-image;
+        }
+    }
+    if !ChatVm.viewer-missing: VerticalLayout {
+        x: 16px; y: parent.height - self.height - 14px; width: parent.width - 32px;
+        height: 76px;
+        spacing: 8px;
+        HorizontalLayout {
+            height: 44px;
+            spacing: 8px; alignment: center;
+            SecondaryButton { text: "Zoom out"; enabled: root.zoom > 1 && ChatVm.viewer-image.width > 0; clicked => { root.zoom = max(1, root.zoom / 2); } }
+            SecondaryButton { text: "Zoom in"; enabled: root.zoom < 8 && ChatVm.viewer-image.width > 0; clicked => { root.zoom = min(8, root.zoom * 2); } }
+            SecondaryButton { text: "Save image"; clicked => { ChatVm.save-image(); } }
+            SecondaryButton { text: "Copy to share"; enabled: ChatVm.viewer-image.width > 0; clicked => { ChatVm.copy-image(); } }
+        }
+        Text { text: ChatVm.viewer-status; color: #ffffffcc; font-size: 12px; horizontal-alignment: center; wrap: word-wrap; }
     }
     if ChatVm.viewer-missing: Text { text: "Image not on this computer"; color: #ffffffcc; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
     IconButton {

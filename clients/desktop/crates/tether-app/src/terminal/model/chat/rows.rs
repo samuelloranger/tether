@@ -238,6 +238,13 @@ fn item_rows(
 ) {
     let key = format!("item:{}", item.id);
     let body = match &item.kind {
+        ItemKind::Card(card) => RowBody::Card {
+            card: Box::new(card.clone()),
+            images: pictures(s, &card.image.iter().cloned().collect::<Vec<_>>(), ctx),
+            expanded: s.expanded.iter().cloned().collect(),
+            enabled: s.can_send() && !s.card_pending(&card.id),
+            pending: s.card_pending(&card.id),
+        },
         ItemKind::User {
             text,
             image_count,

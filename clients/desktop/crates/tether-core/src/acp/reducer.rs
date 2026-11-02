@@ -255,6 +255,7 @@ pub struct Item {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ItemKind {
+    Card(super::cards::Card),
     User {
         text: String,
         image_count: usize,
@@ -359,6 +360,9 @@ pub struct ChatState {
     host_answers: Vec<(AcpId, String)>,
     /// The question tool's own calls: the question row stands for them.
     question_tool_ids: BTreeSet<String>,
+    /// Calls their adapter named as the card tool; a card in any other call's output is ignored.
+    #[serde(default)]
+    card_tool_ids: BTreeSet<String>,
     /// The id of the replayed user message the last user row came from, so two messages in a row stay two rows.
     last_user_message_id: Option<String>,
     /// The turn running now was started by the agent itself (a finished background command), so no prompt is in flight.
@@ -394,6 +398,7 @@ impl Default for ChatState {
             silent_request_ids: BTreeSet::new(),
             host_answers: Vec::new(),
             question_tool_ids: BTreeSet::new(),
+            card_tool_ids: BTreeSet::new(),
             last_user_message_id: None,
             agent_started: false,
             awaiting_session: true,
@@ -402,6 +407,19 @@ impl Default for ChatState {
 }
 
 impl ChatState {
+    pub fn card_action_pending(&self, id: &str) -> bool {
+        let Some(card) = self.items.iter().find_map(|i| match &i.kind {
+            ItemKind::Card(card) if card.id == id => Some(card),
+            _ => None,
+        }) else {
+            return false;
+        };
+        let requests = card.action_requests();
+        self.items.iter().any(|i| {
+            self.in_flight.iter().any(|p| p.item_id == i.id)
+                && matches!(&i.kind, ItemKind::User { text, .. } if requests.contains(text))
+        })
+    }
     pub fn is_queued(&self, item_id: i64) -> bool {
         self.queued_item_ids.contains(&item_id)
     }
@@ -950,6 +968,26 @@ fn apply_update(update: &Update, state: &mut ChatState) {
         }
         Update::ToolCall(fields) | Update::ToolCallUpdate(fields) => {
             start_queued(state);
+            if fields.card_publisher {
+                state.card_tool_ids.insert(fields.id.clone());
+            }
+            if let Some(card) = fields
+                .card
+                .as_ref()
+                .filter(|_| state.card_tool_ids.contains(&fields.id))
+            {
+                if let Some(item) = state
+                    .items
+                    .iter_mut()
+                    .find(|i| matches!(&i.kind, ItemKind::Card(old) if old.id == card.id))
+                {
+                    if matches!(&item.kind, ItemKind::Card(old) if card.revision > old.revision) {
+                        item.kind = ItemKind::Card(card.clone());
+                    }
+                } else {
+                    append(ItemKind::Card(card.clone()), state);
+                }
+            }
             if fields.tool_name.as_deref() == Some(TOOL_NAME) {
                 state.question_tool_ids.insert(fields.id.clone());
             }

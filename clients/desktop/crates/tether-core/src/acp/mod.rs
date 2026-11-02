@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod auth;
+pub mod cards;
 pub mod client;
 pub mod defaults;
 pub mod diff;

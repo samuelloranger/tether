@@ -6,6 +6,39 @@ import SwiftUI
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
 /// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=workflows` a background Workflow still running (`=workflows-sheet` with its sheet open, `=workflows-ended` the sheet of one that was killed), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
 enum ChatFixture {
+  @MainActor
+  static func cardModel(_ kind: String) -> ChatSessionModel {
+    let files = ChatLocalFiles(directory: FileManager.default.temporaryDirectory.appendingPathComponent("chat-card-fixture-\(UUID().uuidString)"))
+    let store = files.images("fixture")
+    let payload: [String: Any]
+    switch kind {
+    case "weather":
+      payload = ["location": "Montréal, QC", "timeZone": "America/Toronto", "unit": "C", "temperature": 4, "feelsLike": 1, "conditions": "Light rain",
+                 "hourly": [["time": "2026-11-01T09:00:00-05:00", "temperature": 5, "conditions": "Cloudy", "precipitation": 20],
+                            ["time": "2026-11-01T10:00:00-05:00", "temperature": 7, "conditions": "Partly cloudy", "precipitation": 10]]]
+    case "docker":
+      payload = ["host": "homelab · preview", "total": 3, "containers": [
+        ["id": "a123", "name": "jellyfin", "state": "running", "health": "healthy", "cpuPercent": 2.3, "memoryBytes": 268435456],
+        ["id": "b456", "name": "immich-machine-learning", "state": "running", "health": "unhealthy", "detail": "Worker latency · preview observation"],
+        ["id": "c789", "name": "caddy", "state": "running"],
+      ]]
+    default: payload = ["alt": "A sample image for previewing zoom, save, and share."]
+    }
+    let card: [String: Any] = ["version": 1, "id": "preview-\(kind)", "revision": 1, "kind": kind,
+                              "title": kind == "docker" ? "Homelab containers" : kind == "weather" ? "Montréal weather" : "Image preview",
+                              "fallback": "Preview data", "source": "Preview data · not live observations", "fetchedAt": "2026-11-01T08:00:00-05:00", "payload": payload]
+    var body: [String: Any] = ["sessionUpdate": "tool_call_update", "toolCallId": "publish", "title": "Publish card", "status": "completed", "_meta": ["tether": ["card": true]],
+                              "rawOutput": ChatCard.marker + json(card)]
+    if kind == "image" {
+      body["content"] = [["type": "content", "content": ["type": "image", "mimeType": "image/png",
+                         "data": syntheticImage(width: 1200, height: 800, hue: 0.58).pngData()!.base64EncodedString()]]]
+    }
+    let log = Data((update(body) + "\n").utf8)
+    var journal = ChatJournal()
+    journal.sessionId = "sess-1"
+    return ChatSessionModel(chatName: "fixture", cwd: "/work/project", readOnly: false,
+                            store: InMemoryChatJournalStore(journal), images: store) { _, _ in FixtureByteStream(log: log) }
+  }
   static var autoEarlier: Bool { ProcessInfo.processInfo.environment["TETHER_DEBUG_AUTO_EARLIER"] != nil }
   static let promptText = "Add a retry with backoff to fetchJSON and cover it with a test."
   static let permissionRequestId = 7
@@ -1148,6 +1181,9 @@ public struct ChatFixtureRoot: View {
     case "workflows", "workflows-sheet": initial = ChatFixture.workflowsModel()
     case "workflows-ended": initial = ChatFixture.workflowsModel(ended: true)
     case "images", "images-top", "image-viewer": initial = ChatFixture.imagesModel()
+    case "card-weather": initial = ChatFixture.cardModel("weather")
+    case "card-docker": initial = ChatFixture.cardModel("docker")
+    case "card-image": initial = ChatFixture.cardModel("image")
     case "controls", "controls-sheet", "slash", "attach", "mention", "mention-all": initial = ChatFixture.controlsModel()
     default: initial = ChatFixture.model(pendingPermission: mode == "permission")
     }

@@ -731,8 +731,14 @@ func (s *acpDaemonState) clientLineLocked(from *acpClient, line []byte) {
 	if s.copilot {
 		line = withCopilotEvents(line)
 	}
+	// The log replays what the client sent: the card server and prompt are the agent's business,
+	// about 10 KB on every session start.
+	echoed := line
+	if s.meta != nil && supportsChatCards(s.meta.Spawn) {
+		line = withChatCards(line, s.meta.Spawn)
+	}
 	if echo && from.id != "" {
-		s.echoLocked(from.id, line)
+		s.echoLocked(from.id, echoed)
 	}
 	_, _ = s.stdin.Write(line)
 }

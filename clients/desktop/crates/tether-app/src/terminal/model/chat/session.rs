@@ -313,6 +313,10 @@ impl Session {
         self.can_interact() && !self.needs_sign_in() && self.branch_write_pending.is_none()
     }
 
+    pub fn card_pending(&self, id: &str) -> bool {
+        self.state().card_action_pending(id)
+    }
+
     pub fn needs_sign_in(&self) -> bool {
         let state = self.state();
         state.session_id.is_none()
@@ -1560,6 +1564,23 @@ impl Session {
 
     pub fn handle_ui(&mut self, msg: ChatMsg, ctx: &mut Ctx<'_>) {
         match msg {
+            ChatMsg::CardAction {
+                id,
+                container,
+                action,
+            } => {
+                if self.can_send() && !self.card_pending(&id) {
+                    let text = self.state().items.iter().find_map(|i| match &i.kind {
+                        tether_core::acp::reducer::ItemKind::Card(card) if card.id == id => {
+                            card.request(&action, &container)
+                        }
+                        _ => None,
+                    });
+                    if let Some(text) = text {
+                        self.deliver(text, Vec::new(), 0, ctx);
+                    }
+                }
+            }
             ChatMsg::Toggle(key) => {
                 if !self.expanded.remove(&key) {
                     self.expanded.insert(key);

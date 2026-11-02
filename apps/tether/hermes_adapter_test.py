@@ -13,10 +13,48 @@ from acp.schema import NewSessionResponse
 from acp_adapter.gateway_commands import CommandRefused
 from acp_adapter.gateway_server import GatewayACPAgent
 from hermes_cli.gateway_client import GatewayRPCError
-from hermes_adapter import TetherHermesAgent, catalog_commands
+from hermes_adapter import TetherHermesAgent, CardConnection, CARD_CONTEXT, catalog_commands
+from chat_cards import MARKER
 
 
 class HermesAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_presentation_context_is_added_only_for_registered_cards_and_removed_from_replay(self):
+        import acp
+        agent = self.viewer()
+        agent._tether_cards = True
+        with patch.object(GatewayACPAgent, "_prepare_submit", AsyncMock(return_value=("retry", "input", ("Forecast?", [])))):
+            prepared = await agent._prepare_submit("sid", [])
+            self.assertEqual(prepared[0:2], ("retry", "input"))
+            self.assertEqual(prepared[2][0], "Forecast?" + CARD_CONTEXT)
+        connection = SimpleNamespace(session_update=AsyncMock())
+        proxy = CardConnection(connection)
+        from acp.schema import UserMessageChunk, TextContentBlock
+        update = UserMessageChunk(session_update="user_message_chunk", content=TextContentBlock(type="text", text="Forecast?" + CARD_CONTEXT))
+        await proxy.session_update(session_id="sid", update=update)
+        self.assertEqual(connection.session_update.call_args.kwargs["update"].content.text, "Forecast?")
+        self.assertEqual(update.content.text, "Forecast?" + CARD_CONTEXT)
+        with patch.object(GatewayACPAgent, "_prepare_submit", AsyncMock(return_value=("retry", "input", ("/help", [])))):
+            self.assertEqual((await agent._prepare_submit("sid", []))[2][0], "/help")
+
+    async def test_card_publication_keeps_typed_data_instead_of_json_prettification(self):
+        agent = self.viewer()
+        card = {"version": 1, "id": "weather", "kind": "weather", "revision": 1, "fallback": "Cloudy"}
+        agent._tool_args[("sid", "call")] = ("mcp_tether_cards_tether_publish_card", {}, "aid")
+        await agent._project_tool("tool.complete", "sid", "editor", "aid", {
+            "tool_call_id": "call", "result": json.dumps({"result": MARKER + json.dumps(card)})})
+        update = agent._conn.session_update.call_args.kwargs["update"]
+        self.assertEqual(update.status, "completed")
+        self.assertEqual(json.loads(update.raw_output[len(MARKER):]), card)
+        self.assertEqual(update.model_dump(by_alias=True)["_meta"], {"tether": {"card": True}})
+        self.assertNotIn(("sid", "call"), agent._tool_args)
+
+    async def test_failed_card_tool_does_not_publish_a_native_card(self):
+        agent = self.viewer()
+        with patch.object(GatewayACPAgent, "_project_tool", AsyncMock()) as parent:
+            payload = {"tool_call_id": "call", "tool_name": "tether_publish_card", "is_error": True}
+            await agent._project_tool("tool.complete", "sid", "editor", "aid", payload)
+            parent.assert_awaited_once()
+
     def viewer(self):
         agent = TetherHermesAgent()
         agent._conn = SimpleNamespace(session_update=AsyncMock())

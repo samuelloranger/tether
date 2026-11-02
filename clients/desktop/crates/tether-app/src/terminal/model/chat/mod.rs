@@ -190,6 +190,11 @@ pub enum ChatMsg {
     DeleteCancelled,
     NewChat(u8),
     Toggle(String),
+    CardAction {
+        id: String,
+        container: String,
+        action: String,
+    },
     /// A task line in the strip: open the tool row it stands for.
     OpenTool(String),
     /// A running workflow in its strip, or its row in the transcript: open the run's sheet.
@@ -832,7 +837,26 @@ impl Chats {
         // `TETHER_DEV_CHAT_WORKFLOW` (`running` or `ended`) adds a Workflow run to the sample,
         // and `TETHER_DEV_CHAT_WORKFLOW_OPEN` opens its sheet.
         let workflow = crate::app::dev_env("TETHER_DEV_CHAT_WORKFLOW");
-        sample.dev_state(devsample::state(workflow.is_some()), now);
+        let mut state = devsample::state(workflow.is_some());
+        if let Some(files) = &self.files {
+            for item in &mut state.items {
+                if let tether_core::acp::reducer::ItemKind::Card(card) = &mut item.kind {
+                    if card.kind == "image" {
+                        use tether_core::acp::images::ImageSink;
+                        let data = devsample::card_image();
+                        if let Some(prepared) =
+                            tether_core::acp::images::prepare_data(&data, Some("image/png"))
+                        {
+                            files.images("sample").write(&prepared.data, &prepared.r);
+                            card.image = Some(prepared.r);
+                        }
+                    } else if card.kind == "docker" {
+                        sample.expanded.insert(format!("card:{}:a123", card.id));
+                    }
+                }
+            }
+        }
+        sample.dev_state(state, now);
         if let Some(kind) = &workflow {
             let wall = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

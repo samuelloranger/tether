@@ -55,6 +55,9 @@ pub trait Platform: Send + Sync + 'static {
     fn toast(&self, machine: &str, session: &str, title: &str, body: &str);
     fn open_url(&self, url: &str);
     fn set_clipboard(&self, text: &str);
+    fn copy_image(&self, _image: arboard::ImageData<'_>) -> Result<(), String> {
+        Err("Image clipboard is unavailable on this platform".into())
+    }
     /// Blocking; called off the UI thread.
     fn read_clipboard(&self) -> ClipboardSnapshot;
     fn bring_to_front(&self);

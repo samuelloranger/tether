@@ -73,6 +73,11 @@ impl Platform for WindowsPlatform {
     fn read_clipboard(&self) -> ClipboardSnapshot {
         crate::terminal::clip::snapshot(&clipboard::WinClipboard, &std::thread::sleep)
     }
+    fn copy_image(&self, image: arboard::ImageData<'_>) -> Result<(), String> {
+        arboard::Clipboard::new()
+            .and_then(|mut c| c.set_image(image))
+            .map_err(|e| e.to_string())
+    }
     fn bring_to_front(&self) {
         if let Some(h) = self.hwnd() {
             shell::bring_to_front(h);

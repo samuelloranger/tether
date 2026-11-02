@@ -51,6 +51,9 @@ struct ACPDiff: Codable, Equatable, Sendable {
 /// `tool_call_update` carries only what changed.
 struct ACPToolFields: Equatable, Sendable {
   var id: String
+  var card: ChatCard?
+  /// The adapter names this call as Tether's card tool; only such a call may show a card.
+  var cardPublisher = false
   var title: String?
   var kind: ACPToolKind?
   var status: ACPToolStatus?
@@ -392,6 +395,7 @@ enum ACPDecoder {
     let allMeta = object["_meta"] as? JSON
     let meta = allMeta?["claudeCode"] as? JSON
     fields.toolName = meta?["toolName"] as? String
+    fields.cardPublisher = ChatCard.isPublisher(object)
     fields.parentId = meta?["parentToolUseId"] as? String
     fields.terminalId = (allMeta?["terminal_info"] as? JSON)?["terminal_id"] as? String
     fields.backgroundTaskId = (meta?["toolResponse"] as? JSON)?["backgroundTaskId"] as? String
@@ -434,6 +438,20 @@ enum ACPDecoder {
     }
     if !texts.isEmpty { fields.text = texts.joined(separator: "\n") }
     if !refs.isEmpty { fields.images = refs }
+    if collectImages, fields.status == .completed {
+      fields.card = ChatCard.decode(object, images: refs)
+      if var card = fields.card {
+        if card.supported, card.kind == "image", refs.isEmpty,
+          let block = ChatCard.imageBlock(object["rawOutput"]), let ref = imageRef(block, sink) {
+          card.image = ref
+          fields.card = card
+          fields.images = [ref]
+        }
+        fields.text = card.fallback
+        fields.rawOutput = nil
+        return fields
+      }
+    }
     switch object["rawOutput"] {
     case let text as String:
       if !ChatToolDetail.looksLikeBlob(text) { fields.rawOutput = text }

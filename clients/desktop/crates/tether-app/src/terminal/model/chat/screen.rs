@@ -586,6 +586,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             .files
             .as_ref()
             .map(|f| f.images(&name).directory().join(id));
+        screen.viewer_path = path.clone().filter(|p| p.is_file());
         match (&picture, path) {
             (Some(_), _) => screen.viewer = Some(picture),
             (None, Some(path)) if path.exists() => {
