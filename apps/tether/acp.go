@@ -107,7 +107,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill")
+		return fmt.Errorf("usage: acp attach|answer|answers|prompt|ls|status|sessions|workflows|organize|usage|kill")
 	}
 	switch args[0] {
 	case "attach":
@@ -119,6 +119,8 @@ func runACP(args []string) error {
 		return acpDaemon(args[1])
 	case "answer":
 		return acpAnswer(args[1:])
+	case "prompt":
+		return acpPrompt(args[1:], os.Stdin)
 	case "answers":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: acp answers <name>")
