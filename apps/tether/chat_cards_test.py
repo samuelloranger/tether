@@ -82,6 +82,23 @@ class ChatCardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "folder"):
             cards.import_image("/etc/hostname")
 
+    def test_hermes_home_is_an_image_root_when_named(self):
+        import base64
+        import os
+        from unittest import mock
+        png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1cAAAAASUVORK5CYII=")
+        home = Path(__file__).resolve().parent / "image_root_test"
+        try:
+            (home / "image_cache").mkdir(parents=True)
+            (home / "image_cache" / "a.png").write_bytes(png)
+            with mock.patch.dict(os.environ, {"HOME": str(home), "TETHER_CARD_IMAGE_ROOT": "~"}), \
+                    mock.patch.object(cards.tempfile, "gettempdir", return_value="/nonexistent"), \
+                    mock.patch.object(cards.os, "getcwd", return_value="/nonexistent"):
+                self.assertEqual(cards.import_image(str(home / "image_cache" / "a.png"))["mimeType"], "image/png")
+        finally:
+            import shutil
+            shutil.rmtree(home, ignore_errors=True)
+
     def test_image_urls_must_reach_a_public_host(self):
         for url in ("https://127.0.0.1/a.png", "https://192.168.1.10/a.png", "https://169.254.169.254/a.png", "https://[::1]/a.png"):
             with self.assertRaisesRegex(ValueError, "public host"):

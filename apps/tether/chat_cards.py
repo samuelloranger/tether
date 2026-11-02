@@ -86,7 +86,12 @@ def fetch_image(source):
 
 
 def image_roots():
-    return [os.path.realpath(root) for root in {os.getcwd(), tempfile.gettempdir(), "/tmp"}]
+    roots = {os.getcwd(), tempfile.gettempdir(), "/tmp"}
+    # Hermes's home: set by the holder for Hermes's server, and present in Hermes's own processes.
+    for extra in (os.environ.get("TETHER_CARD_IMAGE_ROOT"), os.environ.get("HERMES_HOME")):
+        if extra:
+            roots.add(os.path.expanduser(extra))
+    return [os.path.realpath(root) for root in roots]
 
 
 def read_image(source):

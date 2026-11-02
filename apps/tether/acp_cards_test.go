@@ -14,7 +14,7 @@ import (
 func TestChatCardsRegistrationPreservesServersAndIsIdempotent(t *testing.T) {
 	for _, method := range []string{"session/new", "session/load", "session/resume"} {
 		line := []byte(`{"jsonrpc":"2.0","id":"phone-2","method":"` + method + `","params":{"cwd":"/work","sessionId":"s","mcpServers":[{"name":"existing","command":"tool"}]}}`)
-		out := withChatCards(line)
+		out := withChatCards(line, "claude-agent-acp")
 		var msg struct {
 			Params struct {
 				Servers []struct {
@@ -32,13 +32,34 @@ func TestChatCardsRegistrationPreservesServersAndIsIdempotent(t *testing.T) {
 		if msg.Params.Cwd != "/work" || msg.Params.SessionID != "s" || len(msg.Params.Servers) != 2 || msg.Params.Servers[0].Name != "existing" || msg.Params.Servers[1].Name != "tether-cards" {
 			t.Fatal("lost session or MCP configuration")
 		}
-		if !bytes.Equal(withChatCards(out), out) {
+		if !bytes.Equal(withChatCards(out, "claude-agent-acp"), out) {
 			t.Fatal("duplicate registration")
 		}
 	}
 	line := []byte(`{"method":"session/prompt","params":{"prompt":[]}}`)
-	if !bytes.Equal(withChatCards(line), line) {
+	if !bytes.Equal(withChatCards(line, "claude-agent-acp"), line) {
 		t.Fatal("changed an ordinary prompt")
+	}
+}
+
+func TestHermesCardServerMayReadImagesFromHermesHome(t *testing.T) {
+	line := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/w","mcpServers":[]}}`)
+	for spawn, want := range map[string]bool{"tether hermes": true, "npx -y @agentclientprotocol/claude-agent-acp": false} {
+		var msg struct {
+			Params struct {
+				Servers []struct {
+					Env []struct{ Name, Value string }
+				} `json:"mcpServers"`
+			}
+		}
+		if err := json.Unmarshal(withChatCards(line, spawn), &msg); err != nil || len(msg.Params.Servers) != 1 {
+			t.Fatalf("%s: %v", spawn, err)
+		}
+		env := msg.Params.Servers[0].Env
+		has := len(env) == 1 && env[0].Name == "TETHER_CARD_IMAGE_ROOT" && env[0].Value == "~"
+		if has != want {
+			t.Fatalf("%s: image root %v, want %v", spawn, has, want)
+		}
 	}
 }
 

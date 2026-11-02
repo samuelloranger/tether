@@ -108,8 +108,8 @@ stays text. A
 card ID with a higher revision updates in place; duplicates and older revisions
 are ignored. Unknown versions use the envelope's readable fallback. Images are
 imported from an HTTPS URL on a public host (no LAN, loopback or link-local
-address, 30 s overall) or a regular file in the chat's folder or the temp folder,
-outside hidden folders (PNG, JPEG, GIF or WebP, at most 5 MiB) and carried in the existing SSH replay log, so an expiring URL is not the
+address, 30 s overall) or a regular file in the chat's folder or the temp folder
+(for Hermes, also its own home), outside hidden folders (PNG, JPEG, GIF or WebP, at most 5 MiB) and carried in the existing SSH replay log, so an expiring URL is not the
 only copy. Client snapshots keep image references, and the existing protected
 image stores keep the bytes.
 

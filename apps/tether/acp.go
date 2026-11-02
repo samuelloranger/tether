@@ -735,7 +735,7 @@ func (s *acpDaemonState) clientLineLocked(from *acpClient, line []byte) {
 	// about 10 KB on every session start.
 	echoed := line
 	if s.meta != nil && supportsChatCards(s.meta.Spawn) {
-		line = withChatCards(line)
+		line = withChatCards(line, s.meta.Spawn)
 	}
 	if echo && from.id != "" {
 		s.echoLocked(from.id, echoed)

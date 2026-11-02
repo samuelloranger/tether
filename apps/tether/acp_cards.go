@@ -16,7 +16,7 @@ func supportsChatCards(spawn string) bool {
 }
 
 // The holder owns registration, so old and new native clients get the same tools.
-func withChatCards(line []byte) []byte {
+func withChatCards(line []byte, spawn string) []byte {
 	var msg map[string]json.RawMessage
 	if json.Unmarshal(line, &msg) != nil {
 		return line
@@ -36,8 +36,13 @@ func withChatCards(line []byte) []byte {
 			return line
 		}
 	}
+	env := []any{}
+	if isHermesSpawn(spawn) {
+		// Hermes keeps its pictures in its own home (its container's HOME), outside the chat's folder.
+		env = append(env, map[string]any{"name": "TETHER_CARD_IMAGE_ROOT", "value": "~"})
+	}
 	params["mcpServers"] = append(servers, map[string]any{
-		"name": "tether-cards", "command": "python3", "args": []string{"-c", chatCardsSource}, "env": []any{},
+		"name": "tether-cards", "command": "python3", "args": []string{"-c", chatCardsSource}, "env": env,
 	})
 	if params["systemPrompt"] == nil {
 		params["systemPrompt"] = map[string]any{"mode": "append", "content": []any{map[string]any{"type": "text", "text": chatCardInstructions}}}
