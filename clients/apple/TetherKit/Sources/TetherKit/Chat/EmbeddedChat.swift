@@ -219,32 +219,39 @@ struct NewChatSheet: View {
   private var agentPicker: some View {
     VStack(alignment: .leading, spacing: 6) {
       Text("Agent").font(.caption).foregroundStyle(TetherColors.textSecondary)
-      HStack(spacing: 2) {
-        ForEach(ChatAgents.all.filter { $0 != ChatAgents.hermes }) { option in
-          let on = option == agent
+      Menu {
+        ForEach(ChatAgents.all) { option in
           let missing = unavailable[option.key] != nil
-          Button { pick(option) } label: {
-            HStack(spacing: 6) {
-              ChatAgentMark(agent: option, size: 14).opacity(on || !option.tintsIcon ? 1 : 0.7)
-              Text(option.label).font(.footnote.weight(on ? .semibold : .regular)).lineLimit(1)
-                .minimumScaleFactor(0.8)
+          Button { choose(option) } label: {
+            Label {
+              Text(option.label)
+            } icon: {
+              ChatAgentMark(agent: option, size: 14)
             }
-            .foregroundStyle(on ? TetherColors.textPrimary : TetherColors.textSecondary)
-            .frame(maxWidth: .infinity).frame(height: 30)
-            .background(on ? TetherColors.surfaceHover : Color.clear, in: RoundedRectangle(cornerRadius: 7))
-            .opacity(missing ? 0.4 : 1)
-            .contentShape(Rectangle())
           }
-          .buttonStyle(.plain)
-          .accessibilityLabel(option.label)
-          .accessibilityHint(missing ? "Not installed on the host" : "")
-          .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
+          .disabled(missing)
           .accessibilityIdentifier("sshNewChatAgent_\(option.key)")
+          .accessibilityHint(missing ? "Not installed on the host" : "")
         }
+      } label: {
+        HStack(spacing: 8) {
+          ChatAgentMark(agent: agent, size: 16)
+          Text(agent.label).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            .lineLimit(1)
+          Spacer(minLength: 4)
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(TetherColors.textFaint)
+        }
+        .padding(.horizontal, 12).frame(height: 38)
+        .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(TetherColors.border, lineWidth: 1))
+        .contentShape(Rectangle())
       }
-      .padding(2)
-      .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
-      Button { pick(ChatAgents.hermes); mode = .new } label: {
+      .buttonStyle(.plain)
+      .accessibilityLabel("Agent, \(agent.label)")
+      .accessibilityIdentifier("sshNewChatAgentSelect")
+      Button { choose(ChatAgents.hermes) } label: {
         HStack(spacing: 12) {
           ChatAgentMark(agent: ChatAgents.hermes, size: 26)
           VStack(alignment: .leading, spacing: 3) {
@@ -261,6 +268,11 @@ struct NewChatSheet: View {
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("sshNewChatAgent_hermes")
     }
+  }
+
+  private func choose(_ option: ChatAgentProfile) {
+    pick(option)
+    if option == ChatAgents.hermes { mode = .new }
   }
 
   private func pick(_ option: ChatAgentProfile) {
