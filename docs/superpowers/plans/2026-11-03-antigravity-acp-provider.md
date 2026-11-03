@@ -520,8 +520,9 @@ Implemented on 2026-11-03.
   `cargo test --workspace` all pass (488 tether-app, 796 tether-core, plus the remaining crates).
 - Desktop: `cargo check -p tether-app` compiles the new `NcAgentSelect`; the two dialog tests now
   expect six agents with Antigravity at index 4.
-- Swift: `ChatAgents`/`ChatAgentsTests` and the `EmbeddedChat` menu were reviewed but not compiled —
-  no Swift toolchain on this Linux host. Run the TetherKit test suite on macOS before release.
+- Swift: verified on the macbuild Mac (Xcode 27): `macbuild build` succeeded and
+  `macbuild test --only TetherKitTests/ChatAgentsTests` passed 19/19, including
+  `test_antigravity_profile_and_spawn` and the updated `test_only_the_npx_agents_need_node`.
 - Spawn command verified against npm: `@simonepri/refined-antigravity-acp@1.6.3` exists and its CLI
   starts an ACP stdio server; `--yes` is accepted (it applies to `setup`, and is ignored in server mode).
 
