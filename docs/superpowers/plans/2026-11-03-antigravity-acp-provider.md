@@ -31,7 +31,7 @@
 **Interfaces:**
 - Produces: SVG asset `agent-antigravity.svg` (24x24 monochrome path) accessible via `@image-url("icons/agent-antigravity.svg")` in Slint and `"agent-antigravity"` image asset in `TetherKit`.
 
-- [ ] **Step 1: Create the desktop SVG vector icon**
+- [x] **Step 1: Create the desktop SVG vector icon**
 
 Create `clients/desktop/crates/tether-app/ui/icons/agent-antigravity.svg` with a 24x24 monochrome path representing Antigravity (a precision triangle / spark mark):
 ```xml
@@ -40,7 +40,7 @@ Create `clients/desktop/crates/tether-app/ui/icons/agent-antigravity.svg` with a
 </svg>
 ```
 
-- [ ] **Step 2: Create the Apple imageset asset**
+- [x] **Step 2: Create the Apple imageset asset**
 
 Create `clients/apple/TetherKit/Sources/TetherKit/Resources/Agents.xcassets/agent-antigravity.imageset/Contents.json`:
 ```json
@@ -63,11 +63,11 @@ Create `clients/apple/TetherKit/Sources/TetherKit/Resources/Agents.xcassets/agen
 
 Copy the SVG file to `clients/apple/TetherKit/Sources/TetherKit/Resources/Agents.xcassets/agent-antigravity.imageset/agent-antigravity.svg`.
 
-- [ ] **Step 3: Update attribution documentation**
+- [x] **Step 3: Update attribution documentation**
 
 Update `clients/desktop/crates/tether-app/ui/icons/agent-icons-source.txt` and `clients/apple/TetherKit/Sources/TetherKit/Resources/AgentIcons-SOURCE.txt` to include `agent-antigravity`.
 
-- [ ] **Step 4: Commit assets**
+- [x] **Step 4: Commit assets**
 
 ```bash
 git add clients/desktop/crates/tether-app/ui/icons/agent-antigravity.svg \
@@ -89,7 +89,7 @@ git commit -m "feat(chat): add Antigravity vector icon assets"
 - Updates: `pub const ALL: [&AgentProfile; 6]`
 - Updates: `for_spawn(spawn: &str) -> Option<&'static AgentProfile>`
 
-- [ ] **Step 1: Write failing unit tests in `acp/agent.rs`**
+- [x] **Step 1: Write failing unit tests in `acp/agent.rs`**
 
 Add unit tests in `clients/desktop/crates/tether-core/src/acp/agent.rs` (under `mod tests`):
 ```rust
@@ -116,12 +116,12 @@ fn antigravity_sign_in_message() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test -p tether-core --manifest-path clients/desktop/Cargo.toml -- antigravity`
 Expected: FAIL (`ANTIGRAVITY` not found)
 
-- [ ] **Step 3: Implement `ANTIGRAVITY` profile in `acp/agent.rs`**
+- [x] **Step 3: Implement `ANTIGRAVITY` profile in `acp/agent.rs`**
 
 Define `ANTIGRAVITY`:
 ```rust
@@ -154,12 +154,12 @@ pub fn for_spawn(spawn: &str) -> Option<&'static AgentProfile> {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p tether-core --manifest-path clients/desktop/Cargo.toml`
 Expected: PASS (all tests passing)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add clients/desktop/crates/tether-core/src/acp/agent.rs
@@ -178,7 +178,7 @@ git commit -m "feat(acp): add Antigravity agent profile to tether-core"
 - Produces: `static let antigravity: ChatAgentProfile`
 - Updates: `ChatAgents.all`
 
-- [ ] **Step 1: Write unit tests in `ChatAgentsTests.swift`**
+- [x] **Step 1: Write unit tests in `ChatAgentsTests.swift`**
 
 Add tests for Antigravity:
 ```swift
@@ -193,7 +193,7 @@ func testAntigravityProfileAndSpawn() {
 }
 ```
 
-- [ ] **Step 2: Implement Antigravity profile in `ChatAgents.swift`**
+- [x] **Step 2: Implement Antigravity profile in `ChatAgents.swift`**
 
 In `ChatAgents.swift`:
 ```swift
@@ -216,7 +216,7 @@ if command.contains("antigravity-acp") || command.contains("agy_acp_server") {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add clients/apple/TetherKit/Sources/TetherKit/Chat/ChatAgents.swift \
@@ -236,7 +236,7 @@ git commit -m "feat(acp): add Antigravity profile to TetherKit"
 - Updates: `AgentMark` with index 4 for Antigravity, 5 for Hermes.
 - Updates: Hermes index references in `chat.slint` from 4 to 5.
 
-- [ ] **Step 1: Update `AgentMark` in `chat.slint`**
+- [x] **Step 1: Update `AgentMark` in `chat.slint`**
 
 In `clients/desktop/crates/tether-app/ui/chat.slint`:
 ```slint
@@ -248,11 +248,11 @@ if root.agent == 4: Image { width: 100%; height: 100%; image-fit: contain; sourc
 if root.agent == 5: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-hermes.svg"); colorize: root.ink; }
 ```
 
-- [ ] **Step 2: Update Hermes checks from 4 to 5 in `chat.slint`**
+- [x] **Step 2: Update Hermes checks from 4 to 5 in `chat.slint`**
 
 Lines 2588, 2624, 2654, 2655, 2712: replace `!= 4` / `== 4` with `!= 5` / `== 5`.
 
-- [ ] **Step 3: Implement `NcAgentSelect` in `chat.slint`**
+- [x] **Step 3: Implement `NcAgentSelect` in `chat.slint`**
 
 Replace the rigid `HorizontalLayout` for the agent picker with a dropdown `NcAgentSelect` using `PopupWindow`:
 ```slint
@@ -376,12 +376,12 @@ NcAgentSelect {
 }
 ```
 
-- [ ] **Step 4: Verify Slint syntax compilation**
+- [x] **Step 4: Verify Slint syntax compilation**
 
 Run: `PKG_CONFIG_PATH=/tmp/tether-chat-desktop-build/lib/pkgconfig cargo check -p tether-app --manifest-path clients/desktop/Cargo.toml`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add clients/desktop/crates/tether-app/ui/chat.slint
@@ -400,17 +400,17 @@ git commit -m "feat(ui): custom select dropdown for New Chat agent picker"
 **Interfaces:**
 - Updates: Devsample fixtures and test assertions to account for Antigravity in `agent::ALL`.
 
-- [ ] **Step 1: Check existing devsample fixtures and tests**
+- [x] **Step 1: Check existing devsample fixtures and tests**
 
 Verify if devsample fixtures or tests hardcode agent counts or Hermes index.
 Update `tests.rs` where necessary to ensure Hermes conversation tests and agent mappings align.
 
-- [ ] **Step 2: Run all desktop app tests**
+- [x] **Step 2: Run all desktop app tests**
 
 Run: `PKG_CONFIG_PATH=/tmp/tether-chat-desktop-build/lib/pkgconfig cargo test -p tether-app --manifest-path clients/desktop/Cargo.toml`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add clients/desktop/crates/tether-app/src/terminal/model/chat/
@@ -427,7 +427,7 @@ git commit -m "test(desktop): update chat models and tests for Antigravity"
 **Interfaces:**
 - Produces: Dropdown `Menu` in `EmbeddedChat.swift` for agent selection.
 
-- [ ] **Step 1: Refactor `agentPicker` in `EmbeddedChat.swift`**
+- [x] **Step 1: Refactor `agentPicker` in `EmbeddedChat.swift`**
 
 Replace the horizontal `HStack` with a custom select `Menu`:
 ```swift
@@ -475,7 +475,7 @@ private var agentPicker: some View {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add clients/apple/TetherKit/Sources/TetherKit/Chat/EmbeddedChat.swift
@@ -489,7 +489,7 @@ git commit -m "feat(ios): custom agent select menu for New Chat"
 **Files:**
 - None (verification only)
 
-- [ ] **Step 1: Run Rust linting and formatting**
+- [x] **Step 1: Run Rust linting and formatting**
 
 Run:
 ```bash
@@ -498,7 +498,7 @@ PKG_CONFIG_PATH=/tmp/tether-chat-desktop-build/lib/pkgconfig cargo clippy --work
 ```
 Expected: PASS with 0 warnings.
 
-- [ ] **Step 2: Run complete Rust test workspace**
+- [x] **Step 2: Run complete Rust test workspace**
 
 Run:
 ```bash
@@ -506,6 +506,22 @@ PKG_CONFIG_PATH=/tmp/tether-chat-desktop-build/lib/pkgconfig cargo test --worksp
 ```
 Expected: PASS (all workspace tests passing).
 
-- [ ] **Step 3: Verify git status and commit cleanliness**
+- [x] **Step 3: Verify git status and commit cleanliness**
 
 Ensure working directory is clean and all commits follow conventional commit rules.
+
+---
+
+## Completion
+
+Implemented on 2026-11-03.
+
+- Rust: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and
+  `cargo test --workspace` all pass (488 tether-app, 796 tether-core, plus the remaining crates).
+- Desktop: `cargo check -p tether-app` compiles the new `NcAgentSelect`; the two dialog tests now
+  expect six agents with Antigravity at index 4.
+- Swift: `ChatAgents`/`ChatAgentsTests` and the `EmbeddedChat` menu were reviewed but not compiled —
+  no Swift toolchain on this Linux host. Run the TetherKit test suite on macOS before release.
+- Spawn command verified against npm: `@simonepri/refined-antigravity-acp@1.6.3` exists and its CLI
+  starts an ACP stdio server; `--yes` is accepted (it applies to `setup`, and is ignored in server mode).
+
