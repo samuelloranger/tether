@@ -491,8 +491,9 @@ component AgentMark inherits Rectangle {
     if root.agent == 1: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-codex.svg"); colorize: root.ink; }
     if root.agent == 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-opencode.svg"); colorize: root.ink; }
     if root.agent == 3: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-copilot.svg"); colorize: root.ink; }
-    if root.agent == 4: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-hermes.svg"); colorize: root.ink; }
-    if root.agent < 0 || root.agent > 4: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
+    if root.agent == 4: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-antigravity.svg"); colorize: root.ink; }
+    if root.agent == 5: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-hermes.svg"); colorize: root.ink; }
+    if root.agent < 0 || root.agent > 5: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
 }
 
 component Glyph inherits Image {
@@ -2562,6 +2563,138 @@ component NcMenu inherits Rectangle {
     }
 }
 
+// The New chat agent picker. Six agents no longer fit one row, so the trigger shows the picked
+// agent over a popup list that dims the ones this host cannot run.
+component NcAgentSelect inherits Rectangle {
+    in property <int> current-agent;
+    in property <[string]> agent-labels: ["Claude", "Codex", "opencode", "Copilot", "Antigravity", "Hermes"];
+    in property <[bool]> unavailable;
+    callback picked(int);
+
+    height: 38px;
+    background: Tokens.input;
+    border-radius: Tokens.radius-control;
+    border-width: 1px;
+    border-color: focus.has-focus || trigger.has-hover ? Tokens.accent.with-alpha(0.6) : Tokens.border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
+    forward-focus: focus;
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") { popup.show(); return accept; }
+            if (event.text == Key.DownArrow && root.current-agent < root.agent-labels.length - 1) {
+                root.picked(root.current-agent + 1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow && root.current-agent > 0) {
+                root.picked(root.current-agent - 1);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            AgentMark { agent: root.current-agent; size: 16px; ink: Tokens.text; }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.current-agent >= 0 && root.current-agent < root.agent-labels.length ? root.agent-labels[root.current-agent] : "";
+            font-size: 13px;
+            font-weight: 600;
+            color: Tokens.text;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Image {
+                width: 10px;
+                height: 10px;
+                source: @image-url("icons/chevron.svg");
+                transform-rotation: 90deg;
+                colorize: Tokens.text-secondary;
+            }
+        }
+    }
+
+    trigger := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { focus.focus(); popup.show(); }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        height: min(list.preferred-height + 8px, 280px);
+        Rectangle {
+            // A PopupWindow is created when shown, so this fades each opening in.
+            property <bool> shown;
+            opacity: self.shown ? 1 : 0;
+            animate opacity { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+            background: Tokens.surface;
+            border-radius: 9px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000066;
+            Flickable {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    spacing: 2px;
+                    for label[i] in root.agent-labels: Rectangle {
+                        height: 34px;
+                        border-radius: 7px;
+                        background: i == root.current-agent ? Tokens.raised : row.has-hover ? Tokens.surface-hover : transparent;
+                        opacity: i < root.unavailable.length && root.unavailable[i] ? 0.4 : 1;
+                        animate background { duration: Motion.fast; easing: ease-out; }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                AgentMark { agent: i; size: 16px; ink: i == root.current-agent ? Tokens.text : Tokens.text-secondary; }
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: label;
+                                font-size: 13px;
+                                font-weight: i == root.current-agent ? 650 : 500;
+                                color: i == root.current-agent ? Tokens.text : Tokens.text-secondary;
+                                vertical-alignment: center;
+                            }
+                            if i == root.current-agent: Text {
+                                text: "\u{2713}";
+                                color: Tokens.accent;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                        row := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.picked(i); popup.close(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component NewChatDialog inherits Rectangle {
     background: Tokens.background.with-alpha(0.62);
     // Set by a Linger where it is used, so it fades out as well as in.
@@ -2587,7 +2720,7 @@ export component NewChatDialog inherits Rectangle {
                 Text { horizontal-stretch: 1; text: ChatVm.nc-mode == 0 ? "New chat" : "Continue a chat"; font-size: 16px; font-weight: 650; color: Tokens.text; vertical-alignment: center; }
                 IconButton { flat: true; size: 28px; icon: @image-url("icons/close.svg"); tooltip: "Cancel · Esc"; clicked => { ChatVm.nc-cancel(); } }
             }
-            if ChatVm.nc-agent != 4: Segment {
+            if ChatVm.nc-agent != 5: Segment {
                 options: ["New", "Continue"];
                 selected <=> ChatVm.nc-mode;
                 changed(i) => { ChatVm.nc-mode-changed(i); }
@@ -2595,33 +2728,13 @@ export component NewChatDialog inherits Rectangle {
             VerticalLayout {
                 spacing: 5px;
                 Text { text: "Agent"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
-                Rectangle {
-                    height: 34px;
-                    background: Tokens.input;
-                    border-radius: Tokens.radius-control;
-                    border-width: 1px;
-                    border-color: Tokens.border;
-                    HorizontalLayout {
-                        padding: 3px;
-                        spacing: 3px;
-                        for label[i] in ["Claude", "Codex", "opencode", "Copilot", "Hermes"]: Rectangle {
-                            horizontal-stretch: 1;
-                            opacity: ChatVm.nc-unavailable[i] ? 0.4 : 1;
-                            border-radius: 8px;
-                            background: i == ChatVm.nc-agent ? Tokens.raised : agent-touch.has-hover ? Tokens.surface-hover : transparent;
-                            animate background { duration: Motion.fast; easing: ease-out; }
-                            HorizontalLayout {
-                                alignment: center;
-                                spacing: 6px;
-                                VerticalLayout { alignment: center; AgentMark { agent: i; size: 14px; ink: i == ChatVm.nc-agent ? Tokens.text : Tokens.text-secondary; } }
-                                Text { text: label; font-size: 12.5px; font-weight: i == ChatVm.nc-agent ? 650 : 500; color: i == ChatVm.nc-agent ? Tokens.text : Tokens.text-secondary; vertical-alignment: center; }
-                            }
-                            agent-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.nc-agent-picked(i); } }
-                        }
-                    }
+                NcAgentSelect {
+                    current-agent: ChatVm.nc-agent;
+                    unavailable: ChatVm.nc-unavailable;
+                    picked(i) => { ChatVm.nc-agent-picked(i); }
                 }
             }
-            if ChatVm.nc-agent != 4: VerticalLayout {
+            if ChatVm.nc-agent != 5: VerticalLayout {
                 spacing: 5px;
                 Text { text: "Working folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
                 Rectangle {
@@ -2653,8 +2766,8 @@ export component NewChatDialog inherits Rectangle {
                 }
             }
             if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
-            if ChatVm.nc-agent == 4: Wrapped { text: "One persistent conversation on this host. Manage models, skills and settings from chat commands."; font-size: 13px; ink: Tokens.text-secondary; }
-            if ChatVm.nc-agent != 4: Rectangle {
+            if ChatVm.nc-agent == 5: Wrapped { text: "One persistent conversation on this host. Manage models, skills and settings from chat commands."; font-size: 13px; ink: Tokens.text-secondary; }
+            if ChatVm.nc-agent != 5: Rectangle {
                 background: Tokens.surface;
                 border-radius: 10px;
                 border-width: 1px;
@@ -2711,7 +2824,7 @@ export component NewChatDialog inherits Rectangle {
                 alignment: end;
                 spacing: 8px;
                 SmallAction { text: "Cancel"; clicked => { ChatVm.nc-cancel(); } }
-                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : ChatVm.nc-agent == 4 ? "Open Hermes" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
+                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : ChatVm.nc-agent == 5 ? "Open Hermes" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 0: HorizontalLayout {
                 spacing: 8px;
