@@ -87,8 +87,7 @@ pub const HERMES: AgentProfile = AgentProfile {
     needs_node: false,
 };
 
-pub const ALL: [&AgentProfile; 6] =
-    [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &ANTIGRAVITY, &HERMES];
+pub const ALL: [&AgentProfile; 6] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &ANTIGRAVITY, &HERMES];
 
 pub fn hermes_conversation_name(scope: &str) -> String {
     let hash = scope.bytes().fold(14_695_981_039_346_656_037_u64, |h, b| {
@@ -181,10 +180,12 @@ mod tests {
         );
         assert_eq!(for_spawn("antigravity-acp"), Some(&ANTIGRAVITY));
         assert_eq!(for_spawn("/path/to/agy_acp_server.par"), Some(&ANTIGRAVITY));
-        assert!(ANTIGRAVITY.needs_node);
+        assert!(by_key("antigravity").unwrap().needs_node);
         assert_eq!(ANTIGRAVITY.remembered, ["model", "effort", "mode"]);
-        assert!(host::host_problems_for("node=missing", &ANTIGRAVITY)
-            .contains(&host::HostProblem::NodeMissing));
+        assert!(
+            host::host_problems_for("node=missing", &ANTIGRAVITY)
+                .contains(&host::HostProblem::NodeMissing)
+        );
     }
 
     #[test]
