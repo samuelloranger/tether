@@ -77,6 +77,7 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertEqual(ChatAgents.codex.rememberedIds, ["model", "reasoning_effort", "mode"])
     XCTAssertEqual(ChatAgents.opencode.rememberedIds, ["model", "effort", "mode"])
     XCTAssertEqual(ChatAgents.copilot.rememberedIds, ["model", "reasoning_effort", "mode"])
+    XCTAssertEqual(ChatAgents.antigravity.rememberedIds, ["model", "effort", "mode"])
     let suite = UserDefaults(suiteName: "agents-\(UUID().uuidString)")!
     let store = ChatOptionDefaultsStore(defaults: suite)
     store.remember(agent: "codex", id: "reasoning_effort", value: "high")
@@ -133,7 +134,19 @@ final class ChatAgentsTests: XCTestCase {
   }
 
   func test_only_the_npx_agents_need_node() {
-    XCTAssertEqual(ChatAgents.all.filter(\.needsNode).map(\.key), ["claude", "codex"])
+    XCTAssertEqual(ChatAgents.all.filter(\.needsNode).map(\.key), ["claude", "codex", "antigravity"])
+  }
+
+  func test_antigravity_profile_and_spawn() {
+    XCTAssertEqual(ChatAgents.profile(forKey: "antigravity"), ChatAgents.antigravity)
+    XCTAssertEqual(
+      ChatAgents.profile(forSpawn: "npx -y @simonepri/refined-antigravity-acp@1.6.3 --yes"), ChatAgents.antigravity)
+    XCTAssertEqual(ChatAgents.profile(forSpawn: "antigravity-acp"), ChatAgents.antigravity)
+    XCTAssertEqual(ChatAgents.profile(forSpawn: "agy_acp_server"), ChatAgents.antigravity)
+    XCTAssertTrue(ChatAgents.antigravity.needsNode)
+    XCTAssertTrue(ChatAgents.antigravity.tintsIcon)
+    XCTAssertEqual(ChatAgents.antigravity.rememberedIds, ["model", "effort", "mode"])
+    XCTAssertTrue(ChatSignInCopy.message(host: "box", agent: ChatAgents.antigravity).contains("run agy"))
   }
 
   func test_the_options_summary_prefills_stored_then_cached_current_then_nothing() {

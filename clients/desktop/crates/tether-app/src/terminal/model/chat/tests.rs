@@ -1985,7 +1985,7 @@ fn the_dialog_dims_the_agents_the_host_cannot_run_and_will_not_pick_them() {
         "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\nopencode=missing\ncopilot=missing\n",
     );
     let dialog = h.dialog();
-    assert_eq!(dialog.unavailable, [false, false, true, true, false]);
+    assert_eq!(dialog.unavailable, [false, false, true, true, false, false]);
     assert_eq!(dialog.error, "");
     h.msg(ChatMsg::NewChatAgent("copilot".into()));
     let dialog = h.dialog();
@@ -2012,7 +2012,7 @@ fn a_dialog_opening_on_an_agent_the_host_lacks_says_why() {
         "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=missing\nopencode=missing\n",
     );
     let dialog = h.dialog();
-    assert_eq!(dialog.unavailable, [true, true, true, false, false]);
+    assert_eq!(dialog.unavailable, [true, true, true, false, true, false]);
     assert!(
         dialog.error.contains("Install opencode"),
         "{}",

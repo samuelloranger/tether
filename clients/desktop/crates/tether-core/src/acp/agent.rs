@@ -64,6 +64,18 @@ pub const COPILOT: AgentProfile = AgentProfile {
     needs_node: false,
 };
 
+/// Google Antigravity runs behind an npm supervisor that fetches and hardens the official
+/// `agy_acp_server` binary.
+pub const ANTIGRAVITY: AgentProfile = AgentProfile {
+    key: "antigravity",
+    label: "Antigravity",
+    spawn: "npx -y @simonepri/refined-antigravity-acp@1.6.3 --yes",
+    marker: "refined-antigravity-acp",
+    remembered: ["model", "effort", "mode"],
+    sign_in_command: "agy",
+    needs_node: true,
+};
+
 /// In the order the New chat picker lists them.
 pub const HERMES: AgentProfile = AgentProfile {
     key: "hermes",
@@ -75,7 +87,7 @@ pub const HERMES: AgentProfile = AgentProfile {
     needs_node: false,
 };
 
-pub const ALL: [&AgentProfile; 5] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &HERMES];
+pub const ALL: [&AgentProfile; 6] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &ANTIGRAVITY, &HERMES];
 
 pub fn hermes_conversation_name(scope: &str) -> String {
     let hash = scope.bytes().fold(14_695_981_039_346_656_037_u64, |h, b| {
@@ -94,6 +106,9 @@ pub fn by_key(key: &str) -> Option<&'static AgentProfile> {
 /// The profile for a holder's spawn command: an exact match, else the agent's marker anywhere in it.
 pub fn for_spawn(spawn: &str) -> Option<&'static AgentProfile> {
     let spawn = spawn.trim();
+    if spawn.contains("antigravity-acp") || spawn.contains("agy_acp_server") {
+        return Some(&ANTIGRAVITY);
+    }
     ALL.into_iter()
         .find(|p| p.spawn == spawn)
         .or_else(|| ALL.into_iter().find(|p| spawn.contains(p.marker)))
@@ -151,6 +166,32 @@ pub fn spinner_verbs<'a>(agent: Option<&AgentProfile>, claude_verbs: &'a [String
 mod tests {
     use super::*;
     use crate::acp::host;
+
+    #[test]
+    fn antigravity_profile_definition_and_resolution() {
+        assert_eq!(by_key("antigravity"), Some(&ANTIGRAVITY));
+        assert_eq!(
+            for_spawn("npx -y @simonepri/refined-antigravity-acp@1.6.3 --yes"),
+            Some(&ANTIGRAVITY)
+        );
+        assert_eq!(
+            for_spawn("npx -y @simonepri/refined-antigravity-acp"),
+            Some(&ANTIGRAVITY)
+        );
+        assert_eq!(for_spawn("antigravity-acp"), Some(&ANTIGRAVITY));
+        assert_eq!(for_spawn("/path/to/agy_acp_server.par"), Some(&ANTIGRAVITY));
+        assert!(by_key("antigravity").unwrap().needs_node);
+        assert_eq!(ANTIGRAVITY.remembered, ["model", "effort", "mode"]);
+        assert!(
+            host::host_problems_for("node=missing", &ANTIGRAVITY)
+                .contains(&host::HostProblem::NodeMissing)
+        );
+    }
+
+    #[test]
+    fn antigravity_sign_in_message() {
+        assert!(sign_in_message(Some(&ANTIGRAVITY), "devbox").contains("run agy to sign in"));
+    }
 
     #[test]
     fn hermes_is_one_scoped_conversation_without_node() {
@@ -232,6 +273,7 @@ mod tests {
             remembered_ids("copilot"),
             ["model", "reasoning_effort", "mode"]
         );
+        assert_eq!(remembered_ids("antigravity"), ["model", "effort", "mode"]);
         assert!(remembered_ids("other").is_empty());
     }
 
