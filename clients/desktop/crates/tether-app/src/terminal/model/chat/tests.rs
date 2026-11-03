@@ -409,11 +409,44 @@ fn a_sent_message_and_the_agents_reply_show_in_the_transcript() {
         r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Done. **Two** sections moved."}}}}"#,
     );
     let s = h.screen();
-    let rows = rows(&s);
-    assert!(matches!(rows[0], RowBody::User { text, .. } if text == "Tidy the README"));
-    assert!(matches!(rows[1], RowBody::Markdown(md) if md.text == "Done. Two sections moved."));
-    assert!(matches!(rows.last(), Some(RowBody::Working(_))));
+    let shown = rows(&s);
+    assert!(matches!(shown[0], RowBody::User { text, .. } if text == "Tidy the README"));
+    assert!(
+        matches!(shown[1], RowBody::Markdown { items: md, selectable: false } if md[0].text == "Done. Two sections moved.")
+    );
+    assert!(matches!(shown.last(), Some(RowBody::Working(_))));
     assert_eq!(s.composer.action_label, "Stop");
+    let prompt: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    h.feed(
+        &name,
+        generation,
+        &serde_json::json!({
+            "jsonrpc":"2.0", "id":prompt["id"], "result":{"stopReason":"end_turn"}
+        })
+        .to_string(),
+    );
+    assert!(matches!(
+        rows(&h.screen())[1],
+        RowBody::Markdown {
+            selectable: true,
+            ..
+        }
+    ));
+    h.msg(ChatMsg::DraftEdited {
+        text: "Another prompt".into(),
+        cursor_byte: 14,
+    });
+    h.msg(ChatMsg::Send);
+    assert!(
+        matches!(
+            rows(&h.screen())[1],
+            RowBody::Markdown {
+                selectable: true,
+                ..
+            }
+        ),
+        "completed replies remain selectable while a later turn runs"
+    );
 }
 
 #[test]
@@ -566,7 +599,7 @@ fn leaving_hangs_up_and_coming_back_resumes_from_the_snapshot() {
     assert!(
         rows(&s)
             .iter()
-            .any(|r| matches!(r, RowBody::Markdown(md) if md.text == "hello")),
+            .any(|r| matches!(r, RowBody::Markdown { items: md, .. } if md[0].text == "hello")),
         "the transcript stays on screen while it reconnects"
     );
 }
@@ -877,13 +910,13 @@ fn a_long_transcript_lays_out_its_end_and_earlier_messages_grows_it() {
     assert!(matches!(rows(&s)[0], RowBody::Earlier));
     let shown = rows(&s)
         .iter()
-        .filter(|r| matches!(r, RowBody::Markdown(_)))
+        .filter(|r| matches!(r, RowBody::Markdown { .. }))
         .count();
     assert_eq!(shown, 60);
     h.msg(ChatMsg::Earlier);
     let s = h.screen();
     assert!(!matches!(rows(&s)[0], RowBody::Earlier));
-    assert!(matches!(rows(&s)[0], RowBody::Markdown(md) if md.text == "reply 0"));
+    assert!(matches!(rows(&s)[0], RowBody::Markdown { items: md, .. } if md[0].text == "reply 0"));
 }
 
 #[test]
@@ -902,7 +935,7 @@ fn scrolled_up_the_window_holds_its_start_and_back_at_the_end_it_follows_again()
         s.rows
             .iter()
             .find_map(|r| match &r.body {
-                RowBody::Markdown(md) => Some(md.text.clone()),
+                RowBody::Markdown { items: md, .. } => Some(md[0].text.clone()),
                 _ => None,
             })
             .unwrap()
@@ -1170,7 +1203,9 @@ fn a_queued_message_waits_above_the_composer_until_the_agent_starts_it() {
     let s = h.screen();
     assert!(s.queued.is_empty());
     let rows = rows(&s);
-    assert!(matches!(rows[1], RowBody::Markdown(md) if md.text == "Working on one"));
+    assert!(
+        matches!(rows[1], RowBody::Markdown { items: md, .. } if md[0].text == "Working on one")
+    );
     assert!(matches!(rows[2], RowBody::User { text, .. } if text == "two"));
 }
 

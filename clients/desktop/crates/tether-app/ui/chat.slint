@@ -15,6 +15,7 @@ export struct ChatImageVm {
 // kind: 0 tool header, 1 resolved permission, 2 markdown, 3 diff line, 4 images, 5 brief toggle,
 // 6 report label, 7 plan step.
 export struct ChatEntryVm {
+    selection-group: string,
     kind: int,
     key: string,
     depth: int,
@@ -28,6 +29,8 @@ export struct ChatEntryVm {
     expandable: bool,
     open: bool,
     background: bool,
+    markdown: [MdItemVm],
+    selectable: bool,
     md-kind: int,
     level: int,
     text: string,
@@ -65,6 +68,8 @@ export struct ChatRowVm {
     state: int,
     flag: bool,
     open: bool,
+    markdown: [MdItemVm],
+    selectable: bool,
     md-kind: int,
     level: int,
     links: [MdLinkVm],
@@ -198,6 +203,7 @@ export struct SavedSessionVm {
 }
 
 export global ChatVm {
+    in property <string> selection-context;
     in property <bool> active;
     in property <[ChatTabVm]> tabs;
     in property <[ChatSideVm]> sidebar;
@@ -561,20 +567,90 @@ component SmallAction inherits Rectangle {
     }
 }
 
+export struct ChatSelectionScope { id: string, x: length, y: length, width: length, height: length, }
+export global ChatSelection {
+    callback pointer(ChatSelectionScope, length, length, int);
+    callback copy(bool);
+    callback select-all();
+    callback clear();
+}
+
 // Read-only, selectable prose: the agent's words can be copied a block at a time.
-component Prose inherits TextInput {
-    read-only: true;
-    single-line: false;
-    wrap: word-wrap;
-    color: Tokens.text;
-    font-size: 14px;
-    selection-background-color: Tokens.accent.with-alpha(0.35);
+component Prose inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size: 14px;
+    in property <string> font-family: Tokens.ui-font;
+    in property <color> ink: Tokens.text;
+    in property <int> font-weight: 400;
+    in property <bool> font-italic;
+    in property <TextWrap> wrap: word-wrap;
+    in property <TextVerticalAlignment> vertical-alignment;
+    in property <bool> selectable: true;
+    in property <bool> code;
+    in property <ChatSelectionScope> scope;
+    property <ChatSelectionScope> bounds: (root.scope.width > 0px || root.scope.id != "") ? root.scope : {
+        x: root.absolute-position.x, y: root.absolute-position.y, width: root.width, height: root.height
+    };
+    preferred-height: input.preferred-height;
+    input := TextInput {
+        width: parent.width;
+        height: parent.height;
+        read-only: true;
+        enabled: root.selectable;
+        single-line: false;
+        wrap: root.wrap;
+        vertical-alignment: root.vertical-alignment;
+        text: root.text;
+        font-size: root.font-size;
+        font-family: root.font-family;
+        font-weight: root.font-weight;
+        font-italic: root.font-italic;
+        color: root.ink;
+        accessible-id: root.scope.id;
+        accessible-description: root.code ? "Code block" : "Message text";
+        selection-background-color: Tokens.accent.with-alpha(0.35);
+        key-pressed(e) => {
+            if e.modifiers.control && (e.text == "c" || e.text == "C") { ChatSelection.copy(false); return accept; }
+            if e.modifiers.control && (e.text == "a" || e.text == "A") { ChatSelection.select-all(); return accept; }
+            if e.text == Key.Escape { ChatSelection.clear(); return accept; }
+            reject
+        }
+    }
+    context := ContextMenuArea {
+        Menu {
+            MenuItem { title: "Copy"; activated => { ChatSelection.copy(false); } }
+            MenuItem { title: "Copy message"; activated => { ChatSelection.copy(true); } }
+        }
+    }
+    TouchArea {
+        enabled: root.selectable;
+        mouse-cursor: MouseCursor.text;
+        pointer-event(e) => {
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                input.focus();
+                ChatSelection.pointer(root.bounds, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, 0);
+            }
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.up {
+                ChatSelection.pointer(root.bounds, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, 2);
+            }
+            if e.kind == PointerEventKind.cancel { ChatSelection.clear(); }
+            if e.button == PointerEventButton.right && e.kind == PointerEventKind.down {
+                input.focus();
+                ChatSelection.pointer(root.bounds, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, 4);
+                context.show({ x: self.mouse-x, y: self.mouse-y });
+            }
+        }
+        moved => { ChatSelection.pointer(root.bounds, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, 1); }
+        double-clicked => { ChatSelection.pointer(root.bounds, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, 3); }
+    }
 }
 
 // Wrapped text inside a layout. A layout adding up its own height counts a bare wrapping text
 // as one line, so the transcript measured shorter than it drew and its end sat out of reach;
 // this takes the height from the text measured at the width it is drawn at.
 component Para inherits Rectangle {
+    in property <ChatSelectionScope> scope;
+    in property <bool> selectable: true;
     in property <string> text;
     in property <length> font-size: 14px;
     in property <color> ink: Tokens.text;
@@ -582,10 +658,12 @@ component Para inherits Rectangle {
     in property <bool> font-italic;
     height: body.preferred-height;
     body := Prose {
+        scope: root.scope;
+        selectable: root.selectable;
         width: parent.width;
         text: root.text;
         font-size: root.font-size;
-        color: root.ink;
+        ink: root.ink;
         font-weight: root.font-weight;
         font-italic: root.font-italic;
     }
@@ -609,6 +687,8 @@ component Wrapped inherits Rectangle {
 }
 
 component Md inherits VerticalLayout {
+    in property <ChatSelectionScope> scope;
+    in property <bool> selectable: true;
     in property <int> kind;
     in property <int> level;
     in property <string> text;
@@ -617,7 +697,7 @@ component Md inherits VerticalLayout {
     in property <color> ink: Tokens.text;
     spacing: 4px;
     if root.kind == 6: Rectangle { height: 1px; background: Tokens.border; }
-    if root.kind == 7: MdTable { text: root.text; }
+    if root.kind == 7: Prose { text: root.text; font-family: Tokens.mono-font; font-size: 12px; scope: root.scope; selectable: root.selectable; }
     if root.kind == 4: Rectangle {
         background: Tokens.input;
         border-radius: 8px;
@@ -625,6 +705,7 @@ component Md inherits VerticalLayout {
         border-color: Tokens.border;
         height: code.preferred-height + 16px;
         code := Prose {
+            scope: root.scope; selectable: root.selectable; code: true;
             x: 10px;
             y: 8px;
             width: parent.width - 20px;
@@ -638,16 +719,16 @@ component Md inherits VerticalLayout {
     if root.kind == 5: HorizontalLayout {
         spacing: 10px;
         Rectangle { width: 3px; background: Tokens.accent.with-alpha(0.6); border-radius: 2px; }
-        Para { text: root.text; font-size: root.font; ink: Tokens.text-secondary; }
+        Para { scope: root.scope; selectable: root.selectable; text: root.text; font-size: root.font; ink: Tokens.text-secondary; }
     }
-    if root.kind == 0: Para {
+    if root.kind == 0: Para { scope: root.scope; selectable: root.selectable;
         text: root.text;
         font-weight: 700;
         font-size: root.level == 1 ? 20px : root.level == 2 ? 17px : 15px;
     }
     if root.kind == 1 || root.kind == 2 || root.kind == 3: HorizontalLayout {
         padding-left: root.kind == 1 ? 0px : root.level * 18px;
-        Para { text: root.text; font-size: root.font; ink: root.ink; }
+        Para { scope: root.scope; selectable: root.selectable; text: root.text; font-size: root.font; ink: root.ink; }
     }
     if root.links.length > 0: HorizontalLayout {
         spacing: 6px;
@@ -672,7 +753,25 @@ component Md inherits VerticalLayout {
     }
 }
 
+component MdDocument inherits Rectangle {
+    in property <[MdItemVm]> items;
+    in property <bool> selectable: true;
+    in property <length> font: 14px;
+    in property <color> ink: Tokens.text;
+    height: content.preferred-height;
+    content := VerticalLayout {
+        spacing: 9px;
+        for item in root.items: Md {
+            kind: item.kind; level: item.level; text: item.text; links: item.links;
+            font: root.font; ink: root.ink; selectable: root.selectable;
+            scope: { x: root.absolute-position.x, y: root.absolute-position.y, width: root.width, height: root.height };
+        }
+    }
+}
+
 component DiffRow inherits Rectangle {
+    in property <ChatSelectionScope> scope;
+    in property <bool> selectable: true;
     in property <int> kind;     // as DiffLineVm: 1 hunk, 2 added, 3 removed, 4 context, 5 plain
     in property <string> old-no;
     in property <string> new-no;
@@ -698,7 +797,8 @@ component DiffRow inherits Rectangle {
             font-size: 11.5px;
             color: root.kind == 2 ? Tokens.success : Tokens.danger;
         }
-        body := Text {
+        body := Prose {
+            code: true; scope: root.scope; selectable: root.selectable;
             horizontal-stretch: 1;
             text: root.kind == 1 ? "\u{22EF}" : root.text;
             wrap: char-wrap;
@@ -706,7 +806,7 @@ component DiffRow inherits Rectangle {
             font-family: Tokens.mono-font;
             font-size: 11.5px;
             font-weight: root.kind == 0 ? 700 : 400;
-            color: root.kind == 1 ? Tokens.text-faint : root.kind == 5 ? Tokens.text-secondary : Tokens.text;
+            ink: root.kind == 1 ? Tokens.text-faint : root.kind == 5 ? Tokens.text-secondary : Tokens.text;
         }
     }
 }
@@ -828,11 +928,9 @@ component Entry inherits Rectangle {
             padding-left: 12px + root.indent + 34px;
             padding-right: 12px;
             padding-bottom: 4px;
-            Md {
-                kind: root.e.md-kind;
-                level: root.e.level;
-                text: root.e.text;
-                links: root.e.links;
+            MdDocument {
+                items: root.e.markdown;
+                selectable: root.e.selectable;
                 font: 12.5px;
                 ink: Tokens.text-secondary;
             }
@@ -841,6 +939,8 @@ component Entry inherits Rectangle {
             padding-left: 8px + root.indent;
             padding-right: 8px;
             DiffRow {
+                scope: { id: root.e.selection-group };
+                selectable: root.e.selectable;
                 kind: root.e.diff-kind;
                 old-no: root.e.old-no;
                 new-no: root.e.new-no;
@@ -1001,11 +1101,9 @@ component Row inherits VerticalLayout {
             }
         }
     }
-    if root.r.kind == 1: Md {
-        kind: root.r.md-kind;
-        level: root.r.level;
-        text: root.r.text;
-        links: root.r.links;
+    if root.r.kind == 1: MdDocument {
+        items: root.r.markdown;
+        selectable: root.r.selectable;
     }
     if root.r.kind == 2: Thumbs { images: root.r.images; }
     if root.r.kind == 3: VerticalLayout {
@@ -1025,7 +1123,7 @@ component Row inherits VerticalLayout {
         if root.r.open: HorizontalLayout {
             spacing: 10px;
             Rectangle { width: 2px; background: Tokens.border; }
-            Para { text: root.r.text; font-size: 12.5px; font-italic: true; ink: Tokens.text-faint; }
+            Para { text: root.r.text; selectable: root.r.selectable; font-size: 12.5px; font-italic: true; ink: Tokens.text-faint; }
         }
     }
     if root.r.kind == 4 || root.r.kind == 5: Rectangle {
@@ -1918,7 +2016,7 @@ export component ChatPane inherits Rectangle {
     changed source-title => { root.parent-open = false; }
     background: Tokens.background;
     // Keys belong to the composer, never the PTY behind it.
-    TouchArea { }
+    TouchArea { clicked => { ChatSelection.clear(); } }
     VerticalLayout {
         if ChatVm.parent-title != "": Rectangle { height: 44px; background: Tokens.surface;
             HorizontalLayout { padding-left: 20px; padding-right: 20px; spacing: 8px;

@@ -169,20 +169,21 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
             vm.state = if *allowed { 1 } else { 3 };
             vm.title = title.as_str().into();
         }
-        EntryBody::Markdown(md) => {
+        EntryBody::Markdown { items, selectable } => {
             vm.kind = 2;
-            vm.md_kind = md_kind(md.kind);
-            vm.level = i32::from(md.level);
-            vm.text = md.text.as_str().into();
-            vm.links = links(md);
+            vm.markdown = model(items.iter().map(md_vm).collect());
+            vm.selectable = *selectable;
         }
         EntryBody::Diff {
+            selectable,
             kind,
             old,
             new,
             text,
         } => {
             vm.kind = 3;
+            vm.selectable = *selectable;
+            vm.selection_group = e.key.split(":diff:").next().unwrap_or(&e.key).into();
             vm.diff_kind = diff_kind(*kind);
             vm.old_no = old.as_str().into();
             vm.new_no = new.as_str().into();
@@ -338,21 +339,24 @@ fn row_vm(r: &Row) -> ChatRowVm {
             vm.images = pictures(images);
             vm.meta = image_label.as_str().into();
         }
-        RowBody::Markdown(md) => {
+        RowBody::Markdown { items, selectable } => {
             vm.kind = 1;
-            vm.md_kind = md_kind(md.kind);
-            vm.level = i32::from(md.level);
-            vm.text = md.text.as_str().into();
-            vm.links = links(md);
+            vm.markdown = model(items.iter().map(md_vm).collect());
+            vm.selectable = *selectable;
         }
         RowBody::Pictures(list) => {
             vm.kind = 2;
             vm.images = pictures(list);
         }
-        RowBody::Thought { text, open } => {
+        RowBody::Thought {
+            text,
+            open,
+            selectable,
+        } => {
             vm.kind = 3;
             vm.text = text.as_str().into();
             vm.open = *open;
+            vm.selectable = *selectable;
         }
         RowBody::Tools(entries) => {
             vm.kind = 4;
@@ -568,6 +572,16 @@ fn field_vm(f: &FieldView) -> QFieldVm {
 
 pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     let vm = w.global::<ChatVm>();
+    let context = s
+        .tabs
+        .iter()
+        .find(|tab| tab.active)
+        .map(|tab| tab.name.as_str())
+        .unwrap_or("");
+    if vm.get_selection_context().as_str() != context {
+        w.global::<crate::ChatSelection>().invoke_clear();
+        vm.set_selection_context(context.into());
+    }
     vm.set_active(s.active);
     vm.set_has_chats(!s.tabs.is_empty());
     vm.set_tabs(model(
@@ -1047,6 +1061,7 @@ fn index(i: i32) -> usize {
 
 /// Wired once per window, like the git panel: the callbacks route through the current sink.
 pub fn wire(ui: &crate::AppWindow) {
+    super::chatselection::wire(ui);
     let vm = ui.global::<ChatVm>();
     vm.on_actions(|n| send(ChatMsg::Actions(n.into())));
     vm.on_actions_close(|| send(ChatMsg::ActionsClose));

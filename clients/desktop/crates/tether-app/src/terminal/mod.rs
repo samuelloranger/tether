@@ -1,4 +1,5 @@
 pub mod chatmedia;
+mod chatselection;
 pub mod chatview;
 pub mod clip;
 pub mod dib;
