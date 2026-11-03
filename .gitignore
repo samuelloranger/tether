@@ -16,6 +16,7 @@ clients/desktop/dist/
 # Generated docs site (VitePress build output — not tracked); README screenshots are
 /docs/*
 !/docs/screenshots/
+!/docs/superpowers/
 
 # OS & Editor files
 .DS_Store
