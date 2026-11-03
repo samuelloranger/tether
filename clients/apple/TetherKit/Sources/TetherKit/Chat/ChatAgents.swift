@@ -48,7 +48,14 @@ enum ChatAgents {
     rememberedIds: ["model", "mode"], iconAsset: "agent-hermes", tintsIcon: true,
     signInCommand: "hermes model", needsNode: false)
 
-  static let all = [claude, codex, opencode, copilot, hermes]
+  /// Google Antigravity runs behind an npm supervisor that fetches and hardens the official
+  /// `agy_acp_server` binary.
+  static let antigravity = ChatAgentProfile(
+    key: "antigravity", label: "Antigravity", spawn: "npx -y @simonepri/refined-antigravity-acp@1.6.3 --yes",
+    marker: "refined-antigravity-acp", rememberedIds: ["model", "effort", "mode"], iconAsset: "agent-antigravity",
+    tintsIcon: true, signInCommand: "agy", needsNode: true)
+
+  static let all = [claude, codex, opencode, copilot, antigravity, hermes]
 
   static func profile(forKey key: String?) -> ChatAgentProfile? {
     guard let key else { return nil }
@@ -60,6 +67,7 @@ enum ChatAgents {
   static func profile(forSpawn spawn: String) -> ChatAgentProfile? {
     let command = spawn.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !command.isEmpty else { return nil }
+    if command.contains("antigravity-acp") || command.contains("agy_acp_server") { return antigravity }
     return all.first { $0.spawn == command } ?? all.first { command.contains($0.marker) }
       ?? all.first { $0.key == command.lowercased() }
   }
