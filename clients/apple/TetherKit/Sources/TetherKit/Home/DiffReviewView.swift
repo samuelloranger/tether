@@ -59,7 +59,7 @@ struct DiffReviewView: View {
     let limit = shownRows[file.id] ?? Self.pageSize
     return VStack(alignment: .leading, spacing: 0) {
       if let selectionEnabled {
-        ChatSelectableText(diff: Array(file.rows.prefix(limit)), selectable: selectionEnabled)
+        ChatSelectableText(diff: Array(file.rows.prefix(limit)), file: file, selectable: selectionEnabled)
           .padding(.horizontal, 10).padding(.vertical, 4)
       } else {
         ScrollView(.horizontal, showsIndicators: false) {

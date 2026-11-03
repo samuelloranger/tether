@@ -19,6 +19,28 @@ enum ChatSelectionCopy {
   }
 }
 
+enum ChatDiffSelection {
+  static func rowText(_ row: DiffRow) -> String {
+    if row.kind == .hunk { return row.text.isEmpty ? "⋯" : row.text }
+    let marker = row.kind == .added ? "+ " : row.kind == .removed ? "− " : "  "
+    return marker + row.text
+  }
+
+  static func hunk(at range: NSRange, rows: [DiffRow], file: DiffFile) -> String? {
+    var offset = 0
+    for (index, row) in rows.enumerated() {
+      if index > 0 { offset += 1 }
+      let span = NSRange(location: offset, length: rowText(row).utf16.count)
+      if row.kind == .hunk,
+        NSIntersectionRange(range, span).length > 0 || (range.length == 0 && NSLocationInRange(range.location, span)) {
+        return file.hunkPatch(startingAt: row.id)
+      }
+      offset += span.length
+    }
+    return nil
+  }
+}
+
 /// One native text view keeps selection continuous across markdown blocks.
 struct ChatSelectableText: UIViewRepresentable {
   var blocks: [MarkdownBlock]
@@ -28,6 +50,7 @@ struct ChatSelectableText: UIViewRepresentable {
   var message: String?
   var branch: (() -> Void)?
   var diff: [DiffRow]?
+  var diffFile: DiffFile?
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -45,9 +68,11 @@ struct ChatSelectableText: UIViewRepresentable {
     self.message = message
   }
 
-  init(diff: [DiffRow], selectable: Bool = true) {
+  init(diff: [DiffRow], file: DiffFile? = nil, selectable: Bool = true) {
     blocks = []
     self.diff = diff
+    diffFile = file
+    message = file?.patchText
     self.selectable = selectable
     reading = false
   }
@@ -68,10 +93,20 @@ struct ChatSelectableText: UIViewRepresentable {
     let text = attributedText()
     if view.attributedText != text { view.attributedText = text }
     view.isSelectable = selectable
-    view.message = message ?? plain
-    view.branch = branch
+    configureCopyActions(view)
     view.tintColor = UIColor(TetherColors.accent)
     view.linkTextAttributes = [.foregroundColor: UIColor(TetherColors.accent)]
+  }
+
+  func configureCopyActions(_ view: ChatSelectionTextView) {
+    view.message = message ?? plain
+    view.branch = branch
+    view.copyMessageTitle = diffFile == nil ? "Copy message" : "Copy file"
+    if let diff, let diffFile {
+      view.copyHunk = { ChatDiffSelection.hunk(at: $0, rows: diff, file: diffFile) }
+    } else {
+      view.copyHunk = nil
+    }
   }
 
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ChatSelectionTextView, context: Context) -> CGSize? {
@@ -120,8 +155,7 @@ struct ChatSelectableText: UIViewRepresentable {
     }
     if let diff {
       for (index, row) in diff.enumerated() {
-        let marker = row.kind == .added ? "+ " : row.kind == .removed ? "− " : "  "
-        let text = row.kind == .hunk ? (row.text.isEmpty ? "⋯" : row.text) : marker + row.text
+        let text = ChatDiffSelection.rowText(row)
         let color = row.kind == .added ? TetherColors.success : row.kind == .removed ? TetherColors.danger : TetherColors.textSecondary
         append(AttributedString((index > 0 ? "\n" : "") + text),
           font: .monospacedSystemFont(ofSize: font.pointSize - 1, weight: .regular), color: UIColor(color), code: true)
@@ -150,7 +184,9 @@ struct ChatSelectableText: UIViewRepresentable {
           case let .task(done): done ? "☑ " : "☐ "
           case .continuation: ""
           }
-          append(AttributedString(String(repeating: "  ", count: item.depth) + marker) + item.text)
+          append(AttributedString(String(repeating: "  ", count: item.depth) + marker) + item.text,
+            font: item.quoted ? font.withTraits(.traitItalic) : font,
+            color: item.quoted ? UIColor(TetherColors.textFaint) : ink)
         }
       case let .table(header, rows):
         for (n, row) in ([header] + rows).enumerated() {
@@ -177,6 +213,8 @@ private extension UIFont {
 final class ChatSelectionTextView: UITextView, UITextViewDelegate {
   var message: String?
   var branch: (() -> Void)?
+  var copyMessageTitle = "Copy message"
+  var copyHunk: ((NSRange) -> String?)?
   var writeClipboard: (String) -> Void = { UIPasteboard.general.string = $0 }
 
   override func copy(_ sender: Any?) {
@@ -186,10 +224,15 @@ final class ChatSelectionTextView: UITextView, UITextViewDelegate {
 
   func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
     var actions = suggestedActions
-    actions.append(UIAction(title: "Copy message", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+    actions.append(UIAction(title: copyMessageTitle, image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
       guard let self else { return }
       writeClipboard(message ?? ChatSelectionCopy.text(attributedText, range: NSRange(location: 0, length: attributedText.length)))
     })
+    if let patch = copyHunk?(range) {
+      actions.append(UIAction(title: "Copy hunk", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+        self?.writeClipboard(patch)
+      })
+    }
     if let branch {
       actions.append(UIAction(title: "Branch & edit…", image: UIImage(systemName: "arrow.triangle.branch")) { _ in branch() })
     }
