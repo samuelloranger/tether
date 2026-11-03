@@ -1,1 +1,3 @@
 agent-claude.svg, agent-codex.svg, agent-opencode.svg and agent-copilot.svg are from lobehub/icons (MIT, https://github.com/lobehub/lobe-icons); the marks belong to their owners.
+
+agent-antigravity.svg is an original single-color triangle mark authored for Tether; no third-party image assets.
