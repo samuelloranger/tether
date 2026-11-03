@@ -65,6 +65,7 @@ struct ChatItemRow: View, Equatable {
   let expanded: Bool
   let toggle: () -> Void
   var queued = false
+  var selectionEnabled = true
   var host = "the host"
   var agent: ChatAgentProfile? = ChatAgents.claude
   /// Set while the agent has no session for want of a login: the row then offers another try.
@@ -74,29 +75,23 @@ struct ChatItemRow: View, Equatable {
 
   static func == (lhs: ChatItemRow, rhs: ChatItemRow) -> Bool {
     lhs.item == rhs.item && lhs.cwd == rhs.cwd && lhs.expanded == rhs.expanded && lhs.queued == rhs.queued
-      && lhs.host == rhs.host && lhs.agent == rhs.agent && lhs.signInRetry == rhs.signInRetry
+      && lhs.selectionEnabled == rhs.selectionEnabled && lhs.host == rhs.host && lhs.agent == rhs.agent && lhs.signInRetry == rhs.signInRetry
   }
 
   var body: some View {
     switch item.kind {
     case let .user(text, count, _, images):
-      UserMessageRow(text: text, imageCount: count, images: images, queued: queued)
-        .contextMenu {
-          Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
-          if let branch {
-            Button(action: branch) { Label(count == 0 ? "Branch & edit…" : "Branch unavailable for image prompts", systemImage: "arrow.triangle.branch") }
-              .disabled(queued || count > 0)
-          }
-        }
+      UserMessageRow(text: text, imageCount: count, images: images, queued: queued,
+        branch: !queued && count == 0 ? branch : nil)
         .accessibilityAction(named: Text("Branch and edit")) { if !queued, count == 0 { branch?() } }
     case let .assistant(text, _):
-      AssistantTextView(text: text)
+      AssistantTextView(text: text, selectable: selectionEnabled)
     case let .images(refs, _):
       ChatImagesRow(refs: refs)
     case let .card(card):
       ChatCardView(card: card)
     case let .thought(text):
-      ThoughtRow(text: text, expanded: expanded, toggle: toggle)
+      ThoughtRow(text: text, expanded: expanded, toggle: toggle, selectable: selectionEnabled)
     case .tool, .permission:
       ToolGroupView(items: [item], cwd: cwd, expandedIDs: expanded ? [item.id] : []) { _ in toggle() }
     case let .question(question):
@@ -277,6 +272,7 @@ struct UserMessageRow: View {
   var imageCount = 0
   var images: [ChatImageRef] = []
   var queued = false
+  var branch: (() -> Void)?
 
   @Environment(\.chatImages) private var library
 
@@ -302,10 +298,7 @@ struct UserMessageRow: View {
           .font(.caption).foregroundStyle(TetherColors.textSecondary)
       }
       if !text.isEmpty {
-        Text(text)
-          .font(.subheadline)
-          .foregroundStyle(TetherColors.textPrimary)
-          .textSelection(.enabled)
+        ChatSelectableText(text, branch: branch)
       }
     }
       .padding(.horizontal, 14).padding(.vertical, 10)
@@ -317,17 +310,18 @@ struct UserMessageRow: View {
 
 struct AssistantTextView: View {
   let text: String
+  var selectable = true
   @State private var blocks: [MarkdownBlock]
 
-  init(text: String) {
+  init(text: String, selectable: Bool = true) {
     self.text = text
+    self.selectable = selectable
     _blocks = State(initialValue: MarkdownDocument.parse(text))
   }
 
   var body: some View {
-    MarkdownBodyView(blocks: blocks, reading: true)
+    ChatSelectableText(blocks: blocks, selectable: selectable, message: text)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .textSelection(.enabled)
       .onChange(of: text) { _, next in blocks = MarkdownDocument.parse(next) }
       .accessibilityElement(children: .combine)
   }
@@ -337,6 +331,7 @@ struct ThoughtRow: View {
   let text: String
   let expanded: Bool
   let toggle: () -> Void
+  var selectable = true
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -352,8 +347,7 @@ struct ThoughtRow: View {
       .buttonStyle(.plain)
       .accessibilityHint(expanded ? "Hides the agent's reasoning" : "Shows the agent's reasoning")
       if expanded {
-        Text(text).font(.footnote.italic()).foregroundStyle(TetherColors.textFaint)
-          .textSelection(.enabled)
+        ChatSelectableText(blocks: [.quote(AttributedString(text))], reading: false, selectable: selectable)
           .padding(.leading, 10)
           .overlay(alignment: .leading) { Rectangle().fill(TetherColors.border).frame(width: 2) }
       }
@@ -524,13 +518,13 @@ struct ToolCallRow: View {
   private var detailView: some View {
     Group {
       if let diff = call.diff {
-        DiffReviewView(files: [ACPDiffAdapter.file(for: diff, relativeTo: cwd)])
+        DiffReviewView(files: [ACPDiffAdapter.file(for: diff, relativeTo: cwd)], selectionEnabled: !call.isRunning && !call.isBackgroundRunning)
       } else {
         VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(call.images.enumerated()), id: \.offset) { _, ref in ChatImageView(ref: ref) }
           if ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput) {
-            MarkdownBodyView(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput))
-              .textSelection(.enabled)
+            ChatSelectableText(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput), reading: false,
+              selectable: !call.isRunning && !call.isBackgroundRunning)
           }
         }
         .padding(10)

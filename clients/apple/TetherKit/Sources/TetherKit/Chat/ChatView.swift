@@ -285,7 +285,10 @@ struct ChatView: View {
         case let .item(item):
           ChatItemRow(
             item: item, cwd: model.cwd, expanded: isExpanded(item), toggle: { toggleExpanded(item.id) },
-            queued: model.state.isQueued(item.id), host: model.hostLabel, agent: model.agent,
+            queued: model.state.isQueued(item.id),
+            selectionEnabled: model.state.turn != .working || item.id <= (model.state.items.last(where: {
+              if case .user = $0.kind { return !model.state.isQueued($0.id) }; return false
+            })?.id ?? -1), host: model.hostLabel, agent: model.agent,
             signInRetry: model.needsSignIn && item.id == model.state.items.last?.id ? model.signInRetry : nil,
             retrySignIn: { model.retrySignIn() },
             branch: onBranch == nil ? nil : {

@@ -8,6 +8,7 @@ struct DiffReviewView: View {
   var untracked: [String] = []
   var untrackedTruncated = false
   var loadUntracked: ((String) async -> GitPatch?)?
+  var selectionEnabled: Bool?
 
   /// A file this long starts folded, and opens a page at a time: every row is a view, and a
   /// lockfile's worth of them at once stalls the scroll.
@@ -57,23 +58,28 @@ struct DiffReviewView: View {
   private func rows(of file: DiffFile) -> some View {
     let limit = shownRows[file.id] ?? Self.pageSize
     return VStack(alignment: .leading, spacing: 0) {
-      ScrollView(.horizontal, showsIndicators: false) {
-        // Sized to the widest row (and at least the screen), so every band spans the same width.
-        VStack(alignment: .leading, spacing: 0) {
-          ForEach(file.rows.prefix(limit)) { row in
-            DiffRowView(row: row, digits: file.lineDigits, minWidth: viewportWidth)
-              .contextMenu {
-                if row.kind == .hunk {
-                  Button { copy(file.hunkPatch(startingAt: row.id)) } label: {
-                    Label("Copy hunk", systemImage: "doc.on.doc")
+      if let selectionEnabled {
+        ChatSelectableText(diff: Array(file.rows.prefix(limit)), file: file, selectable: selectionEnabled)
+          .padding(.horizontal, 10).padding(.vertical, 4)
+      } else {
+        ScrollView(.horizontal, showsIndicators: false) {
+          // Sized to the widest row (and at least the screen), so every band spans the same width.
+          VStack(alignment: .leading, spacing: 0) {
+            ForEach(file.rows.prefix(limit)) { row in
+              DiffRowView(row: row, digits: file.lineDigits, minWidth: viewportWidth)
+                .contextMenu {
+                  if row.kind == .hunk {
+                    Button { copy(file.hunkPatch(startingAt: row.id)) } label: {
+                      Label("Copy hunk", systemImage: "doc.on.doc")
+                    }
                   }
+                  Button { copy(file.patchText) } label: { Label("Copy file", systemImage: "doc.on.doc") }
                 }
-                Button { copy(file.patchText) } label: { Label("Copy file", systemImage: "doc.on.doc") }
-              }
+            }
           }
+          .fixedSize(horizontal: true, vertical: false)
+          .padding(.vertical, 4)
         }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.vertical, 4)
       }
       if file.rows.count > limit {
         pageButton("Show \(min(Self.pageSize, file.rows.count - limit)) more lines") {

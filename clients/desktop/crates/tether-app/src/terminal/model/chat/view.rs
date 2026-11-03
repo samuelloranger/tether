@@ -74,8 +74,12 @@ pub enum EntryBody {
         allowed: bool,
         title: String,
     },
-    Markdown(MdItem),
+    Markdown {
+        items: Vec<MdItem>,
+        selectable: bool,
+    },
     Diff {
+        selectable: bool,
         kind: DiffKind,
         old: String,
         new: String,
@@ -135,11 +139,15 @@ pub enum RowBody {
         images: Vec<Picture>,
         image_label: String,
     },
-    Markdown(MdItem),
+    Markdown {
+        items: Vec<MdItem>,
+        selectable: bool,
+    },
     Pictures(Vec<Picture>),
     Thought {
         text: String,
         open: bool,
+        selectable: bool,
     },
     Tools(Vec<Entry>),
     Plan {

@@ -229,6 +229,16 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
     rows
 }
 
+fn state_selectable(state: &ChatState, id: i64) -> bool {
+    state.turn != Turn::Working
+        || state
+            .items
+            .iter()
+            .rev()
+            .find(|i| matches!(i.kind, ItemKind::User { .. }) && !state.is_queued(i.id))
+            .is_some_and(|user| id <= user.id)
+}
+
 fn item_rows(
     s: &Session,
     item: &Item,
@@ -259,19 +269,15 @@ fn item_rows(
                 String::new()
             },
         },
-        ItemKind::Assistant { text, .. } => {
-            for (n, md) in tether_core::markdown::items(text).into_iter().enumerate() {
-                rows.push(Row {
-                    key: format!("{key}:{n}"),
-                    body: RowBody::Markdown(md),
-                });
-            }
-            return;
-        }
+        ItemKind::Assistant { text, .. } => RowBody::Markdown {
+            items: tether_core::markdown::items(text),
+            selectable: state_selectable(s.state(), item.id),
+        },
         ItemKind::Images { refs, .. } => RowBody::Pictures(pictures(s, refs, ctx)),
         ItemKind::Thought { text } => RowBody::Thought {
             text: text.clone(),
             open: s.expanded.contains(&key),
+            selectable: state_selectable(s.state(), item.id),
         },
         ItemKind::Tool(_) | ItemKind::Permission(_) => {
             RowBody::Tools(tool_entries(s, std::slice::from_ref(item), ctx))
@@ -486,6 +492,7 @@ fn tool(
                 depth,
                 first: false,
                 body: EntryBody::Diff {
+                    selectable: !running && !call.is_background_running(),
                     kind: diff_kind(row.kind),
                     old: number(row.old_line),
                     new: number(row.new_line),
@@ -503,17 +510,15 @@ fn tool(
             body: EntryBody::Pictures(pictures(s, &call.images, ctx)),
         });
     }
-    for (n, md) in tooldetail::blocks(call.text.as_deref(), call.raw_output.as_deref())
-        .into_iter()
-        .enumerate()
-    {
-        out.push(Entry {
-            key: format!("{key}:md:{n}"),
-            depth,
-            first: false,
-            body: EntryBody::Markdown(md),
-        });
-    }
+    out.push(Entry {
+        key: format!("{key}:md"),
+        depth,
+        first: false,
+        body: EntryBody::Markdown {
+            items: tooldetail::blocks(call.text.as_deref(), call.raw_output.as_deref()),
+            selectable: !running && !call.is_background_running(),
+        },
+    });
 }
 
 fn subagent(
@@ -579,17 +584,15 @@ fn subagent(
             body: EntryBody::BriefToggle { open: brief_open },
         });
         if brief_open {
-            for (n, md) in tooldetail::blocks(Some(&brief), None)
-                .into_iter()
-                .enumerate()
-            {
-                out.push(Entry {
-                    key: format!("{brief_key}:{n}"),
-                    depth: 0,
-                    first: false,
-                    body: EntryBody::Markdown(md),
-                });
-            }
+            out.push(Entry {
+                key: format!("{brief_key}:md"),
+                depth: 0,
+                first: false,
+                body: EntryBody::Markdown {
+                    items: tooldetail::blocks(Some(&brief), None),
+                    selectable: true,
+                },
+            });
         }
     }
     if let Some(report) = report {
@@ -599,17 +602,15 @@ fn subagent(
             first: false,
             body: EntryBody::ReportLabel,
         });
-        for (n, md) in tooldetail::blocks(Some(&report), None)
-            .into_iter()
-            .enumerate()
-        {
-            out.push(Entry {
-                key: format!("report:{key}:{n}"),
-                depth: 0,
-                first: false,
-                body: EntryBody::Markdown(md),
-            });
-        }
+        out.push(Entry {
+            key: format!("report:{key}:md"),
+            depth: 0,
+            first: false,
+            body: EntryBody::Markdown {
+                items: tooldetail::blocks(Some(&report), None),
+                selectable: !call.is_active(),
+            },
+        });
     }
 }
 

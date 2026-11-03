@@ -125,8 +125,7 @@ struct SubagentRow: View {
       .buttonStyle(.plain)
       .accessibilityHint(briefOpen ? "Hides the instructions" : "Shows the instructions given to the subagent")
       if briefOpen {
-        MarkdownBodyView(blocks: ChatToolDetail.blocks(text: text, rawOutput: nil))
-          .textSelection(.enabled)
+        ChatSelectableText(blocks: ChatToolDetail.blocks(text: text, rawOutput: nil), reading: false)
           .padding(10)
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(TetherColors.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
@@ -138,8 +137,7 @@ struct SubagentRow: View {
   private func reportView(_ text: String) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       Text("Report").font(.caption.weight(.medium)).foregroundStyle(TetherColors.textFaint)
-      MarkdownBodyView(blocks: ChatToolDetail.blocks(text: text, rawOutput: nil))
-        .textSelection(.enabled)
+      ChatSelectableText(blocks: ChatToolDetail.blocks(text: text, rawOutput: nil), reading: false, selectable: !call.isActive)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(TetherColors.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
