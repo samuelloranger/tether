@@ -34,6 +34,16 @@ final class ChatMarkdownTableTests: XCTestCase {
     XCTAssertEqual(ChatMarkdownView.groups([table, table]), [[table], [table]])
   }
 
+  @MainActor func test_tool_result_copy_message_includes_surrounding_prose_and_all_cells() {
+    let source = "Intro.\n\n| A | B |\n|---|---|\n| one | two |\n\nEnd."
+    let view = ChatMarkdownView(blocks: MarkdownDocument.parse(source), reading: false)
+    XCTAssertEqual(view.copyMessage, "Intro. A\tB one\ttwo End.")
+    let textView = ChatSelectionTextView()
+    ChatSelectableText(blocks: [.paragraph(AttributedString("one"))], message: view.copyMessage)
+      .configureCopyActions(textView)
+    XCTAssertEqual(textView.message, "Intro. A\tB one\ttwo End.")
+  }
+
   @MainActor func test_columns_are_bounded_and_scale_with_dynamic_type() {
     guard case let .table(header, rows) = MarkdownDocument.parse(markdown)[1] else { return XCTFail("Expected a table") }
     let widths = ChatMarkdownTable.columnWidths(header: header, rows: rows, font: .systemFont(ofSize: 15))

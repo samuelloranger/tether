@@ -138,7 +138,7 @@ impl Selection {
         if !items.iter().any(ItemRc::is_visible) {
             return String::new();
         }
-        for item in items {
+        for (index, item) in items.into_iter().enumerate() {
             let Some(input) = item.downcast::<TextInput>() else {
                 continue;
             };
@@ -155,7 +155,11 @@ impl Selection {
             let description =
                 item.accessible_string_property(AccessibleStringProperty::Description);
             let table_cell = description.as_deref() == Some("Table cell");
-            if a == b && !(all && table_cell) {
+            let empty_selected_cell = text.is_empty()
+                && self.anchor != self.focus
+                && (self.anchor.0.min(self.focus.0)..=self.anchor.0.max(self.focus.0))
+                    .contains(&index);
+            if a == b && !(table_cell && (all || empty_selected_cell)) {
                 continue;
             }
             let Some(text) = text.get(a.min(b)..a.max(b)) else {
@@ -541,12 +545,20 @@ mod tests {
                     "The last column extends into the horizontal scroll area"
                 );
             }
-            let selected = Selection {
+            let mut selected = Selection {
                 blocks: inputs.iter().map(ItemRc::downgrade).collect(),
                 ..Default::default()
             };
             let expected = "Before the comparison.\nComponent\tOur code\tUpstream\nJellyfin Android TV player/profile code\tAdapted\tTranslations, tooling updates and a home/search lifecycle fix; no player changes.\nMedia3 / ExoPlayer\t1.8.0\tStable 1.11.1, including Matroska seeking, playback stability and HLS fixes.\nFFmpeg decoder\t\tReleases\nAfter the comparison.";
             assert_eq!(selected.copy(true), expected);
+            selected.focus = (inputs.len() - 1, "After the comparison.".len());
+            selected.paint();
+            assert_eq!(
+                selected.copy(false),
+                expected,
+                "Ctrl+A / Ctrl+C retains empty cells"
+            );
+            selected.clear();
         }
         ui.hide().unwrap();
     }

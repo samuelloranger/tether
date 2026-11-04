@@ -8,7 +8,7 @@ struct ChatMarkdownView: View {
   var selectable = true
   var message: String?
 
-  static func groups(_ blocks: [MarkdownBlock]) -> [[MarkdownBlock]] {
+  nonisolated static func groups(_ blocks: [MarkdownBlock]) -> [[MarkdownBlock]] {
     var groups: [[MarkdownBlock]] = []
     var prose: [MarkdownBlock] = []
     for block in blocks {
@@ -23,7 +23,14 @@ struct ChatMarkdownView: View {
     return groups
   }
 
+  var copyMessage: String {
+    if let message { return message }
+    let text = ChatSelectableText(blocks: blocks, reading: reading).attributedText()
+    return ChatSelectionCopy.text(text, range: NSRange(location: 0, length: text.length))
+  }
+
   var body: some View {
+    let message = copyMessage
     VStack(alignment: .leading, spacing: reading ? 9 : 6) {
       ForEach(Array(Self.groups(blocks).enumerated()), id: \.offset) { _, group in
         if case let .table(header, rows)? = group.first {
