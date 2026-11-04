@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use slint::{ComponentHandle, Model, ModelRc, SharedPixelBuffer, SharedString, VecModel};
-use tether_core::markdown::{Item as MdItem, ItemKind};
+use tether_core::markdown::{Item as MdItem, ItemKind, TableAlignment};
 
 use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
@@ -13,8 +13,8 @@ use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
     AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
     ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
-    MdItemVm, MdLinkVm, NcChoiceVm, NcMenuVm, PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm,
-    QFieldVm, QueuedVm, SavedSessionVm, WfAgentVm, WfPhaseVm,
+    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
+    PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 
 thread_local! {
@@ -78,12 +78,54 @@ fn links(md: &MdItem) -> ModelRc<MdLinkVm> {
     )
 }
 
-fn md_vm(md: &MdItem) -> MdItemVm {
+pub(super) fn md_vm(md: &MdItem) -> MdItemVm {
+    let mut table_rows = Vec::new();
+    let mut table_width = 0.;
+    if let Some(table) = &md.table {
+        let columns = table.rows.iter().map(Vec::len).max().unwrap_or(0);
+        // Bound each column independently: long descriptions wrap inside their cells.
+        let widths: Vec<f32> = (0..columns)
+            .map(|column| {
+                let characters = table
+                    .rows
+                    .iter()
+                    .filter_map(|r| r.get(column))
+                    .flat_map(|s| s.lines())
+                    .map(|s| s.chars().count())
+                    .max()
+                    .unwrap_or(0);
+                (characters as f32 * 7.5 + 20.).clamp(100., 260.)
+            })
+            .collect();
+        table_width = widths.iter().sum();
+        for (index, row) in table.rows.iter().enumerate() {
+            table_rows.push(MdTableRowVm {
+                header: index < table.header_rows,
+                cells: model(
+                    widths
+                        .iter()
+                        .enumerate()
+                        .map(|(column, width)| MdTableCellVm {
+                            text: row.get(column).map_or("", String::as_str).into(),
+                            width: *width,
+                            alignment: match table.alignments.get(column) {
+                                Some(TableAlignment::Center) => 2,
+                                Some(TableAlignment::Right) => 3,
+                                _ => 0,
+                            },
+                        })
+                        .collect(),
+                ),
+            });
+        }
+    }
     MdItemVm {
         kind: md_kind(md.kind),
         level: i32::from(md.level),
         text: md.text.as_str().into(),
         links: links(md),
+        table_rows: model(table_rows),
+        table_width,
     }
 }
 
@@ -1272,7 +1314,43 @@ pub fn close_add_menu(ui: &crate::AppWindow) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::queue_shift;
+    use super::{md_vm, queue_shift};
+    use slint::Model;
+
+    #[test]
+    fn table_cells_share_bounded_column_widths_and_keep_empty_cells() {
+        let description = "A long description with spaces. ".repeat(40);
+        let source = format!(
+            "| Component | Version | Notes |\n|:---|---:|:---:|\n| Player | 1.8.0 | {description} |\n| Decoder | | [Releases](https://example.test/releases) |"
+        );
+        let parsed = tether_core::markdown::items(&source);
+        let vm = md_vm(&parsed[0]);
+        assert_eq!(vm.table_rows.row_count(), 3);
+        let header = vm.table_rows.row_data(0).unwrap();
+        assert!(header.header);
+        let row = vm.table_rows.row_data(1).unwrap();
+        let last = vm.table_rows.row_data(2).unwrap();
+        assert!(!row.header);
+        assert_eq!(row.cells.row_count(), 3);
+        for column in 0..3 {
+            let cell = row.cells.row_data(column).unwrap();
+            assert!((100. ..=260.).contains(&cell.width));
+            assert_eq!(cell.width, header.cells.row_data(column).unwrap().width);
+            assert_eq!(cell.width, last.cells.row_data(column).unwrap().width);
+        }
+        assert_eq!(row.cells.row_data(2).unwrap().width, 260.);
+        assert_eq!(row.cells.row_data(1).unwrap().alignment, 3);
+        assert_eq!(row.cells.row_data(2).unwrap().alignment, 2);
+        assert_eq!(last.cells.row_data(1).unwrap().text, "");
+        assert_eq!(
+            vm.links.row_data(0).unwrap().url,
+            "https://example.test/releases"
+        );
+        assert_eq!(
+            vm.table_width,
+            header.cells.iter().map(|c| c.width).sum::<f32>()
+        );
+    }
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()

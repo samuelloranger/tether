@@ -38,12 +38,25 @@ export struct MdLinkVm {
     url: string,
 }
 
+export struct MdTableCellVm {
+    text: string,
+    width: float,
+    alignment: int,
+}
+
+export struct MdTableRowVm {
+    cells: [MdTableCellVm],
+    header: bool,
+}
+
 // kind: 0 heading, 1 paragraph, 2 bullet, 3 numbered, 4 code, 5 quote, 6 rule, 7 table.
 export struct MdItemVm {
     kind: int,
     level: int,
     text: string,
     links: [MdLinkVm],
+    table-rows: [MdTableRowVm],
+    table-width: float,
 }
 
 export global GitVm {

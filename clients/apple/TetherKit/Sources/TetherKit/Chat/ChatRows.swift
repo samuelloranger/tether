@@ -320,7 +320,7 @@ struct AssistantTextView: View {
   }
 
   var body: some View {
-    ChatSelectableText(blocks: blocks, selectable: selectable, message: text)
+    ChatMarkdownView(blocks: blocks, selectable: selectable, message: text)
       .frame(maxWidth: .infinity, alignment: .leading)
       .onChange(of: text) { _, next in blocks = MarkdownDocument.parse(next) }
       .accessibilityElement(children: .combine)
@@ -523,7 +523,7 @@ struct ToolCallRow: View {
         VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(call.images.enumerated()), id: \.offset) { _, ref in ChatImageView(ref: ref) }
           if ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput) {
-            ChatSelectableText(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput), reading: false,
+            ChatMarkdownView(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput), reading: false,
               selectable: !call.isRunning && !call.isBackgroundRunning)
           }
         }

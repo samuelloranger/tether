@@ -35,7 +35,8 @@ fn blocks(ui: &crate::AppWindow, scope: ChatSelectionScope) -> Vec<ItemRc> {
     let root = ItemRc::new_root(WindowInner::from_pub(ui.window()).component());
     let mut found = Vec::new();
     root.visit_descendants(|item| {
-        if item.is_visible()
+        // An explicit message scope also owns cells clipped by its horizontal scroller.
+        if (!scope.id.is_empty() || item.is_visible())
             && let Some(input) = item.downcast::<TextInput>()
             && input.as_pin_ref().read_only()
             && input.as_pin_ref().enabled()
@@ -130,12 +131,19 @@ impl Selection {
 
     fn copy(&self, all: bool) -> String {
         let mut parts = Vec::new();
-        for item in self.items() {
+        let mut table = String::new();
+        let mut table_y: Option<f32> = None;
+        let items = self.items();
+        // Stop copying a dismissed message, while retaining its offscreen table columns.
+        if !items.iter().any(ItemRc::is_visible) {
+            return String::new();
+        }
+        for item in items {
             let Some(input) = item.downcast::<TextInput>() else {
                 continue;
             };
             let input = input.as_pin_ref();
-            if !input.enabled() || !item.is_visible() {
+            if !input.enabled() {
                 return String::new();
             }
             let text = input.text();
@@ -144,16 +152,38 @@ impl Selection {
             } else {
                 input.selection_anchor_and_cursor()
             };
-            if a == b {
+            let description =
+                item.accessible_string_property(AccessibleStringProperty::Description);
+            let table_cell = description.as_deref() == Some("Table cell");
+            if a == b && !(all && table_cell) {
                 continue;
             }
             let Some(text) = text.get(a.min(b)..a.max(b)) else {
                 continue;
             };
-            let code = item
-                .accessible_string_property(AccessibleStringProperty::Description)
-                .is_some_and(|s| s == "Code block");
-            parts.push((text.to_owned(), code));
+            if table_cell {
+                let y = geometry(&item).min_y();
+                if let Some(previous) = table_y {
+                    table.push(if (previous - y).abs() < 1. {
+                        '\t'
+                    } else {
+                        '\n'
+                    });
+                }
+                table.push_str(&flatten(text));
+                table_y = Some(y);
+            } else {
+                if table_y.take().is_some() {
+                    parts.push((std::mem::take(&mut table), true));
+                }
+                parts.push((
+                    text.to_owned(),
+                    description.as_deref() == Some("Code block"),
+                ));
+            }
+        }
+        if table_y.is_some() {
+            parts.push((table, true));
         }
         copy_parts(&parts)
     }
@@ -408,6 +438,116 @@ mod tests {
         );
         ui.global::<ChatSelection>().invoke_clear();
         assert!(selected.copy(false).is_empty());
+        ui.hide().unwrap();
+    }
+
+    #[test]
+    fn native_tables_align_wrap_and_copy_columns_outside_the_viewport() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        use slint::platform::{Platform, WindowAdapter};
+        use slint::{ModelRc, Rgb8Pixel, VecModel};
+
+        struct Headless(Rc<MinimalSoftwareWindow>);
+        impl Platform for Headless {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        let ui = crate::AppWindow::new().unwrap();
+        ui.global::<crate::AppBridge>()
+            .set_page(crate::PageKind::Terminal);
+        ui.global::<crate::ChatVm>().set_active(true);
+        ui.global::<crate::ChatVm>()
+            .set_title("Player dependency comparison".into());
+        let source = "Before the comparison.\n\n| Component | Our code | Upstream |\n|---|---:|---|\n| Jellyfin Android TV player/profile code | Adapted | Translations, tooling updates and a home/search lifecycle fix; no player changes. |\n| Media3 / ExoPlayer | 1.8.0 | Stable 1.11.1, including Matroska seeking, playback stability and HLS fixes. |\n| FFmpeg decoder | | [Releases](https://example.test/releases) |\n\nAfter the comparison.";
+        let md = tether_core::markdown::items(source);
+        ui.global::<crate::ChatVm>()
+            .set_rows(ModelRc::new(VecModel::from(vec![crate::ChatRowVm {
+                kind: 1,
+                key: "item:table".into(),
+                selectable: true,
+                markdown: ModelRc::new(VecModel::from(
+                    md.iter()
+                        .map(crate::terminal::chatview::md_vm)
+                        .collect::<Vec<_>>(),
+                )),
+                ..Default::default()
+            }])));
+        ui.show().unwrap();
+        for width in [640usize, 1100] {
+            ui.window()
+                .set_size(slint::LogicalSize::new(width as f32, 800.));
+            let mut pixels = vec![Rgb8Pixel::default(); width * 800];
+            window.draw_if_needed(|renderer| {
+                renderer.render(&mut pixels, width);
+            });
+            // Reveal starts after a timer; let the real native transition settle for snapshots.
+            for delay in [40, 350] {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                slint::platform::update_timers_and_animations();
+                window.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width);
+                });
+            }
+            if let Ok(directory) = std::env::var("TETHER_TABLE_SHOTS") {
+                std::fs::create_dir_all(&directory).unwrap();
+                let rgb: Vec<u8> = pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
+                image::save_buffer(
+                    std::path::Path::new(&directory).join(format!("desktop-table-{width}.png")),
+                    &rgb,
+                    width as u32,
+                    800,
+                    image::ColorType::Rgb8,
+                )
+                .unwrap();
+            }
+            let inputs = blocks(
+                &ui,
+                ChatSelectionScope {
+                    id: "item:table".into(),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                inputs.len(),
+                14,
+                "Twelve cells and both prose blocks at width {width}"
+            );
+            let cells: Vec<_> = inputs
+                .iter()
+                .filter(|i| {
+                    i.accessible_string_property(AccessibleStringProperty::Description)
+                        .as_deref()
+                        == Some("Table cell")
+                })
+                .collect();
+            assert_eq!(cells.len(), 12);
+            for row in cells.chunks(3) {
+                assert!((geometry(row[0]).min_y() - geometry(row[2]).min_y()).abs() < 1.);
+                for (column, cell) in row.iter().enumerate() {
+                    assert!((geometry(cell).min_x() - geometry(cells[column]).min_x()).abs() < 1.);
+                    assert!(geometry(cell).width() <= 240.);
+                }
+            }
+            assert!(
+                geometry(cells[3]).height() > geometry(cells[0]).height(),
+                "Long names wrap within the first column"
+            );
+            if width == 640 {
+                assert!(
+                    geometry(cells[2]).max_x() > geometry(&inputs[0]).max_x(),
+                    "The last column extends into the horizontal scroll area"
+                );
+            }
+            let selected = Selection {
+                blocks: inputs.iter().map(ItemRc::downgrade).collect(),
+                ..Default::default()
+            };
+            let expected = "Before the comparison.\nComponent\tOur code\tUpstream\nJellyfin Android TV player/profile code\tAdapted\tTranslations, tooling updates and a home/search lifecycle fix; no player changes.\nMedia3 / ExoPlayer\t1.8.0\tStable 1.11.1, including Matroska seeking, playback stability and HLS fixes.\nFFmpeg decoder\t\tReleases\nAfter the comparison.";
+            assert_eq!(selected.copy(true), expected);
+        }
         ui.hide().unwrap();
     }
 
