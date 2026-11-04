@@ -216,6 +216,7 @@ pub fn apply(w: &AppWindow, v: GitView) {
                                 })
                                 .collect(),
                         ),
+                        ..Default::default()
                     })
                     .collect()
             })

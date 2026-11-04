@@ -32,6 +32,8 @@ pub struct Item {
     pub level: u8,
     pub text: String,
     pub links: Vec<Link>,
+    /// Structured cells for native table layouts; text remains available to plain-text viewers.
+    pub table: Option<Table>,
 }
 
 const BULLET: &str = "\u{2022}  ";
@@ -62,10 +64,19 @@ struct ListItem {
     started: bool,
 }
 
-#[derive(Default)]
-struct Table {
-    rows: Vec<Vec<String>>,
-    header_rows: usize,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TableAlignment {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Table {
+    pub rows: Vec<Vec<String>>,
+    pub header_rows: usize,
+    pub alignments: Vec<TableAlignment>,
 }
 
 #[derive(Default)]
@@ -104,6 +115,7 @@ impl Builder {
                         level: 0,
                         text: code.trim_end_matches('\n').to_owned(),
                         links: Vec::new(),
+                        table: None,
                     });
                 }
                 _ => {}
@@ -125,6 +137,7 @@ impl Builder {
                     level: 0,
                     text: String::new(),
                     links: Vec::new(),
+                    table: None,
                 });
             }
             Event::TaskListMarker(done) => {
@@ -178,9 +191,19 @@ impl Builder {
                     started: false,
                 });
             }
-            Tag::Table(_) => {
+            Tag::Table(alignments) => {
                 self.flush();
-                self.table = Some(Table::default());
+                self.table = Some(Table {
+                    alignments: alignments
+                        .into_iter()
+                        .map(|a| match a {
+                            pulldown_cmark::Alignment::Center => TableAlignment::Center,
+                            pulldown_cmark::Alignment::Right => TableAlignment::Right,
+                            _ => TableAlignment::Left,
+                        })
+                        .collect(),
+                    ..Table::default()
+                });
             }
             Tag::TableHead => self.in_head = true,
             Tag::TableRow => {
@@ -243,6 +266,7 @@ impl Builder {
                     level: 0,
                     text: render_table(&table),
                     links,
+                    table: Some(table),
                 });
             }
             TagEnd::Link | TagEnd::Image => {
@@ -287,6 +311,7 @@ impl Builder {
                 level,
                 text,
                 links,
+                table: None,
             }
         } else if let Some(li) = self.items.last_mut() {
             let prefix = if li.started { "" } else { li.prefix.as_str() };
@@ -301,6 +326,7 @@ impl Builder {
                 level: depth,
                 text: format!("{prefix}{text}"),
                 links,
+                table: None,
             };
             li.started = true;
             item
@@ -310,6 +336,7 @@ impl Builder {
                 level: 0,
                 text,
                 links,
+                table: None,
             }
         } else {
             Item {
@@ -317,6 +344,7 @@ impl Builder {
                 level: 0,
                 text,
                 links,
+                table: None,
             }
         };
         self.out.push(item);
@@ -521,6 +549,28 @@ mod tests {
             "name   n\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\nalpha  1\nb      22"
         );
         assert_eq!(list[1].text, "after");
+    }
+
+    #[test]
+    fn structured_tables_keep_empty_cells_escaped_pipes_and_alignment() {
+        let list = items(
+            "Before\n\n| Left | Center | Right |\n|:---|:---:|---:|\n| café \u{1f642} | a\\|b | |\n\nAfter",
+        );
+        assert_eq!(list.len(), 3);
+        let table = list[1].table.as_ref().unwrap();
+        assert_eq!(table.header_rows, 1);
+        assert_eq!(table.rows[0], ["Left", "Center", "Right"]);
+        assert_eq!(table.rows[1], ["café \u{1f642}", "a|b", ""]);
+        assert_eq!(
+            table.alignments,
+            [
+                TableAlignment::Left,
+                TableAlignment::Center,
+                TableAlignment::Right
+            ]
+        );
+        assert!(list[0].table.is_none());
+        assert!(list[2].table.is_none());
     }
 
     #[test]

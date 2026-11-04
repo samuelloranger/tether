@@ -23,6 +23,7 @@ pub fn blocks(text: Option<&str>, raw_output: Option<&str>) -> Vec<Item> {
             level: 0,
             text: bounded(r),
             links: Vec::new(),
+            table: None,
         }]
     } else {
         Vec::new()
@@ -102,6 +103,7 @@ mod tests {
             level: 0,
             text: text.to_string(),
             links: Vec::new(),
+            table: None,
         }
     }
 
