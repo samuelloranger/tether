@@ -7,8 +7,8 @@ use super::images::ImageRef;
 pub const MARKER: &str = "TETHER_CARD_V1\n";
 pub const TOOL_NAME: &str = "tether_publish_card";
 
-/// Claude names the tool in `name` and `_meta.claudeCode.toolName`, Codex in its title, and
-/// Tether's Hermes adapter marks its own update; none of these come from the tool's output.
+/// Claude names the tool in `name` and `_meta.claudeCode.toolName`, Codex in its title, and an
+/// adapter may mark its own update with `_meta.tether.card`; none of these come from the tool's output.
 pub fn is_publisher(object: &serde_json::Map<String, Value>) -> bool {
     let claude = format!("mcp__tether-cards__{TOOL_NAME}");
     let meta = object.get("_meta").and_then(Value::as_object);
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn captured_claude_codex_and_hermes_results_include_native_images() {
+    fn captured_claude_and_codex_results_include_native_images() {
         let fixtures: std::collections::BTreeMap<String, Value> = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-card-adapter-results.json"))).unwrap();
         for (name, update) in fixtures {
             let line = json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":update}});

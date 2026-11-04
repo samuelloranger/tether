@@ -43,11 +43,6 @@ enum ChatAgents {
     rememberedIds: ["model", "reasoning_effort", "mode"], iconAsset: "agent-copilot", tintsIcon: true,
     signInCommand: "copilot login", needsNode: false)
 
-  static let hermes = ChatAgentProfile(
-    key: "hermes", label: "Hermes", spawn: "tether hermes", marker: "tether hermes",
-    rememberedIds: ["model", "mode"], iconAsset: "agent-hermes", tintsIcon: true,
-    signInCommand: "hermes model", needsNode: false)
-
   /// Google Antigravity runs behind an npm supervisor that fetches and hardens the official
   /// `agy_acp_server` binary.
   static let antigravity = ChatAgentProfile(
@@ -55,11 +50,17 @@ enum ChatAgents {
     marker: "refined-antigravity-acp", rememberedIds: ["model", "effort", "mode"], iconAsset: "agent-antigravity",
     tintsIcon: true, signInCommand: "agy", needsNode: true)
 
-  static let all = [claude, codex, opencode, copilot, antigravity, hermes]
+  static let all = [claude, codex, opencode, copilot, antigravity]
 
   static func profile(forKey key: String?) -> ChatAgentProfile? {
     guard let key else { return nil }
     return all.first { $0.key == key }
+  }
+
+  /// A chat of an agent this app no longer offers. Saved state may still name it; such a chat is
+  /// ignored rather than shown as an unknown agent.
+  static func isRetired(localKey: String?, statusSpawn: String?) -> Bool {
+    localKey == "hermes" || (statusSpawn?.contains("tether hermes") ?? false)
   }
 
   /// An exact spawn command first, then the marker (or the bare agent name, which older listings and

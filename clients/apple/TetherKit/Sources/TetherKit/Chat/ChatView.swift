@@ -27,8 +27,6 @@ struct ChatView: View {
   /// Where finished uploads wait for their chat to be on screen.
   var uploads: ChatUploadInbox?
   var onBranch: ((ChatBranchPoint, String, String) async -> String?)?
-  /// Starts the agent again when its holder ended; Hermes has one, since it never ends.
-  var onReopen: (() async -> String?)?
   var onOpenParent: ((ChatParent) -> Void)?
   var seedAttachments = false
   #if DEBUG
@@ -51,14 +49,6 @@ struct ChatView: View {
   @State private var reviewing: ChatPermission?
   @State private var questionTyping = false
   @State private var showingControls = false
-  @State private var hermesCommands = false
-  @State private var reopening = false
-  @State private var reopenError: String?
-  @State private var hermesCommand: ACPCommand?
-  @State private var hermesCommandDraft: String?
-  @State private var hermesNewCommand = "/new"
-  @State private var hermesNewFromDraft = false
-  @State private var confirmingHermesNew = false
   @State private var workflowSheet: ChatWorkflowSelection?
   @State private var attachments = ChatAttachments()
   @State private var pickingPhotos = false
@@ -145,16 +135,6 @@ struct ChatView: View {
         for _ in 0..<100 where model.workflowTracker.runs.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
         workflowSheet = model.workflowTracker.runs.first.map { ChatWorkflowSelection(id: $0.toolCallId) }
       }
-      if ChatFixture.planMode.hasPrefix("hermes-") {
-        for _ in 0..<40 where model.state.commands.isEmpty {
-          try? await Task.sleep(for: .milliseconds(100))
-        }
-        if ChatFixture.planMode == "hermes-new" { hermesNewCommand = "/new"; confirmingHermesNew = true }
-        else {
-          if ChatFixture.planMode == "hermes-model" { hermesCommand = model.state.commands.first { $0.name == "model" } }
-          else { hermesCommands = true }
-        }
-      }
       if ChatFixture.planMode == "plan-sheet" {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         reviewing = model.state.pendingPermissions.first
@@ -190,22 +170,6 @@ struct ChatView: View {
       }
     }
     .sheet(isPresented: $showingControls) { ChatControlsSheet(model: model) }
-    .sheet(isPresented: $hermesCommands) { HermesCommandsSheet(model: model) }
-    .sheet(item: $hermesCommand) { command in
-      HermesCommandsSheet(model: model, initialCommand: command, onSent: {
-        if let original = hermesCommandDraft, draft == original { draft = "" }
-      })
-    }
-    .alert("Start fresh with Hermes?", isPresented: $confirmingHermesNew) {
-      Button("Cancel", role: .cancel) {}
-      Button("Start fresh") {
-        if model.send(hermesNewCommand) {
-          if hermesNewFromDraft { draft = "" }
-          userScrolledUp = false
-          sendTick += 1
-        }
-      }
-    } message: { Text("Hermes clears the active conversation context. Its memory and tools remain available; earlier messages stay in this thread.") }
     .sheet(item: $workflowSheet) { ChatWorkflowSheet(model: model, callId: $0.id) }
     .photosPicker(
       isPresented: $pickingPhotos, selection: $pickedPhotos, maxSelectionCount: max(1, attachments.room),
@@ -706,19 +670,6 @@ struct ChatView: View {
         Label("Started on another device. Read only.", systemImage: "eye")
           .font(.footnote).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
-      } else if model.hasEnded, onReopen != nil {
-        HStack(spacing: 8) {
-          if let reopenError {
-            Text(reopenError).font(.footnote).foregroundStyle(TetherColors.textSecondary)
-            Button("Try again") { Task { await reopen() } }.font(.footnote.weight(.semibold))
-          } else {
-            ProgressView().controlSize(.small)
-            Text("Reconnecting to Hermes…").font(.footnote).foregroundStyle(TetherColors.textSecondary)
-          }
-        }
-        .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 6)
-        .accessibilityIdentifier("chatReopening")
-        .task { await reopen() }
       } else if model.hasEnded {
         Label("This chat has ended. You can still read it.", systemImage: "moon.zzz")
           .font(.footnote).foregroundStyle(TetherColors.textSecondary)
@@ -758,30 +709,8 @@ struct ChatView: View {
 
   private var composer: some View {
     VStack(alignment: .leading, spacing: 6) {
-      if model.agent == ChatAgents.hermes {
-        HStack(spacing: 16) {
-          Button { hermesCommand = nil; hermesCommandDraft = nil; hermesCommands = true } label: { Label("Commands", systemImage: "command") }
-            .accessibilityIdentifier("hermesCommands")
-          Spacer()
-          Text("Hermes").foregroundStyle(TetherColors.textFaint)
-          if model.state.commands.contains(where: { $0.name == "new" }) {
-            Button { hermesNewCommand = "/new"; hermesNewFromDraft = false; confirmingHermesNew = true } label: { Label("New", systemImage: "plus.bubble") }
-              .disabled(!model.canSend || working).accessibilityIdentifier("hermesNew")
-          }
-        }
-        .font(.caption).foregroundStyle(TetherColors.accent)
-        .frame(minHeight: 44).padding(.horizontal, 6)
-      }
       if let query = slashQuery {
         SlashPalette(query: query, commands: model.state.commands) { command in
-          if model.agent == ChatAgents.hermes {
-            if ChatHermes.module(for: command) == .fresh {
-              hermesNewCommand = "/" + command.name; hermesNewFromDraft = true; confirmingHermesNew = true
-            } else {
-              hermesCommandDraft = draft; hermesCommand = command
-            }
-            return
-          }
           draft = ChatSlash.insertion(for: command).text
           composerFocused = true
         }
@@ -956,22 +885,7 @@ struct ChatView: View {
     return canSendNow ? TetherColors.onAccent : TetherColors.textSecondary
   }
 
-  private func reopen() async {
-    guard let onReopen, !reopening else { return }
-    reopening = true
-    reopenError = nil
-    reopenError = await onReopen()
-    reopening = false
-  }
-
   private func sendMessage() {
-    if model.agent == ChatAgents.hermes && ChatHermes.isFresh(draft) {
-      guard canSendNow, !working else { return }
-      hermesNewCommand = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-      hermesNewFromDraft = true
-      confirmingHermesNew = true
-      return
-    }
     deliverMessage()
   }
 

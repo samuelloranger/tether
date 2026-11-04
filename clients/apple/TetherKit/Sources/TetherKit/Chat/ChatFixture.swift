@@ -832,33 +832,6 @@ enum ChatFixture {
     ) { _, _ in FixtureByteStream(log: log) }
   }
 
-  @MainActor
-  static func hermesModel() -> ChatSessionModel {
-    let commands: [[String: Any]] = [
-      ["name": "new", "description": "Start fresh; keep your agent's memory"],
-      ["name": "model", "description": "Choose the model for this conversation", "input": ["hint": "model name"]],
-      ["name": "compress", "description": "Summarize context and keep going"],
-      ["name": "context", "description": "Show conversation context usage"],
-      ["name": "status", "description": "Show your agent's current status"],
-      ["name": "home", "description": "Your home and connected devices", "input": ["hint": "instructions (optional)"]],
-    ]
-    let lines = [
-      update(["sessionUpdate": "session_info_update", "title": "Your Hermes"]),
-      update(["sessionUpdate": "available_commands_update", "availableCommands": commands]),
-      update(["sessionUpdate": "config_option_update", "configOptions": [
-        option("model", "Model", "Hermes model", current: "default", [("default", "Hermes default", "Uses the gateway's current model")]),
-      ]]),
-      message("I'm here. Your tools, your home, and a place to pick things up again.\n\nAsk me something, or open **Commands** to see what I can do."),
-    ]
-    var journal = ChatJournal()
-    journal.sessionId = "sess-1"
-    journal.nextRequestId = 4
-    return ChatSessionModel(chatName: "hermes-fixture", cwd: "/opt/data/workspace", readOnly: false,
-      store: InMemoryChatJournalStore(journal), agent: ChatAgents.hermes) { _, _ in
-        FixtureByteStream(log: Data((lines.joined(separator: "\n") + "\n").utf8))
-      }
-  }
-
   /// A Codex chat: its options, a finished search, a message and a command waiting on the user.
   @MainActor
   static func codexModel() -> ChatSessionModel {
@@ -1175,7 +1148,6 @@ public struct ChatFixtureRoot: View {
       journal.branchDraft = "Retry only GET requests, with jitter and a timeout."
       initial = ChatSessionModel(chatName: "fixture-branch", cwd: "/work/api-server", readOnly: false,
         store: InMemoryChatJournalStore(journal)) { _, _ in FixtureByteStream(log: Data()) }
-    case "hermes", "hermes-commands", "hermes-model", "hermes-new": initial = ChatFixture.hermesModel()
     case "codex": initial = ChatFixture.codexModel()
     case "tasks", "tasks-open", "tasks-drawer": initial = ChatFixture.tasksModel()
     case "workflows", "workflows-sheet": initial = ChatFixture.workflowsModel()
@@ -1201,7 +1173,7 @@ public struct ChatFixtureRoot: View {
         ChatView(
           model: model, focusComposer: mode == "keyboard" || mode == "slash" || mode == "send" || mode == "send-long" || mode.hasSuffix("-kb") || mode.hasPrefix("mention"), startAtTop: mode == "scrolledup" || mode == "images-top" || mode == "send-long-top" || mode == "subagents-open-top",
           initialDraft: mode == "slash" ? "/co" : mode == "mention" ? "Look at @ma" : mode == "mention-all" ? "Compare @" : mode == "attach" ? "Compare these two screenshots" : "",
-          openControls: mode == "controls-sheet", onShowGit: mode.hasPrefix("hermes") ? nil : {}, onUpload: { _, _ in nil}, uploads: nil,
+          openControls: mode == "controls-sheet", onShowGit: {}, onUpload: { _, _ in nil}, uploads: nil,
           seedAttachments: mode == "attach",
           sendDraft: mode == "send" || mode == "send-long" ? ChatFixture.sendDraft : nil,
           probeLastRow: mode == "send-long" || mode == "send-long-top" || mode.hasPrefix("open-"))

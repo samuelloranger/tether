@@ -21,7 +21,6 @@ pub enum Step {
     Home,
     ListHome,
     Sessions,
-    HermesPrepared,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,11 +32,6 @@ pub enum Listing {
 
 pub enum Next {
     Nothing,
-    Hermes {
-        name: String,
-        cwd: String,
-        fresh: bool,
-    },
     Job(ChatJob),
     /// `multi`: the host's holders take several clients, so this one names itself.
     Open {
@@ -74,24 +68,6 @@ pub fn probe_job() -> ChatJob {
     }
 }
 
-/// `tether hermes --prepare` for this host's one conversation.
-pub fn hermes_prepare_command(name: &str) -> String {
-    format!(
-        "PATH=\"$HOME/.local/bin:$PATH\" tether hermes --prepare {}",
-        tether_core::zmx::shell_quote(name)
-    )
-}
-
-/// The prepared conversation's name, folder and whether it starts fresh.
-pub fn parse_prepared(text: &str) -> Option<(String, String, bool)> {
-    let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
-    Some((
-        value["name"].as_str()?.into(),
-        value["cwd"].as_str()?.into(),
-        value["fresh"].as_bool()?,
-    ))
-}
-
 fn exec(request: u64, step: Step, command: String) -> ChatJob {
     ChatJob::Exec {
         tag: ExecTag::NewChat { request, step },
@@ -114,7 +90,7 @@ impl NewChat {
         options: OptionsDraft,
     ) -> Self {
         Self {
-            mode: if agent == &agent::HERMES { 0 } else { mode },
+            mode,
             folder,
             busy: false,
             error: None,
@@ -150,11 +126,7 @@ impl NewChat {
     }
 
     pub fn set_mode(&mut self, mode: u8, now: Duration) -> Option<ChatJob> {
-        self.mode = if self.agent == &agent::HERMES {
-            0
-        } else {
-            mode
-        };
+        self.mode = mode;
         self.error = None;
         self.reload(now)
     }
@@ -174,9 +146,6 @@ impl NewChat {
             return None;
         }
         self.agent = agent;
-        if agent == &agent::HERMES {
-            self.mode = 0;
-        }
         self.options = options;
         self.error = None;
         self.reload(now)
@@ -264,9 +233,7 @@ impl NewChat {
         host_name: &str,
     ) -> Next {
         match step {
-            Step::Check | Step::Home | Step::HermesPrepared if request != self.request => {
-                Next::Nothing
-            }
+            Step::Check | Step::Home if request != self.request => Next::Nothing,
             Step::ListHome | Step::Sessions if request != self.list_request => Next::Nothing,
             // A host that cannot be checked is left to the chat's own dial to report.
             Step::Check => {
@@ -279,24 +246,10 @@ impl NewChat {
                     return self.stop(message);
                 }
                 self.multi = result.as_ref().is_ok_and(|o| host::host_multi_client(o));
-                if self.agent == &agent::HERMES {
-                    let name = agent::hermes_conversation_name(host_name);
-                    return Next::Job(exec(
-                        self.request,
-                        Step::HermesPrepared,
-                        hermes_prepare_command(&name),
-                    ));
-                }
                 if host::needs_home(&self.folder) {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
                 }
                 self.open_next(host::expand_cwd(&self.folder, ""))
-            }
-            Step::HermesPrepared => {
-                if let Some((name, cwd, fresh)) = result.ok().and_then(|t| parse_prepared(&t)) {
-                    return Next::Hermes { name, cwd, fresh };
-                }
-                self.stop("Couldn't open Hermes. Update tether on the host and run tether hermes --check.".into())
             }
             Step::Home => match result {
                 Ok(home) if home.trim().starts_with('/') => {

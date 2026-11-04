@@ -110,7 +110,6 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
         {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":\(now + 8280)},"weekly":{"usedPercent":68,"resetsAt":\(now + 273600)},"updatedAt":\(now),"stale":false},"codex":{"fiveHour":{"usedPercent":24,"resetsAt":\(now + 14760)},"weekly":{"usedPercent":83,"resetsAt":\(now + 115200)},"updatedAt":\(now),"stale":false}}
         """
     }
-    if command.contains("hermes --available") { return "hermes=ok" }
     if command.contains("acp status") {
       if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether: unknown acp command \"status\"" }
       func line(
@@ -132,9 +131,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
         return String(decoding: data, as: UTF8.self)
       }
       if env["TETHER_DEBUG_DRAWER"]?.hasPrefix("agents") == true || env["TETHER_DEBUG_DRAWER"]?.hasPrefix("projects") == true {
-        let hermes: [String] = env["TETHER_DEBUG_DRAWER"] == "projects-hermes"
-          ? [line("hermes-fixture", "running", "idle", "Weekend plans", "/home/dev", 900, spawn: ChatAgents.hermes.spawn)] : []
-        return (hermes + [
+        return ([
           line("chat-a1", "running", "working", "Release 6.3.1", "/home/dev/sites/tether", 600, spawn: ChatAgents.claude.spawn),
           line("chat-b2", "running", "waiting", "Fix the season-pack cleanup", "/home/dev/sites/rawkoon", 1800, spawn: ChatAgents.codex.spawn),
           line("chat-c3", "running", "idle", "Tidy the README", "/home/dev/sites/labby", 3600, spawn: ChatAgents.opencode.spawn, tasks: 1),

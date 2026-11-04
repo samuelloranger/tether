@@ -77,23 +77,12 @@ pub const ANTIGRAVITY: AgentProfile = AgentProfile {
 };
 
 /// In the order the New chat picker lists them.
-pub const HERMES: AgentProfile = AgentProfile {
-    key: "hermes",
-    label: "Hermes",
-    spawn: "tether hermes",
-    marker: "tether hermes",
-    remembered: ["model", "mode", ""],
-    sign_in_command: "hermes model",
-    needs_node: false,
-};
+pub const ALL: [&AgentProfile; 5] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &ANTIGRAVITY];
 
-pub const ALL: [&AgentProfile; 6] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &ANTIGRAVITY, &HERMES];
-
-pub fn hermes_conversation_name(scope: &str) -> String {
-    let hash = scope.bytes().fold(14_695_981_039_346_656_037_u64, |h, b| {
-        (h ^ u64::from(b)).wrapping_mul(1_099_511_628_211)
-    });
-    format!("hermes-{hash:x}")
+/// A chat of an agent this build no longer offers. Saved state may still name it; such a chat is
+/// ignored rather than shown as an unknown agent.
+pub fn is_retired(local_key: Option<&str>, status_spawn: &str) -> bool {
+    local_key == Some("hermes") || status_spawn.contains("tether hermes")
 }
 
 /// What a chat with an agent this build does not know is called.
@@ -194,22 +183,11 @@ mod tests {
     }
 
     #[test]
-    fn hermes_is_one_scoped_conversation_without_node() {
-        assert_eq!(for_spawn("tether hermes"), Some(&HERMES));
-        assert!(!for_spawn("tether hermes").unwrap().needs_node);
-        assert_eq!(
-            hermes_conversation_name("server:22"),
-            "hermes-6d10ccc02fbceea4"
-        );
-        assert_ne!(
-            hermes_conversation_name("server:22"),
-            hermes_conversation_name("server:2222")
-        );
-        assert!(super::super::host::host_problems_for("node=missing", &HERMES).is_empty());
-        assert_eq!(
-            super::super::host::host_problems_for("hermes=missing", &HERMES),
-            vec![super::super::host::HostProblem::HermesMissing]
-        );
+    fn a_chat_of_the_retired_agent_is_recognised() {
+        assert!(is_retired(Some("hermes"), ""));
+        assert!(is_retired(None, "tether hermes"));
+        assert!(!is_retired(Some("claude"), "npx -y claude-agent-acp"));
+        assert!(!is_retired(None, ""));
     }
 
     #[test]

@@ -131,8 +131,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, "tether: replaced by another client")
 			os.Exit(5)
 		}
-	case "hermes":
-		err = runHermes(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -146,7 +144,6 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `tether — the Tether host tool: encrypted push, agent state, chats
 
-  hermes [--check | --available | --prepare NAME]  open the existing Hermes gateway through ACP
   version [--json]                           print the version and the protocol number the app checks
   register <token> <secretKeyB64> [label]   register/replace a phone
   notify --title T --body B [--link L] [--category C] [--collapse ID] [--dry-run]

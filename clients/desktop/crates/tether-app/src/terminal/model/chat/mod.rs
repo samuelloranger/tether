@@ -36,9 +36,6 @@ pub const POLL_WITH_CHATS: Duration = Duration::from_secs(5);
 pub const POLL_WITHOUT: Duration = Duration::from_secs(10);
 /// Streaming redraws at most this often; the newest state wins.
 pub const FRAME: Duration = Duration::from_millis(33);
-/// The probe looks for Hermes's interpreter or container, which rarely changes.
-const HERMES_RECHECK: Duration = Duration::from_secs(600);
-const HERMES_RETRY: Duration = Duration::from_secs(30);
 const FOLDER_COPIED_FOR: Duration = Duration::from_millis(1300);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,10 +73,6 @@ pub enum ExecTag {
     },
     /// The host check the New chat dialog runs as it opens, to dim the agents the host can't run.
     AgentProbe,
-    /// Whether the host has Hermes set up (`tether hermes --available`).
-    HermesProbe,
-    /// `tether hermes --prepare` for the sidebar's Hermes entry.
-    HermesStart,
     /// The words a running turn shows (see `acp::verbs`).
     Verbs,
 }
@@ -164,7 +157,6 @@ pub enum ChatJob {
 pub enum ChatMsg {
     // From the window.
     Select(String),
-    StartHermes,
     Actions(String),
     ActionsClose,
     Pin(String),
@@ -347,12 +339,6 @@ pub struct Chats {
     plan_usage: tether_core::acp::organization::PlanUsage,
     usage_asked: Option<Duration>,
     usage_loading: bool,
-    /// The host's answer to the Hermes probe; `None` until it gave one.
-    hermes_configured: Option<bool>,
-    hermes_due: Duration,
-    hermes_revive_due: Duration,
-    hermes_probing: bool,
-    hermes_starting: bool,
     pub(super) usage_visible: bool,
     organization_error: String,
     defaults: ChatDefaults,
@@ -456,11 +442,6 @@ impl Chats {
             plan_usage: Default::default(),
             usage_asked: None,
             usage_loading: false,
-            hermes_configured: None,
-            hermes_due: Duration::ZERO,
-            hermes_revive_due: Duration::ZERO,
-            hermes_probing: false,
-            hermes_starting: false,
             usage_visible: true,
             organization_error: String::new(),
             defaults: ChatDefaults::default(),
@@ -563,8 +544,6 @@ impl Chats {
         self.connected = false;
         self.polling = false;
         self.usage_loading = false;
-        self.hermes_probing = false;
-        self.hermes_starting = false;
         // A dropped connection never answers the organize exec; keep the dialog for a retry.
         if let Some((name, _)) = self.pending_branch.take() {
             if let Some(files) = &self.files {
@@ -587,8 +566,6 @@ impl Chats {
 
     pub fn on_tick(&mut self, now: Duration, out: &mut Out) {
         self.poll_usage(now, out);
-        self.poll_hermes(now, out);
-        self.revive_hermes(now, out);
         let every = if self.has_chats() {
             POLL_WITH_CHATS
         } else {
@@ -953,89 +930,6 @@ impl Chats {
         self.focus_seq += 1;
     }
 
-    /// Opens the host's prepared Hermes conversation; a fresh one drops what this device kept of it.
-    fn open_hermes(
-        &mut self,
-        name: String,
-        cwd: String,
-        fresh: bool,
-        now: Duration,
-        out: &mut Out,
-    ) {
-        if fresh {
-            if let Some(files) = &self.files {
-                files.clear(&name);
-            }
-            self.sessions.remove(&name);
-            self.listed.retain(|c| c.name != name);
-            self.provisional.retain(|c| c.name != name);
-            if self.active.as_deref() == Some(&name) {
-                self.active = None;
-            }
-            self.open_route(
-                name,
-                cwd,
-                None,
-                true,
-                &agent::HERMES,
-                StartOptions::Reset,
-                now,
-                out,
-            );
-        } else {
-            if !self.ordered().iter().any(|c| c.name == name) {
-                let mut row = ChatSummary::new(&name, &cwd);
-                row.spawn = agent::HERMES.spawn.into();
-                row.multi_client = true;
-                self.provisional.push(row);
-            }
-            self.select(&name, now, out);
-        }
-    }
-
-    /// The sidebar's Hermes entry, and an ended Hermes chat in it: `--prepare` restarts the holder.
-    fn start_hermes(&mut self, out: &mut Out) {
-        if !self.connected || self.hermes_starting {
-            return;
-        }
-        self.hermes_starting = true;
-        out.jobs.push(ChatJob::Exec {
-            tag: ExecTag::HermesStart,
-            command: newchat::hermes_prepare_command(&agent::hermes_conversation_name(&self.scope)),
-        });
-    }
-
-    fn is_ended_hermes(&self, name: &str) -> bool {
-        self.ordered()
-            .into_iter()
-            .find(|c| c.name == name)
-            .is_some_and(|c| !c.is_running && self.agent_of(c) == Some(&agent::HERMES))
-    }
-
-    /// The open chat is a Hermes whose holder stopped: start it again rather than show it ended.
-    fn revive_hermes(&mut self, now: Duration, out: &mut Out) {
-        let Some(name) = self.active.clone() else {
-            return;
-        };
-        if now < self.hermes_revive_due || !self.is_ended_hermes(&name) {
-            return;
-        }
-        self.hermes_revive_due = now + HERMES_RETRY;
-        self.start_hermes(out);
-    }
-
-    fn poll_hermes(&mut self, now: Duration, out: &mut Out) {
-        if !self.connected || self.hermes_probing || now < self.hermes_due {
-            return;
-        }
-        self.hermes_probing = true;
-        self.hermes_due = now + HERMES_RECHECK;
-        out.jobs.push(ChatJob::Exec {
-            tag: ExecTag::HermesProbe,
-            command: host::hermes_available_command(),
-        });
-    }
-
     pub fn take_new_chat_when_ready(&mut self) -> bool {
         std::mem::take(&mut self.new_chat_when_ready)
     }
@@ -1071,36 +965,7 @@ impl Chats {
         match msg {
             #[cfg(debug_assertions)]
             ChatMsg::DevSample(agent) => self.dev_sample(&agent, now),
-            ChatMsg::Select(name) => {
-                if self.is_ended_hermes(&name) {
-                    self.start_hermes(out);
-                } else {
-                    self.select(&name, now, out);
-                }
-            }
-            ChatMsg::StartHermes => self.start_hermes(out),
-            ChatMsg::ExecDone {
-                tag: ExecTag::HermesProbe,
-                result,
-            } => {
-                self.hermes_probing = false;
-                match result.ok().and_then(|o| host::hermes_configured(&o)) {
-                    Some(configured) => self.hermes_configured = Some(configured),
-                    None => self.hermes_due = now + HERMES_RETRY,
-                }
-            }
-            ChatMsg::ExecDone {
-                tag: ExecTag::HermesStart,
-                result,
-            } => {
-                self.hermes_starting = false;
-                match result.ok().and_then(|t| newchat::parse_prepared(&t)) {
-                    Some((name, cwd, fresh)) => self.open_hermes(name, cwd, fresh, now, out),
-                    None => {
-                        self.organization_error = "Couldn't open Hermes. Update tether on the host and run tether hermes --check.".into();
-                    }
-                }
-            }
+            ChatMsg::Select(name) => self.select(&name, now, out),
             ChatMsg::Delete(name) => self.delete_prompt = Some(name),
             ChatMsg::NewChatWhenReady => self.new_chat_when_ready = true,
             ChatMsg::DeleteCancelled => {
@@ -1175,16 +1040,7 @@ impl Chats {
                 let Some(nc) = self.new_chat.as_mut() else {
                     return;
                 };
-                let host = if nc.agent == &agent::HERMES {
-                    self.scope.clone()
-                } else {
-                    self.host.clone()
-                };
-                match nc.on_exec(request, step, result, &host) {
-                    newchat::Next::Hermes { name, cwd, fresh } => {
-                        self.new_chat = None;
-                        self.open_hermes(name, cwd, fresh, now, out);
-                    }
+                match nc.on_exec(request, step, result, &self.host) {
                     newchat::Next::Nothing => {}
                     newchat::Next::Job(job) => out.jobs.push(job),
                     newchat::Next::Open {

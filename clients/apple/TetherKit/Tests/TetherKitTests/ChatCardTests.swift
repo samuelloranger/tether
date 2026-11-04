@@ -12,7 +12,7 @@ final class ChatCardTests: XCTestCase {
     let card = try XCTUnwrap(builder.state.items.firstIndex { if case .card = $0.kind { return true }; return false })
     XCTAssertGreaterThan(card, user)
   }
-  func test_captured_claude_codex_and_hermes_tool_results_render_cards_and_images() throws {
+  func test_captured_claude_and_codex_tool_results_render_cards_and_images() throws {
     let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/chat-card-adapter-results.json")
     let fixtures = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: [String: Any]])
     for (name, update) in fixtures {

@@ -84,7 +84,7 @@ export struct ChatTabVm {
     state: int,
     label: string,
     active: bool,
-    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, 4 Hermes, -1 an agent not known here
+    agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, 4 Antigravity, -1 an agent not known here
 }
 
 export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, }
@@ -215,11 +215,6 @@ export global ChatVm {
     in property <string> actions-name;
     in property <string> actions-title;
     in property <bool> actions-pinned;
-    in property <bool> actions-hermes;
-    // Hermes's line above the terminals; `hermes-start` when the host has no conversation yet.
-    in property <bool> hermes-shown;
-    in property <bool> hermes-start;
-    in property <ChatTabVm> hermes-tab;
     in property <bool> actions-archived;
     in property <bool> rename-open;
     in-out property <string> rename-title;
@@ -374,7 +369,6 @@ export global ChatVm {
     in property <string> delete-title;
 
     callback select(string);
-    callback start-hermes();
     callback delete(string);
     callback delete-confirmed();
     callback delete-cancelled();
@@ -492,7 +486,6 @@ component AgentMark inherits Rectangle {
     if root.agent == 2: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-opencode.svg"); colorize: root.ink; }
     if root.agent == 3: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-copilot.svg"); colorize: root.ink; }
     if root.agent == 4: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-antigravity.svg"); colorize: root.ink; }
-    if root.agent == 5: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/agent-hermes.svg"); colorize: root.ink; }
     if root.agent < 0 || root.agent > 5: Image { width: 100%; height: 100%; image-fit: contain; source: @image-url("icons/chat.svg"); colorize: root.ink; }
 }
 
@@ -2567,7 +2560,7 @@ component NcMenu inherits Rectangle {
 // agent over a popup list that dims the ones this host cannot run.
 component NcAgentSelect inherits Rectangle {
     in property <int> current-agent;
-    in property <[string]> agent-labels: ["Claude", "Codex", "opencode", "Copilot", "Antigravity", "Hermes"];
+    in property <[string]> agent-labels: ["Claude", "Codex", "opencode", "Copilot", "Antigravity"];
     in property <[bool]> unavailable;
     callback picked(int);
 
@@ -2720,7 +2713,7 @@ export component NewChatDialog inherits Rectangle {
                 Text { horizontal-stretch: 1; text: ChatVm.nc-mode == 0 ? "New chat" : "Continue a chat"; font-size: 16px; font-weight: 650; color: Tokens.text; vertical-alignment: center; }
                 IconButton { flat: true; size: 28px; icon: @image-url("icons/close.svg"); tooltip: "Cancel · Esc"; clicked => { ChatVm.nc-cancel(); } }
             }
-            if ChatVm.nc-agent != 5: Segment {
+            Segment {
                 options: ["New", "Continue"];
                 selected <=> ChatVm.nc-mode;
                 changed(i) => { ChatVm.nc-mode-changed(i); }
@@ -2734,7 +2727,7 @@ export component NewChatDialog inherits Rectangle {
                     picked(i) => { ChatVm.nc-agent-picked(i); }
                 }
             }
-            if ChatVm.nc-agent != 5: VerticalLayout {
+            VerticalLayout {
                 spacing: 5px;
                 Text { text: "Working folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
                 Rectangle {
@@ -2766,8 +2759,7 @@ export component NewChatDialog inherits Rectangle {
                 }
             }
             if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
-            if ChatVm.nc-agent == 5: Wrapped { text: "One persistent conversation on this host. Manage models, skills and settings from chat commands."; font-size: 13px; ink: Tokens.text-secondary; }
-            if ChatVm.nc-agent != 5: Rectangle {
+            Rectangle {
                 background: Tokens.surface;
                 border-radius: 10px;
                 border-width: 1px;
@@ -2824,7 +2816,7 @@ export component NewChatDialog inherits Rectangle {
                 alignment: end;
                 spacing: 8px;
                 SmallAction { text: "Cancel"; clicked => { ChatVm.nc-cancel(); } }
-                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : ChatVm.nc-agent == 5 ? "Open Hermes" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
+                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 0: HorizontalLayout {
                 spacing: 8px;
@@ -2878,8 +2870,6 @@ export component NewChatDialog inherits Rectangle {
 // One chat in the sidebar's Chats section.
 export component ChatSidebarRow inherits Rectangle {
     in property <ChatTabVm> tab;
-    // Hermes on a host where it is set up but has no conversation yet: no chat, so no menu.
-    in property <bool> start;
     callback picked();
     height: 30px;
     border-radius: 8px;
@@ -2918,9 +2908,9 @@ export component ChatSidebarRow inherits Rectangle {
     }
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { if (root.start) { ChatVm.start-hermes(); } else { ChatVm.select(root.tab.name); } root.picked(); }
+        clicked => { ChatVm.select(root.tab.name); root.picked(); }
     }
-    if !root.start && (touch.has-hover || close-touch.has-hover): Rectangle {
+    if (touch.has-hover || close-touch.has-hover): Rectangle {
         x: parent.width - 8px - 16px;
         y: (parent.height - 16px) / 2;
         width: 16px;
@@ -2939,7 +2929,6 @@ export component ChatSidebarRow inherits Rectangle {
         }
     }
     close-touch := TouchArea {
-        enabled: !root.start;
         x: parent.width - 8px - 16px;
         y: (parent.height - 16px) / 2;
         width: 16px;
