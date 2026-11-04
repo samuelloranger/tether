@@ -127,8 +127,9 @@ impl server::Handler for ConnHandler {
     async fn auth_publickey_offered(
         &mut self,
         _user: &str,
-        key: &PublicKey,
+        key: server::PublicKeyOffer<'_>,
     ) -> Result<Auth, Self::Error> {
+        let key = key.public_key;
         self.shared.state.lock().unwrap().auth_attempts += 1;
         let ok = self
             .shared
@@ -139,7 +140,12 @@ impl server::Handler for ConnHandler {
         Ok(if ok { Auth::Accept } else { Auth::reject() })
     }
 
-    async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(
+        &mut self,
+        _user: &str,
+        key: server::VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
+        let key = key.public_key;
         let ok = self
             .shared
             .opts
