@@ -42,27 +42,6 @@ func TestChatCardsRegistrationPreservesServersAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestHermesCardServerMayReadImagesFromHermesHome(t *testing.T) {
-	line := []byte(`{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/w","mcpServers":[]}}`)
-	for spawn, want := range map[string]bool{"tether hermes": true, "npx -y @agentclientprotocol/claude-agent-acp": false} {
-		var msg struct {
-			Params struct {
-				Servers []struct {
-					Env []struct{ Name, Value string }
-				} `json:"mcpServers"`
-			}
-		}
-		if err := json.Unmarshal(withChatCards(line, spawn), &msg); err != nil || len(msg.Params.Servers) != 1 {
-			t.Fatalf("%s: %v", spawn, err)
-		}
-		env := msg.Params.Servers[0].Env
-		has := len(env) == 1 && env[0].Name == "TETHER_CARD_IMAGE_ROOT" && env[0].Value == "~"
-		if has != want {
-			t.Fatalf("%s: image root %v, want %v", spawn, has, want)
-		}
-	}
-}
-
 func TestEmbeddedCardPublisherIsDiscoverableByAnMCPClient(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {

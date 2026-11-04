@@ -382,10 +382,6 @@ impl DrawerChatRow {
         self.state != DrawerChatState::Ended
     }
 
-    pub fn is_hermes(&self) -> bool {
-        self.agent == Some(&agent::HERMES)
-    }
-
     pub fn state_label(&self) -> &'static str {
         self.state.label()
     }
@@ -393,9 +389,8 @@ impl DrawerChatRow {
 
 /// The host's title, else the stored agent title, else the folder name. The subtitle is the
 /// folder, or the path above it when the folder is already the title; a chat with another agent
-/// than Claude leads it with the agent's name. Hermes is one conversation per host, not a folder's
-/// chat: it is titled Hermes unless renamed and has no subtitle. `local_agents` holds the agent key this device
-/// recorded for the chats it started.
+/// than Claude leads it with the agent's name. `local_agents` holds the agent key this device
+/// recorded for the chats it started. A chat of a retired agent (see `agent::is_retired`) is left out.
 pub fn drawer_rows(
     chats: &[ChatSummary],
     titles: &HashMap<String, String>,
@@ -403,6 +398,12 @@ pub fn drawer_rows(
 ) -> Vec<DrawerChatRow> {
     chats
         .iter()
+        .filter(|chat| {
+            !agent::is_retired(
+                local_agents.get(&chat.name).map(String::as_str),
+                &chat.spawn,
+            )
+        })
         .map(|chat| {
             let agent = agent::resolve(
                 local_agents.get(&chat.name).map(String::as_str),
@@ -410,35 +411,23 @@ pub fn drawer_rows(
             );
             let custom = (!chat.organization.custom_title.is_empty())
                 .then(|| chat.organization.custom_title.clone());
-            let (title, subtitle) = if agent == Some(&agent::HERMES) {
-                (
-                    custom.unwrap_or_else(|| agent::HERMES.label.to_string()),
-                    String::new(),
-                )
+            let folder = folder_name(&chat.cwd);
+            let stored = titles.get(&chat.name).filter(|t| !t.is_empty());
+            let title = custom
+                .or_else(|| chat.host_title.clone())
+                .or_else(|| stored.cloned())
+                .unwrap_or_else(|| folder.clone());
+            let subtitle = if title == folder {
+                super::format::parent_path(&chat.cwd).unwrap_or_else(|| chat.cwd.clone())
             } else {
-                let folder = folder_name(&chat.cwd);
-                let stored = titles.get(&chat.name).filter(|t| !t.is_empty());
-                let title = custom
-                    .or_else(|| chat.host_title.clone())
-                    .or_else(|| stored.cloned())
-                    .unwrap_or_else(|| folder.clone());
-                let subtitle = if title == folder {
-                    super::format::parent_path(&chat.cwd).unwrap_or_else(|| chat.cwd.clone())
-                } else {
-                    folder
-                };
-                let subtitle = if agent == Some(&CLAUDE) {
-                    subtitle
-                } else {
-                    format!("{} \u{b7} {subtitle}", agent::label(agent))
-                };
-                (title, subtitle)
+                folder
             };
-            let state = match DrawerChatState::of(chat) {
-                // Hermes never ends: a stopped holder is started again when the chat is opened.
-                DrawerChatState::Ended if agent == Some(&agent::HERMES) => DrawerChatState::Idle,
-                state => state,
+            let subtitle = if agent == Some(&CLAUDE) {
+                subtitle
+            } else {
+                format!("{} \u{b7} {subtitle}", agent::label(agent))
             };
+            let state = DrawerChatState::of(chat);
             DrawerChatRow {
                 name: chat.name.clone(),
                 title,
@@ -451,51 +440,6 @@ pub fn drawer_rows(
             }
         })
         .collect()
-}
-
-/// What the sidebar's Assistant line shows: the host's Hermes conversation, or a way to start it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HermesEntry {
-    Chat(String),
-    Start,
-}
-
-/// `conversation` is the name this device gives the host's Hermes chat; another Hermes chat stands
-/// in for it. `configured` is the host's answer to `tether hermes --available`, `None` until asked.
-pub fn hermes_entry(
-    rows: &[DrawerChatRow],
-    conversation: &str,
-    configured: Option<bool>,
-) -> Option<HermesEntry> {
-    let mut candidates = rows.iter().filter(|r| r.is_hermes() && !r.archived);
-    let first = candidates.clone().find(|r| r.name == conversation);
-    if let Some(row) = first.or_else(|| candidates.next()) {
-        return Some(HermesEntry::Chat(row.name.clone()));
-    }
-    (configured == Some(true)).then_some(HermesEntry::Start)
-}
-
-/// The control exec returns no exit status, so the answer is a line.
-pub fn hermes_available_command() -> String {
-    format!(
-        "sh -c {}",
-        shell_quote(concat!(
-            "PATH=\"$HOME/.local/bin:$PATH\"; if tether hermes --available </dev/null >/dev/null 2>&1; ",
-            "then echo hermes=ok; else echo hermes=missing; fi"
-        ))
-    )
-}
-
-/// `None` when the output is neither answer, as from a host that could not be asked.
-pub fn hermes_configured(output: &str) -> Option<bool> {
-    let lines: Vec<&str> = lines_of(output).map(str::trim).collect();
-    if lines.contains(&"hermes=ok") {
-        Some(true)
-    } else if lines.contains(&"hermes=missing") {
-        Some(false)
-    } else {
-        None
-    }
 }
 
 /// A chat other than the open one is waiting on an answer; the drawer button says so because
@@ -787,7 +731,6 @@ pub enum HostProblem {
     NodeMissing,
     OpencodeMissing,
     CopilotMissing,
-    HermesMissing,
 }
 
 /// A POSIX script run through `sh -c` so the host's login shell (fish, say) does not matter.
@@ -811,7 +754,6 @@ pub const HOST_CHECK_SCRIPT: &str = concat!(
     "if command -v copilot >/dev/null 2>&1 ",
     "|| $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; ",
     "then echo copilot=ok; else echo copilot=missing; fi",
-    "; if $T tether hermes --available </dev/null >/dev/null 2>&1; then echo hermes=ok; else echo hermes=missing; fi",
 );
 
 pub fn host_check_command() -> String {
@@ -853,9 +795,6 @@ pub fn host_problems(output: &str) -> Vec<HostProblem> {
     if lines.contains(&"copilot=missing") {
         found.push(HostProblem::CopilotMissing);
     }
-    if lines.contains(&"hermes=missing") {
-        found.push(HostProblem::HermesMissing);
-    }
     found
 }
 
@@ -866,7 +805,6 @@ pub fn host_problems_for(output: &str, agent: &AgentProfile) -> Vec<HostProblem>
         .filter(|p| match p {
             HostProblem::OpencodeMissing => agent.key == agent::OPENCODE.key,
             HostProblem::CopilotMissing => agent.key == agent::COPILOT.key,
-            HostProblem::HermesMissing => agent.key == agent::HERMES.key,
             HostProblem::NodeMissing => agent.needs_node,
             _ => true,
         })
@@ -884,7 +822,6 @@ pub fn agent_unavailable(output: &str, agent: &AgentProfile, host: &str) -> Opti
                 HostProblem::NodeMissing
                     | HostProblem::OpencodeMissing
                     | HostProblem::CopilotMissing
-                    | HostProblem::HermesMissing
             )
         })
         .collect();
@@ -929,9 +866,6 @@ pub fn host_problem_message(problems: &[HostProblem], host: &str) -> Option<Stri
         parts.push(format!(
             "Install the GitHub Copilot CLI on {host}, or check it is on the PATH of a login shell."
         ));
-    }
-    if problems.contains(&HostProblem::HermesMissing) {
-        parts.push(format!("Update tether and start the Hermes gateway on {host}. Run tether hermes --check there to check its setup."));
     }
     Some(parts.join(" "))
 }
@@ -1077,63 +1011,17 @@ mod tests {
     }
 
     #[test]
-    fn hermes_rows_are_titled_hermes_without_a_folder() {
-        let mut hermes = ChatSummary::new("hermes-1", "/home/dev");
-        hermes.spawn = agent::HERMES.spawn.to_string();
-        hermes.host_title = Some("Weekend plans".into());
-        let mut renamed = ChatSummary::new("hermes-2", "/home/dev");
-        renamed.spawn = agent::HERMES.spawn.to_string();
-        renamed.organization.custom_title = "Jarvis".into();
-        let rows = drawer_rows(&[hermes, renamed], &HashMap::new(), &HashMap::new());
+    fn chats_of_the_retired_agent_are_left_out_of_the_drawer() {
+        let mut old = ChatSummary::new("old", "/home/dev");
+        old.spawn = "tether hermes".to_string();
+        let saved = ChatSummary::new("saved", "/home/dev");
+        let kept = ChatSummary::new("kept", "/home/dev");
+        let local = HashMap::from([("saved".to_string(), "hermes".to_string())]);
+        let rows = drawer_rows(&[old, saved, kept], &HashMap::new(), &local);
         assert_eq!(
-            (rows[0].title.as_str(), rows[0].subtitle.as_str()),
-            ("Hermes", "")
+            rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["kept"]
         );
-        assert_eq!(
-            (rows[1].title.as_str(), rows[1].subtitle.as_str()),
-            ("Jarvis", "")
-        );
-        assert!(rows[0].is_hermes());
-    }
-
-    fn hermes_row(name: &str, archived: bool) -> DrawerChatRow {
-        let mut chat = ChatSummary::new(name, "/home/dev");
-        chat.spawn = agent::HERMES.spawn.to_string();
-        chat.organization.archived = archived;
-        drawer_rows(&[chat], &HashMap::new(), &HashMap::new()).remove(0)
-    }
-
-    #[test]
-    fn hermes_entry_prefers_this_devices_conversation_and_needs_a_setup_to_start() {
-        let rows = [
-            hermes_row("hermes-other", false),
-            hermes_row("hermes-mine", false),
-        ];
-        assert_eq!(
-            hermes_entry(&rows, "hermes-mine", None),
-            Some(HermesEntry::Chat("hermes-mine".into()))
-        );
-        assert_eq!(
-            hermes_entry(&rows, "hermes-gone", Some(false)),
-            Some(HermesEntry::Chat("hermes-other".into())),
-            "A Hermes chat on the host is enough: Hermes is set up there"
-        );
-        assert_eq!(hermes_entry(&[], "h", Some(true)), Some(HermesEntry::Start));
-        assert_eq!(hermes_entry(&[], "h", Some(false)), None);
-        assert_eq!(hermes_entry(&[], "h", None), None);
-        assert_eq!(
-            hermes_entry(&[hermes_row("h", true)], "h", Some(true)),
-            Some(HermesEntry::Start)
-        );
-    }
-
-    #[test]
-    fn hermes_probe_output_is_ok_missing_or_unknown() {
-        assert_eq!(hermes_configured("hermes=ok\n"), Some(true));
-        assert_eq!(hermes_configured("motd\r\n hermes=missing \n"), Some(false));
-        assert_eq!(hermes_configured(""), None);
-        assert_eq!(hermes_configured("tether: not found"), None);
-        assert!(hermes_available_command().starts_with("sh -c "));
     }
 
     #[test]
@@ -1532,7 +1420,6 @@ mod tests {
                 "if command -v npx >/dev/null 2>&1; then echo node=ok; else echo node=missing; fi",
                 "if command -v opencode >/dev/null 2>&1 || [ -x \"$HOME/.opencode/bin/opencode\" ] || PATH=\"$HOME/.opencode/bin:$PATH\" $T \"${SHELL:-sh}\" -lc \"command -v opencode\" </dev/null >/dev/null 2>&1; then echo opencode=ok; else echo opencode=missing; fi",
                 "if command -v copilot >/dev/null 2>&1 || $T \"${SHELL:-sh}\" -lc \"command -v copilot\" </dev/null >/dev/null 2>&1; then echo copilot=ok; else echo copilot=missing; fi",
-                "if $T tether hermes --available </dev/null >/dev/null 2>&1; then echo hermes=ok; else echo hermes=missing; fi",
             ]
             .join("; ")
         );

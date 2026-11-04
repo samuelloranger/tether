@@ -68,40 +68,14 @@ final class ChatOrganizationTests: XCTestCase {
     XCTAssertTrue(rows.first { $0.name == "b" }?.isRunning == true, "Archive does not end an agent")
   }
 
-  func test_hermes_sits_on_its_own_line_without_a_folder() {
+  func test_a_chat_of_a_retired_agent_is_left_out_of_the_drawer() {
     let listing = ACPChatStatusListing.parse("""
-      {"name":"hermes-1","state":"running","cwd":"/home/dev","projectRoot":"/home/dev","title":"Weekend plans","spawn":"tether hermes","pinned":true}
-      {"name":"c","state":"running","cwd":"/home/dev","projectRoot":"/home/dev","spawn":"claude"}
+      {"name":"old","state":"running","cwd":"/home/dev","spawn":"tether hermes"}
+      {"name":"saved","state":"ended","cwd":"/home/dev"}
+      {"name":"c","state":"running","cwd":"/home/dev","spawn":"claude"}
       """)
-    let rows = DrawerChatRows.rows(chats: listing.chats, titles: [:])
-    let hermes = rows[0]
-    XCTAssertEqual(hermes.title, "Hermes")
-    XCTAssertEqual(hermes.subtitle, "")
-    XCTAssertNil(hermes.agentLabel)
-    let entry = ChatOrganization.hermes(rows, conversation: "hermes-1", configured: nil)
-    XCTAssertEqual(entry, .chat(hermes), "A Hermes chat on the host is enough: Hermes is set up there")
-    XCTAssertEqual(ChatOrganization.groups(rows, excluding: entry?.row?.name).flatMap { $0.rows.map(\.name) }, ["c"])
-    XCTAssertEqual(ChatOrganization.pinned(rows, excluding: entry?.row?.name), [])
-  }
-
-  func test_a_renamed_hermes_keeps_its_name_and_another_device_conversation_stands_in() {
-    let listing = ACPChatStatusListing.parse("""
-      {"name":"hermes-other","state":"ended","cwd":"/home/dev","spawn":"tether hermes","customTitle":"Jarvis"}
-      """)
-    let rows = DrawerChatRows.rows(chats: listing.chats, titles: [:])
-    XCTAssertEqual(rows[0].title, "Jarvis")
-    XCTAssertEqual(ChatOrganization.hermes(rows, conversation: "hermes-mine", configured: false)?.row?.name, "hermes-other")
-  }
-
-  func test_an_ended_hermes_reads_idle_and_is_started_again() {
-    let rows = DrawerChatRows.rows(chats: ACPChatStatusListing.parse("""
-      {"name":"h","state":"ended","endedReason":"exited","cwd":"/home/dev","spawn":"tether hermes"}
-      {"name":"c","state":"ended","cwd":"/srv/a","spawn":"claude"}
-      """).chats, titles: [:])
-    XCTAssertEqual(rows[0].state, .idle)
-    XCTAssertTrue(rows[0].hostEnded)
-    XCTAssertEqual(rows[1].state, .ended, "Other agents still end")
-    XCTAssertFalse(rows[1].hostEnded)
+    let rows = DrawerChatRows.rows(chats: listing.chats, titles: [:], agents: ["saved": "hermes"])
+    XCTAssertEqual(rows.map(\.name), ["c"])
   }
 
   func test_a_restarted_chat_with_the_same_name_gets_a_new_view() {
@@ -114,19 +88,6 @@ final class ChatOrganizationTests: XCTestCase {
     restarted.startedHere = true
     content.open(restarted)
     XCTAssertNotEqual(content.viewID, before)
-  }
-
-  func test_hermes_shows_only_where_it_is_set_up() {
-    XCTAssertEqual(ChatOrganization.hermes([], conversation: "h", configured: true), .start)
-    XCTAssertNil(ChatOrganization.hermes([], conversation: "h", configured: false))
-    XCTAssertNil(ChatOrganization.hermes([], conversation: "h", configured: nil), "Not asked yet: nothing shows")
-    let archived = DrawerChatRows.rows(chats: ACPChatStatusListing.parse("""
-      {"name":"h","state":"running","cwd":"/home/dev","spawn":"tether hermes","archived":true}
-      """).chats, titles: [:])
-    XCTAssertEqual(ChatOrganization.hermes(archived, conversation: "h", configured: true), .start)
-    XCTAssertEqual(ACPHostCommand.hermesConfigured("hermes=ok\n"), true)
-    XCTAssertEqual(ACPHostCommand.hermesConfigured("hermes=missing"), false)
-    XCTAssertNil(ACPHostCommand.hermesConfigured(""))
   }
 
   func test_quota_missing_is_not_zero_and_stale_reset_times_are_honest() throws {

@@ -470,13 +470,9 @@ pub struct ChatScreen {
     pub active: bool,
     pub tabs: Vec<TabView>,
     pub sidebar: Vec<SidebarView>,
-    /// Hermes, on its own line above the terminals rather than in a project.
-    pub hermes: Option<HermesLine>,
     pub archived: bool,
     pub archived_count: usize,
     pub actions: Option<(String, String, bool, bool)>,
-    /// The chat in the actions menu is Hermes, which has no folder to pin it by.
-    pub actions_hermes: bool,
     pub rename: Option<String>,
     pub rename_title: String,
     pub branch: Option<(String, String, String)>,
@@ -519,12 +515,6 @@ pub struct SidebarView {
     pub tab: Option<TabView>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum HermesLine {
-    Chat(TabView),
-    /// Hermes is set up on the host but has no conversation yet.
-    Start,
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageView {
     pub provider: String,

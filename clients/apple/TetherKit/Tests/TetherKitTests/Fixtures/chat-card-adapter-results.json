@@ -144,35 +144,5 @@
       },
       "error": null
     }
-  },
-  "hermes-weather": {
-    "content": [],
-    "rawOutput": "TETHER_CARD_V1\n{\"version\": 1, \"id\": \"weather-montreal\", \"revision\": 1, \"kind\": \"weather\", \"title\": \"Montr\\u00e9al weather\", \"fallback\": \"Montr\\u00e9al: 4\\u00b0C, light rain.\", \"fetchedAt\": \"2026-11-01T08:00:00-05:00\", \"source\": \"Fixture data, not live observations\", \"payload\": {\"location\": \"Montr\\u00e9al, QC\", \"timeZone\": \"America/Toronto\", \"unit\": \"C\", \"temperature\": 4, \"feelsLike\": 1, \"conditions\": \"Light rain\", \"hourly\": [{\"time\": \"2026-11-01T09:00:00-05:00\", \"temperature\": 5, \"conditions\": \"Cloudy\", \"precipitation\": 20, \"label\": \"Sun 09:00\"}]}}",
-    "status": "completed",
-    "toolCallId": "hermes-weather",
-    "sessionUpdate": "tool_call_update"
-  },
-  "hermes-docker": {
-    "content": [],
-    "rawOutput": "TETHER_CARD_V1\n{\"version\": 1, \"id\": \"docker-lab\", \"revision\": 1, \"kind\": \"docker\", \"title\": \"Homelab containers\", \"fallback\": \"2 containers, one unhealthy.\", \"fetchedAt\": \"2026-11-01T08:00:00-05:00\", \"source\": \"Fixture data, not live observations\", \"payload\": {\"host\": \"homelab \\u00b7 fixture\", \"containers\": [{\"id\": \"a123\", \"name\": \"jellyfin\", \"state\": \"running\", \"health\": \"healthy\", \"cpuPercent\": 2.3, \"memoryBytes\": 268435456, \"detail\": \"Fixture service, port 8096\"}, {\"id\": \"b456\", \"name\": \"immich-machine-learning\", \"state\": \"running\", \"health\": \"unhealthy\", \"cpuPercent\": null, \"memoryBytes\": null, \"detail\": \"Worker latency \\u00b7 fixture observation\"}], \"total\": 3}}",
-    "status": "completed",
-    "toolCallId": "hermes-docker",
-    "sessionUpdate": "tool_call_update"
-  },
-  "hermes-image": {
-    "content": [
-      {
-        "content": {
-          "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1cAAAAASUVORK5CYII=",
-          "mimeType": "image/png",
-          "type": "image"
-        },
-        "type": "content"
-      }
-    ],
-    "rawOutput": "TETHER_CARD_V1\n{\"version\": 1, \"id\": \"image-pixel-fixture\", \"revision\": 1, \"kind\": \"image\", \"title\": \"Supplied picture\", \"fallback\": \"Picture supplied at /fixture/pixel.png.\", \"fetchedAt\": \"2026-11-01T08:00:00-05:00\", \"source\": \"User-supplied local image path\", \"payload\": {\"alt\": \"Picture supplied by user\"}}",
-    "status": "completed",
-    "toolCallId": "hermes-image",
-    "sessionUpdate": "tool_call_update"
   }
 }

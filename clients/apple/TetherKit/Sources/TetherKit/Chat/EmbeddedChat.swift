@@ -28,7 +28,7 @@ struct EmbeddedChat: View {
     NavigationStack {
       ChatView(
         model: model, onSessions: onSessions, sessionsNeedYou: needsYou, onContinueInTerminal: onContinueInTerminal,
-        onShowGit: model.agent == ChatAgents.hermes ? nil : {
+        onShowGit: {
           controller.setGitTarget(GitTarget.forChat(folder: folder))
           showGit = true
         },
@@ -39,12 +39,7 @@ struct EmbeddedChat: View {
           case let .failed(message): return message
           case let .ready(route): onOpenChat?(route); return nil
           }
-        }, onReopen: model.agent == ChatAgents.hermes ? {
-          switch await controller.newChat(cwdText: "~", request: .init(agent: ChatAgents.hermes)) {
-          case let .failed(message): return message
-          case let .ready(route): onOpenChat?(route); return nil
-          }
-        } : nil, onOpenParent: { parent in
+        }, onOpenParent: { parent in
           onOpenChat?(ChatRoute.opening(name: parent.name, chats: controller.chats,
             journal: UserDefaultsChatJournalStore(name: parent.name).load(), localAgent: model.agent?.key))
         })
@@ -145,36 +140,29 @@ struct NewChatSheet: View {
       }
       .pickerStyle(.segmented)
       .accessibilityIdentifier("sshNewChatMode")
-      .disabled(agent == ChatAgents.hermes)
       agentPicker
-      if agent != ChatAgents.hermes {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Working folder").font(.caption).foregroundStyle(TetherColors.textSecondary)
-          TextField("Folder on the host", text: $folder)
-            .font(.callout.monospaced()).foregroundStyle(TetherColors.textPrimary)
-            .textInputAutocapitalization(.never).autocorrectionDisabled()
-            .focused($focused).submitLabel(.go).onSubmit(submitFolder)
-            .padding(10).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
-            .accessibilityLabel("Working folder for the new chat")
-            .accessibilityIdentifier("sshNewChatFolder")
-          if let shownFailure {
-            Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
-              .fixedSize(horizontal: false, vertical: true)
-              .accessibilityIdentifier("sshNewChatError")
-          }
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Working folder").font(.caption).foregroundStyle(TetherColors.textSecondary)
+        TextField("Folder on the host", text: $folder)
+          .font(.callout.monospaced()).foregroundStyle(TetherColors.textPrimary)
+          .textInputAutocapitalization(.never).autocorrectionDisabled()
+          .focused($focused).submitLabel(.go).onSubmit(submitFolder)
+          .padding(10).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 10))
+          .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+          .accessibilityLabel("Working folder for the new chat")
+          .accessibilityIdentifier("sshNewChatFolder")
+        if let shownFailure {
+          Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("sshNewChatError")
         }
-      } else {
-        Label("Uses your Hermes gateway's workspace", systemImage: "server.rack")
-          .font(.caption).foregroundStyle(TetherColors.textSecondary).padding(.vertical, 6)
-        if let shownFailure { Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning) }
       }
-      if agent != ChatAgents.hermes { optionsBox }
+      optionsBox
       if mode == .new {
         Button(action: start) {
           Group {
             if starting { ProgressView().tint(TetherColors.onAccent) } else {
-              Text(agent == ChatAgents.hermes ? "Open Hermes" : "Start chat").font(.subheadline.weight(.semibold))
+              Text("Start chat").font(.subheadline.weight(.semibold))
             }
           }
           .frame(maxWidth: .infinity).frame(height: 36)
@@ -197,7 +185,6 @@ struct NewChatSheet: View {
       if folder.isEmpty { folder = initialFolder }
       mode = initialMode
       agent = initialAgent ?? ChatLastAgentStore().agent
-      if agent == ChatAgents.hermes { mode = .new }
       optionsOpen = initiallyOpenOptions
       changes = initialChanges
     }
@@ -222,7 +209,7 @@ struct NewChatSheet: View {
       Menu {
         ForEach(ChatAgents.all) { option in
           let missing = unavailable[option.key] != nil
-          Button { choose(option) } label: {
+          Button { pick(option) } label: {
             Label {
               Text(option.label)
             } icon: {
@@ -251,28 +238,7 @@ struct NewChatSheet: View {
       .buttonStyle(.plain)
       .accessibilityLabel("Agent, \(agent.label)")
       .accessibilityIdentifier("sshNewChatAgentSelect")
-      Button { choose(ChatAgents.hermes) } label: {
-        HStack(spacing: 12) {
-          ChatAgentMark(agent: ChatAgents.hermes, size: 26)
-          VStack(alignment: .leading, spacing: 3) {
-            Text("Hermes").font(.subheadline.weight(.semibold))
-            Text("One conversation. Your tools and memory.").font(.caption).foregroundStyle(TetherColors.textSecondary)
-          }
-          Spacer(minLength: 4)
-          Image(systemName: agent == ChatAgents.hermes ? "checkmark.circle.fill" : "chevron.right")
-            .foregroundStyle(TetherColors.accent)
-        }
-        .padding(12).frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .background(agent == ChatAgents.hermes ? TetherColors.surfaceHover : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-      }
-      .buttonStyle(TetherPressStyle())
-      .accessibilityIdentifier("sshNewChatAgent_hermes")
     }
-  }
-
-  private func choose(_ option: ChatAgentProfile) {
-    pick(option)
-    if option == ChatAgents.hermes { mode = .new }
   }
 
   private func pick(_ option: ChatAgentProfile) {

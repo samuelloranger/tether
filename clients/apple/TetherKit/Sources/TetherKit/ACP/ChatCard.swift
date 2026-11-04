@@ -62,8 +62,8 @@ struct ChatCard: Codable, Equatable, Sendable {
 
   static let toolName = "tether_publish_card"
 
-  /// Claude names the tool in `name` and `_meta.claudeCode.toolName`, Codex in its title, and
-  /// Tether's Hermes adapter marks its own update; none of these come from the tool's output.
+  /// Claude names the tool in `name` and `_meta.claudeCode.toolName`, Codex in its title, and an
+  /// adapter may mark its own update with `_meta.tether.card`; none of these come from the tool's output.
   static func isPublisher(_ object: [String: Any]) -> Bool {
     let meta = object["_meta"] as? [String: Any]
     let claude = (meta?["claudeCode"] as? [String: Any])?["toolName"] as? String

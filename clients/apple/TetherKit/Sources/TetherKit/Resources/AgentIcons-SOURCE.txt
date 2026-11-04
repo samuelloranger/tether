@@ -1,5 +1,3 @@
 agent-claude, agent-codex, agent-opencode and agent-copilot (Agents.xcassets) are from lobehub/icons (MIT, https://github.com/lobehub/lobe-icons). The marks belong to their owners.
 
 agent-antigravity is an original single-color triangle mark authored for Tether; no third-party image assets.
-
-agent-hermes is an original single-color feather mark authored for Tether; no third-party image assets.

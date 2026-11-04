@@ -17,13 +17,8 @@ struct DrawerChatRow: Equatable, Identifiable {
   var agentKey: String? = ChatAgents.claude.key
 
   var agent: ChatAgentProfile? { ChatAgents.profile(forKey: agentKey) }
-  var isHermes: Bool { agentKey == ChatAgents.hermes.key }
-  /// Hermes's holder stopped on the host (a reboot, say). Hermes itself never ends, so the row
-  /// reads idle and opening it starts the holder again.
-  var hostEnded = false
-  /// Only a chat that is not Claude's names its agent: Claude rows look as they always did. A Hermes
-  /// row is titled Hermes already.
-  var agentLabel: String? { agentKey == ChatAgents.claude.key || isHermes ? nil : ChatAgents.label(of: agent) }
+  /// Only a chat that is not Claude's names its agent: Claude rows look as they always did.
+  var agentLabel: String? { agentKey == ChatAgents.claude.key ? nil : ChatAgents.label(of: agent) }
 
   var id: String { name }
   var isRunning: Bool { state != .ended }
@@ -39,32 +34,20 @@ struct DrawerChatRow: Equatable, Identifiable {
 
 enum DrawerChatRows {
   /// The host's title, else the stored agent title, else the folder name. The subtitle is the folder,
-  /// or the path above it when the folder is already the title. Hermes is not tied to a folder: its
-  /// title is Hermes unless renamed, and it has no subtitle.
+  /// or the path above it when the folder is already the title.
   /// `agents` holds the keys this device recorded for the chats it started; the host's spawn command covers the rest.
+  /// A chat of a retired agent (see `ChatAgents.isRetired`) is left out.
   static func rows(chats: [ACPChatSummary], titles: [String: String], agents: [String: String] = [:]) -> [DrawerChatRow] {
-    chats.map { chat in
+    chats.filter { !ChatAgents.isRetired(localKey: agents[$0.name], statusSpawn: $0.spawn) }.map { chat in
       let agentKey = ChatAgents.resolve(localKey: agents[chat.name], statusSpawn: chat.spawn)?.key
       let folder = ChatFormat.folderName(chat.cwd)
       let stored = titles[chat.name].flatMap { $0.isEmpty ? nil : $0 }
-      let title: String
-      let subtitle: String
-      var state = DrawerChatState(chat)
-      var hostEnded = false
-      if agentKey == ChatAgents.hermes.key {
-        title = chat.customTitle ?? ChatAgents.hermes.label
-        subtitle = ""
-        if state == .ended { (state, hostEnded) = (.idle, true) }
-      } else {
-        title = chat.customTitle ?? chat.hostTitle ?? stored ?? folder
-        subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
-      }
-      var row = DrawerChatRow(
-        name: chat.name, title: title, subtitle: subtitle, state: state, cwd: chat.cwd,
+      let title = chat.customTitle ?? chat.hostTitle ?? stored ?? folder
+      let subtitle = title == folder ? (ChatFormat.parentPath(chat.cwd).map(DrawerLayout.homeRelative) ?? chat.cwd) : folder
+      return DrawerChatRow(
+        name: chat.name, title: title, subtitle: subtitle, state: DrawerChatState(chat), cwd: chat.cwd,
         multiClient: chat.multiClient, pinned: chat.pinned, archived: chat.archived, projectRoot: chat.projectRoot, customTitle: chat.customTitle, parent: chat.parent,
         agentKey: agentKey)
-      row.hostEnded = hostEnded
-      return row
     }
   }
 }
@@ -80,7 +63,7 @@ extension DrawerChatRows {
 /// What the terminal screen's main area shows: the terminal, or one chat swapped in over it.
 struct DrawerContent: Equatable {
   private(set) var chat: ChatRoute?
-  /// Counts chats started here: a restarted Hermes keeps its name, and its view must still be rebuilt.
+  /// Counts chats started here: a restarted chat keeps its name, and its view must still be rebuilt.
   private(set) var fresh = 0
 
   var showsChat: Bool { chat != nil }

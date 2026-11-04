@@ -12,7 +12,7 @@ var chatCardsSource string
 const chatCardInstructions = "You are answering inside Tether, which renders native weather, image and Docker cards. Use the tether-cards MCP tool tether_publish_card whenever these make your answer clearer; do not wait for the user to request a card format. Fetch real data with your existing tools first, or clearly label supplied test observations. The tool only presents data and does not grant data access. Keep surrounding prose concise and useful. Refresh existing card IDs with a higher revision. Card action requests must follow your normal permission policy and target verification."
 
 func supportsChatCards(spawn string) bool {
-	return strings.Contains(spawn, "claude-agent-acp") || strings.Contains(spawn, "codex-acp") || isHermesSpawn(spawn)
+	return strings.Contains(spawn, "claude-agent-acp") || strings.Contains(spawn, "codex-acp")
 }
 
 // The holder owns registration, so old and new native clients get the same tools.
@@ -36,13 +36,8 @@ func withChatCards(line []byte, spawn string) []byte {
 			return line
 		}
 	}
-	env := []any{}
-	if isHermesSpawn(spawn) {
-		// Hermes keeps its pictures in its own home (its container's HOME), outside the chat's folder.
-		env = append(env, map[string]any{"name": "TETHER_CARD_IMAGE_ROOT", "value": "~"})
-	}
 	params["mcpServers"] = append(servers, map[string]any{
-		"name": "tether-cards", "command": "python3", "args": []string{"-c", chatCardsSource}, "env": env,
+		"name": "tether-cards", "command": "python3", "args": []string{"-c", chatCardsSource}, "env": []any{},
 	})
 	if params["systemPrompt"] == nil {
 		params["systemPrompt"] = map[string]any{"mode": "append", "content": []any{map[string]any{"type": "text", "text": chatCardInstructions}}}
