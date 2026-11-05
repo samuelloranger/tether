@@ -537,7 +537,8 @@ mod tests {
             }
             assert!(
                 geometry(cells[3]).height() > geometry(cells[0]).height(),
-                "Long names wrap within the first column"
+                "Long names wrap within the first column at width {width}: {:?}",
+                cells.iter().map(|c| geometry(c)).collect::<Vec<_>>()
             );
             if width == 640 {
                 assert!(
