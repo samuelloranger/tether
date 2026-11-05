@@ -281,7 +281,9 @@ private struct PullRequestDetailView: View {
         .foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
       HStack(spacing: 6) {
         chip(stateChip.text, tint: stateChip.tint)
-        chip("\(pullRequest.changedFiles) files", tint: TetherColors.textSecondary)
+        if let changedFiles = pullRequest.changedFiles {
+          chip("\(changedFiles) files", tint: TetherColors.textSecondary)
+        }
         if let decision = pullRequest.reviewDecision, !decision.isEmpty {
           chip(decision.replacingOccurrences(of: "_", with: " ").lowercased(), tint: TetherColors.accent)
         }

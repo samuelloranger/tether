@@ -20,7 +20,8 @@ public struct GitPullRequest: Codable, Equatable, Identifiable, Sendable {
   public let base: String
   public let url: String
   public let isDraft: Bool
-  public let changedFiles: Int
+  /// Only the open list asks for it.
+  public let changedFiles: Int?
   public let reviewDecision: String?
   /// Absent from detail JSON and older list output; missing reads as open.
   public let rawState: String?
@@ -129,17 +130,22 @@ public enum GitRepositoryModel {
   /// distinguishable from gh running and refusing.
   public static let ghMissingSentinel = "__TETHER_NO_GH__"
 
+  /// `output` is `GitWorkspaceScript.pullRequests`: open, 0x1d, merged. Either part failing
+  /// fails the list, so a half-read one never passes for the whole.
   public static func pullRequestResult(from output: String) -> PullRequestResult {
     let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed == ghMissingSentinel { return .toolMissing }
-    // The list fetches every state so merged ones show; closed-without-merge
-    // is noise the screen does not ask for.
-    if let pulls = try? pullRequests(from: trimmed) {
-      return .list(pulls.filter { $0.state != .closed })
+    var pulls: [GitPullRequest] = []
+    for part in trimmed.split(separator: "\u{1D}", omittingEmptySubsequences: false) {
+      let part = part.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard let list = try? pullRequests(from: part) else {
+        // gh puts its reason on the first line.
+        return .failed(part.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? part)
+      }
+      pulls += list
     }
-    // gh puts its reason on the first line.
-    let firstLine = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
-    return .failed(firstLine)
+    // Closed-without-merge is noise the screen does not ask for.
+    return .list(pulls.filter { $0.state != .closed })
   }
 
   public static func checks(from output: String) -> [GitCheck] {
