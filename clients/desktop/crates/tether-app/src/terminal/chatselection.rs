@@ -465,7 +465,7 @@ mod tests {
         ui.global::<crate::ChatVm>().set_active(true);
         ui.global::<crate::ChatVm>()
             .set_title("Player dependency comparison".into());
-        let source = "Before the comparison.\n\n| Component | Our code | Upstream |\n|---|---:|---|\n| Jellyfin Android TV player/profile code | Adapted | Translations, tooling updates and a home/search lifecycle fix; no player changes. |\n| Media3 / ExoPlayer | 1.8.0 | Stable 1.11.1, including Matroska seeking, playback stability and HLS fixes. |\n| FFmpeg decoder | | [Releases](https://example.test/releases) |\n\nAfter the comparison.";
+        let source = "Before the comparison.\n\n| Component | Our code | Upstream |\n|---|---:|---|\n| Jellyfin Android TV player, playback profile and device capability code | Adapted | Translations, tooling updates and a home/search lifecycle fix; no player changes. |\n| Media3 / ExoPlayer | 1.8.0 | Stable 1.11.1, including Matroska seeking, playback stability and HLS fixes. |\n| FFmpeg decoder | | [Releases](https://example.test/releases) |\n\nAfter the comparison.";
         let md = tether_core::markdown::items(source);
         ui.global::<crate::ChatVm>()
             .set_rows(ModelRc::new(VecModel::from(vec![crate::ChatRowVm {
@@ -537,7 +537,8 @@ mod tests {
             }
             assert!(
                 geometry(cells[3]).height() > geometry(cells[0]).height(),
-                "Long names wrap within the first column"
+                "Long names wrap within the first column at width {width}: {:?}",
+                cells.iter().map(|c| geometry(c)).collect::<Vec<_>>()
             );
             if width == 640 {
                 assert!(
@@ -549,7 +550,7 @@ mod tests {
                 blocks: inputs.iter().map(ItemRc::downgrade).collect(),
                 ..Default::default()
             };
-            let expected = "Before the comparison.\nComponent\tOur code\tUpstream\nJellyfin Android TV player/profile code\tAdapted\tTranslations, tooling updates and a home/search lifecycle fix; no player changes.\nMedia3 / ExoPlayer\t1.8.0\tStable 1.11.1, including Matroska seeking, playback stability and HLS fixes.\nFFmpeg decoder\t\tReleases\nAfter the comparison.";
+            let expected = "Before the comparison.\nComponent\tOur code\tUpstream\nJellyfin Android TV player, playback profile and device capability code\tAdapted\tTranslations, tooling updates and a home/search lifecycle fix; no player changes.\nMedia3 / ExoPlayer\t1.8.0\tStable 1.11.1, including Matroska seeking, playback stability and HLS fixes.\nFFmpeg decoder\t\tReleases\nAfter the comparison.";
             assert_eq!(selected.copy(true), expected);
             selected.focus = (inputs.len() - 1, "After the comparison.".len());
             selected.paint();
