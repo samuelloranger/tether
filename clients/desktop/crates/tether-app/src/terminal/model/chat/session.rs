@@ -114,6 +114,8 @@ pub struct Session {
     /// The dial generation an ask is out for: one loop, and an answer for an older dial is dropped.
     workflow_asked: Option<u64>,
     workflow_next: Duration,
+    /// In front: a hidden chat keeps its stream but does no host polling.
+    front: bool,
     pub sign_in: SignIn,
     generation: u64,
     dialing: bool,
@@ -210,6 +212,7 @@ impl Session {
             workflows: workflows::Tracker::default(),
             workflow_asked: None,
             workflow_next: Duration::ZERO,
+            front: true,
             sign_in: SignIn::Idle,
             generation: 0,
             dialing: false,
@@ -880,6 +883,7 @@ impl Session {
     fn poll_workflows(&mut self, ctx: &mut Ctx<'_>) {
         if self.client.is_none()
             || self.left
+            || !self.front
             || self.has_ended()
             || !ctx.connected
             || self.workflow_asked.is_some()
@@ -1048,6 +1052,21 @@ impl Session {
             });
             self.chan = Chan::Closed;
         }
+    }
+
+    /// The chat came to the front: the host polling it stopped while it was hidden resumes.
+    pub fn activate(&mut self) {
+        self.front = true;
+        self.touched();
+    }
+
+    /// The chat left the front but keeps its stream: only the host polling stops, so coming back
+    /// is a redraw rather than a dial. A chat dropped from the live cap uses `background`.
+    pub fn deactivate(&mut self) {
+        self.front = false;
+        self.workflow_asked = None;
+        self.workflow_next = Duration::ZERO;
+        self.touched();
     }
 
     /// The chat left the front (or the terminal connection dropped): the socket goes, and coming

@@ -47,6 +47,9 @@ final class ChatSessionModel {
   /// Permission cards whose last answer did not reach the agent; they stay answerable.
   private(set) var answerFailures: Set<ACPID> = []
   var notice: String?
+  /// The composer's text. It lives here so a chat kept connected behind another keeps what was
+  /// typed in it; the view keeps its own copy for editing.
+  @ObservationIgnored var draft = ""
   /// Option changes in flight or refused, by option id; the shown value only changes once the agent confirms.
   private(set) var optionChanges: [String: OptionChange] = [:]
   /// The folder's files for `@` mentions; loaded when the palette first opens.

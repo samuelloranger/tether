@@ -20,6 +20,7 @@ struct Harness {
     toasts: Vec<(String, String, String)>,
     remembered: Vec<(String, String)>,
     seen: Vec<(String, Vec<tether_core::acp::message::ConfigOption>)>,
+    hangups: Vec<String>,
 }
 
 const CHECK_OK: &str = "tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n";
@@ -40,6 +41,7 @@ impl Harness {
             toasts: Vec::new(),
             remembered: Vec::new(),
             seen: Vec::new(),
+            hangups: Vec::new(),
         };
         h.run(|c, now, out| c.on_connected(now, out));
         h.run(|c, now, out| c.on_tick(now, out));
@@ -62,7 +64,15 @@ impl Harness {
     }
 
     fn take(&mut self) -> Vec<ChatJob> {
-        std::mem::take(&mut self.jobs)
+        let jobs = std::mem::take(&mut self.jobs);
+        let mut kept = Vec::new();
+        for j in jobs {
+            match j {
+                ChatJob::Hangup { name } => self.hangups.push(name),
+                other => kept.push(other),
+            }
+        }
+        kept
     }
 
     fn screen(&mut self) -> ChatScreen {
@@ -547,21 +557,9 @@ fn stop_cancels_the_turn() {
 }
 
 #[test]
-fn leaving_hangs_up_and_coming_back_resumes_from_the_snapshot() {
+fn leaving_the_front_keeps_the_chat_connected() {
     let mut h = Harness::new();
     let (name, generation) = h.live_chat();
-    h.exec(
-        |t| {
-            matches!(
-                t,
-                ExecTag::Inspect {
-                    why: InspectWhy::Learn,
-                    ..
-                }
-            )
-        },
-        &format!("{name}\trunning\t4096\t/home/sam/proj\t300\tnpx\n"),
-    );
     h.feed(
         &name,
         generation,
@@ -569,39 +567,45 @@ fn leaving_hangs_up_and_coming_back_resumes_from_the_snapshot() {
     );
     h.run(|c, now, out| c.leave_active(now, out));
     assert!(
-        h.take()
-            .iter()
-            .any(|j| matches!(j, ChatJob::Hangup { name: n } if *n == name))
+        h.hangups.is_empty(),
+        "the chat stays connected behind the terminal"
     );
-    let snapshot = h.files.snapshot(&name).expect("a snapshot on leaving");
-    assert!(snapshot.offset > 0);
     h.msg(ChatMsg::Select(name.clone()));
-    h.exec(
-        |t| {
-            matches!(
-                t,
-                ExecTag::Inspect {
-                    why: InspectWhy::Resume,
-                    ..
-                }
-            )
-        },
-        &format!("{name}\trunning\t4096\t/home/sam/proj\t300\tnpx\n"),
-    );
     let jobs = h.take();
-    let (_, _, command) = h.dial_of(&jobs).unwrap();
     assert!(
-        command.contains(&format!("--from {}", snapshot.offset)),
-        "{command}"
+        h.dial_of(&jobs).is_none(),
+        "coming back is a redraw, not a dial"
     );
-    assert!(!command.contains("--spawn"));
     let s = h.screen();
     assert!(
         rows(&s)
             .iter()
             .any(|r| matches!(r, RowBody::Markdown { items: md, .. } if md[0].text == "hello")),
-        "the transcript stays on screen while it reconnects"
+        "the transcript is still there"
     );
+    // The stream was never replaced: the original generation still feeds it.
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" again"}}}}"#,
+    );
+    assert!(
+        rows(&h.screen()).iter().any(
+            |r| matches!(r, RowBody::Markdown { items: md, .. } if md[0].text == "hello again")
+        )
+    );
+}
+
+#[test]
+fn past_the_live_cap_the_least_recent_chat_hangs_up() {
+    let mut h = Harness::new();
+    let mut opened = Vec::new();
+    for _ in 0..=super::LIVE_CHATS {
+        opened.push(h.live_chat().0);
+    }
+    let hung = h.hangups;
+    assert!(hung.contains(&opened[0]), "{hung:?}");
+    assert!(!hung.contains(opened.last().unwrap()), "{hung:?}");
 }
 
 #[test]
@@ -2635,4 +2639,14 @@ fn a_chat_of_a_retired_agent_is_left_out_of_the_sidebar() {
     );
     let s = h.screen();
     assert_eq!(sections(&s), ["a", "  c"]);
+}
+
+#[test]
+fn a_dropped_connection_still_counts_the_chat_in_front() {
+    let mut h = Harness::new();
+    h.live_chat();
+    h.live_chat();
+    assert_eq!(h.chats.live_count(), 2);
+    h.run(|c, now, out| c.on_dropped(now, out));
+    assert_eq!(h.chats.live_count(), 1, "the chat in front redials");
 }
