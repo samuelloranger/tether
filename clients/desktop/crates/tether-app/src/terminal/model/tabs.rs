@@ -13,7 +13,10 @@ impl TerminalModel {
             return;
         }
         self.view_tick += 1;
-        if let Some(evicted) = strip.select(name, self.view_tick) {
+        // Each attached tab is a channel on the one SSH connection, and so is every chat kept
+        // connected: the sessions OpenSSH allows have to cover both.
+        let cap = tether_core::tabs::ATTACH_CAP.saturating_sub(self.chats.live_count());
+        if let Some(evicted) = strip.select_with_cap(name, self.view_tick, cap) {
             self.close_channel(&evicted, fx);
         }
         self.toasts.forget(name);

@@ -39,6 +39,8 @@ public struct SSHTerminalView: View {
   @State private var pendingChatKill: DrawerChatRow?
   /// The main area: the terminal, or a chat swapped in over it. The terminal stays attached under a chat.
   @State private var content = DrawerContent()
+  /// Chats kept connected while another chat or the terminal is in front.
+  @State private var liveChats = LiveChatModels()
   @State private var showNewChat = false
   @State private var newChatMode: NewChatSheet.Mode = .new
   @State private var newChatAgent: ChatAgentProfile?
@@ -87,7 +89,9 @@ public struct SSHTerminalView: View {
         .ignoresSafeArea(.keyboard, edges: content.showsChat ? .bottom : [])
       if let route = content.chat {
         EmbeddedChat(
-          route: route, controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) },
+          model: liveChats.model(for: route, fresh: content.fresh) { controller.makeChatModel(route: route) },
+          folder: route.cwd,
+          controller: controller, needsYou: drawerNeedsYou, onSessions: { setDrawer(open: true) },
           onContinueInTerminal: { id, cwd in await continueInTerminal(chat: route.name, sessionId: id, cwd: cwd) },
           onOpenChat: openChat)
           .id(content.viewID)
@@ -189,11 +193,15 @@ public struct SSHTerminalView: View {
         }
       case .background:
         // A hidden or minimized Mac window is still a desktop terminal: nothing detaches.
-        if tabs == nil { backgroundDetach.begin(controller: controller) }
+        if tabs == nil {
+          liveChats.sceneEnteredBackground()
+          backgroundDetach.begin(controller: controller)
+        }
       default:
         break
       }
     }
+    .onDisappear { liveChats.leaveAll() }
     .task(id: scenePhase == .active) {
       guard let tabs, scenePhase == .active else { return }
       while !Task.isCancelled {
@@ -349,6 +357,7 @@ public struct SSHTerminalView: View {
       message: "The agent stops and the conversation is removed from the host."
     ) { row in
       content.chatKilled(row.name)
+      liveChats.leave(row.name)
       Task { await controller.killChat(row.name) }
     }
   }
@@ -360,6 +369,7 @@ public struct SSHTerminalView: View {
       return "Couldn't end the chat on the host, so it stays here. Try again."
     }
     await controller.forgetChat(chat)
+    liveChats.leave(chat)
     let name = "claude-" + String(sessionId.prefix(8))
     let command = ZmxSwitch.resumeCommand(sessionId: sessionId, cwd: cwd)
     showTerminal()

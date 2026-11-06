@@ -328,6 +328,10 @@ pub struct Out {
     pub picked_agent: Option<String>,
 }
 
+/// Chats kept connected while another chat or the terminal is in front. Each one holds an ACP
+/// stream on the terminal connection, so the host's session budget has to cover them too.
+pub const LIVE_CHATS: usize = 4;
+
 pub struct Chats {
     files: Option<ChatFiles>,
     actions: Option<String>,
@@ -355,6 +359,8 @@ pub struct Chats {
     polled_at: Option<Duration>,
     polling: bool,
     sessions: HashMap<String, Session>,
+    /// The chats kept connected, least recently shown first. Past `LIVE_CHATS` the first hangs up.
+    live_order: Vec<String>,
     active: Option<String>,
     new_chat: Option<NewChat>,
     /// Asked of the host the first time a chat opens; empty until then, and then Tether's own.
@@ -455,6 +461,7 @@ impl Chats {
             polled_at: None,
             polling: false,
             sessions: HashMap::new(),
+            live_order: Vec::new(),
             active: None,
             new_chat: None,
             verbs: Vec::new(),
@@ -555,6 +562,7 @@ impl Chats {
         for name in names {
             self.with_session(&name, now, out, |s, ctx| s.background(ctx));
         }
+        self.live_order.clear();
     }
 
     pub fn on_focus(&mut self, focused: bool, now: Duration, out: &mut Out) {
@@ -683,6 +691,7 @@ impl Chats {
             if let Some(mut s) = self.sessions.remove(&name) {
                 s.leave(&mut self.ctx(now, out));
             }
+            self.live_order.retain(|n| n != &name);
         }
         self.dirty = true;
     }
@@ -702,7 +711,8 @@ impl Chats {
             .unwrap_or_default()
     }
 
-    /// Opens a chat tab: an open chat reconnects, another one opens from its journal.
+    /// Opens a chat tab: a chat kept in the background is already connected and only takes the
+    /// front; another one opens from its journal.
     pub fn select(&mut self, name: &str, now: Duration, out: &mut Out) {
         if self.active.as_deref() == Some(name) {
             return;
@@ -715,7 +725,7 @@ impl Chats {
             });
         }
         if let Some(previous) = self.active.take() {
-            self.with_session(&previous, now, out, |s, ctx| s.background(ctx));
+            self.with_session(&previous, now, out, |s, _ctx| s.deactivate());
         }
         let Some(chat) = self.ordered().into_iter().find(|c| c.name == name).cloned() else {
             return;
@@ -739,14 +749,45 @@ impl Chats {
             self.sessions.insert(name.to_string(), session);
         }
         self.active = Some(name.to_string());
+        self.keep_live(name, now, out);
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
         self.follow_seq += 1;
         self.focus_seq += 1;
         self.draft_seq += 1;
-        self.with_session(name, now, out, |s, ctx| s.connect(ctx));
+        self.with_session(name, now, out, |s, ctx| {
+            s.activate();
+            s.connect(ctx)
+        });
         self.dirty = true;
+    }
+
+    /// Chats stay connected while out of front; past the cap the least recently shown hangs up so
+    /// the connection budget stays bounded.
+    fn keep_live(&mut self, name: &str, now: Duration, out: &mut Out) {
+        self.live_order.retain(|n| n != name);
+        self.live_order.push(name.to_string());
+        while self.live_order.len() > LIVE_CHATS {
+            let Some(victim) = self
+                .live_order
+                .iter()
+                .find(|n| self.active.as_deref() != Some(n.as_str()))
+                .cloned()
+            else {
+                break;
+            };
+            self.live_order.retain(|n| n != &victim);
+            self.with_session(&victim, now, out, |s, ctx| s.background(ctx));
+        }
+    }
+
+    /// Chats kept connected behind the front, which the terminal's own attach budget covers.
+    pub fn live_count(&self) -> usize {
+        self.live_order
+            .iter()
+            .filter(|n| self.sessions.contains_key(*n))
+            .count()
     }
 
     /// A route from the new-chat dialog: the chat starts and takes the front.
@@ -947,7 +988,8 @@ impl Chats {
 
     pub fn leave_active(&mut self, now: Duration, out: &mut Out) {
         if let Some(name) = self.active.take() {
-            self.with_session(&name, now, out, |s, ctx| s.background(ctx));
+            // The chat keeps its stream behind the terminal: coming back is a redraw.
+            self.with_session(&name, now, out, |s, _ctx| s.deactivate());
             out.show_terminal = true;
         }
         self.controls_open = false;
@@ -1380,6 +1422,7 @@ impl Chats {
         if let Some(mut s) = self.sessions.remove(&name) {
             s.leave(&mut self.ctx(now, out));
         }
+        self.live_order.retain(|n| n != &name);
         out.jobs.push(ChatJob::Exec {
             tag: ExecTag::Kill { name: name.clone() },
             command: host::kill_command(&name),

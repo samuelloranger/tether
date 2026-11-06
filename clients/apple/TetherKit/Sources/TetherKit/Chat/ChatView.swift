@@ -29,6 +29,9 @@ struct ChatView: View {
   var onBranch: ((ChatBranchPoint, String, String) async -> String?)?
   var onOpenParent: ((ChatParent) -> Void)?
   var seedAttachments = false
+  /// False for a chat kept connected behind another one: the model belongs to the screen's cache,
+  /// not to this view, and disappearing is a switch, not an end.
+  var leavesOnDisappear = true
   #if DEBUG
   var sendDraft: String?
   var probeLastRow = false
@@ -114,7 +117,9 @@ struct ChatView: View {
     }
     .task { await model.connect() }
     .task {
-      if draft.isEmpty { draft = initialDraft.isEmpty ? model.branchDraft : initialDraft }
+      if draft.isEmpty {
+        draft = model.draft.isEmpty ? (initialDraft.isEmpty ? model.branchDraft : initialDraft) : model.draft
+      }
       #if DEBUG
       if seedAttachments { attachments.seedPlaceholders() }
       #endif
@@ -153,7 +158,10 @@ struct ChatView: View {
       sendMessage()
       #endif
     }
-    .onChange(of: draft) { _, next in model.saveBranchDraft(next) }
+    .onChange(of: draft) { _, next in
+      model.draft = next
+      model.saveBranchDraft(next)
+    }
     .onChange(of: scenePhase) { _, phase in
       switch phase {
       case .active: model.sceneBecameActive()
@@ -161,7 +169,7 @@ struct ChatView: View {
       default: break
       }
     }
-    .onDisappear { model.leave() }
+    .onDisappear { if leavesOnDisappear { model.leave() } }
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingPermissions.first?.requestId)
     .sensoryFeedback(.impact(weight: .light), trigger: model.state.pendingQuestions.first?.requestId)
     .sheet(item: $branching) { point in
@@ -892,6 +900,7 @@ struct ChatView: View {
   private func deliverMessage() {
     guard canSendNow, model.send(text: draft, images: attachments.ready) else { return }
     draft = ""
+    model.draft = ""
     attachments.clear()
     userScrolledUp = false
     sendTick += 1
