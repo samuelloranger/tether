@@ -354,10 +354,12 @@ type acpDaemonState struct {
 
 	handshaking int // connections accepted whose first line is not read yet, guarded by mu
 	// copilot asks the agent for assistant.idle; dropAnswers are prompts the holder answered for it.
-	copilot     bool
-	dropAnswers map[string]bool // guarded by mu
-	metaMu      sync.Mutex
-	meta        *acpMeta
+	copilot       bool
+	dropAnswers   map[string]bool   // guarded by mu
+	activePrompt  string            // OpenCode's one prompt in flight, guarded by mu
+	queuedPrompts []acpQueuedPrompt // guarded by mu
+	metaMu        sync.Mutex
+	meta          *acpMeta
 }
 
 // setMeta applies fn to the daemon's meta and writes it; the one writer once the daemon runs.
@@ -738,6 +740,9 @@ func (s *acpDaemonState) clientLineLocked(from *acpClient, line []byte) {
 	}
 	if echo && from.id != "" {
 		s.echoLocked(from.id, echoed)
+	}
+	if s.queueOpenCodePromptLocked(line) {
+		return
 	}
 	_, _ = s.stdin.Write(line)
 }

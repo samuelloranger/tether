@@ -159,6 +159,12 @@ connection the host never saw drop would otherwise count as attached and hold ba
 a request that was already answered, from any client or from `acp answer`, is not sent to the
 agent. A client without `--client` is never echoed.
 
+OpenCode accepts one active prompt at a time. For `opencode acp` chats the holder keeps later
+prompts in order and sends each after the previous prompt returns, including after an error.
+Queued prompts are echoed immediately and survive client disconnects while the holder runs.
+Stop cancels the active turn and withdraws the queued prompts; withdrawn requests receive a
+`cancelled` result in the log so replay cannot leave them waiting.
+
 ### Status and saved conversations
 
 `acp status` reads the holder and organization metadata, so it works without talking to the daemon. It prints one
