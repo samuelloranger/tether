@@ -259,6 +259,8 @@ private struct ChatFolderBrowser: View {
 
   private func navigate(_ path: String) {
     guard !locked, !loading else { return }
+    // The load task is keyed on location: the current folder's own crumb needs a reload to fire it.
+    if path == location { reloads += 1 }
     location = path; filter = ""; info = nil; loading = true
   }
 

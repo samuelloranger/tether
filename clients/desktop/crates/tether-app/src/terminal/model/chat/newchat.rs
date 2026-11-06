@@ -499,8 +499,24 @@ impl NewChat {
     fn stop(&mut self, error: String) -> Next {
         self.busy = false;
         self.continuing = None;
+        // start() dropped any folder check still in flight; without a new one the form stays on "Checking folder…".
+        if self.folder_loading && self.folder_at.is_none() {
+            self.recheck(Duration::ZERO);
+        }
         self.error = Some(error);
         Next::Nothing
+    }
+
+    /// Checks the same folder again, e.g. after a timeout, without touching what the user typed.
+    pub fn recheck(&mut self, now: Duration) {
+        if self.busy || self.continuing.is_some() || self.creating || self.browsing {
+            return;
+        }
+        self.error = None;
+        self.folder_info = None;
+        self.folder_loading = true;
+        self.folder_request = next_request();
+        self.folder_at = Some(now);
     }
 
     pub fn on_exec(
@@ -672,6 +688,37 @@ mod tests {
         ));
         assert!(nc.folder_info.as_ref().unwrap().ready());
         assert!(!nc.creating);
+    }
+
+    #[test]
+    fn a_failed_start_reschedules_the_folder_check_it_dropped() {
+        let mut nc = dialog("~/api");
+        assert!(nc.folder_loading);
+        let check = nc.start(None).expect("host check");
+        let next = reply(&mut nc, check, "");
+        let next = match next {
+            Next::Job(home) => reply(&mut nc, home, "not a path"),
+            other => other,
+        };
+        assert!(matches!(next, Next::Nothing));
+        assert!(nc.error.is_some() && !nc.busy);
+        let (_, step) = exec_of(nc.tick(Duration::ZERO));
+        assert_eq!(step, Step::Folder);
+        assert!(nc.error.is_some());
+    }
+
+    #[test]
+    fn retry_checks_the_same_folder_again() {
+        let mut nc = dialog("/projects/api");
+        let job = nc.tick(Duration::ZERO).unwrap();
+        reply(&mut nc, job, "");
+        assert!(!nc.folder_loading && !nc.folder_info.as_ref().unwrap().ready());
+        nc.recheck(Duration::ZERO);
+        assert!(nc.folder_loading && nc.folder_info.is_none());
+        let job = nc.tick(Duration::ZERO).unwrap();
+        reply(&mut nc, job, "__TETHER_FOLDER__\0ready\0/projects/api\0");
+        assert!(nc.folder_info.as_ref().unwrap().ready());
+        assert_eq!(nc.folder, "/projects/api");
     }
 
     #[test]

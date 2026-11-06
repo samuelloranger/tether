@@ -1109,8 +1109,13 @@ impl Chats {
                 }
             }
             ChatMsg::NewChatRetry => {
-                if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
-                    out.jobs.push(job);
+                if let Some(nc) = self.new_chat.as_mut() {
+                    if !nc.folder_loading && nc.folder_info.as_ref().is_none_or(|f| !f.ready()) {
+                        nc.recheck(now);
+                    }
+                    if let Some(job) = nc.reload(now) {
+                        out.jobs.push(job);
+                    }
                 }
             }
             ChatMsg::NewChatStart => {

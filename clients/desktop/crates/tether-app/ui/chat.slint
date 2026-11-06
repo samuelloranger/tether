@@ -2894,6 +2894,14 @@ export component NewChatDialog inherits Rectangle {
                         clicked => { ChatVm.nc-create-folder(); }
                         create-text := Text { x: 4px; text: ChatVm.nc-creating ? "Creating\u{2026}" : "Create folder"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
                     }
+                    if !ChatVm.nc-folder-missing && !ChatVm.nc-folder-loading && !ChatVm.nc-folder-ready && ChatVm.nc-folder-message != "": Pressable {
+                        width: retry-text.preferred-width + 8px;
+                        height: 18px;
+                        enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing;
+                        hover-fill: false;
+                        clicked => { ChatVm.nc-retry(); }
+                        retry-text := Text { x: 4px; text: "Retry"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                    }
                 }
             }
             if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
