@@ -93,6 +93,20 @@ impl TerminalModel {
         self.chat_out(out, now, fx);
     }
 
+    /// A chat kept connected takes a channel a terminal tab could have had: past the budget the
+    /// least recently viewed tabs detach.
+    fn fit_tabs_to_chats(&mut self, fx: &mut Vec<Effect>) {
+        let cap = tether_core::tabs::ATTACH_CAP.saturating_sub(self.chats.live_count());
+        let evicted = self
+            .strip
+            .as_mut()
+            .map(|s| s.shrink_to(cap))
+            .unwrap_or_default();
+        for name in evicted {
+            self.close_channel(&name, fx);
+        }
+    }
+
     fn chat_out(&mut self, out: Out, now: Duration, fx: &mut Vec<Effect>) {
         for job in out.jobs {
             fx.push(Effect::Chat(job));
@@ -147,6 +161,7 @@ impl TerminalModel {
                 }
             }
         }
+        self.fit_tabs_to_chats(fx);
     }
 
     /// The pane follows the model after every message; streaming output is held to the frame rate.

@@ -2640,3 +2640,13 @@ fn a_chat_of_a_retired_agent_is_left_out_of_the_sidebar() {
     let s = h.screen();
     assert_eq!(sections(&s), ["a", "  c"]);
 }
+
+#[test]
+fn a_dropped_connection_still_counts_the_chat_in_front() {
+    let mut h = Harness::new();
+    h.live_chat();
+    h.live_chat();
+    assert_eq!(h.chats.live_count(), 2);
+    h.run(|c, now, out| c.on_dropped(now, out));
+    assert_eq!(h.chats.live_count(), 1, "the chat in front redials");
+}

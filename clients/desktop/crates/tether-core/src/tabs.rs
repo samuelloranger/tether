@@ -136,6 +136,26 @@ impl TabStrip {
         Some(victim.name.clone())
     }
 
+    /// Detaches the least recently viewed tabs, never the active one, until at most `cap` stay
+    /// attached. Returns the tabs to detach.
+    pub fn shrink_to(&mut self, cap: usize) -> Vec<String> {
+        let mut evicted = Vec::new();
+        while self.tabs.iter().filter(|t| t.attached).count() > cap.max(1) {
+            let active = self.active.clone();
+            let Some(victim) = self
+                .tabs
+                .iter_mut()
+                .filter(|t| t.attached && Some(&t.name) != active.as_ref())
+                .min_by_key(|t| t.last_viewed)
+            else {
+                break;
+            };
+            victim.attached = false;
+            evicted.push(victim.name.clone());
+        }
+        evicted
+    }
+
     pub fn create(&mut self, name: &str, view_tick: u64) -> CreateOutcome {
         if self.index(name).is_some() {
             return CreateOutcome::Existing {
@@ -428,6 +448,20 @@ mod tests {
         assert_eq!(strip.select_with_cap("t2", 3, 3), None);
         assert_eq!(strip.select_with_cap("t3", 4, 3).as_deref(), Some("t0"));
         assert_eq!(strip.tabs.iter().filter(|t| t.attached).count(), 3);
+    }
+
+    #[test]
+    fn shrinking_detaches_the_least_recently_viewed_but_never_the_active_tab() {
+        let sessions: Vec<_> = (0..5).map(|i| s(&format!("t{i}"), i as i64)).collect();
+        let mut strip = TabStrip::from_sessions(&sessions);
+        for (tick, name) in ["t1", "t2", "t3", "t4", "t0"].iter().enumerate() {
+            strip.select(name, tick as u64);
+        }
+        assert_eq!(strip.shrink_to(2), vec!["t1", "t2", "t3"]);
+        assert!(strip.tab("t0").unwrap().attached);
+        assert!(strip.tab("t4").unwrap().attached);
+        assert_eq!(strip.shrink_to(0), vec!["t4"], "the active tab stays");
+        assert!(strip.shrink_to(5).is_empty());
     }
 
     #[test]

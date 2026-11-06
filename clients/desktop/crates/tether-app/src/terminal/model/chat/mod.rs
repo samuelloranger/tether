@@ -562,7 +562,8 @@ impl Chats {
         for name in names {
             self.with_session(&name, now, out, |s, ctx| s.background(ctx));
         }
-        self.live_order.clear();
+        // Only the chat in front redials.
+        self.live_order = self.active.iter().cloned().collect();
     }
 
     pub fn on_focus(&mut self, focused: bool, now: Duration, out: &mut Out) {
