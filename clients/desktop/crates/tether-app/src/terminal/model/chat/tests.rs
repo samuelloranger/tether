@@ -2710,3 +2710,13 @@ fn a_dropped_connection_still_counts_the_chat_in_front() {
     h.run(|c, now, out| c.on_dropped(now, out));
     assert_eq!(h.chats.live_count(), 1, "the chat in front redials");
 }
+
+#[test]
+fn the_folder_field_shows_what_was_typed_not_an_abbreviation() {
+    let mut h = Harness::new();
+    h.run(|c, now, out| c.open_new_chat(0, "/home/sam/proj".into(), now, out));
+    h.msg(ChatMsg::NewChatFolder("/home/sam".into()));
+    assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam");
+    h.msg(ChatMsg::NewChatFolder("/home/sam/e".into()));
+    assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam/e");
+}

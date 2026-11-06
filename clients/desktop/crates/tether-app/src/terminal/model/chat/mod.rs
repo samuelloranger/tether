@@ -258,6 +258,12 @@ pub enum ChatMsg {
     NewChatMode(u8),
     NewChatFolder(String),
     NewChatBrowse,
+    NewChatBack,
+    NewChatChoose,
+    NewChatNavigate(String),
+    NewChatFilter(String),
+    NewChatName(Option<String>),
+    NewChatCreateChild,
     NewChatCreateFolder,
     /// The agent picker: an agent key.
     NewChatAgent(String),
@@ -988,7 +994,7 @@ impl Chats {
             && let Some(state) = crate::app::dev_env("TETHER_DEV_CHAT_FOLDER_STATE")
             && let Some(nc) = self.new_chat.as_mut()
         {
-            nc.preview_folder(state == "missing");
+            nc.preview_folder(&state);
         }
         out.jobs.push(newchat::probe_job());
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
@@ -1041,8 +1047,38 @@ impl Chats {
                 }
             }
             ChatMsg::NewChatBrowse => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.browse(now)) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatBack => {
                 if let Some(nc) = self.new_chat.as_mut() {
-                    nc.browse(now);
+                    nc.back();
+                }
+            }
+            ChatMsg::NewChatChoose => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.choose_folder(now);
+                }
+            }
+            ChatMsg::NewChatNavigate(path) => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.navigate(path)) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatFilter(filter) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.filter = filter;
+                }
+            }
+            ChatMsg::NewChatName(name) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.set_new_name(name);
+                }
+            }
+            ChatMsg::NewChatCreateChild => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.create_child()) {
+                    out.jobs.push(job);
                 }
             }
             ChatMsg::NewChatCreateFolder => {

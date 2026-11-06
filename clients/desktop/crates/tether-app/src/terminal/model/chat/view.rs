@@ -399,6 +399,12 @@ pub struct OptionMenuView {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewChatView {
+    pub host: String,
+    pub browse_path: String,
+    pub crumbs: Vec<(String, String)>,
+    pub filter: String,
+    pub naming: bool,
+    pub new_name: String,
     pub folder_loading: bool,
     pub folder_ready: bool,
     pub folder_missing: bool,

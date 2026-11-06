@@ -23,6 +23,9 @@ pub enum Step {
     ListHome,
     Sessions,
     Folder,
+    FolderHome,
+    BrowseFolder,
+    CreateChild,
     CreateFolder,
     Validate,
 }
@@ -56,6 +59,13 @@ pub struct NewChat {
     pub folder_loading: bool,
     pub creating: bool,
     pub browsing: bool,
+    pub home: Option<String>,
+    edited: bool,
+    pub browse_folder: String,
+    pub browse_info: Option<Folder>,
+    pub filter: String,
+    pub new_name: Option<String>,
+    browse_request: u64,
     folder_request: u64,
     folder_at: Option<Duration>,
     pub error: Option<String>,
@@ -113,6 +123,13 @@ impl NewChat {
             folder_loading: true,
             creating: false,
             browsing: false,
+            home: None,
+            edited: false,
+            browse_folder: String::new(),
+            browse_info: None,
+            filter: String::new(),
+            new_name: None,
+            browse_request: generation,
             folder_request: generation,
             folder_at: Some(Duration::ZERO),
             error: None,
@@ -129,19 +146,168 @@ impl NewChat {
     }
 
     #[cfg(debug_assertions)]
-    pub fn preview_folder(&mut self, missing: bool) {
+    pub fn preview_folder(&mut self, state: &str) {
+        let missing = state == "missing";
         self.folder = "/home/dev/projects/api-server".into();
-        self.browsing = !missing;
+        self.home = Some("/home/dev".into());
+        self.browsing = state == "browse";
+        self.browse_folder = self.folder.clone();
         self.folder_at = None;
         self.folder_loading = false;
         self.folder_info = Some(Folder {
             status: if missing { "missing" } else { "ready" }.into(),
             path: self.folder.clone(),
-            children: ["Sources", "Tests"]
+            children: ["Sources", "Tests", "docs", "scripts"]
                 .iter()
                 .map(|name| format!("{}/{name}", self.folder))
                 .collect(),
         });
+        self.browse_info = self.folder_info.clone();
+    }
+
+    pub fn display_path(&self, path: &str) -> String {
+        if let Some(home) = &self.home {
+            if path == home {
+                return "~".into();
+            }
+            if let Some(tail) = path.strip_prefix(&format!("{home}/")) {
+                return format!("~/{tail}");
+            }
+        }
+        path.into()
+    }
+
+    pub fn active_info(&self) -> Option<&Folder> {
+        if self.browsing {
+            self.browse_info.as_ref()
+        } else {
+            self.folder_info.as_ref()
+        }
+    }
+
+    pub fn visible_children(&self) -> Vec<String> {
+        let filter = self.filter.to_lowercase();
+        self.active_info().map_or_else(Vec::new, |f| {
+            f.children
+                .iter()
+                .filter(|p| {
+                    p.rsplit('/')
+                        .next()
+                        .unwrap_or(p)
+                        .to_lowercase()
+                        .contains(&filter)
+                })
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Each breadcrumb as (label, absolute path); the home folder collapses to `~`.
+    pub fn crumbs(&self) -> Vec<(String, String)> {
+        let path = self.browse_folder.as_str();
+        let (mut out, mut acc, rest) = match &self.home {
+            Some(h) if path == h || path.starts_with(&format!("{h}/")) => (
+                vec![("~".to_string(), h.clone())],
+                h.clone(),
+                &path[h.len()..],
+            ),
+            _ => (
+                vec![("/".to_string(), "/".to_string())],
+                String::new(),
+                path,
+            ),
+        };
+        for seg in rest.split('/').filter(|s| !s.is_empty()) {
+            acc.push('/');
+            acc.push_str(seg);
+            out.push((seg.to_string(), acc.clone()));
+        }
+        out
+    }
+
+    pub fn navigate(&mut self, path: String) -> Option<ChatJob> {
+        if !self.browsing || self.creating || self.new_name.is_some() || self.folder_loading {
+            return None;
+        }
+        let info = self.browse_info.as_ref()?;
+        let ancestor = path == "/"
+            || info
+                .path
+                .starts_with(&format!("{}/", path.trim_end_matches('/')));
+        if !ancestor && !info.children.contains(&path) {
+            return None;
+        }
+        self.browse_folder = path;
+        self.filter.clear();
+        self.load_browser()
+    }
+
+    fn load_browser(&mut self) -> Option<ChatJob> {
+        self.browse_request = next_request();
+        self.folder_loading = true;
+        self.error = None;
+        Some(exec(
+            self.browse_request,
+            Step::BrowseFolder,
+            folders::command(&self.browse_folder, false),
+        ))
+    }
+
+    pub fn choose_folder(&mut self, now: Duration) {
+        if !self.browsing || self.folder_loading || self.creating || self.new_name.is_some() {
+            return;
+        }
+        if let Some(info) = self.browse_info.as_ref().filter(|f| f.ready()) {
+            let path = self.display_path(&info.path);
+            self.browsing = false;
+            self.set_folder(path, now);
+        }
+    }
+
+    pub fn back(&mut self) {
+        if self.creating {
+            return;
+        }
+        if self.new_name.take().is_some() {
+            self.error = None;
+            return;
+        }
+        self.browsing = false;
+        self.browse_request = next_request();
+        self.folder_loading = false;
+        self.error = None;
+    }
+
+    pub fn set_new_name(&mut self, name: Option<String>) {
+        if self.browsing && !self.creating && !self.folder_loading {
+            self.new_name = name;
+            self.error = None;
+        }
+    }
+
+    pub fn create_child(&mut self) -> Option<ChatJob> {
+        if !self.browsing || self.creating || self.folder_loading {
+            return None;
+        }
+        let name = self.new_name.as_ref()?.trim();
+        if name.is_empty()
+            || matches!(name, "." | "..")
+            || name.contains('/')
+            || name.contains('\0')
+        {
+            self.error = Some("Enter a folder name without /, other than . or ...".into());
+            return None;
+        }
+        let parent = self.browse_info.as_ref().filter(|f| f.ready())?;
+        let path = format!("{}/{}", parent.path.trim_end_matches('/'), name);
+        self.creating = true;
+        self.browse_request = next_request();
+        self.error = None;
+        Some(exec(
+            self.browse_request,
+            Step::CreateChild,
+            folders::command(&path, true),
+        ))
     }
 
     pub fn unavailable(&self, agent: &AgentProfile) -> Option<&str> {
@@ -190,10 +356,11 @@ impl NewChat {
     }
 
     pub fn set_folder(&mut self, folder: String, now: Duration) {
-        if self.busy || self.continuing.is_some() || self.creating {
+        if self.busy || self.continuing.is_some() || self.creating || self.browsing {
             return;
         }
         self.folder = folder;
+        self.edited = true;
         self.error = None;
         self.folder_info = None;
         self.folder_loading = true;
@@ -209,6 +376,13 @@ impl NewChat {
     pub fn tick(&mut self, now: Duration) -> Option<ChatJob> {
         if !self.busy && !self.creating && self.folder_at.is_some_and(|at| now >= at) {
             self.folder_at = None;
+            if self.home.is_none() {
+                return Some(exec(
+                    self.folder_request,
+                    Step::FolderHome,
+                    host::HOME.to_string(),
+                ));
+            }
             return Some(exec(
                 self.folder_request,
                 Step::Folder,
@@ -251,11 +425,24 @@ impl NewChat {
         )
     }
 
-    pub fn browse(&mut self, now: Duration) {
-        self.browsing = !self.browsing;
-        self.folder_request = next_request();
-        self.folder_loading = true;
-        self.folder_at = Some(now);
+    pub fn browse(&mut self, _now: Duration) -> Option<ChatJob> {
+        if self.busy || self.continuing.is_some() || self.creating || self.folder_loading {
+            return None;
+        }
+        self.browsing = true;
+        self.filter.clear();
+        self.new_name = None;
+        self.browse_folder = self.folder_info.as_ref().map_or_else(
+            || self.folder.clone(),
+            |f| {
+                if f.ready() {
+                    f.path.clone()
+                } else {
+                    f.parent()
+                }
+            },
+        );
+        self.load_browser()
     }
 
     pub fn create_folder(&mut self) -> Option<ChatJob> {
@@ -287,7 +474,7 @@ impl NewChat {
 
     /// `load` continues that earlier conversation instead of starting one.
     pub fn start(&mut self, load: Option<String>) -> Option<ChatJob> {
-        if self.busy || self.creating || self.continuing.is_some() {
+        if self.busy || self.creating || self.continuing.is_some() || self.browsing {
             return None;
         }
         self.folder_request = next_request();
@@ -326,7 +513,48 @@ impl NewChat {
         match step {
             Step::Check | Step::Home | Step::Validate if request != self.request => Next::Nothing,
             Step::ListHome | Step::Sessions if request != self.list_request => Next::Nothing,
-            Step::Folder | Step::CreateFolder if request != self.folder_request => Next::Nothing,
+            Step::Folder | Step::FolderHome | Step::CreateFolder
+                if request != self.folder_request =>
+            {
+                Next::Nothing
+            }
+            Step::BrowseFolder | Step::CreateChild
+                if request != self.browse_request || !self.browsing =>
+            {
+                Next::Nothing
+            }
+            Step::FolderHome => {
+                self.home = result
+                    .ok()
+                    .map(|h| h.trim().trim_end_matches('/').to_string())
+                    .filter(|h| h.starts_with('/'));
+                if !self.edited {
+                    self.folder = self.display_path(&self.folder);
+                }
+                Next::Job(exec(
+                    self.folder_request,
+                    Step::Folder,
+                    folders::command(&self.folder, false),
+                ))
+            }
+            Step::BrowseFolder | Step::CreateChild => {
+                self.folder_loading = false;
+                self.creating = false;
+                let info = result.as_deref().map(Folder::parse).unwrap_or_default();
+                if step == Step::CreateChild && !info.ready() {
+                    self.error = Some(info.message().into());
+                } else {
+                    if step == Step::CreateChild {
+                        self.new_name = None;
+                        self.filter.clear();
+                    }
+                    if !info.path.is_empty() {
+                        self.browse_folder = info.path.clone();
+                    }
+                    self.browse_info = Some(info);
+                }
+                Next::Nothing
+            }
             Step::Folder | Step::CreateFolder => {
                 self.folder_loading = false;
                 self.creating = false;
@@ -402,12 +630,14 @@ mod tests {
     use tether_core::acp::{agent::CLAUDE, defaults::ChatDefaults};
 
     fn dialog(path: &str) -> NewChat {
-        NewChat::open(
+        let mut nc = NewChat::open(
             0,
             path.into(),
             &CLAUDE,
             OptionsDraft::new(&CLAUDE, &ChatDefaults::default(), &[]),
-        )
+        );
+        nc.home = Some("/home/dev".into());
+        nc
     }
 
     fn reply(nc: &mut NewChat, job: ChatJob, output: &str) -> Next {
@@ -497,5 +727,233 @@ mod tests {
         assert!(
             matches!(reply(&mut nc, check, "__TETHER_FOLDER__\0ready\0/projects/new\0"), Next::Open { cwd, .. } if cwd == "/projects/new")
         );
+    }
+
+    fn listing(status: &str, path: &str, children: &[&str]) -> String {
+        let mut out = format!("__TETHER_FOLDER__\0{status}\0{path}\0");
+        for c in children {
+            out.push_str(&format!("{path}/{c}\0"));
+        }
+        out
+    }
+
+    fn exec_of(job: Option<ChatJob>) -> (u64, Step) {
+        let Some(ChatJob::Exec {
+            tag: ExecTag::NewChat { request, step },
+            ..
+        }) = job
+        else {
+            panic!("expected exec")
+        };
+        (request, step)
+    }
+
+    fn browsing(path: &str, children: &[&str]) -> NewChat {
+        let mut nc = dialog(path);
+        nc.folder_info = Some(Folder::parse(&listing("ready", path, children)));
+        nc.folder_loading = false;
+        let (request, step) = exec_of(nc.browse(Duration::ZERO));
+        nc.on_exec(request, step, Ok(listing("ready", path, children)), "host");
+        nc
+    }
+
+    #[test]
+    fn browse_opens_a_ready_folder() {
+        let nc = browsing("/home/dev/api", &["a", "b"]);
+        assert!(nc.browsing && !nc.folder_loading);
+        assert_eq!(nc.browse_folder, "/home/dev/api");
+        assert_eq!(nc.display_path(&nc.browse_folder), "~/api");
+    }
+
+    #[test]
+    fn browse_of_a_missing_folder_opens_its_parent() {
+        let mut nc = dialog("/home/dev/new");
+        nc.folder_info = Some(Folder::parse(&listing("missing", "/home/dev/new", &[])));
+        nc.folder_loading = false;
+        let job = nc.browse(Duration::ZERO);
+        assert_eq!(nc.browse_folder, "/home/dev");
+        assert!(nc.folder_loading);
+        assert!(job.is_some());
+    }
+
+    #[test]
+    fn navigate_accepts_the_parent_ancestors_and_children_only() {
+        let mut nc = browsing("/home/dev/api", &["a", "b"]);
+        assert!(nc.navigate("/etc".into()).is_none());
+        assert!(nc.navigate("/home/dev/api/zzz".into()).is_none());
+        assert!(nc.navigate("/home/dev/ap".into()).is_none());
+        assert!(nc.navigate("/home/dev/api/a".into()).is_some());
+        assert!(nc.folder_loading);
+
+        let mut nc = browsing("/home/dev/api", &["a"]);
+        assert!(nc.navigate("/home/dev".into()).is_some());
+        let mut nc = browsing("/home/dev/api", &["a"]);
+        assert!(nc.navigate("/".into()).is_some());
+    }
+
+    #[test]
+    fn stale_browse_replies_are_ignored_after_back_or_a_new_navigation() {
+        let mut nc = browsing("/home/dev/api", &["a"]);
+        let (first, step) = exec_of(nc.navigate("/home/dev/api/a".into()));
+        let (second, _) = {
+            nc.folder_loading = false;
+            exec_of(nc.navigate("/home/dev".into()))
+        };
+        assert_ne!(first, second);
+        nc.on_exec(
+            first,
+            step,
+            Ok(listing("ready", "/home/dev/api/a", &[])),
+            "host",
+        );
+        assert_eq!(nc.browse_info.as_ref().unwrap().path, "/home/dev/api");
+        assert_eq!(nc.browse_folder, "/home/dev");
+        nc.back();
+        nc.on_exec(
+            second,
+            step,
+            Ok(listing("ready", "/home/dev/api", &["x"])),
+            "host",
+        );
+        assert!(!nc.browsing);
+        assert!(!nc.folder_loading);
+        assert!(
+            nc.browse_info.as_ref().unwrap().children.len() == 1
+                && nc.browse_info.as_ref().unwrap().children[0].ends_with("/a")
+        );
+    }
+
+    #[test]
+    fn choosing_a_folder_fills_the_field_abbreviated_and_leaves_browsing() {
+        let mut nc = browsing("/home/dev/api", &["a"]);
+        let (request, step) = exec_of(nc.navigate("/home/dev/api/a".into()));
+        nc.on_exec(
+            request,
+            step,
+            Ok(listing("ready", "/home/dev/api/a", &[])),
+            "host",
+        );
+        nc.choose_folder(Duration::ZERO);
+        assert!(!nc.browsing);
+        assert_eq!(nc.folder, "~/api/a");
+        assert!(nc.folder_loading);
+    }
+
+    #[test]
+    fn choosing_waits_for_a_ready_loaded_folder() {
+        let mut nc = browsing("/home/dev/api", &["a"]);
+        nc.navigate("/home/dev/api/a".into());
+        nc.choose_folder(Duration::ZERO);
+        assert!(nc.browsing);
+        assert_eq!(nc.folder, "/home/dev/api");
+    }
+
+    #[test]
+    fn typing_is_ignored_only_while_the_chooser_covers_the_field() {
+        let mut nc = browsing("/home/dev/api", &[]);
+        nc.set_folder("/elsewhere".into(), Duration::ZERO);
+        assert_eq!(nc.folder, "/home/dev/api");
+        nc.back();
+        nc.set_folder("/elsewhere".into(), Duration::ZERO);
+        assert_eq!(nc.folder, "/elsewhere");
+    }
+
+    #[test]
+    fn create_child_rejects_bad_names_and_enters_the_new_folder_without_a_chat() {
+        let mut nc = browsing("/home/dev/api", &[]);
+        nc.set_new_name(Some(String::new()));
+        for bad in ["", "  ", ".", "..", "a/b", "/"] {
+            nc.new_name = Some(bad.into());
+            assert!(nc.create_child().is_none(), "{bad:?}");
+            assert!(nc.error.is_some());
+            assert!(!nc.creating);
+        }
+        nc.new_name = Some("fresh".into());
+        let (request, step) = exec_of(nc.create_child());
+        assert_eq!(step, Step::CreateChild);
+        assert!(nc.creating && !nc.busy);
+        nc.on_exec(
+            request,
+            step,
+            Ok(listing("ready", "/home/dev/api/fresh", &[])),
+            "host",
+        );
+        assert!(!nc.creating && nc.new_name.is_none());
+        assert_eq!(nc.browse_folder, "/home/dev/api/fresh");
+        assert!(nc.browsing && !nc.busy);
+    }
+
+    #[test]
+    fn a_failed_child_creation_keeps_the_name_field_and_shows_why() {
+        let mut nc = browsing("/home/dev/api", &[]);
+        nc.new_name = Some("fresh".into());
+        let (request, step) = exec_of(nc.create_child());
+        nc.on_exec(
+            request,
+            step,
+            Ok(listing("create_failed", "/home/dev/api/fresh", &[])),
+            "host",
+        );
+        assert_eq!(nc.new_name.as_deref(), Some("fresh"));
+        assert_eq!(nc.browse_folder, "/home/dev/api");
+        assert!(nc.error.as_deref().unwrap().contains("create"));
+    }
+
+    #[test]
+    fn home_is_read_once_then_the_folder_is_checked() {
+        let mut nc = NewChat::open(
+            0,
+            "/home/dev/api".into(),
+            &CLAUDE,
+            OptionsDraft::new(&CLAUDE, &ChatDefaults::default(), &[]),
+        );
+        let job = nc.tick(Duration::ZERO).unwrap();
+        let (_, step) = exec_of(Some(job.clone()));
+        assert_eq!(step, Step::FolderHome);
+        let Next::Job(check) = reply(&mut nc, job, "/home/dev\n") else {
+            panic!("expected the folder check")
+        };
+        assert_eq!(nc.home.as_deref(), Some("/home/dev"));
+        assert_eq!(nc.folder, "~/api");
+        assert_eq!(exec_of(Some(check)).1, Step::Folder);
+    }
+
+    #[test]
+    fn an_edited_folder_is_not_rewritten_when_home_arrives() {
+        let mut nc = NewChat::open(
+            0,
+            "/start".into(),
+            &CLAUDE,
+            OptionsDraft::new(&CLAUDE, &ChatDefaults::default(), &[]),
+        );
+        nc.set_folder("/home/dev".into(), Duration::ZERO);
+        let job = nc.tick(Duration::from_secs(5)).unwrap();
+        reply(&mut nc, job, "/home/dev");
+        assert_eq!(nc.folder, "/home/dev");
+    }
+
+    #[test]
+    fn breadcrumbs_collapse_home_and_navigate_by_absolute_path() {
+        let nc = browsing("/home/dev/api/src", &[]);
+        let crumbs = nc.crumbs();
+        assert_eq!(
+            crumbs,
+            vec![
+                ("~".to_string(), "/home/dev".to_string()),
+                ("api".to_string(), "/home/dev/api".to_string()),
+                ("src".to_string(), "/home/dev/api/src".to_string()),
+            ]
+        );
+        let mut outside = browsing("/srv/app", &[]);
+        assert_eq!(outside.crumbs()[0], ("/".to_string(), "/".to_string()));
+        assert_eq!(outside.crumbs()[2].1, "/srv/app");
+        assert!(outside.navigate("/srv".into()).is_some());
+    }
+
+    #[test]
+    fn the_filter_narrows_children_case_insensitively() {
+        let mut nc = browsing("/home/dev/api", &["Sources", "Tests", "docs"]);
+        nc.filter = "SO".into();
+        assert_eq!(nc.visible_children(), vec!["/home/dev/api/Sources"]);
     }
 }
