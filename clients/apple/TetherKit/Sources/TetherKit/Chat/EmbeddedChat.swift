@@ -71,10 +71,12 @@ struct NewChatSheet: View {
   }
 
   let initialFolder: String
+  var hostName = ""
   var initialMode: Mode = .new
   /// Nil starts on the agent picked last on this device.
   var initialAgent: ChatAgentProfile?
   var initiallyOpenOptions = false
+  var initiallyBrowseFolders = false
   /// Options already changed when the sheet opens, for previews.
   var initialChanges: [String: String] = [:]
   /// The stored defaults and the cached choices of an agent, for the Options row.
@@ -83,6 +85,7 @@ struct NewChatSheet: View {
   var onAgentPicked: (ChatAgentProfile) -> Void = { _ in }
   /// Agent key → why the host can't run it; those agents are dimmed and refuse the pick.
   var checkAgents: () async -> [String: String] = { [:] }
+  let checkFolder: (String, Bool) async -> ChatFolder
   /// Resolves the folder and opens the chat; a message leaves the sheet up showing it.
   let onStart: (String, NewChatRequest) async -> String?
   /// The earlier conversations of an agent in a folder.
@@ -94,6 +97,10 @@ struct NewChatSheet: View {
   @State private var mode: Mode = .new
   @State private var agent: ChatAgentProfile = ChatAgents.claude
   @State private var folder = ""
+  @State private var folderInfo: ChatFolder?
+  @State private var checkingFolder = true
+  @State private var creatingFolder = false
+  @State private var browsing = false
   @State private var starting = false
   @State private var failure: String?
   @State private var listing: Listing = .idle
@@ -128,84 +135,97 @@ struct NewChatSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
-        Text(mode == .new ? "New chat" : "Continue a chat").font(.footnote.weight(.semibold))
-          .foregroundStyle(TetherColors.textSecondary)
+        Text(mode == .new ? "New chat" : "Continue a chat").font(.headline)
+          .foregroundStyle(TetherColors.textPrimary)
           .accessibilityAddTraits(.isHeader)
         Spacer()
         Button("Cancel", action: onCancel).font(.subheadline).foregroundStyle(TetherColors.accent)
-          .buttonStyle(TetherPressStyle())
+          .frame(minHeight: 44).buttonStyle(TetherPressStyle())
+          .disabled(starting || creatingFolder || continuing != nil)
       }
       Picker("Mode", selection: $mode) {
         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
       }
       .pickerStyle(.segmented)
+      .disabled(starting || creatingFolder || continuing != nil)
       .accessibilityIdentifier("sshNewChatMode")
-      agentPicker
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Working folder").font(.caption).foregroundStyle(TetherColors.textSecondary)
-        TextField("Folder on the host", text: $folder)
-          .font(.callout.monospaced()).foregroundStyle(TetherColors.textPrimary)
-          .textInputAutocapitalization(.never).autocorrectionDisabled()
-          .focused($focused).submitLabel(.go).onSubmit(submitFolder)
-          .padding(10).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 10))
-          .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
-          .accessibilityLabel("Working folder for the new chat")
-          .accessibilityIdentifier("sshNewChatFolder")
-        if let shownFailure {
-          Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("sshNewChatError")
-        }
-      }
-      optionsBox
-      if mode == .new {
-        Button(action: start) {
-          Group {
-            if starting { ProgressView().tint(TetherColors.onAccent) } else {
-              Text("Start chat").font(.subheadline.weight(.semibold))
+      ScrollView {
+        VStack(alignment: .leading, spacing: 12) {
+          agentPicker
+          VStack(alignment: .leading, spacing: 6) {
+            ChatFolderPicker(folder: $folder, folderInfo: $folderInfo, checkingFolder: $checkingFolder,
+              creatingFolder: $creatingFolder, browsing: $browsing, focused: $focused,
+              disabled: starting || continuing != nil, hostName: hostName,
+              checkFolder: checkFolder, onSubmit: submitFolder)
+            if let shownFailure {
+              Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("sshNewChatError")
             }
           }
-          .frame(maxWidth: .infinity).frame(height: 36)
-          .foregroundStyle(TetherColors.onAccent)
-          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
-          .padding(.vertical, 4).contentShape(Rectangle())
+          optionsBox.disabled(starting || creatingFolder || continuing != nil)
+          if mode == .resume { sessionList.frame(minHeight: 140, maxHeight: 340) }
         }
-        .buttonStyle(TetherPressStyle())
-        .disabled(starting)
-        .accessibilityIdentifier("sshNewChatStart")
-        Spacer(minLength: 0)
-      } else {
-        sessionList
       }
+      .scrollBounceBehavior(.basedOnSize)
+      .scrollDismissesKeyboard(.interactively)
     }
-    .padding(.horizontal, 16).padding(.top, 16)
+    .padding(.horizontal, 16).padding(.top, 8)
     .background(TetherColors.background.ignoresSafeArea())
-    .presentationDetents(mode == .new ? [.height(newHeight)] : [.medium, .large])
+    .safeAreaInset(edge: .bottom) {
+      if mode == .new { startButton.padding(.horizontal, 16).padding(.vertical, 12).background(TetherColors.background) }
+    }
+    .presentationDetents(mode == .new ? [.height(newHeight), .large] : [.medium, .large])
+    .interactiveDismissDisabled(starting || creatingFolder || continuing != nil)
     .onAppear {
       if folder.isEmpty { folder = initialFolder }
       mode = initialMode
       agent = initialAgent ?? ChatLastAgentStore().agent
       optionsOpen = initiallyOpenOptions
+      browsing = initiallyBrowseFolders
       changes = initialChanges
     }
     .task(id: "\(mode.rawValue)|\(agent.key)|\(folder)|\(reloads)") { await reload() }
     .task { unavailable = await checkAgents() }
+    .onChange(of: folder) { _, _ in
+      folderInfo = nil
+      checkingFolder = true
+      failure = nil
+    }
     .onChange(of: mode) { _, _ in failure = nil }
   }
 
-  /// The sheet is as tall as what it holds: the agent picker and the Options row add to the folder step.
+  private var startButton: some View {
+    Button(action: start) {
+      Group {
+        if starting { ProgressView().tint(TetherColors.onAccent) } else {
+          Text("Start chat").font(.subheadline.weight(.semibold))
+        }
+      }
+      .frame(maxWidth: .infinity, minHeight: 44)
+      .foregroundStyle(TetherColors.onAccent)
+      .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(TetherPressStyle())
+    .disabled(starting || creatingFolder || checkingFolder || folderInfo?.ready != true)
+    .opacity(checkingFolder || creatingFolder || folderInfo?.ready != true ? 0.45 : 1)
+    .accessibilityIdentifier("sshNewChatStart")
+  }
+
   private var newHeight: CGFloat {
-    var height: CGFloat = 405
+    var height: CGFloat = 410
+    if folderInfo?.message != nil { height += 44 }
     if shownFailure != nil { height += 68 }
-    if optionsOpen { height += optionRows.isEmpty ? 64 : CGFloat(optionRows.count) * 40 + 36 }
+    if optionsOpen { height += optionRows.isEmpty ? 64 : CGFloat(optionRows.count) * 44 + 44 }
     return height
   }
 
   // MARK: Agent
 
   private var agentPicker: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("Agent").font(.caption).foregroundStyle(TetherColors.textSecondary)
+    HStack(spacing: 12) {
+      Text("Agent").font(.subheadline).foregroundStyle(TetherColors.textSecondary)
       Menu {
         ForEach(ChatAgents.all) { option in
           let missing = unavailable[option.key] != nil
@@ -230,14 +250,13 @@ struct NewChatSheet: View {
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(TetherColors.textFaint)
         }
-        .padding(.horizontal, 12).frame(height: 38)
-        .background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(TetherColors.border, lineWidth: 1))
+        .padding(.horizontal, 10).frame(minHeight: 44)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .accessibilityLabel("Agent, \(agent.label)")
       .accessibilityIdentifier("sshNewChatAgentSelect")
+      .disabled(starting || creatingFolder || continuing != nil)
     }
   }
 
@@ -270,7 +289,7 @@ struct NewChatSheet: View {
           Image(systemName: optionsOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
             .foregroundStyle(TetherColors.textFaint)
         }
-        .padding(.horizontal, 10).frame(minHeight: 38)
+        .padding(.horizontal, 10).frame(minHeight: 44)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -315,7 +334,7 @@ struct NewChatSheet: View {
           Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
             .foregroundStyle(TetherColors.textFaint)
         }
-        .padding(.horizontal, 8).frame(minHeight: 26)
+        .padding(.horizontal, 8).frame(minHeight: 44)
         .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
         .overlay(
           RoundedRectangle(cornerRadius: 7)
@@ -324,7 +343,7 @@ struct NewChatSheet: View {
       .accessibilityLabel("\(row.name), \(row.selectedName)")
       .accessibilityIdentifier("sshNewChatOption_\(row.id)")
     }
-    .padding(.horizontal, 10).frame(minHeight: 40)
+    .padding(.horizontal, 10).frame(minHeight: 44)
     .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
   }
 
@@ -346,12 +365,12 @@ struct NewChatSheet: View {
         if resetNow {
           if !stored.isEmpty {
             Text("·").foregroundStyle(TetherColors.textFaint)
-            Button("Undo") { reset = false }.foregroundStyle(TetherColors.accent)
+            Button("Undo") { reset = false }.foregroundStyle(TetherColors.accent).frame(minHeight: 44)
           }
         } else {
           Text("·").foregroundStyle(TetherColors.textFaint)
           Button("Reset") { changes = [:]; reset = true }.foregroundStyle(TetherColors.accent)
-            .accessibilityIdentifier("sshNewChatOptionsReset")
+            .frame(minHeight: 44).accessibilityIdentifier("sshNewChatOptionsReset")
         }
         Spacer(minLength: 0)
       }
@@ -377,7 +396,7 @@ struct NewChatSheet: View {
             .fixedSize(horizontal: false, vertical: true)
           Spacer(minLength: 0)
           Button("Retry") { reloads += 1 }
-            .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .frame(minHeight: 44).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.accent)
             .buttonStyle(TetherPressStyle())
             .accessibilityIdentifier("sshContinueRetry")
         }
@@ -428,7 +447,7 @@ struct NewChatSheet: View {
         }
       }
       .padding(.horizontal, 12).padding(.vertical, 8)
-      .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
       .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
@@ -440,11 +459,12 @@ struct NewChatSheet: View {
   private func reload() async {
     guard mode == .resume else { return }
     let wanted = folder
+    let wantedAgent = agent
     listing = .loading
     try? await Task.sleep(nanoseconds: 500_000_000)
     guard !Task.isCancelled else { return }
-    let result = await loadSessions(wanted, agent)
-    guard !Task.isCancelled, wanted == folder else { return }
+    let result = await loadSessions(wanted, wantedAgent)
+    guard !Task.isCancelled, wanted == folder, agent == wantedAgent else { return }
     switch result {
     case let .loaded(sessions): listing = .loaded(sessions)
     case let .failed(message): listing = .failed(message)
@@ -456,7 +476,7 @@ struct NewChatSheet: View {
   }
 
   private func start() {
-    guard !starting else { return }
+    guard !starting, !creatingFolder, !checkingFolder, folderInfo?.ready == true else { return }
     starting = true
     failure = nil
     focused = false
@@ -467,7 +487,7 @@ struct NewChatSheet: View {
   }
 
   private func resume(_ session: ACPSavedSession) {
-    guard continuing == nil else { return }
+    guard continuing == nil, !creatingFolder, !checkingFolder, folderInfo?.ready == true else { return }
     continuing = session.id
     failure = nil
     focused = false

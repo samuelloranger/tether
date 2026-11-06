@@ -745,6 +745,38 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                     })
                     .collect(),
             ));
+            vm.set_nc_host(nc.host.as_str().into());
+            vm.set_nc_browse_path(nc.browse_path.as_str().into());
+            vm.set_nc_crumbs(model(
+                nc.crumbs
+                    .iter()
+                    .map(|(name, path)| NcChoiceVm {
+                        value: path.as_str().into(),
+                        name: name.as_str().into(),
+                        selected: false,
+                    })
+                    .collect(),
+            ));
+            vm.set_nc_filter(nc.filter.as_str().into());
+            vm.set_nc_naming(nc.naming);
+            vm.set_nc_new_name(nc.new_name.as_str().into());
+            vm.set_nc_folder_loading(nc.folder_loading);
+            vm.set_nc_folder_ready(nc.folder_ready);
+            vm.set_nc_folder_missing(nc.folder_missing);
+            vm.set_nc_folder_message(nc.folder_message.as_str().into());
+            vm.set_nc_folder_children(model(
+                nc.folder_children
+                    .iter()
+                    .map(|p| NcChoiceVm {
+                        value: p.as_str().into(),
+                        name: p.rsplit('/').next().unwrap_or(p).into(),
+                        selected: false,
+                    })
+                    .collect(),
+            ));
+            vm.set_nc_folder_parent(nc.folder_parent.as_str().into());
+            vm.set_nc_browsing(nc.browsing);
+            vm.set_nc_creating(nc.creating);
             vm.set_nc_busy(nc.busy);
             vm.set_nc_error(nc.error.as_str().into());
             vm.set_nc_continuing(nc.continuing);
@@ -1254,6 +1286,15 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_ctl_command(|text| send(ChatMsg::ControlsCommand(text.into())));
     vm.on_bypass_confirmed(|| send(ChatMsg::BypassConfirmed));
     vm.on_bypass_cancelled(|| send(ChatMsg::BypassCancelled));
+    vm.on_nc_browse(|| send(ChatMsg::NewChatBrowse));
+    vm.on_nc_back(|| send(ChatMsg::NewChatBack));
+    vm.on_nc_choose(|| send(ChatMsg::NewChatChoose));
+    vm.on_nc_navigate(|path| send(ChatMsg::NewChatNavigate(path.into())));
+    vm.on_nc_filter_edited(|filter| send(ChatMsg::NewChatFilter(filter.into())));
+    vm.on_nc_name_edited(|name| send(ChatMsg::NewChatName(Some(name.into()))));
+    vm.on_nc_name_cancel(|| send(ChatMsg::NewChatName(None)));
+    vm.on_nc_create_child(|| send(ChatMsg::NewChatCreateChild));
+    vm.on_nc_create_folder(|| send(ChatMsg::NewChatCreateFolder));
     vm.on_nc_start(|| send(ChatMsg::NewChatStart));
     vm.on_nc_cancel(|| send(ChatMsg::NewChatCancel));
     vm.on_nc_mode_changed(|m| send(ChatMsg::NewChatMode(u8::try_from(m).unwrap_or(0))));

@@ -8,6 +8,10 @@ struct ChatListView: View {
 
   @State private var newFolder = "~"
   @State private var starting = false
+  @State private var folderInfo: ChatFolder?
+  @State private var checkingFolder = true
+  @State private var creatingFolder = false
+  @State private var browsing = false
   @State private var pendingDeletion: ACPChatSummary?
   @FocusState private var folderFocused: Bool
 
@@ -66,24 +70,9 @@ struct ChatListView: View {
 
   private var newChatRow: some View {
     VStack(alignment: .leading, spacing: 10) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Working folder").font(.caption).foregroundStyle(TetherColors.textSecondary)
-        HStack(spacing: 8) {
-          TextField("Folder on the host", text: $newFolder)
-            .font(.body.monospaced())
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .focused($folderFocused)
-            .submitLabel(.go)
-            .onSubmit(start)
-            .accessibilityLabel("Working folder for the new chat")
-          Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-            .foregroundStyle(TetherColors.textFaint)
-            .accessibilityHidden(true)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { folderFocused = true }
-      }
+      ChatFolderPicker(folder: $newFolder, folderInfo: $folderInfo, checkingFolder: $checkingFolder,
+        creatingFolder: $creatingFolder, browsing: $browsing, focused: $folderFocused,
+        disabled: starting, hostName: model.hostName, checkFolder: { await model.checkFolder($0, create: $1) }, onSubmit: start)
       Button(action: start) {
         Group {
           if starting {
@@ -100,14 +89,15 @@ struct ChatListView: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(TetherPressStyle())
-      .disabled(starting)
+      .disabled(starting || checkingFolder || creatingFolder || folderInfo?.ready != true)
+        .opacity(checkingFolder || creatingFolder || folderInfo?.ready != true ? 0.45 : 1)
       .accessibilityIdentifier("chatNew")
     }
     .padding(.vertical, 2)
   }
 
   private func start() {
-    guard !starting else { return }
+    guard !starting, !checkingFolder, !creatingFolder, folderInfo?.ready == true else { return }
     starting = true
     folderFocused = false
     Task {

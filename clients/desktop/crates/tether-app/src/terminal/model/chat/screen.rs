@@ -270,6 +270,22 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     }
     if let Some(nc) = &chats.new_chat {
         screen.new_chat = Some(NewChatView {
+            host: chats.host.clone(),
+            browse_path: nc.display_path(&nc.browse_folder),
+            crumbs: nc.crumbs(),
+            filter: nc.filter.clone(),
+            naming: nc.new_name.is_some(),
+            new_name: nc.new_name.clone().unwrap_or_default(),
+            folder_loading: nc.folder_loading,
+            folder_ready: nc.active_info().is_some_and(|f| f.ready()),
+            folder_missing: nc.active_info().is_some_and(|f| f.missing()),
+            folder_message: nc.active_info().map_or("", |f| f.message()).to_string(),
+            folder_children: nc.visible_children(),
+            folder_parent: nc
+                .active_info()
+                .map_or_else(|| "/".to_string(), |f| f.parent()),
+            browsing: nc.browsing,
+            creating: nc.creating,
             agent: agent_index(Some(nc.agent)),
             unavailable: agent::ALL
                 .iter()

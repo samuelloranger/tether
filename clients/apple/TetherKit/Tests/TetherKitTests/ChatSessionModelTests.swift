@@ -310,6 +310,7 @@ final class ChatSessionModelTests: XCTestCase {
       commands.append(command)
       if command == ACPHostCommand.listWithErrors { return "chat-a\trunning\t1\t/srv/api\t5\tclaude\n" }
       if command == ACPHostCommand.home { return "/home/sam" }
+      if command.contains("tether-folder") { return "__TETHER_FOLDER__\0ready\0/home/sam/code\0" }
       return ""
     }
     await listModel.refresh()

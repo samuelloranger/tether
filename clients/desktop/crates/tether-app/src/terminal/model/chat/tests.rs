@@ -104,6 +104,18 @@ impl Harness {
         self.msg(ChatMsg::NewChatStart);
         self.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
         self.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+        self.exec(
+            |t| {
+                matches!(
+                    t,
+                    ExecTag::NewChat {
+                        step: newchat::Step::Validate,
+                        ..
+                    }
+                )
+            },
+            "__TETHER_FOLDER__\0ready\0/home/sam/proj\0",
+        );
         self.chats.active().unwrap().to_string()
     }
 
@@ -1697,6 +1709,18 @@ impl Harness {
         self.msg(ChatMsg::NewChatStart);
         self.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
         self.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+        self.exec(
+            |t| {
+                matches!(
+                    t,
+                    ExecTag::NewChat {
+                        step: newchat::Step::Validate,
+                        ..
+                    }
+                )
+            },
+            "__TETHER_FOLDER__\0ready\0/home/sam/proj\0",
+        );
         self.chats.active().unwrap().to_string()
     }
 
@@ -1739,6 +1763,18 @@ fn the_next_dialog_opens_on_the_agent_picked_last() {
     h.msg(ChatMsg::NewChatStart);
     h.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
     h.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::Validate,
+                    ..
+                }
+            )
+        },
+        "__TETHER_FOLDER__\0ready\0/home/sam/proj\0",
+    );
     h.run(|c, now, out| c.open_new_chat(0, "~".into(), now, out));
     assert_eq!(h.dialog().agent, 1, "Codex was the last one started");
 }
@@ -1872,6 +1908,18 @@ fn the_dialogs_picks_are_applied_and_the_confirmed_ones_become_that_agents_defau
     h.msg(ChatMsg::NewChatStart);
     h.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
     h.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::Validate,
+                    ..
+                }
+            )
+        },
+        "__TETHER_FOLDER__\0ready\0/home/sam/proj\0",
+    );
     let name = h.chats.active().unwrap().to_string();
     let (_, generation, _) = h.open_stream();
     h.feed(
@@ -1933,6 +1981,18 @@ fn reset_applies_nothing_to_the_new_chat() {
     h.msg(ChatMsg::NewChatStart);
     h.exec(|t| matches!(t, ExecTag::NewChat { .. }), CHECK_OK);
     h.exec(|t| matches!(t, ExecTag::NewChat { .. }), "/home/sam");
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::NewChat {
+                    step: newchat::Step::Validate,
+                    ..
+                }
+            )
+        },
+        "__TETHER_FOLDER__\0ready\0/home/sam/proj\0",
+    );
     let name = h.chats.active().unwrap().to_string();
     let (_, generation, _) = h.open_stream();
     h.feed(
@@ -2649,4 +2709,14 @@ fn a_dropped_connection_still_counts_the_chat_in_front() {
     assert_eq!(h.chats.live_count(), 2);
     h.run(|c, now, out| c.on_dropped(now, out));
     assert_eq!(h.chats.live_count(), 1, "the chat in front redials");
+}
+
+#[test]
+fn the_folder_field_shows_what_was_typed_not_an_abbreviation() {
+    let mut h = Harness::new();
+    h.run(|c, now, out| c.open_new_chat(0, "/home/sam/proj".into(), now, out));
+    h.msg(ChatMsg::NewChatFolder("/home/sam".into()));
+    assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam");
+    h.msg(ChatMsg::NewChatFolder("/home/sam/e".into()));
+    assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam/e");
 }

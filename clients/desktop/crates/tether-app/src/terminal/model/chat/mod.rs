@@ -257,6 +257,14 @@ pub enum ChatMsg {
     NewChatCancel,
     NewChatMode(u8),
     NewChatFolder(String),
+    NewChatBrowse,
+    NewChatBack,
+    NewChatChoose,
+    NewChatNavigate(String),
+    NewChatFilter(String),
+    NewChatName(Option<String>),
+    NewChatCreateChild,
+    NewChatCreateFolder,
     /// The agent picker: an agent key.
     NewChatAgent(String),
     /// The opened Options row: one menu's choice.
@@ -621,11 +629,11 @@ impl Chats {
             self.workflow_redrawn = now;
             self.dirty = true;
         }
-        if let Some(nc) = self.new_chat.as_mut()
-            && let Some(job) = nc.tick(now)
-        {
-            out.jobs.push(job);
-            self.dirty = true;
+        if let Some(nc) = self.new_chat.as_mut() {
+            while let Some(job) = nc.tick(now) {
+                out.jobs.push(job);
+                self.dirty = true;
+            }
         }
     }
 
@@ -981,6 +989,13 @@ impl Chats {
         self.dirty = true;
         let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
         self.new_chat = Some(NewChat::open(mode, folder, agent, self.draft_for(agent)));
+        #[cfg(debug_assertions)]
+        if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
+            && let Some(state) = crate::app::dev_env("TETHER_DEV_CHAT_FOLDER_STATE")
+            && let Some(nc) = self.new_chat.as_mut()
+        {
+            nc.preview_folder(&state);
+        }
         out.jobs.push(newchat::probe_job());
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
             out.jobs.push(job);
@@ -1031,6 +1046,46 @@ impl Chats {
                     nc.set_folder(text, now);
                 }
             }
+            ChatMsg::NewChatBrowse => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.browse(now)) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatBack => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.back();
+                }
+            }
+            ChatMsg::NewChatChoose => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.choose_folder(now);
+                }
+            }
+            ChatMsg::NewChatNavigate(path) => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.navigate(path)) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatFilter(filter) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.filter = filter;
+                }
+            }
+            ChatMsg::NewChatName(name) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.set_new_name(name);
+                }
+            }
+            ChatMsg::NewChatCreateChild => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.create_child()) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatCreateFolder => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.create_folder()) {
+                    out.jobs.push(job);
+                }
+            }
             ChatMsg::NewChatAgent(key) => {
                 if let Some(agent) = agent::by_key(&key) {
                     let draft = self.draft_for(agent);
@@ -1054,8 +1109,13 @@ impl Chats {
                 }
             }
             ChatMsg::NewChatRetry => {
-                if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
-                    out.jobs.push(job);
+                if let Some(nc) = self.new_chat.as_mut() {
+                    if !nc.folder_loading && nc.folder_info.as_ref().is_none_or(|f| !f.ready()) {
+                        nc.recheck(now);
+                    }
+                    if let Some(job) = nc.reload(now) {
+                        out.jobs.push(job);
+                    }
                 }
             }
             ChatMsg::NewChatStart => {

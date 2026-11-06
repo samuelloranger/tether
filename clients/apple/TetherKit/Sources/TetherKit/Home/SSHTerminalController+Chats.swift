@@ -82,6 +82,14 @@ extension SSHTerminalController {
     row.route(journal: UserDefaultsChatJournalStore(name: row.name).load())
   }
 
+  func chatFolder(_ text: String, create: Bool) async -> ChatFolder {
+    let control = control
+    let output = try? await ChatContinueLoader.withDeadline(8) {
+      try await control.exec(ChatFolders.command(text, create: create))
+    }
+    return output.map(ChatFolder.parse) ?? ChatFolder()
+  }
+
   func newChat(cwdText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)) async -> ChatStart {
     let result = await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed) {
       try await self.control.exec($0)

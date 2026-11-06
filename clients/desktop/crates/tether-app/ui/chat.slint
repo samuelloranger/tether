@@ -352,7 +352,21 @@ export global ChatVm {
     // New chat.
     in property <bool> nc-open;
     in-out property <int> nc-mode;
+    in property <string> nc-host;
+    in property <string> nc-browse-path;
+    in property <[NcChoiceVm]> nc-crumbs;
+    in-out property <string> nc-filter;
+    in property <bool> nc-naming;
+    in-out property <string> nc-new-name;
     in-out property <string> nc-folder;
+    in property <bool> nc-folder-loading;
+    in property <bool> nc-folder-ready;
+    in property <bool> nc-folder-missing;
+    in property <string> nc-folder-message;
+    in property <[NcChoiceVm]> nc-folder-children;
+    in property <string> nc-folder-parent;
+    in property <bool> nc-browsing;
+    in property <bool> nc-creating;
     in property <bool> nc-busy;
     in property <string> nc-error;
     in property <int> nc-listing;            // 0 loading, 1 failed, 2 loaded
@@ -418,6 +432,15 @@ export global ChatVm {
     callback ctl-command(string);
     callback bypass-confirmed();
     callback bypass-cancelled();
+    callback nc-browse();
+    callback nc-back();
+    callback nc-choose();
+    callback nc-navigate(string);
+    callback nc-filter-edited(string);
+    callback nc-name-edited(string);
+    callback nc-name-cancel();
+    callback nc-create-child();
+    callback nc-create-folder();
     callback nc-start();
     callback nc-cancel();
     callback nc-mode-changed(int);
@@ -2783,7 +2806,9 @@ export component NewChatDialog inherits Rectangle {
         border-width: 1px;
         border-color: Tokens.border;
         clip: true;
-        dialog := VerticalLayout {
+        ScrollView {
+            dialog := VerticalLayout {
+            if !ChatVm.nc-browsing: VerticalLayout {
             padding: 18px;
             spacing: 12px;
             HorizontalLayout {
@@ -2806,7 +2831,7 @@ export component NewChatDialog inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 5px;
-                Text { text: "Working folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+                Text { text: ChatVm.nc-host != "" ? "Folder on " + ChatVm.nc-host : "Working folder on the host"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; overflow: elide; }
                 Rectangle {
                     height: 38px;
                     background: Tokens.input;
@@ -2814,24 +2839,68 @@ export component NewChatDialog inherits Rectangle {
                     border-width: 1px;
                     border-color: folder-input.has-focus ? Tokens.accent : Tokens.border;
                     animate border-color { duration: Motion.fast; easing: ease-out; }
-                    folder-input := TextInput {
-                        x: 12px;
-                        width: parent.width - 24px;
-                        height: parent.height;
-                        vertical-alignment: center;
-                        single-line: true;
-                        text <=> ChatVm.nc-folder;
-                        font-family: Tokens.mono-font;
-                        font-size: 13px;
-                        color: Tokens.text;
-                        selection-background-color: Tokens.accent.with-alpha(0.35);
-                        init => { self.focus(); self.select-all(); }
-                        edited => { ChatVm.nc-folder-edited(self.text); }
-                        accepted => { if (ChatVm.nc-mode == 0) { ChatVm.nc-start(); } else { ChatVm.nc-retry(); } }
-                        key-pressed(e) => {
-                            if (e.text == Key.Escape) { ChatVm.nc-cancel(); return accept; }
-                            reject
+                    HorizontalLayout {
+                        padding-left: 11px;
+                        padding-right: 4px;
+                        spacing: 8px;
+                        VerticalLayout { alignment: center; Image { source: @image-url("icons/folder.svg"); colorize: Tokens.text-faint; width: 15px; height: 15px; } }
+                        folder-input := TextInput {
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            single-line: true;
+                            enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing && !ChatVm.nc-creating;
+                            text <=> ChatVm.nc-folder;
+                            font-family: Tokens.mono-font;
+                            font-size: 13px;
+                            color: Tokens.text;
+                            selection-background-color: Tokens.accent.with-alpha(0.35);
+                            init => { self.focus(); self.select-all(); }
+                            edited => { ChatVm.nc-folder-edited(self.text); }
+                            accepted => { if (ChatVm.nc-mode == 0 && ChatVm.nc-folder-ready && !ChatVm.nc-folder-loading) { ChatVm.nc-start(); } else { ChatVm.nc-retry(); } }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) { ChatVm.nc-cancel(); return accept; }
+                                reject
+                            }
                         }
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                flat: true;
+                                size: 28px;
+                                icon: @image-url("icons/more.svg");
+                                tooltip: "Browse folders";
+                                enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing && !ChatVm.nc-creating && !ChatVm.nc-folder-loading;
+                                clicked => { ChatVm.nc-browse(); }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    min-height: 18px;
+                    spacing: 6px;
+                    if ChatVm.nc-folder-loading: Text { text: "Checking folder\u{2026}"; color: Tokens.text-secondary; font-size: 12px; vertical-alignment: center; }
+                    if !ChatVm.nc-folder-loading && ChatVm.nc-folder-ready: HorizontalLayout {
+                        spacing: 5px;
+                        VerticalLayout { alignment: center; Image { source: @image-url("icons/check.svg"); colorize: Tokens.success; width: 12px; height: 12px; } }
+                        Text { text: "Folder ready"; color: Tokens.text-secondary; font-size: 12px; vertical-alignment: center; }
+                    }
+                    if !ChatVm.nc-folder-loading && ChatVm.nc-folder-message != "": Wrapped { horizontal-stretch: 1; text: ChatVm.nc-folder-missing ? "This folder doesn't exist yet." : ChatVm.nc-folder-message; font-size: 12px; ink: Tokens.warning; }
+                    if !ChatVm.nc-folder-loading && ChatVm.nc-folder-message == "": Rectangle { horizontal-stretch: 1; }
+                    if ChatVm.nc-folder-missing && !ChatVm.nc-folder-loading: Pressable {
+                        width: create-text.preferred-width + 8px;
+                        height: 18px;
+                        enabled: !ChatVm.nc-creating && !ChatVm.nc-busy;
+                        hover-fill: false;
+                        clicked => { ChatVm.nc-create-folder(); }
+                        create-text := Text { x: 4px; text: ChatVm.nc-creating ? "Creating\u{2026}" : "Create folder"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                    }
+                    if !ChatVm.nc-folder-missing && !ChatVm.nc-folder-loading && !ChatVm.nc-folder-ready && ChatVm.nc-folder-message != "": Pressable {
+                        width: retry-text.preferred-width + 8px;
+                        height: 18px;
+                        enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing;
+                        hover-fill: false;
+                        clicked => { ChatVm.nc-retry(); }
+                        retry-text := Text { x: 4px; text: "Retry"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
                     }
                 }
             }
@@ -2845,13 +2914,13 @@ export component NewChatDialog inherits Rectangle {
                 height: opts.preferred-height + 2px;
                 opts := VerticalLayout {
                     Pressable {
-                        height: 34px;
+                        height: 32px;
                         clicked => { ChatVm.nc-opts-open = !ChatVm.nc-opts-open; }
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 10px;
                             spacing: 8px;
-                            Text { text: "Options"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                            Text { text: "Chat options"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
                             Text { horizontal-stretch: 1; text: ChatVm.nc-opts-open ? "" : ChatVm.nc-summary; font-size: 12.5px; color: Tokens.text; overflow: elide; vertical-alignment: center; }
                             VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 9px; height: 9px; transform-rotation: ChatVm.nc-opts-open ? 90deg : 0deg; } }
                         }
@@ -2893,7 +2962,7 @@ export component NewChatDialog inherits Rectangle {
                 alignment: end;
                 spacing: 8px;
                 SmallAction { text: "Cancel"; clicked => { ChatVm.nc-cancel(); } }
-                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
+                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy && !ChatVm.nc-creating && !ChatVm.nc-folder-loading && ChatVm.nc-folder-ready; clicked => { ChatVm.nc-start(); } }
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 0: HorizontalLayout {
                 spacing: 8px;
@@ -2939,6 +3008,195 @@ export component NewChatDialog inherits Rectangle {
                         }
                     }
                 }
+            }
+            }
+            if ChatVm.nc-browsing: VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Pressable {
+                        width: back-row.preferred-width + 10px;
+                        height: 28px;
+                        border-radius: 7px;
+                        enabled: !ChatVm.nc-creating;
+                        clicked => { ChatVm.nc-back(); }
+                        back-row := HorizontalLayout {
+                            padding-left: 4px;
+                            padding-right: 6px;
+                            spacing: 4px;
+                            VerticalLayout { alignment: center; Image { source: @image-url("icons/back.svg"); colorize: Tokens.accent; width: 11px; height: 11px; } }
+                            Text { text: "New chat"; font-size: 13px; color: Tokens.accent; vertical-alignment: center; }
+                        }
+                    }
+                    Text { horizontal-stretch: 1; text: "Choose folder"; font-size: 15px; font-weight: 650; color: Tokens.text; horizontal-alignment: center; vertical-alignment: center; }
+                    IconButton {
+                        flat: true;
+                        size: 28px;
+                        icon: @image-url("icons/folder-plus.svg");
+                        tooltip: "New folder";
+                        active: ChatVm.nc-naming;
+                        enabled: !ChatVm.nc-folder-loading && !ChatVm.nc-creating && ChatVm.nc-folder-ready;
+                        clicked => { if (ChatVm.nc-naming) { ChatVm.nc-name-cancel(); } else { ChatVm.nc-name-edited(""); } }
+                    }
+                }
+                Text { text: ChatVm.nc-host != "" ? "On " + ChatVm.nc-host : "On the host"; font-size: 12px; color: Tokens.text-faint; overflow: elide; }
+                Flickable {
+                    height: 26px;
+                    content-width: crumbs.preferred-width;
+                    crumbs := HorizontalLayout {
+                        spacing: 2px;
+                        for crumb[i] in ChatVm.nc-crumbs: HorizontalLayout {
+                            spacing: 2px;
+                            Pressable {
+                                width: crumb-text.preferred-width + 12px;
+                                height: 26px;
+                                border-radius: 6px;
+                                enabled: i < ChatVm.nc-crumbs.length - 1 && !ChatVm.nc-folder-loading && !ChatVm.nc-creating;
+                                clicked => { ChatVm.nc-navigate(crumb.value); }
+                                crumb-text := Text {
+                                    x: 6px;
+                                    height: parent.height;
+                                    text: crumb.name;
+                                    font-family: Tokens.mono-font;
+                                    font-size: 12px;
+                                    font-weight: i == ChatVm.nc-crumbs.length - 1 ? 650 : 500;
+                                    color: i == ChatVm.nc-crumbs.length - 1 ? Tokens.text : Tokens.text-secondary;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if i < ChatVm.nc-crumbs.length - 1: VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 9px; height: 9px; } }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 34px;
+                    background: Tokens.input;
+                    border-radius: Tokens.radius-control;
+                    border-width: 1px;
+                    border-color: filter-input.has-focus ? Tokens.accent : Tokens.border;
+                    animate border-color { duration: Motion.fast; easing: ease-out; }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        VerticalLayout { alignment: center; Image { source: @image-url("icons/search.svg"); colorize: Tokens.text-faint; width: 13px; height: 13px; } }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            filter-input := TextInput {
+                                width: parent.width;
+                                height: parent.height;
+                                vertical-alignment: center;
+                                single-line: true;
+                                text <=> ChatVm.nc-filter;
+                                font-size: 13px;
+                                color: Tokens.text;
+                                selection-background-color: Tokens.accent.with-alpha(0.35);
+                                init => { self.focus(); }
+                                edited => { ChatVm.nc-filter-edited(self.text); }
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) { ChatVm.nc-back(); return accept; }
+                                    reject
+                                }
+                            }
+                            if ChatVm.nc-filter == "": Text { width: parent.width; height: parent.height; horizontal-alignment: left; text: "Filter folders"; font-size: 13px; color: Tokens.text-faint; vertical-alignment: center; }
+                        }
+                    }
+                }
+                if ChatVm.nc-naming: VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 34px;
+                            background: Tokens.input;
+                            border-radius: Tokens.radius-control;
+                            border-width: 1px;
+                            border-color: name-input.has-focus ? Tokens.accent : Tokens.border;
+                            name-input := TextInput {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height;
+                                vertical-alignment: center;
+                                single-line: true;
+                                enabled: !ChatVm.nc-creating;
+                                text <=> ChatVm.nc-new-name;
+                                font-family: Tokens.mono-font;
+                                font-size: 13px;
+                                color: Tokens.text;
+                                selection-background-color: Tokens.accent.with-alpha(0.35);
+                                init => { self.focus(); }
+                                edited => { ChatVm.nc-name-edited(self.text); }
+                                accepted => { ChatVm.nc-create-child(); }
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) { ChatVm.nc-name-cancel(); return accept; }
+                                    reject
+                                }
+                            }
+                            if ChatVm.nc-new-name == "": Text { x: 10px; width: parent.width - 20px; horizontal-alignment: left; height: parent.height; text: "New folder name"; font-size: 13px; color: Tokens.text-faint; vertical-alignment: center; }
+                        }
+                        SmallAction { height: 34px; text: ChatVm.nc-creating ? "Creating\u{2026}" : "Create"; style: 3; enabled: !ChatVm.nc-creating && ChatVm.nc-new-name != ""; clicked => { ChatVm.nc-create-child(); } }
+                        SmallAction { height: 34px; text: "Cancel"; enabled: !ChatVm.nc-creating; clicked => { ChatVm.nc-name-cancel(); } }
+                    }
+                    if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
+                }
+                Rectangle {
+                    height: 232px;
+                    background: Tokens.surface;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: Tokens.border;
+                    clip: true;
+                    Flickable {
+                        content-height: rows.preferred-height;
+                        rows := VerticalLayout {
+                            if ChatVm.nc-browse-path != "/" && ChatVm.nc-browse-path != "": Pressable {
+                                height: 36px;
+                                enabled: !ChatVm.nc-folder-loading && !ChatVm.nc-creating;
+                                clicked => { ChatVm.nc-navigate(ChatVm.nc-folder-parent); }
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+                                    VerticalLayout { alignment: center; Image { source: @image-url("icons/arrow-up.svg"); colorize: Tokens.text-faint; width: 14px; height: 14px; } }
+                                    Text { horizontal-stretch: 1; text: "Parent folder"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                                }
+                            }
+                            for child in ChatVm.nc-folder-children: Pressable {
+                                height: 36px;
+                                enabled: !ChatVm.nc-folder-loading && !ChatVm.nc-creating;
+                                clicked => { ChatVm.nc-navigate(child.value); }
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+                                    VerticalLayout { alignment: center; Image { source: @image-url("icons/folder.svg"); colorize: Tokens.text-secondary; width: 14px; height: 14px; } }
+                                    Text { horizontal-stretch: 1; text: child.name; font-family: Tokens.mono-font; font-size: 12.5px; color: Tokens.text; overflow: elide; vertical-alignment: center; }
+                                    VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 9px; height: 9px; } }
+                                }
+                            }
+                            if ChatVm.nc-folder-loading: Text { height: 36px; text: "Loading\u{2026}"; font-size: 12px; color: Tokens.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                            if !ChatVm.nc-folder-loading && ChatVm.nc-folder-children.length == 0 && ChatVm.nc-folder-message == "": Text { height: 44px; text: ChatVm.nc-filter != "" ? "No matching folders." : "No subfolders in this folder."; font-size: 12px; color: Tokens.text-faint; horizontal-alignment: center; vertical-alignment: center; }
+                            if !ChatVm.nc-folder-loading && ChatVm.nc-folder-message != "": Wrapped { height: 44px; text: ChatVm.nc-folder-message; font-size: 12px; ink: Tokens.warning; }
+                            if ChatVm.nc-folder-children.length >= 200: Text { height: 30px; text: "First 200 folders shown. Type to narrow the list."; font-size: 11px; color: Tokens.text-faint; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                }
+                if ChatVm.nc-error != "" && !ChatVm.nc-naming: Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
+                Rectangle { height: 1px; background: Tokens.border; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 1px;
+                        Text { text: ChatVm.nc-crumbs.length > 0 ? ChatVm.nc-crumbs[ChatVm.nc-crumbs.length - 1].name : ""; font-size: 13px; font-weight: 650; color: Tokens.text; overflow: elide; }
+                        Text { text: ChatVm.nc-browse-path; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
+                    }
+                    SmallAction { text: "Use this folder"; style: 1; enabled: !ChatVm.nc-folder-loading && !ChatVm.nc-creating && ChatVm.nc-folder-ready && !ChatVm.nc-naming; clicked => { ChatVm.nc-choose(); } }
+                }
+            }
             }
         }
     }

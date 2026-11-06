@@ -849,6 +849,10 @@ mod tests {
                 Ok("tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=ok\n".into()),
             ),
             ("printf %s".to_string(), Ok("/home/sam".into())),
+            (
+                "tether-folder".to_string(),
+                Ok("__TETHER_FOLDER__\0ready\0/home/sam/proj\0".into()),
+            ),
         ]);
         let (_ui, send, _h) = start(remote.clone()).await;
         send(Msg::Chat(ChatMsg::NewChat(0)));

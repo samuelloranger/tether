@@ -68,6 +68,17 @@ final class ChatListModel {
     }
   }
 
+  func checkFolder(_ text: String, create: Bool) async -> ChatFolder {
+    let output = try? await ChatContinueLoader.withDeadline(8) {
+      try await self.folderOutput(ChatFolders.command(text, create: create))
+    }
+    return output.map(ChatFolder.parse) ?? ChatFolder()
+  }
+
+  private func folderOutput(_ command: String) async throws -> String {
+    try await exec(command)
+  }
+
   func newRoute(cwdText: String) async -> ChatRoute? {
     startError = nil
     switch await ChatRoute.start(cwdText: cwdText, host: hostName, exec: exec) {

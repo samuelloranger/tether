@@ -28,7 +28,7 @@ final class ACPHostCheckTests: XCTestCase {
     XCTAssertEqual(
       opencode, .failed("Install opencode on box (opencode.ai), or check it is on the PATH of a login shell."))
     let claude = await ChatRoute.start(cwdText: "/srv", host: "box") { command in
-      command == ACPHostCheck.command ? report : "/home/dev"
+      command == ACPHostCheck.command ? report : "__TETHER_FOLDER__\0ready\0/srv\0"
     }
     guard case .ready = claude else { return XCTFail("\(claude)") }
   }
@@ -101,7 +101,8 @@ final class ACPHostCheckTests: XCTestCase {
 
   func test_a_ready_host_gets_a_route_and_an_unreachable_check_does_not_block() async {
     let ready = await ChatRoute.start(cwdText: "~/p", host: "box") { command in
-      command == ACPHostCheck.command ? Self.ours : "/home/dev"
+      if command.contains("tether-folder") { return "__TETHER_FOLDER__\0ready\0/home/dev/p\0" }
+      return command == ACPHostCheck.command ? Self.ours : "/home/dev"
     }
     guard case let .ready(route) = ready else { return XCTFail("\(ready)") }
     XCTAssertEqual(route.cwd, "/home/dev/p")
@@ -109,7 +110,7 @@ final class ACPHostCheckTests: XCTestCase {
 
     let flaky = await ChatRoute.start(cwdText: "/srv", host: "box") { command in
       if command == ACPHostCheck.command { throw SSHConnectError.transport("blip") }
-      return ""
+      return "__TETHER_FOLDER__\0ready\0/srv\0"
     }
     guard case .ready = flaky else { return XCTFail("\(flaky)") }
 
@@ -123,7 +124,7 @@ final class ACPHostCheckTests: XCTestCase {
   func test_the_chat_list_shows_the_reason_under_the_start_button_and_clears_it() async {
     let report = LockedBox("tether=found\nversion={\"name\":\"tether\",\"protocol\":1}\nnode=missing\n")
     let model = ChatListModel(hostName: "box") { command in
-      command == ACPHostCheck.command ? report.value : "/home/dev"
+      command == ACPHostCheck.command ? report.value : "__TETHER_FOLDER__\0ready\0/srv\0"
     }
     let blocked = await model.newRoute(cwdText: "/srv")
     XCTAssertNil(blocked)

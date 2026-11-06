@@ -99,7 +99,8 @@ final class ChatContinueTests: XCTestCase {
   func test_continuing_carries_the_session_id_on_the_route_and_keeps_the_host_checks() async {
     let session = ACPSavedSession(sessionId: "s-9", title: "T", updatedAt: nil, cwd: "/srv/x")
     let ready = await ChatRoute.startContinuing(session: session, cwdText: "/srv/x", host: "dev") { command in
-      command.hasPrefix("sh -c") ? "notify=ok\nnode=ok" : ""
+      if command.contains("tether-folder") { return "__TETHER_FOLDER__\0ready\0/srv/x\0" }
+      return command.hasPrefix("sh -c") ? "notify=ok\nnode=ok" : ""
     }
     guard case let .ready(route) = ready else { return XCTFail("expected a route") }
     XCTAssertEqual(route.loadSessionId, "s-9")
