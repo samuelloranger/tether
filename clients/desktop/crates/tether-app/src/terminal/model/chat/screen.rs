@@ -270,6 +270,24 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     }
     if let Some(nc) = &chats.new_chat {
         screen.new_chat = Some(NewChatView {
+            folder_loading: nc.folder_loading,
+            folder_ready: nc.folder_info.as_ref().is_some_and(|f| f.ready()),
+            folder_missing: nc.folder_info.as_ref().is_some_and(|f| f.missing()),
+            folder_message: nc
+                .folder_info
+                .as_ref()
+                .map_or("", |f| f.message())
+                .to_string(),
+            folder_children: nc
+                .folder_info
+                .as_ref()
+                .map_or_else(Vec::new, |f| f.children.clone()),
+            folder_parent: nc
+                .folder_info
+                .as_ref()
+                .map_or_else(|| "/".to_string(), |f| f.parent()),
+            browsing: nc.browsing,
+            creating: nc.creating,
             agent: agent_index(Some(nc.agent)),
             unavailable: agent::ALL
                 .iter()

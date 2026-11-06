@@ -75,6 +75,7 @@ struct NewChatSheet: View {
   /// Nil starts on the agent picked last on this device.
   var initialAgent: ChatAgentProfile?
   var initiallyOpenOptions = false
+  var initiallyBrowseFolders = false
   /// Options already changed when the sheet opens, for previews.
   var initialChanges: [String: String] = [:]
   /// The stored defaults and the cached choices of an agent, for the Options row.
@@ -83,6 +84,7 @@ struct NewChatSheet: View {
   var onAgentPicked: (ChatAgentProfile) -> Void = { _ in }
   /// Agent key → why the host can't run it; those agents are dimmed and refuse the pick.
   var checkAgents: () async -> [String: String] = { [:] }
+  let checkFolder: (String, Bool) async -> ChatFolder
   /// Resolves the folder and opens the chat; a message leaves the sheet up showing it.
   let onStart: (String, NewChatRequest) async -> String?
   /// The earlier conversations of an agent in a folder.
@@ -94,6 +96,10 @@ struct NewChatSheet: View {
   @State private var mode: Mode = .new
   @State private var agent: ChatAgentProfile = ChatAgents.claude
   @State private var folder = ""
+  @State private var folderInfo: ChatFolder?
+  @State private var checkingFolder = true
+  @State private var creatingFolder = false
+  @State private var browsing = false
   @State private var starting = false
   @State private var failure: String?
   @State private var listing: Listing = .idle
@@ -142,15 +148,9 @@ struct NewChatSheet: View {
       .accessibilityIdentifier("sshNewChatMode")
       agentPicker
       VStack(alignment: .leading, spacing: 6) {
-        Text("Working folder").font(.caption).foregroundStyle(TetherColors.textSecondary)
-        TextField("Folder on the host", text: $folder)
-          .font(.callout.monospaced()).foregroundStyle(TetherColors.textPrimary)
-          .textInputAutocapitalization(.never).autocorrectionDisabled()
-          .focused($focused).submitLabel(.go).onSubmit(submitFolder)
-          .padding(10).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 10))
-          .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
-          .accessibilityLabel("Working folder for the new chat")
-          .accessibilityIdentifier("sshNewChatFolder")
+        ChatFolderPicker(folder: $folder, folderInfo: $folderInfo, checkingFolder: $checkingFolder,
+          creatingFolder: $creatingFolder, browsing: $browsing, focused: $focused,
+          disabled: starting || continuing != nil, checkFolder: checkFolder, onSubmit: submitFolder)
         if let shownFailure {
           Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
             .fixedSize(horizontal: false, vertical: true)
@@ -171,7 +171,8 @@ struct NewChatSheet: View {
           .padding(.vertical, 4).contentShape(Rectangle())
         }
         .buttonStyle(TetherPressStyle())
-        .disabled(starting)
+        .disabled(starting || creatingFolder || checkingFolder || folderInfo?.ready != true)
+        .opacity(checkingFolder || creatingFolder || folderInfo?.ready != true ? 0.45 : 1)
         .accessibilityIdentifier("sshNewChatStart")
         Spacer(minLength: 0)
       } else {
@@ -186,16 +187,24 @@ struct NewChatSheet: View {
       mode = initialMode
       agent = initialAgent ?? ChatLastAgentStore().agent
       optionsOpen = initiallyOpenOptions
+      browsing = initiallyBrowseFolders
       changes = initialChanges
     }
     .task(id: "\(mode.rawValue)|\(agent.key)|\(folder)|\(reloads)") { await reload() }
     .task { unavailable = await checkAgents() }
+    .onChange(of: folder) { _, _ in
+      folderInfo = nil
+      checkingFolder = true
+      failure = nil
+    }
     .onChange(of: mode) { _, _ in failure = nil }
   }
 
   /// The sheet is as tall as what it holds: the agent picker and the Options row add to the folder step.
   private var newHeight: CGFloat {
-    var height: CGFloat = 405
+    var height: CGFloat = 455
+    if folderInfo?.message != nil { height += 58 }
+    if browsing || (focused && !(folderInfo?.children.isEmpty ?? true)) { height += 215 }
     if shownFailure != nil { height += 68 }
     if optionsOpen { height += optionRows.isEmpty ? 64 : CGFloat(optionRows.count) * 40 + 36 }
     return height
@@ -456,7 +465,7 @@ struct NewChatSheet: View {
   }
 
   private func start() {
-    guard !starting else { return }
+    guard !starting, !creatingFolder, !checkingFolder, folderInfo?.ready == true else { return }
     starting = true
     failure = nil
     focused = false

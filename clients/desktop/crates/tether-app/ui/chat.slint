@@ -353,6 +353,14 @@ export global ChatVm {
     in property <bool> nc-open;
     in-out property <int> nc-mode;
     in-out property <string> nc-folder;
+    in property <bool> nc-folder-loading;
+    in property <bool> nc-folder-ready;
+    in property <bool> nc-folder-missing;
+    in property <string> nc-folder-message;
+    in property <[NcChoiceVm]> nc-folder-children;
+    in property <string> nc-folder-parent;
+    in property <bool> nc-browsing;
+    in property <bool> nc-creating;
     in property <bool> nc-busy;
     in property <string> nc-error;
     in property <int> nc-listing;            // 0 loading, 1 failed, 2 loaded
@@ -418,6 +426,8 @@ export global ChatVm {
     callback ctl-command(string);
     callback bypass-confirmed();
     callback bypass-cancelled();
+    callback nc-browse();
+    callback nc-create-folder();
     callback nc-start();
     callback nc-cancel();
     callback nc-mode-changed(int);
@@ -2783,7 +2793,8 @@ export component NewChatDialog inherits Rectangle {
         border-width: 1px;
         border-color: Tokens.border;
         clip: true;
-        dialog := VerticalLayout {
+        ScrollView {
+            dialog := VerticalLayout {
             padding: 18px;
             spacing: 12px;
             HorizontalLayout {
@@ -2806,7 +2817,7 @@ export component NewChatDialog inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 5px;
-                Text { text: "Working folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
+                Text { text: "Working folder on the host"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
                 Rectangle {
                     height: 38px;
                     background: Tokens.input;
@@ -2820,6 +2831,7 @@ export component NewChatDialog inherits Rectangle {
                         height: parent.height;
                         vertical-alignment: center;
                         single-line: true;
+                        enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing && !ChatVm.nc-creating;
                         text <=> ChatVm.nc-folder;
                         font-family: Tokens.mono-font;
                         font-size: 13px;
@@ -2827,13 +2839,37 @@ export component NewChatDialog inherits Rectangle {
                         selection-background-color: Tokens.accent.with-alpha(0.35);
                         init => { self.focus(); self.select-all(); }
                         edited => { ChatVm.nc-folder-edited(self.text); }
-                        accepted => { if (ChatVm.nc-mode == 0) { ChatVm.nc-start(); } else { ChatVm.nc-retry(); } }
+                        accepted => { if (ChatVm.nc-mode == 0 && ChatVm.nc-folder-ready && !ChatVm.nc-folder-loading) { ChatVm.nc-start(); } else { ChatVm.nc-retry(); } }
                         key-pressed(e) => {
                             if (e.text == Key.Escape) { ChatVm.nc-cancel(); return accept; }
                             reject
                         }
                     }
                 }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                SmallAction { text: ChatVm.nc-browsing ? "Hide folders" : "Browse folders"; enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing && !ChatVm.nc-creating; clicked => { ChatVm.nc-browse(); } }
+                if ChatVm.nc-folder-missing: SmallAction { text: ChatVm.nc-creating ? "Creating…" : "Create folder"; enabled: !ChatVm.nc-creating && !ChatVm.nc-busy; clicked => { ChatVm.nc-create-folder(); } }
+                if ChatVm.nc-folder-loading: Text { text: "Checking folder…"; color: Tokens.text-secondary; font-size: 12px; vertical-alignment: center; }
+            }
+            if ChatVm.nc-folder-message != "" && !ChatVm.nc-folder-loading: Wrapped { text: ChatVm.nc-folder-message; font-size: 12px; ink: Tokens.warning; }
+            if ChatVm.nc-browsing || (folder-input.has-focus && ChatVm.nc-folder-children.length > 0): VerticalLayout {
+                spacing: 3px;
+                if ChatVm.nc-browsing: SmallAction { text: "Parent folder"; enabled: !ChatVm.nc-folder-loading && !ChatVm.nc-busy && !ChatVm.nc-creating && !ChatVm.nc-continuing; clicked => { ChatVm.nc-folder = ChatVm.nc-folder-parent; ChatVm.nc-folder-edited(ChatVm.nc-folder); } }
+                if ChatVm.nc-folder-children.length == 0 && !ChatVm.nc-folder-loading: Text { text: "No matching subfolders"; font-size: 12px; color: Tokens.text-secondary; }
+                if ChatVm.nc-folder-children.length > 0: ScrollView {
+                    height: min(144px, ChatVm.nc-folder-children.length * 36px);
+                    VerticalLayout {
+                        for path in ChatVm.nc-folder-children: Pressable {
+                            height: 36px;
+                            enabled: !ChatVm.nc-busy && !ChatVm.nc-creating && !ChatVm.nc-continuing;
+                            clicked => { ChatVm.nc-folder = path.value; ChatVm.nc-folder-edited(path.value); }
+                            Text { x: 10px; width: parent.width - 20px; height: parent.height; text: path.name; overflow: elide; vertical-alignment: center; color: Tokens.text; font-family: Tokens.mono-font; font-size: 12px; }
+                        }
+                    }
+                }
+                if ChatVm.nc-folder-children.length >= 200: Text { text: "First 200 folders shown. Type to narrow the list."; font-size: 11px; color: Tokens.text-faint; }
             }
             if ChatVm.nc-error != "": Wrapped { text: ChatVm.nc-error; font-size: 12px; ink: Tokens.warning; }
             Rectangle {
@@ -2893,7 +2929,7 @@ export component NewChatDialog inherits Rectangle {
                 alignment: end;
                 spacing: 8px;
                 SmallAction { text: "Cancel"; clicked => { ChatVm.nc-cancel(); } }
-                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy; clicked => { ChatVm.nc-start(); } }
+                SmallAction { text: ChatVm.nc-busy ? "Opening\u{2026}" : "Start chat"; style: 1; enabled: !ChatVm.nc-busy && !ChatVm.nc-creating && !ChatVm.nc-folder-loading && ChatVm.nc-folder-ready; clicked => { ChatVm.nc-start(); } }
             }
             if ChatVm.nc-mode == 1 && ChatVm.nc-listing == 0: HorizontalLayout {
                 spacing: 8px;
@@ -2939,6 +2975,7 @@ export component NewChatDialog inherits Rectangle {
                         }
                     }
                 }
+            }
             }
         }
     }

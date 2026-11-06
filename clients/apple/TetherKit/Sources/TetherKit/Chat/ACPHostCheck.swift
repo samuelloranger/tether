@@ -152,6 +152,11 @@ extension ChatRoute {
     guard var route = await fresh(cwdText: cwdText, exec: exec) else {
       return .failed("Couldn't read the host's home folder.")
     }
+    do {
+      let folder = ChatFolder.parse(try await exec(ChatFolders.command(route.cwd)))
+      if let message = folder.message { return .failed(message) }
+      route.cwd = folder.path
+    } catch { return .failed("Couldn't check the folder on the host. Try again.") }
     route.multiClient = check.multiClient
     route.agentKey = agent.key
     route.optionPicks = picks

@@ -9,6 +9,7 @@ pub mod defaults;
 pub mod diff;
 pub mod echo;
 pub mod files;
+pub mod folders;
 pub mod format;
 pub mod grouping;
 pub mod host;

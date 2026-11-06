@@ -45,6 +45,7 @@ public struct SSHTerminalView: View {
   @State private var newChatMode: NewChatSheet.Mode = .new
   @State private var newChatAgent: ChatAgentProfile?
   @State private var newChatOptionsOpen = false
+  @State private var newChatBrowseFolders = false
   @State private var newChatChanges: [String: String] = [:]
   @State private var showFileImporter = false
   @State private var showHistory = false
@@ -265,11 +266,13 @@ public struct SSHTerminalView: View {
         initialMode: newChatMode,
         initialAgent: newChatAgent,
         initiallyOpenOptions: newChatOptionsOpen,
+        initiallyBrowseFolders: newChatBrowseFolders,
         initialChanges: newChatChanges,
         storedDefaults: { ChatOptionDefaultsStore().stored(agent: $0.key) },
         cachedOptions: { controller.cachedOptions(agent: $0) },
         onAgentPicked: { ChatLastAgentStore().set($0) },
         checkAgents: { await controller.unavailableAgents() },
+        checkFolder: { await controller.chatFolder($0, create: $1) },
         onStart: { folder, request in
           switch await controller.newChat(cwdText: folder, request: request) {
           case let .failed(message): return message
@@ -1026,7 +1029,8 @@ public struct SSHTerminalView: View {
       if let row { content.open(controller.chatRoute(for: row)) }
       if mode == "chat-open" { try? await Task.sleep(nanoseconds: 700_000_000); drawerOpen = true }
     case "projects-archive": showingArchive = true; drawerOpen = true
-    case "newchat": showNewChat = true
+    case "newchat", "newchat-missing": showNewChat = true
+    case "newchat-folders": newChatBrowseFolders = true; showNewChat = true
     case "newchat-claude", "newchat-codex-open", "newchat-opencode-first":
       newChatAgent = mode == "newchat-claude" ? ChatAgents.claude : mode == "newchat-codex-open" ? ChatAgents.codex : ChatAgents.opencode
       newChatOptionsOpen = mode != "newchat-claude"

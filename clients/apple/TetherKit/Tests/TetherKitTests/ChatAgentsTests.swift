@@ -209,7 +209,8 @@ final class ChatAgentsTests: XCTestCase {
 
   func test_a_fresh_route_carries_the_agent_and_picks() async {
     let route = await ChatRoute.start(cwdText: "/srv/x", host: "h", agent: ChatAgents.opencode, picks: ["mode": "plan"]) { command in
-      command.contains("tether=found") || command.contains("command -v tether") ? "tether=found\nversion={\"name\":\"tether\",\"protocol\":2}\nnode=missing" : ""
+      if command.contains("tether-folder") { return "__TETHER_FOLDER__\0ready\0/srv/x\0" }
+      return command.contains("tether=found") || command.contains("command -v tether") ? "tether=found\nversion={\"name\":\"tether\",\"protocol\":2}\nnode=missing" : ""
     }
     guard case let .ready(ready) = route else { return XCTFail("opencode does not need node: \(route)") }
     XCTAssertEqual(ready.agentKey, "opencode")
@@ -221,7 +222,8 @@ final class ChatAgentsTests: XCTestCase {
     XCTAssertNil(joined.agentToRecord, "an existing or joined chat leaves the agent to the host")
     XCTAssertEqual(ChatAgents.resolve(localKey: nil, statusSpawn: ChatAgents.codex.spawn)?.key, "codex")
     let started = await ChatRoute.start(cwdText: "/srv/x", host: "h", agent: ChatAgents.codex) { command in
-      command.contains("command -v tether") ? "tether=found\nversion={\"name\":\"tether\",\"protocol\":2}\nnode=found" : ""
+      if command.contains("tether-folder") { return "__TETHER_FOLDER__\0ready\0/srv/x\0" }
+      return command.contains("command -v tether") ? "tether=found\nversion={\"name\":\"tether\",\"protocol\":2}\nnode=found" : ""
     }
     guard case let .ready(ready) = started else { return XCTFail("\(started)") }
     XCTAssertEqual(ready.agentToRecord?.key, "codex")

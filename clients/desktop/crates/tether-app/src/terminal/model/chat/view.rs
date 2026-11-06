@@ -399,6 +399,14 @@ pub struct OptionMenuView {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewChatView {
+    pub folder_loading: bool,
+    pub folder_ready: bool,
+    pub folder_missing: bool,
+    pub folder_message: String,
+    pub folder_children: Vec<String>,
+    pub folder_parent: String,
+    pub browsing: bool,
+    pub creating: bool,
     pub agent: i8,
     /// In `agent::ALL` order: the host can't run that agent, so the picker dims it.
     pub unavailable: Vec<bool>,

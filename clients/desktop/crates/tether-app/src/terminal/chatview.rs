@@ -745,6 +745,23 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                     })
                     .collect(),
             ));
+            vm.set_nc_folder_loading(nc.folder_loading);
+            vm.set_nc_folder_ready(nc.folder_ready);
+            vm.set_nc_folder_missing(nc.folder_missing);
+            vm.set_nc_folder_message(nc.folder_message.as_str().into());
+            vm.set_nc_folder_children(model(
+                nc.folder_children
+                    .iter()
+                    .map(|p| NcChoiceVm {
+                        value: p.as_str().into(),
+                        name: p.rsplit('/').next().unwrap_or(p).into(),
+                        selected: false,
+                    })
+                    .collect(),
+            ));
+            vm.set_nc_folder_parent(nc.folder_parent.as_str().into());
+            vm.set_nc_browsing(nc.browsing);
+            vm.set_nc_creating(nc.creating);
             vm.set_nc_busy(nc.busy);
             vm.set_nc_error(nc.error.as_str().into());
             vm.set_nc_continuing(nc.continuing);
@@ -1254,6 +1271,8 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_ctl_command(|text| send(ChatMsg::ControlsCommand(text.into())));
     vm.on_bypass_confirmed(|| send(ChatMsg::BypassConfirmed));
     vm.on_bypass_cancelled(|| send(ChatMsg::BypassCancelled));
+    vm.on_nc_browse(|| send(ChatMsg::NewChatBrowse));
+    vm.on_nc_create_folder(|| send(ChatMsg::NewChatCreateFolder));
     vm.on_nc_start(|| send(ChatMsg::NewChatStart));
     vm.on_nc_cancel(|| send(ChatMsg::NewChatCancel));
     vm.on_nc_mode_changed(|m| send(ChatMsg::NewChatMode(u8::try_from(m).unwrap_or(0))));

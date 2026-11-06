@@ -100,6 +100,11 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
 
   func exec(_ command: String) throws -> String {
     let env = ProcessInfo.processInfo.environment
+    if command.contains("tether-folder") {
+      let path = "/home/dev/projects/api-server"
+      let status = env["TETHER_DEBUG_DRAWER"] == "newchat-missing" && !command.hasSuffix(" create") ? "missing" : "ready"
+      return "__TETHER_FOLDER__\0\(status)\0\(path)\0\(path)/Sources\0\(path)/Tests\0"
+    }
     if command.contains("acp usage") {
       if env["TETHER_DEBUG_DRAWER"] == "projects-unavailable" {
         return """

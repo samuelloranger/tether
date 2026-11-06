@@ -257,6 +257,8 @@ pub enum ChatMsg {
     NewChatCancel,
     NewChatMode(u8),
     NewChatFolder(String),
+    NewChatBrowse,
+    NewChatCreateFolder,
     /// The agent picker: an agent key.
     NewChatAgent(String),
     /// The opened Options row: one menu's choice.
@@ -621,11 +623,11 @@ impl Chats {
             self.workflow_redrawn = now;
             self.dirty = true;
         }
-        if let Some(nc) = self.new_chat.as_mut()
-            && let Some(job) = nc.tick(now)
-        {
-            out.jobs.push(job);
-            self.dirty = true;
+        if let Some(nc) = self.new_chat.as_mut() {
+            while let Some(job) = nc.tick(now) {
+                out.jobs.push(job);
+                self.dirty = true;
+            }
         }
     }
 
@@ -981,6 +983,13 @@ impl Chats {
         self.dirty = true;
         let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
         self.new_chat = Some(NewChat::open(mode, folder, agent, self.draft_for(agent)));
+        #[cfg(debug_assertions)]
+        if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
+            && let Some(state) = crate::app::dev_env("TETHER_DEV_CHAT_FOLDER_STATE")
+            && let Some(nc) = self.new_chat.as_mut()
+        {
+            nc.preview_folder(state == "missing");
+        }
         out.jobs.push(newchat::probe_job());
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
             out.jobs.push(job);
@@ -1029,6 +1038,16 @@ impl Chats {
             ChatMsg::NewChatFolder(text) => {
                 if let Some(nc) = self.new_chat.as_mut() {
                     nc.set_folder(text, now);
+                }
+            }
+            ChatMsg::NewChatBrowse => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.browse(now);
+                }
+            }
+            ChatMsg::NewChatCreateFolder => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|nc| nc.create_folder()) {
+                    out.jobs.push(job);
                 }
             }
             ChatMsg::NewChatAgent(key) => {
