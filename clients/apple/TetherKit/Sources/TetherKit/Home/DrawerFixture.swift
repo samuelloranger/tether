@@ -101,9 +101,18 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
   func exec(_ command: String) throws -> String {
     let env = ProcessInfo.processInfo.environment
     if command.contains("tether-folder") {
-      let path = "/home/dev/projects/api-server"
-      let status = env["TETHER_DEBUG_DRAWER"] == "newchat-missing" && !command.hasSuffix(" create") ? "missing" : "ready"
-      return "__TETHER_FOLDER__\0\(status)\0\(path)\0\(path)/Sources\0\(path)/Tests\0"
+      let home = "/home/dev"
+      let quoted = command.components(separatedBy: " tether-folder ").last ?? ""
+      var path = String(quoted.dropFirst().prefix { $0 != "'" })
+      if path == "~" || path.hasPrefix("~/") { path = home + path.dropFirst() }
+      if !path.hasPrefix("/") { path = home + "/projects/api-server" }
+      if path.count > 1, path.hasSuffix("/") { path.removeLast() }
+      let missing = env["TETHER_DEBUG_DRAWER"] == "newchat-missing" && path.hasSuffix("/api-server")
+        && !command.hasSuffix(" create")
+      let children = path.hasSuffix("/projects")
+        ? ["api-server", "docs-site", "mobile-app", "tether"] : ["Sources", "Tests"]
+      return "__TETHER_FOLDER__\0\(missing ? "missing" : "ready")\0\(path)\0"
+        + (missing ? "" : children.map { "\(path)/\($0)\0" }.joined())
     }
     if command.contains("acp usage") {
       if env["TETHER_DEBUG_DRAWER"] == "projects-unavailable" {

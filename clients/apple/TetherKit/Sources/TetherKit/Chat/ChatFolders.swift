@@ -32,6 +32,33 @@ struct ChatFolder: Equatable, Sendable {
 }
 
 enum ChatFolders {
+  static func abbreviated(_ path: String, home: String) -> String {
+    guard home.hasPrefix("/"), home != "/" else { return path }
+    if path == home { return "~" }
+    return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+  }
+
+  static func childPath(name: String, parent: String) -> String? {
+    let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0"),
+      parent.hasPrefix("/") else { return nil }
+    return (parent == "/" ? "" : parent) + "/" + name
+  }
+
+  static func matchingChildren(_ children: [String], filter: String) -> [String] {
+    children.filter { filter.isEmpty || ($0 as NSString).lastPathComponent.localizedStandardContains(filter) }
+      .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+  }
+
+  static func breadcrumbs(_ path: String) -> [String] {
+    guard path.hasPrefix("/") else { return [] }
+    var result = ["/"]
+    for component in path.split(separator: "/") {
+      result.append((result.last == "/" ? "" : result.last!) + "/" + component)
+    }
+    return result
+  }
+
   static func command(_ text: String, create: Bool = false) -> String {
     "sh -c \(shellQuote(script)) tether-folder \(shellQuote(text.trimmingCharacters(in: .whitespacesAndNewlines))) \(create ? "create" : "check")"
   }

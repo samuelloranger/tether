@@ -72,7 +72,7 @@ struct ChatListView: View {
     VStack(alignment: .leading, spacing: 10) {
       ChatFolderPicker(folder: $newFolder, folderInfo: $folderInfo, checkingFolder: $checkingFolder,
         creatingFolder: $creatingFolder, browsing: $browsing, focused: $folderFocused,
-        disabled: starting, checkFolder: { await model.checkFolder($0, create: $1) }, onSubmit: start)
+        disabled: starting, hostName: model.hostName, checkFolder: { await model.checkFolder($0, create: $1) }, onSubmit: start)
       Button(action: start) {
         Group {
           if starting {

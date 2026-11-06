@@ -263,6 +263,7 @@ public struct SSHTerminalView: View {
     .sheet(isPresented: $showNewChat) {
       NewChatSheet(
         initialFolder: controller.activeSessionCwd ?? "~",
+        hostName: controller.title,
         initialMode: newChatMode,
         initialAgent: newChatAgent,
         initiallyOpenOptions: newChatOptionsOpen,

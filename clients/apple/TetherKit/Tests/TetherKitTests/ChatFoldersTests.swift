@@ -34,6 +34,33 @@ final class ChatFoldersTests: XCTestCase {
     XCTAssertTrue(check.hasPrefix("sh -c "))
   }
 
+  func test_paths_under_home_are_shown_with_a_tilde() {
+    XCTAssertEqual(ChatFolders.abbreviated("/home/dev", home: "/home/dev"), "~")
+    XCTAssertEqual(ChatFolders.abbreviated("/home/dev/projects/api", home: "/home/dev"), "~/projects/api")
+    XCTAssertEqual(ChatFolders.abbreviated("/home/developer/x", home: "/home/dev"), "/home/developer/x")
+    XCTAssertEqual(ChatFolders.abbreviated("/srv/x", home: ""), "/srv/x")
+    XCTAssertEqual(ChatFolders.abbreviated("/srv/x", home: "/"), "/srv/x")
+  }
+
+  func test_new_folder_names_are_one_plain_component() {
+    XCTAssertEqual(ChatFolders.childPath(name: " api ", parent: "/projects"), "/projects/api")
+    XCTAssertEqual(ChatFolders.childPath(name: "srv", parent: "/"), "/srv")
+    for name in ["", "  ", ".", "..", "a/b", "a\0b"] {
+      XCTAssertNil(ChatFolders.childPath(name: name, parent: "/projects"), name)
+    }
+    XCTAssertNil(ChatFolders.childPath(name: "api", parent: "~/projects"))
+  }
+
+  func test_chooser_filters_by_folder_name_and_breadcrumbs_walk_up_from_root() {
+    let children = ["/p/Zeta", "/p/api-server", "/p/docs", "/p/API-v2"]
+    XCTAssertEqual(ChatFolders.matchingChildren(children, filter: "api"), ["/p/api-server", "/p/API-v2"])
+    XCTAssertEqual(ChatFolders.matchingChildren(children, filter: ""), ["/p/api-server", "/p/API-v2", "/p/docs", "/p/Zeta"])
+    XCTAssertEqual(ChatFolders.matchingChildren(children, filter: "p/"), [])
+    XCTAssertEqual(ChatFolders.breadcrumbs("/home/dev/projects"), ["/", "/home", "/home/dev", "/home/dev/projects"])
+    XCTAssertEqual(ChatFolders.breadcrumbs("/"), ["/"])
+    XCTAssertEqual(ChatFolders.breadcrumbs("~/x"), [])
+  }
+
   func test_start_rechecks_and_rejects_missing_or_unverified_folders() async {
     for response in ["", "__TETHER_FOLDER__\0missing\0/projects/new\0", "__TETHER_FOLDER__\0denied\0/projects/new\0"] {
       var commands: [String] = []
