@@ -520,14 +520,17 @@ func (s *acpDaemonState) scanAgent(chunk []byte) {
 		s.partial, s.skip = nil, true
 	}
 	for _, l := range lines {
+		s.mu.Lock()
 		ev := s.tr.agentLine(l)
+		continued := s.advanceOpenCodePromptLocked(l)
+		s.mu.Unlock()
 		s.syncStream()
 		switch {
 		case ev.permission != nil:
 			s.whenDetached(func() bool { return s.tr.claimNotify(ev.key) }, func() {
 				s.pushAsync(s.permissionPush(ev.permission), "acp-"+s.collapseSuffix(ev.key))
 			})
-		case ev.turnEnded:
+		case ev.turnEnded && !continued:
 			s.whenDetached(func() bool { return true }, func() {
 				s.pushAsync(s.donePush(ev.stopReason), "acp-done-"+threadKey(hostLabel(), s.tr.name))
 			})
