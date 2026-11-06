@@ -152,6 +152,91 @@ final class SubagentTranscriptTests: XCTestCase {
     XCTAssertEqual(top[2].subagent?.background, true)
     XCTAssertNil(top[2].text)
   }
+
+  // MARK: - OpenCode child sessions
+
+  private func apply(_ frames: [String]) -> ChatState {
+    frames.reduce(ChatState()) { state, json in
+      ChatReducer.reduce(state, .message(ACPDecoder.decode(Data(json.utf8))))
+    }
+  }
+
+  private func thoughts(_ state: ChatState) -> [String] {
+    state.items.compactMap { if case let .thought(text) = $0.kind { text } else { nil } }
+  }
+
+  private let openCodeLaunch = #"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"call_task","title":"Explore the codebase","kind":"think","status":"in_progress","rawInput":{"description":"Explore the codebase","prompt":"Read src/app.ts"},"rawOutput":{"metadata":{"sessionId":"ses_child","model":"x"}}}}}"#
+
+  private let openCodeChild = #"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"ses_child:call_1","title":"Explore the codebase: Read src/app.ts","kind":"read","status":"in_progress","_meta":{"opencode/child-session":{"id":"ses_child","parentID":"ses_123","depth":1,"title":"Explore the codebase"}}}}}"#
+
+  func test_decoder_reads_the_opencode_child_session_dialect() {
+    guard case let .update(.toolCall(child)) = ACPDecoder.decode(Data(openCodeChild.utf8)) else { return XCTFail() }
+    XCTAssertEqual(child.childSessionId, "ses_child")
+    XCTAssertEqual(child.childParentSessionId, "ses_123")
+    XCTAssertEqual(child.childTitle, "Explore the codebase")
+
+    guard case let .update(.toolCall(launch)) = ACPDecoder.decode(Data(openCodeLaunch.utf8)) else { return XCTFail() }
+    XCTAssertEqual(launch.launchedSessionId, "ses_child")
+  }
+
+  func test_opencode_child_calls_nest_under_the_task_that_launched_them() {
+    let main = #"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"call_main","title":"ls","kind":"execute","status":"in_progress"}}}"#
+    let state = apply([openCodeLaunch, openCodeChild, main])
+    let top = calls(state)
+    XCTAssertEqual(top.map(\.id), ["call_task", "call_main"])
+    XCTAssertEqual(top[0].children.map(\.id), ["ses_child:call_1"])
+    XCTAssertEqual(top[0].children[0].title, "Read src/app.ts")
+    XCTAssertNotNil(top[0].subagent)
+    XCTAssertEqual(top[0].subagentTitle, "Explore the codebase")
+  }
+
+  func test_opencode_child_thoughts_and_messages_stay_out_of_the_main_transcript() {
+    let rootThought = #"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"main reasoning"}}}}"#
+    let childThought = #"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"child reasoning"},"_meta":{"opencode/child-session":{"id":"ses_child","parentID":"ses_123","depth":1,"title":"Explore the codebase"}}}}}"#
+    let childMessage = #"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"ses_child:m1","content":{"type":"text","text":"child narration"},"_meta":{"opencode/child-session":{"id":"ses_child","parentID":"ses_123","depth":1,"title":"Explore the codebase"}}}}}"#
+    let state = apply([rootThought, childThought, childMessage])
+    XCTAssertEqual(thoughts(state), ["main reasoning"])
+    XCTAssertFalse(state.items.contains {
+      if case let .assistant(text, _) = $0.kind { text.contains("child narration") } else { false }
+    })
+  }
+
+  func test_a_late_task_metadata_adopts_children_that_arrived_first() {
+    let state = apply([openCodeChild, openCodeLaunch])
+    let top = calls(state)
+    XCTAssertEqual(top.map(\.id), ["call_task"])
+    XCTAssertEqual(top[0].children.map(\.id), ["ses_child:call_1"])
+    XCTAssertEqual(state.items.count, 1)
+  }
+
+  // MARK: - Codex native subagents
+
+  private let codexSpawn = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_root","update":{"sessionUpdate":"subagent_spawned","subagentSessionId":"sub-1","name":"Explore the repo","task":"Read src/app.ts"}}}"#
+
+  func test_codex_native_subagent_spawn_creates_a_row_that_child_updates_nest_under() {
+    let childTool = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sub-1","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Read src/app.ts","kind":"read","status":"in_progress"}}}"#
+    let childThought = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sub-1","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"child reasoning"}}}}"#
+    let state = apply([codexSpawn, childTool, childThought])
+    let top = calls(state)
+    XCTAssertEqual(top.map(\.id), ["subagent:sub-1"])
+    XCTAssertEqual(top[0].children.map(\.id), ["t1"])
+    XCTAssertEqual(top[0].subagentTitle, "Explore the repo")
+    XCTAssertEqual(thoughts(state), [])
+  }
+
+  func test_codex_subagent_state_update_finishes_the_row() {
+    let done = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_root","update":{"sessionUpdate":"subagent_state_update","subagentSessionId":"sub-1","state":"completed"}}}"#
+    let state = apply([codexSpawn, done])
+    XCTAssertEqual(calls(state)[0].status, .completed)
+  }
+
+  func test_scoped_updates_on_the_chat_session_still_apply() {
+    let message = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_root","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"hello"}}}}"#
+    let state = apply([message])
+    XCTAssertTrue(state.items.contains {
+      if case let .assistant(text, _) = $0.kind { text == "hello" } else { false }
+    })
+  }
 }
 
 private enum ChatFixtureLines {

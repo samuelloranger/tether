@@ -115,6 +115,18 @@ pub struct ToolFields {
     pub tool_name: Option<String>,
     /// `_meta.claudeCode.parentToolUseId`: set on a subagent's own tool calls.
     pub parent_id: Option<String>,
+    /// `_meta["opencode/child-session"]`: the child session an OpenCode subagent call belongs to.
+    #[serde(default)]
+    pub child_session_id: Option<String>,
+    /// That child session's parent session.
+    #[serde(default)]
+    pub child_parent_session_id: Option<String>,
+    /// The child session's title, which prefixes its calls' titles.
+    #[serde(default)]
+    pub child_title: Option<String>,
+    /// `rawOutput.metadata.sessionId`: the child session this call launched (OpenCode's task tool).
+    #[serde(default)]
+    pub launched_session_id: Option<String>,
     /// Scalar fields of `rawInput`, stringified; a subagent launch fills them in progressively.
     pub input: Option<BTreeMap<String, String>>,
     /// `_meta.terminal_info` is present: the call runs in a terminal the agent can keep after the turn.
@@ -208,6 +220,16 @@ pub enum Update {
     AgentThought {
         text: String,
     },
+    SubagentSpawned {
+        session_id: String,
+        name: Option<String>,
+        task: Option<String>,
+        state: Option<String>,
+    },
+    SubagentState {
+        session_id: String,
+        state: String,
+    },
     UserMessage {
         text: String,
         message_id: Option<String>,
@@ -269,6 +291,9 @@ pub enum Inbound {
         message: String,
     },
     Update(Update),
+    /// An update that names its session: Codex's native subagents stream on the child's own id,
+    /// everything else arrives under the chat's.
+    ScopedUpdate(Update, String),
     PermissionRequest {
         id: AcpId,
         request: PermissionRequest,
@@ -362,7 +387,11 @@ pub fn decode(line: &[u8], images: Option<&dyn ImageSink>) -> Inbound {
         if method == "session/update"
             && let Some(update) = object(params.get("update"))
         {
-            return Inbound::Update(decode_update(update, images));
+            let decoded = decode_update(update, images);
+            return match params.get("sessionId").and_then(Value::as_str) {
+                Some(session_id) => Inbound::ScopedUpdate(decoded, session_id.to_string()),
+                None => Inbound::Update(decoded),
+            };
         }
         if method == super::echo::METHOD
             && let Some(client) = params.get("client").and_then(Value::as_str)
@@ -431,6 +460,11 @@ fn decode_update(update: &Json, images: Option<&dyn ImageSink>) -> Update {
     let unknown = || Update::Unknown { kind: kind.clone() };
     match kind.as_str() {
         "agent_message_chunk" => {
+            // A child session's stream is part of the subagent's work; its report arrives on the
+            // task call.
+            if open_code_child(update) {
+                return unknown();
+            }
             if let Some(block) = object(update.get("content"))
                 && block.get("type").and_then(Value::as_str) == Some("image")
             {
@@ -450,10 +484,16 @@ fn decode_update(update: &Json, images: Option<&dyn ImageSink>) -> Update {
                 None => unknown(),
             }
         }
-        "agent_thought_chunk" => match content_text(update.get("content")) {
-            Some(text) => Update::AgentThought { text },
-            None => unknown(),
-        },
+        "agent_thought_chunk" => {
+            // A child session's reasoning belongs to its subagent row, not the main transcript.
+            if open_code_child(update) {
+                return unknown();
+            }
+            match content_text(update.get("content")) {
+                Some(text) => Update::AgentThought { text },
+                None => unknown(),
+            }
+        }
         "user_message_chunk" => match update
             .get("content")
             .filter(|block| {
@@ -571,8 +611,36 @@ fn decode_update(update: &Json, images: Option<&dyn ImageSink>) -> Update {
             (Some(id), Some(text)) => Update::CompactionChunk { id, text },
             _ => unknown(),
         },
+        "subagent_spawned" | "subagent_state_update" | "_subagent_update" => {
+            // The ACP subagent RFD as codex-acp implements it; older builds spell the unified event
+            // `_subagent_update`. Spawns carry a name/task, later updates only the state.
+            let Some(id) = string(update.get("subagentSessionId")) else {
+                return unknown();
+            };
+            match string(update.get("state")) {
+                Some(state) if update.get("name").is_none() && update.get("task").is_none() => {
+                    Update::SubagentState {
+                        session_id: id,
+                        state,
+                    }
+                }
+                state => Update::SubagentSpawned {
+                    session_id: id,
+                    name: string(update.get("name")),
+                    task: string(update.get("task")),
+                    state,
+                },
+            }
+        }
         _ => unknown(),
     }
+}
+
+fn open_code_child(update: &Json) -> bool {
+    update
+        .get("_meta")
+        .and_then(|meta| meta.get("opencode/child-session"))
+        .is_some()
 }
 
 fn content_block_text(block: &Json) -> Option<String> {
@@ -672,6 +740,16 @@ fn tool_fields(
     fields.tool_name = meta.and_then(|m| string(m.get("toolName")));
     fields.card_publisher = super::cards::is_publisher(object_);
     fields.parent_id = meta.and_then(|m| string(m.get("parentToolUseId")));
+    // OpenCode names a child session instead of a parent call; the task that launched it carries the
+    // session id in its rawOutput metadata.
+    if let Some(child) = outer_meta.and_then(|m| object(m.get("opencode/child-session"))) {
+        fields.child_session_id = string(child.get("id"));
+        fields.child_parent_session_id = string(child.get("parentID"));
+        fields.child_title = string(child.get("title"));
+    }
+    fields.launched_session_id = object(object_.get("rawOutput"))
+        .and_then(|o| object(o.get("metadata")))
+        .and_then(|m| string(m.get("sessionId")));
     fields.background_task_id = meta
         .and_then(|m| object(m.get("toolResponse")))
         .and_then(|r| string(r.get("backgroundTaskId")));
@@ -851,6 +929,39 @@ mod tests {
             block["mimeType"] = json!(m);
         }
         update(json!({"sessionUpdate": "agent_message_chunk", "messageId": "m1", "content": block}))
+    }
+
+    #[test]
+    fn opencode_child_meta_and_codex_subagent_events_decode() {
+        let child = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_child","update":{"sessionUpdate":"tool_call","toolCallId":"ses_child:call_1","title":"Explore the codebase: Read a","status":"in_progress","_meta":{"opencode/child-session":{"id":"ses_child","parentID":"ses_123","title":"Explore the codebase"}},"rawOutput":{"metadata":{"sessionId":"ses_other"}}}}}"#;
+        let Inbound::ScopedUpdate(Update::ToolCall(fields), session) = dec(child) else {
+            panic!();
+        };
+        assert_eq!(session, "ses_child");
+        assert_eq!(fields.child_session_id.as_deref(), Some("ses_child"));
+        assert_eq!(fields.child_parent_session_id.as_deref(), Some("ses_123"));
+        assert_eq!(fields.child_title.as_deref(), Some("Explore the codebase"));
+        assert_eq!(fields.launched_session_id.as_deref(), Some("ses_other"));
+
+        let spawn = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_root","update":{"sessionUpdate":"subagent_spawned","subagentSessionId":"sub-1","name":"Explore","task":"Read src"}}}"#;
+        assert_eq!(
+            dec(spawn),
+            Inbound::ScopedUpdate(
+                Update::SubagentSpawned {
+                    session_id: "sub-1".into(),
+                    name: Some("Explore".into()),
+                    task: Some("Read src".into()),
+                    state: None,
+                },
+                "ses_root".into(),
+            )
+        );
+
+        let thought = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_child","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"hm"},"_meta":{"opencode/child-session":{"id":"ses_child"}}}}}"#;
+        assert!(matches!(
+            dec(thought),
+            Inbound::ScopedUpdate(Update::Unknown { .. }, _)
+        ));
     }
 
     #[test]

@@ -60,6 +60,12 @@ pub struct ToolCall {
     #[serde(default)]
     pub images: Vec<ImageRef>,
     pub parent_id: Option<String>,
+    /// The OpenCode child session this call belongs to, when the adapter names one.
+    #[serde(default)]
+    pub child_session_id: Option<String>,
+    /// The child session this call launched (its task tool's rawOutput metadata, or a Codex spawn).
+    #[serde(default)]
+    pub launched_session_id: Option<String>,
     pub subagent: Option<Subagent>,
     /// A launch row's own tool calls, in arrival order.
     #[serde(default)]
@@ -91,6 +97,8 @@ impl ToolCall {
             raw_output: None,
             images: Vec::new(),
             parent_id: fields.parent_id.clone(),
+            child_session_id: fields.child_session_id.clone(),
+            launched_session_id: fields.launched_session_id.clone(),
             subagent: None,
             children: Vec::new(),
             has_terminal: false,
@@ -104,6 +112,9 @@ impl ToolCall {
         {
             call.subagent = Some(Subagent::default());
         }
+        if fields.launched_session_id.is_some() {
+            call.subagent = Some(Subagent::default());
+        }
         call.merge(fields);
         call
     }
@@ -111,6 +122,11 @@ impl ToolCall {
     pub fn merge(&mut self, fields: &ToolFields) {
         if let Some(v) = &fields.title {
             self.title = v.clone();
+        }
+        if let (Some(prefix), Some(value)) = (&fields.child_title, &fields.title)
+            && let Some(rest) = value.strip_prefix(&format!("{prefix}: "))
+        {
+            self.title = rest.to_string();
         }
         if let Some(v) = fields.kind {
             self.kind = v;
@@ -123,6 +139,15 @@ impl ToolCall {
         }
         if let Some(v) = &fields.parent_id {
             self.parent_id = Some(v.clone());
+        }
+        if let Some(v) = &fields.child_session_id {
+            self.child_session_id = Some(v.clone());
+        }
+        if let Some(v) = &fields.launched_session_id {
+            self.launched_session_id = Some(v.clone());
+        }
+        if self.subagent.is_none() && fields.launched_session_id.is_some() {
+            self.subagent = Some(Subagent::default());
         }
         if let Some(v) = &fields.raw_output {
             self.raw_output = Some(v.clone());
@@ -842,6 +867,7 @@ fn apply(message: &Inbound, state: &mut ChatState) {
             elicitation(id, request, state);
         }
         Inbound::Update(update) => apply_update(update, state),
+        Inbound::ScopedUpdate(update, session_id) => apply_scoped(update, session_id, state),
         Inbound::AuthStatus { signed_in } => {
             start_queued(state);
             if *signed_in {
@@ -966,6 +992,26 @@ fn apply_update(update: &Update, state: &mut ChatState) {
             }
             state.last_user_message_id = message_id.clone();
         }
+        Update::SubagentSpawned {
+            session_id,
+            name,
+            task,
+            state: reported,
+        } => {
+            start_queued(state);
+            begin_agent_turn(state);
+            spawn_subagent(
+                session_id,
+                name.as_deref(),
+                task.as_deref(),
+                reported.as_deref(),
+                state,
+            );
+        }
+        Update::SubagentState {
+            session_id,
+            state: reported,
+        } => set_subagent_state(session_id, reported, state),
         Update::ToolCall(fields) | Update::ToolCallUpdate(fields) => {
             start_queued(state);
             if fields.card_publisher {
@@ -1249,30 +1295,57 @@ fn set_config_options(options: &[ConfigOption], state: &mut ChatState) {
 }
 
 fn merge_tool(fields: &ToolFields, creating: bool, state: &mut ChatState) {
+    let mut merged = false;
     for item in state.items.iter_mut().rev() {
         let ItemKind::Tool(call) = &mut item.kind else {
             continue;
         };
         if call.id == fields.id {
             call.merge(fields);
-            return;
+            merged = true;
+            break;
         }
         if let Some(child) = call.children.iter_mut().find(|c| c.id == fields.id) {
             child.merge(fields);
-            return;
+            merged = true;
+            break;
         }
+    }
+    if merged {
+        if let Some(launched) = &fields.launched_session_id {
+            adopt_orphans(launched, state);
+        }
+        return;
     }
     if !creating {
         return;
     }
-    if let Some(parent_id) = &fields.parent_id
-        && let Some(index) = launch_index(parent_id, state)
+    let parent = fields
+        .parent_id
+        .as_deref()
+        .and_then(|id| launch_index(id, state))
+        .or_else(|| {
+            fields
+                .child_session_id
+                .as_deref()
+                .and_then(|id| launch_index_for_child_session(id, state))
+        })
+        .or_else(|| {
+            fields
+                .child_parent_session_id
+                .as_deref()
+                .and_then(|id| launch_index_for_child_session(id, state))
+        });
+    if let Some(index) = parent
         && let ItemKind::Tool(call) = &mut state.items[index].kind
     {
         call.children.push(ToolCall::new(fields));
-        return;
+    } else {
+        append(ItemKind::Tool(ToolCall::new(fields)), state);
     }
-    append(ItemKind::Tool(ToolCall::new(fields)), state);
+    if let Some(launched) = &fields.launched_session_id {
+        adopt_orphans(launched, state);
+    }
 }
 
 /// The top-level row a child belongs under; a subagent launched by a subagent shares its parent's list.
@@ -1283,6 +1356,141 @@ fn launch_index(parent_id: &str, state: &ChatState) -> Option<usize> {
         }
         _ => false,
     })
+}
+
+/// An OpenCode child session belongs under the task row that launched it (its rawOutput metadata).
+fn launch_index_for_child_session(session: &str, state: &ChatState) -> Option<usize> {
+    state.items.iter().rposition(|item| match &item.kind {
+        ItemKind::Tool(call) => {
+            call.launched_session_id.as_deref() == Some(session)
+                || call
+                    .children
+                    .iter()
+                    .any(|c| c.launched_session_id.as_deref() == Some(session))
+        }
+        _ => false,
+    })
+}
+
+/// A child can arrive before the launcher's metadata names its session; when the launcher catches
+/// up, its children move under it.
+fn adopt_orphans(session: &str, state: &mut ChatState) {
+    let orphans: Vec<ToolCall> = state
+        .items
+        .iter()
+        .filter_map(|item| match &item.kind {
+            ItemKind::Tool(call)
+                if call.launched_session_id.as_deref() != Some(session)
+                    && call.child_session_id.as_deref() == Some(session) =>
+            {
+                Some(call.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    if orphans.is_empty() {
+        return;
+    }
+    {
+        let launcher = state.items.iter_mut().find(|item| match &item.kind {
+            ItemKind::Tool(call) => {
+                call.launched_session_id.as_deref() == Some(session)
+                    || call
+                        .children
+                        .iter()
+                        .any(|c| c.launched_session_id.as_deref() == Some(session))
+            }
+            _ => false,
+        });
+        let Some(item) = launcher else {
+            return;
+        };
+        let ItemKind::Tool(call) = &mut item.kind else {
+            return;
+        };
+        for orphan in &orphans {
+            if !call.children.iter().any(|c| c.id == orphan.id) {
+                call.children.push(orphan.clone());
+            }
+        }
+    }
+    let ids: Vec<&str> = orphans.iter().map(|o| o.id.as_str()).collect();
+    state
+        .items
+        .retain(|item| !matches!(&item.kind, ItemKind::Tool(c) if ids.contains(&c.id.as_str())));
+}
+
+/// A native subagent (Codex's ACP subagent RFD): one row the child session's updates nest under.
+fn spawn_subagent(
+    session_id: &str,
+    name: Option<&str>,
+    task: Option<&str>,
+    reported: Option<&str>,
+    state: &mut ChatState,
+) {
+    let status = subagent_status(reported.unwrap_or("running"));
+    if let Some(index) = launch_index_for_child_session(session_id, state)
+        && let ItemKind::Tool(call) = &mut state.items[index].kind
+    {
+        call.status = status;
+        return;
+    }
+    let mut fields = ToolFields::new(&format!("subagent:{session_id}"));
+    fields.title = Some(name.unwrap_or("Subagent").to_string());
+    fields.kind = Some(ToolKind::Other);
+    fields.status = Some(status);
+    fields.launched_session_id = Some(session_id.to_string());
+    let mut input = BTreeMap::new();
+    input.insert(
+        "description".to_string(),
+        name.unwrap_or("Subagent").to_string(),
+    );
+    if let Some(task) = task.filter(|t| !t.is_empty()) {
+        input.insert("prompt".to_string(), task.to_string());
+    }
+    fields.input = Some(input);
+    append(ItemKind::Tool(ToolCall::new(&fields)), state);
+}
+
+fn set_subagent_state(session_id: &str, reported: &str, state: &mut ChatState) {
+    if let Some(index) = launch_index_for_child_session(session_id, state)
+        && let ItemKind::Tool(call) = &mut state.items[index].kind
+    {
+        call.status = subagent_status(reported);
+    }
+}
+
+fn subagent_status(text: &str) -> ToolStatus {
+    match text.to_ascii_lowercase().as_str() {
+        "completed" | "done" | "succeeded" | "finished" => ToolStatus::Completed,
+        "failed" | "error" | "cancelled" | "canceled" | "interrupted" | "stopped" | "timeout"
+        | "timed_out" => ToolStatus::Failed,
+        _ => ToolStatus::InProgress,
+    }
+}
+
+/// An update that names its session. A session the chat knows nothing about is the chat itself
+/// (a load replay against a new id); a spawned child's tools nest under its row and its narration
+/// stays out of the main transcript.
+fn apply_scoped(update: &Update, session_id: &str, state: &mut ChatState) {
+    if matches!(
+        update,
+        Update::SubagentSpawned { .. } | Update::SubagentState { .. }
+    ) {
+        apply_update(update, state);
+        return;
+    }
+    if launch_index_for_child_session(session_id, state).is_none() {
+        apply_update(update, state);
+        return;
+    }
+    if let Update::ToolCall(fields) | Update::ToolCallUpdate(fields) = update {
+        let mut scoped = fields.clone();
+        scoped.child_session_id = Some(session_id.to_string());
+        start_queued(state);
+        begin_agent_turn(state);
+        merge_tool(&scoped, true, state);
+    }
 }
 
 fn set_question(
@@ -1936,6 +2144,131 @@ mod tests {
     }
 
     // Questions
+
+    #[test]
+    fn opencode_child_sessions_nest_under_their_task_and_lose_the_title_prefix() {
+        let mut s = ChatState::default();
+        let launch = ToolFields {
+            title: Some("Explore the codebase".into()),
+            status: Some(ToolStatus::InProgress),
+            launched_session_id: Some("ses_child".into()),
+            input: Some(BTreeMap::from([(
+                "description".into(),
+                "Explore the codebase".into(),
+            )])),
+            ..ToolFields::new("call_task")
+        };
+        msg(&mut s, Inbound::Update(Update::ToolCall(launch)));
+        let child = ToolFields {
+            title: Some("Explore the codebase: Read src/app.ts".into()),
+            status: Some(ToolStatus::InProgress),
+            child_session_id: Some("ses_child".into()),
+            child_parent_session_id: Some("ses_123".into()),
+            child_title: Some("Explore the codebase".into()),
+            ..ToolFields::new("ses_child:call_1")
+        };
+        msg(&mut s, Inbound::Update(Update::ToolCall(child)));
+        assert_eq!(s.items.len(), 1);
+        let ItemKind::Tool(call) = &s.items[0].kind else {
+            panic!();
+        };
+        assert!(call.subagent.is_some());
+        assert_eq!(call.children.len(), 1);
+        assert_eq!(call.children[0].title, "Read src/app.ts");
+    }
+
+    #[test]
+    fn a_late_task_metadata_adopts_children_that_arrived_first() {
+        let mut s = ChatState::default();
+        let child = ToolFields {
+            title: Some("Read src/app.ts".into()),
+            child_session_id: Some("ses_child".into()),
+            ..ToolFields::new("ses_child:call_1")
+        };
+        msg(&mut s, Inbound::Update(Update::ToolCall(child)));
+        assert_eq!(s.items.len(), 1);
+        let launch = ToolFields {
+            title: Some("Explore the codebase".into()),
+            launched_session_id: Some("ses_child".into()),
+            ..ToolFields::new("call_task")
+        };
+        msg(&mut s, Inbound::Update(Update::ToolCall(launch)));
+        assert_eq!(s.items.len(), 1);
+        let ItemKind::Tool(call) = &s.items[0].kind else {
+            panic!();
+        };
+        assert_eq!(call.children.len(), 1);
+    }
+
+    #[test]
+    fn codex_native_subagents_spawn_and_stream_scoped_child_updates() {
+        let mut s = ChatState::default();
+        msg(
+            &mut s,
+            Inbound::Update(Update::SubagentSpawned {
+                session_id: "sub-1".into(),
+                name: Some("Explore the repo".into()),
+                task: Some("Read src/app.ts".into()),
+                state: Some("running".into()),
+            }),
+        );
+        assert_eq!(s.items.len(), 1);
+        let child = ToolFields {
+            title: Some("Read src/app.ts".into()),
+            status: Some(ToolStatus::InProgress),
+            ..ToolFields::new("t1")
+        };
+        msg(
+            &mut s,
+            Inbound::ScopedUpdate(Update::ToolCall(child), "sub-1".into()),
+        );
+        msg(
+            &mut s,
+            Inbound::ScopedUpdate(
+                Update::AgentThought {
+                    text: "child reasoning".into(),
+                },
+                "sub-1".into(),
+            ),
+        );
+        assert_eq!(s.items.len(), 1, "the child's narration stays in its row");
+        let ItemKind::Tool(call) = &s.items[0].kind else {
+            panic!();
+        };
+        assert_eq!(call.children.len(), 1);
+        assert_eq!(call.children[0].id, "t1");
+        assert_eq!(call.subagent_title(), "Explore the repo");
+        msg(
+            &mut s,
+            Inbound::Update(Update::SubagentState {
+                session_id: "sub-1".into(),
+                state: "completed".into(),
+            }),
+        );
+        let ItemKind::Tool(call) = &s.items[0].kind else {
+            panic!();
+        };
+        assert_eq!(call.status, ToolStatus::Completed);
+    }
+
+    #[test]
+    fn scoped_updates_for_the_chat_itself_still_apply() {
+        let mut s = ChatState::default();
+        msg(
+            &mut s,
+            Inbound::ScopedUpdate(
+                Update::AgentMessage {
+                    text: "hello".into(),
+                    message_id: Some("m1".into()),
+                },
+                "ses_root".into(),
+            ),
+        );
+        assert!(matches!(
+            s.items.last().unwrap().kind,
+            ItemKind::Assistant { .. }
+        ));
+    }
 
     fn choice(value: &str) -> QuestionChoice {
         QuestionChoice {

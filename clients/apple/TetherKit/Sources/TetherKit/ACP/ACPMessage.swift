@@ -72,6 +72,14 @@ struct ACPToolFields: Equatable, Sendable {
   var terminalId: String?
   /// `_meta.claudeCode.toolResponse.backgroundTaskId`: the command went to the background.
   var backgroundTaskId: String?
+  /// `_meta["opencode/child-session"]`: the child session an OpenCode subagent call belongs to.
+  var childSessionId: String?
+  /// `_meta["opencode/child-session"].parentID`: that child session's parent session.
+  var childParentSessionId: String?
+  /// `_meta["opencode/child-session"].title`: the child session's title, which prefixes its calls' titles.
+  var childTitle: String?
+  /// `rawOutput.metadata.sessionId`: the child session this call launched (OpenCode's task tool).
+  var launchedSessionId: String?
   /// `_meta.terminal_exit` arrived.
   var terminalExited: Bool?
   /// `_meta.terminal_output.data`: the whole output so far.
@@ -130,6 +138,8 @@ enum ACPUpdate: Equatable, Sendable {
   case agentMessage(text: String, messageId: String?)
   case agentImage(ChatImageRef, messageId: String?)
   case agentThought(text: String)
+  case subagentSpawned(sessionId: String, name: String?, task: String?, state: String?)
+  case subagentState(sessionId: String, state: String)
   case userMessage(text: String, messageId: String? = nil)
   case toolCall(ACPToolFields)
   case toolCallUpdate(ACPToolFields)
@@ -157,6 +167,9 @@ enum ACPInbound: Equatable, Sendable {
   case response(id: ACPID, result: ACPResult)
   case errorResponse(id: ACPID?, code: Int, message: String)
   case update(ACPUpdate)
+  /// An update that names its session: Codex's native subagents stream on the child's own id,
+  /// everything else arrives under the chat's.
+  case scopedUpdate(ACPUpdate, sessionId: String)
   case permissionRequest(id: ACPID, request: ACPPermissionRequest)
   case elicitation(id: ACPID, request: ACPElicitationRequest)
   /// The adapter's `_auth/status_update`: whether the host's agent has a login. Sent at session start and
@@ -187,7 +200,11 @@ enum ACPDecoder {
         return .unknown(method: method)
       }
       if method == "session/update", let update = params["update"] as? JSON {
-        return .update(decodeUpdate(update, images: images))
+        let decoded = decodeUpdate(update, images: images)
+        if let sessionId = params["sessionId"] as? String {
+          return .scopedUpdate(decoded, sessionId: sessionId)
+        }
+        return .update(decoded)
       }
       if method == ACPClientLine.echoMethod, let client = params["client"] as? String,
         let line = params["message"] as? JSON
@@ -275,9 +292,13 @@ enum ACPDecoder {
         return .agentImage(ref, messageId: update["messageId"] as? String)
       }
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
+      // A child session's stream is part of the subagent's work; its report arrives on the task call.
+      if (update["_meta"] as? JSON)?["opencode/child-session"] != nil { return .unknown(kind: kind) }
       return .agentMessage(text: text, messageId: update["messageId"] as? String)
     case "agent_thought_chunk":
       guard let text = contentText(update["content"]) else { return .unknown(kind: kind) }
+      // A child session's reasoning belongs to its subagent row, not the main transcript.
+      if (update["_meta"] as? JSON)?["opencode/child-session"] != nil { return .unknown(kind: kind) }
       return .agentThought(text: text)
     case "user_message_chunk":
       if let block = update["content"] as? JSON, (block["_meta"] as? JSON)?["tether/branchContext"] as? Bool == true {
@@ -338,6 +359,16 @@ enum ACPDecoder {
         return .unknown(kind: kind)
       }
       return .compactionSummaryChunk(id: id, text: text)
+    case "subagent_spawned", "subagent_state_update", "_subagent_update":
+      // The ACP subagent RFD, as codex-acp implements it; older builds spell the unified event
+      // `_subagent_update`. Spans carry the name/task, later updates only the state.
+      guard let id = update["subagentSessionId"] as? String else { return .unknown(kind: kind) }
+      if let state = update["state"] as? String, update["name"] == nil, update["task"] == nil {
+        return .subagentState(sessionId: id, state: state)
+      }
+      return .subagentSpawned(
+        sessionId: id, name: update["name"] as? String, task: update["task"] as? String,
+        state: update["state"] as? String)
     default:
       return .unknown(kind: kind)
     }
@@ -397,6 +428,14 @@ enum ACPDecoder {
     fields.toolName = meta?["toolName"] as? String
     fields.cardPublisher = ChatCard.isPublisher(object)
     fields.parentId = meta?["parentToolUseId"] as? String
+    // OpenCode names a child session instead of a parent call; the task that launched it carries the
+    // session id in its rawOutput metadata.
+    if let child = allMeta?["opencode/child-session"] as? JSON {
+      fields.childSessionId = child["id"] as? String
+      fields.childParentSessionId = child["parentID"] as? String
+      fields.childTitle = child["title"] as? String
+    }
+    fields.launchedSessionId = ((object["rawOutput"] as? JSON)?["metadata"] as? JSON)?["sessionId"] as? String
     fields.terminalId = (allMeta?["terminal_info"] as? JSON)?["terminal_id"] as? String
     fields.backgroundTaskId = (meta?["toolResponse"] as? JSON)?["backgroundTaskId"] as? String
     if allMeta?["terminal_exit"] != nil { fields.terminalExited = true }
