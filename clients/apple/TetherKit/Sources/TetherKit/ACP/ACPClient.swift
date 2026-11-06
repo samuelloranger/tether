@@ -45,6 +45,9 @@ actor ACPClient {
   private var subscribers: [UUID: AsyncStream<ChatState>.Continuation] = [:]
   private let snapshotStore: (any ChatSnapshotStore)?
   private let images: ChatImageStore?
+  /// Advertise the ACP subagent RFD in `initialize`. Codex uses it when the client asks; Claude
+  /// keeps its `_meta.claudeCode` path, so this stays off unless the chat's agent needs it.
+  private let subagents: Bool
   private var snapshotIdentity: Int?
   private let snapshotInterval: Duration
   private var lastSnapshot: ContinuousClock.Instant?
@@ -59,9 +62,10 @@ actor ACPClient {
   init(
     stream: any TerminalByteStream, store: any ChatJournalStore = InMemoryChatJournalStore(),
     resume: ChatSnapshot? = nil, snapshots: (any ChatSnapshotStore)? = nil, snapshotInterval: Duration = .seconds(3),
-    images: ChatImageStore? = nil
+    images: ChatImageStore? = nil, subagents: Bool = false
   ) {
     self.images = images
+    self.subagents = subagents
     self.stream = stream
     self.store = store
     self.snapshotStore = snapshots
@@ -126,17 +130,21 @@ actor ACPClient {
   }
 
   func initialize() async throws -> ACPResult {
-    try await request(
+    var capabilities: [String: Any] = [
+      "fs": ["readTextFile": false, "writeTextFile": false], "terminal": false,
+      // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
+      "elicitation": ["form": [String: Any]()],
+      "session": ["notices": [String: Any](), "compaction": [String: Any]()],
+      "_meta": ["terminal_output": true],
+    ]
+    // The draft ACP subagent RFD needs both sides: without this codex-acp keeps a subagent to an
+    // ordinary tool call and never streams the child session.
+    if subagents { capabilities["subagents"] = [String: Any]() }
+    return try await request(
       "initialize",
       [
         "protocolVersion": 1,
-        "clientCapabilities": [
-          "fs": ["readTextFile": false, "writeTextFile": false], "terminal": false,
-          // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
-          "elicitation": ["form": [String: Any]()],
-          "session": ["notices": [String: Any](), "compaction": [String: Any]()],
-          "_meta": ["terminal_output": true],
-        ],
+        "clientCapabilities": capabilities,
       ])
   }
 

@@ -91,6 +91,9 @@ pub struct ChatClient {
     was_working: bool,
     journal_changed: bool,
     joining: bool,
+    /// Advertise the ACP subagent RFD in `initialize`. Codex uses it when the client asks; Claude
+    /// keeps its `_meta.claudeCode` path, so this stays off unless the chat's agent needs it.
+    subagents: bool,
 }
 
 fn encode(message: Value) -> Vec<u8> {
@@ -120,7 +123,14 @@ impl ChatClient {
             was_working: false,
             journal_changed: false,
             joining: false,
+            subagents: false,
         }
+    }
+
+    /// Codex's native subagents need the client to advertise the draft ACP subagent RFD.
+    pub fn with_subagents(mut self, subagents: bool) -> Self {
+        self.subagents = subagents;
+        self
     }
 
     /// For a chat another client started on a holder that takes several: no handshake of its
@@ -223,20 +233,26 @@ impl ChatClient {
     }
 
     pub fn initialize(&mut self) -> Outbound {
+        let mut capabilities = json!({
+            "fs": {"readTextFile": false, "writeTextFile": false},
+            "terminal": false,
+            // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
+            "elicitation": {"form": {}},
+            // Notices and compaction updates stream only to a client that declares them; terminal_output
+            // moves Bash output into _meta. Not `_meta.jetbrains.air`: that switches the adapter's dialect.
+            "session": {"notices": {}, "compaction": {}},
+            "_meta": {"terminal_output": true},
+        });
+        // The draft ACP subagent RFD needs both sides: without this codex-acp keeps a subagent to an
+        // ordinary tool call and never streams the child session.
+        if self.subagents {
+            capabilities["subagents"] = json!({});
+        }
         self.request(
             "initialize",
             json!({
                 "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": {"readTextFile": false, "writeTextFile": false},
-                    "terminal": false,
-                    // Without this the adapter leaves AskUserQuestion out; a chat started before it has none until recreated.
-                    "elicitation": {"form": {}},
-                    // Notices and compaction updates stream only to a client that declares them; terminal_output
-                    // moves Bash output into _meta. Not `_meta.jetbrains.air`: that switches the adapter's dialect.
-                    "session": {"notices": {}, "compaction": {}},
-                    "_meta": {"terminal_output": true},
-                },
+                "clientCapabilities": capabilities,
             }),
             RequestKind::Initialize,
             None,
@@ -1001,6 +1017,21 @@ mod tests {
         assert_eq!(caps["session"], json!({"notices": {}, "compaction": {}}));
         assert_eq!(caps["_meta"], json!({"terminal_output": true}));
         assert!(!String::from_utf8_lossy(&c.initialize().line).contains("jetbrains"));
+    }
+
+    #[test]
+    fn only_a_subagent_capable_chat_advertises_the_draft_rfd() {
+        let mut plain = client(Journal::default());
+        assert!(
+            parse(&plain.initialize().line)["params"]["clientCapabilities"]
+                .get("subagents")
+                .is_none()
+        );
+        let mut codex = ChatClient::new(Journal::default(), None, None).with_subagents(true);
+        assert_eq!(
+            parse(&codex.initialize().line)["params"]["clientCapabilities"]["subagents"],
+            json!({})
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ final class ChatCardTests: XCTestCase {
     let fixtures = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: [String: Any]])
     for (name, update) in fixtures {
       let data = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "method": "session/update", "params": ["sessionId": "s", "update": update]])
-      guard case let .update(.toolCallUpdate(fields)) = ACPDecoder.decode(data), let card = fields.card else { return XCTFail("No card for \(name)") }
+      guard case let .scopedUpdate(.toolCallUpdate(fields), _) = ACPDecoder.decode(data), let card = fields.card else { return XCTFail("No card for \(name)") }
       XCTAssertEqual(card.kind, name.split(separator: "-").last.map(String.init), name)
       if card.kind == "image" { XCTAssertEqual(card.image?.pixelWidth, 1, name) }
     }

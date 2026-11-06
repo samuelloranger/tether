@@ -262,11 +262,15 @@ mod tests {
         let fixtures: std::collections::BTreeMap<String, Value> = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-card-adapter-results.json"))).unwrap();
         for (name, update) in fixtures {
             let line = json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":update}});
-            let crate::acp::message::Inbound::Update(crate::acp::message::Update::ToolCallUpdate(
-                fields,
-            )) = crate::acp::message::decode(line.to_string().as_bytes(), None)
-            else {
-                panic!("not a result: {name}")
+            let fields = match crate::acp::message::decode(line.to_string().as_bytes(), None) {
+                crate::acp::message::Inbound::Update(
+                    crate::acp::message::Update::ToolCallUpdate(fields),
+                )
+                | crate::acp::message::Inbound::ScopedUpdate(
+                    crate::acp::message::Update::ToolCallUpdate(fields),
+                    _,
+                ) => fields,
+                _ => panic!("not a result: {name}"),
             };
             let card = fields.card.unwrap_or_else(|| panic!("no card for {name}"));
             assert_eq!(card.kind, name.split('-').next_back().unwrap(), "{name}");

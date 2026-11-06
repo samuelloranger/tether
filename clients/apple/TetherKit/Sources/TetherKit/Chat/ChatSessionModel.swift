@@ -278,7 +278,8 @@ final class ChatSessionModel {
       return
     }
     let fresh = ACPClient(
-      stream: stream, store: store, resume: resume, snapshots: snapshots, images: imageLibrary?.store)
+      stream: stream, store: store, resume: resume, snapshots: snapshots, images: imageLibrary?.store,
+      subagents: agent?.key == ChatAgents.codex.key)
     if resume == nil, snapshots != nil { learnIdentity(of: fresh, from: inspectRead, retry: spawn) }
     if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh

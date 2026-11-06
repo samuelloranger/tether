@@ -32,6 +32,10 @@ struct ChatToolCall: Codable, Equatable, Sendable {
   /// The pictures the result carried; the files live in the chat's image store.
   var images: [ChatImageRef] = []
   var parentId: String?
+  /// The OpenCode child session this call belongs to, when the adapter names one.
+  var childSessionId: String?
+  /// The OpenCode child session this call launched (its task tool's rawOutput metadata).
+  var launchedSessionId: String?
   var subagent: ChatSubagent?
   /// A launch row's own tool calls, in arrival order.
   var children: [ChatToolCall] = []
@@ -51,16 +55,25 @@ struct ChatToolCall: Codable, Equatable, Sendable {
     status = fields.status ?? .pending
     diff = fields.diff
     parentId = fields.parentId
+    childSessionId = fields.childSessionId
+    launchedSessionId = fields.launchedSessionId
     if let name = fields.toolName, ChatSubagent.launchToolNames.contains(name) { subagent = ChatSubagent() }
+    if fields.launchedSessionId != nil { subagent = subagent ?? ChatSubagent() }
     merge(fields)
   }
 
   mutating func merge(_ fields: ACPToolFields) {
     if let value = fields.title { title = value }
+    if let childTitle = fields.childTitle, let value = fields.title, value.hasPrefix(childTitle + ": ") {
+      title = String(value.dropFirst(childTitle.count + 2))
+    }
     if let value = fields.kind { kind = value }
     if let value = fields.status { status = value }
     if let value = fields.diff { diff = value }
     if let value = fields.parentId { parentId = value }
+    if let value = fields.childSessionId { childSessionId = value }
+    if let value = fields.launchedSessionId { launchedSessionId = value }
+    if subagent == nil, fields.launchedSessionId != nil { subagent = ChatSubagent() }
     if let value = fields.rawOutput { rawOutput = value }
     if let value = fields.terminalId { terminalId = value }
     if let value = fields.backgroundTaskId { backgroundTaskId = value }
@@ -506,6 +519,8 @@ enum ChatReducer {
       if let value = state.hostAnswers[id] { resolveQuestion(id, hostValue: value, in: &state) }
     case let .update(update):
       apply(update, to: &state)
+    case let .scopedUpdate(update, sessionId):
+      applyScoped(update, sessionId: sessionId, to: &state)
     case let .authStatus(signedIn):
       startQueued(in: &state)
       if signedIn {
@@ -548,6 +563,12 @@ enum ChatReducer {
       } else {
         append(.thought(text: text), to: &state)
       }
+    case let .subagentSpawned(sessionId, name, task, spawnState):
+      startQueued(in: &state)
+      startAgentTurn(in: &state)
+      spawnSubagent(sessionId: sessionId, name: name, task: task, state: spawnState, in: &state)
+    case let .subagentState(sessionId, reported):
+      setSubagentState(sessionId: sessionId, state: reported, in: &state)
     case let .userMessage(text, messageId):
       if let first = state.queuedItemIds.first {
         unqueue(first, in: &state)
@@ -760,23 +781,136 @@ enum ChatReducer {
       if call.id == fields.id {
         call.merge(fields)
         state.items[index].kind = .tool(call)
+        if let launched = fields.launchedSessionId { adoptOrphans(of: launched, in: &state) }
         return
       }
       if let child = call.children.firstIndex(where: { $0.id == fields.id }) {
         call.children[child].merge(fields)
         state.items[index].kind = .tool(call)
+        if let launched = fields.launchedSessionId { adoptOrphans(of: launched, in: &state) }
         return
       }
     }
     guard creating else { return }
-    if let parentId = fields.parentId, let index = launchIndex(for: parentId, in: state),
-      case var .tool(call) = state.items[index].kind
+    if let parentId = fields.parentId, let index = launchIndex(for: parentId, in: state) {
+      nest(ChatToolCall(fields), under: index, in: &state)
+    } else if let session = fields.childSessionId, let index = launchIndex(forChildSession: session, in: state) {
+      nest(ChatToolCall(fields), under: index, in: &state)
+    } else if let parentSession = fields.childParentSessionId,
+      let index = launchIndex(forChildSession: parentSession, in: state)
     {
-      call.children.append(ChatToolCall(fields))
-      state.items[index].kind = .tool(call)
+      nest(ChatToolCall(fields), under: index, in: &state)
+    } else {
+      append(.tool(ChatToolCall(fields)), to: &state)
+    }
+    if let launched = fields.launchedSessionId { adoptOrphans(of: launched, in: &state) }
+  }
+
+  private static func nest(_ child: ChatToolCall, under index: Int, in state: inout ChatState) {
+    guard case var .tool(call) = state.items[index].kind else { return }
+    call.children.append(child)
+    state.items[index].kind = .tool(call)
+  }
+
+  /// OpenCode names a child session instead of a parent call; the task that launched it carries that
+  /// session in its rawOutput metadata. A child of a child resolves to the same top-level row, as a
+  /// Claude nested launch does.
+  private static func launchIndex(forChildSession id: String, in state: ChatState) -> Int? {
+    state.items.indices.reversed().first { index in
+      guard case let .tool(call) = state.items[index].kind else { return false }
+      return call.launchedSessionId == id || call.children.contains { $0.launchedSessionId == id }
+    }
+  }
+
+  /// A child can arrive before the launcher's metadata names its session; when the launcher catches
+  /// up, its children move under it.
+  private static func adoptOrphans(of sessionId: String, in state: inout ChatState) {
+    var kept: [ChatItem] = []
+    var orphans: [ChatToolCall] = []
+    for item in state.items {
+      if case let .tool(call) = item.kind, call.launchedSessionId != sessionId, call.childSessionId == sessionId {
+        orphans.append(call)
+      } else {
+        kept.append(item)
+      }
+    }
+    guard !orphans.isEmpty else { return }
+    for index in kept.indices {
+      guard case var .tool(call) = kept[index].kind else { continue }
+      guard call.launchedSessionId == sessionId || call.children.contains(where: { $0.launchedSessionId == sessionId })
+      else { continue }
+      for orphan in orphans where !call.children.contains(where: { $0.id == orphan.id }) {
+        call.children.append(orphan)
+      }
+      kept[index].kind = .tool(call)
+      state.items = kept
       return
     }
-    append(.tool(ChatToolCall(fields)), to: &state)
+  }
+
+  /// A native subagent (Codex's ACP subagent RFD): one row the child session's updates nest under.
+  private static func spawnSubagent(
+    sessionId: String, name: String?, task: String?, state: String?, in chat: inout ChatState
+  ) {
+    let status = subagentStatus(state ?? "running")
+    if let index = launchIndex(forChildSession: sessionId, in: chat),
+      case var .tool(call) = chat.items[index].kind
+    {
+      call.status = status
+      chat.items[index].kind = .tool(call)
+      return
+    }
+    var fields = ACPToolFields(id: "subagent:\(sessionId)")
+    fields.title = name ?? "Subagent"
+    fields.kind = .other
+    fields.status = status
+    fields.launchedSessionId = sessionId
+    var input = ["description": name ?? "Subagent"]
+    if let task, !task.isEmpty { input["prompt"] = task }
+    fields.input = input
+    append(.tool(ChatToolCall(fields)), to: &chat)
+  }
+
+  private static func setSubagentState(sessionId: String, state: String, in chat: inout ChatState) {
+    guard let index = launchIndex(forChildSession: sessionId, in: chat),
+      case var .tool(call) = chat.items[index].kind
+    else { return }
+    call.status = subagentStatus(state)
+    chat.items[index].kind = .tool(call)
+  }
+
+  private static func subagentStatus(_ state: String) -> ACPToolStatus {
+    switch state.lowercased() {
+    case "completed", "done", "succeeded", "finished": .completed
+    case "failed", "error", "cancelled", "canceled", "interrupted", "stopped", "timeout", "timed_out":
+      .failed
+    default: .inProgress
+    }
+  }
+
+  /// An update that names its session. A session the chat knows nothing about is the chat itself
+  /// (a load replay against a new id); a spawned child's tools nest under its row and its
+  /// narration stays out of the main transcript.
+  private static func applyScoped(_ update: ACPUpdate, sessionId: String, to chat: inout ChatState) {
+    switch update {
+    case .subagentSpawned, .subagentState:
+      apply(update, to: &chat)
+    default:
+      guard launchIndex(forChildSession: sessionId, in: chat) != nil else {
+        apply(update, to: &chat)
+        return
+      }
+      switch update {
+      case let .toolCall(fields), let .toolCallUpdate(fields):
+        var scoped = fields
+        scoped.childSessionId = sessionId
+        startQueued(in: &chat)
+        startAgentTurn(in: &chat)
+        mergeTool(scoped, creating: true, into: &chat)
+      default:
+        break
+      }
+    }
   }
 
   /// The top-level row a child belongs under; a subagent launched by a subagent shares its parent's list.

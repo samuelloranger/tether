@@ -567,7 +567,8 @@ impl Session {
         let images: Option<Arc<dyn ImageSink>> = ctx
             .files
             .map(|f| Arc::new(f.images(&self.name)) as Arc<dyn ImageSink>);
-        let mut client = ChatClient::new(journal, self.resume.take(), images);
+        let mut client = ChatClient::new(journal, self.resume.take(), images)
+            .with_subagents(self.agent.is_some_and(|a| a.key == "codex"));
         if self.joined {
             client.join();
         }
