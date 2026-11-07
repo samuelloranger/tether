@@ -358,6 +358,8 @@ type acpDaemonState struct {
 	dropAnswers   map[string]bool   // guarded by mu
 	activePrompt  string            // OpenCode's one prompt in flight, guarded by mu
 	queuedPrompts []acpQueuedPrompt // guarded by mu
+	promptSeq     uint64            // guarded by mu
+	cancelTimer   *time.Timer       // releases a stuck activePrompt after a cancel, guarded by mu
 	metaMu        sync.Mutex
 	meta          *acpMeta
 }

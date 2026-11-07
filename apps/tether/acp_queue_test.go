@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsOpenCodeSpawn(t *testing.T) {
@@ -15,7 +16,18 @@ func TestIsOpenCodeSpawn(t *testing.T) {
 		"opencode.exe acp": true,
 		"opencode serve":   false,
 		"other acp":        false,
-		"npx -y @agentclientprotocol/codex-acp@2.3.0": false,
+		"npx -y @agentclientprotocol/codex-acp@2.3.0":   false,
+		`PATH="$HOME/.opencode/bin:$PATH" opencode acp`: true,
+		"npx opencode-ai acp":                           true,
+		"npx -y opencode-ai@1.2.3 acp":                  true,
+		"bunx opencode-ai@latest acp":                   true,
+		`sh -c "opencode acp"`:                          true,
+		`sh -c 'npx opencode-ai@latest acp'`:            true,
+		"claude-agent-acp":                              false,
+		"npx -y @zed-industries/claude-agent-acp acp":   false,
+		"gemini --acp":                                  false,
+		"/opt/opencode-tools/other acp":                 false,
+		"opencode-ai serve":                             false,
 	} {
 		if got := isOpenCodeSpawn(spawn); got != want {
 			t.Errorf("isOpenCodeSpawn(%q) = %v, want %v", spawn, got, want)
@@ -127,5 +139,91 @@ func TestOpenCodeStopWithdrawsQueuedPrompts(t *testing.T) {
 	h.client(queuedPrompt)
 	if !strings.HasSuffix(h.stdin.String(), queuedPrompt+"\n") {
 		t.Fatal("a new prompt after stop must run")
+	}
+}
+
+func fastOpenCodeTimers(t *testing.T, grace time.Duration) {
+	t.Helper()
+	old := openCodeCancelGrace
+	openCodeCancelGrace = grace
+	t.Cleanup(func() { openCodeCancelGrace = old })
+}
+
+const stopLine = `{"method":"session/cancel","params":{"sessionId":"s"}}`
+
+func TestOpenCodeStopReleasesAnUnansweredPrompt(t *testing.T) {
+	// Long enough that the pre-release check below runs first even on a loaded -race runner.
+	fastOpenCodeTimers(t, 500*time.Millisecond)
+	h := openCodeHarness(t)
+	h.client(promptLine)
+	h.client(stopLine)
+	// Queued after the Stop: must go out once the stuck prompt is released.
+	h.client(queuedPrompt)
+	if got := h.stdin.String(); got != promptLine+"\n"+stopLine+"\n" {
+		t.Fatalf("prompt delivered before release: %s", got)
+	}
+	waitFor(t, "stuck prompt released", func() bool { return strings.HasSuffix(h.stdin.String(), queuedPrompt+"\n") })
+	if !strings.Contains(h.log(), `"id":"dev-a-3","result":{"stopReason":"cancelled"}`) {
+		t.Fatalf("no synthetic response for the active prompt: %s", h.log())
+	}
+	if h.turn() != "working" {
+		t.Fatal("the released queued prompt must be the turn in flight")
+	}
+
+	// The agent's late answer to the released prompt neither releases nor writes again.
+	before, logBefore := h.stdin.String(), strings.Count(h.log(), "phone-2")
+	h.agent(`{"id":"dev-a-3","result":{"stopReason":"cancelled"}}`)
+	if got := h.stdin.String(); got != before {
+		t.Fatalf("late response wrote to the agent: %s", got)
+	}
+	h.s.mu.Lock()
+	active, queued := h.s.activePrompt, len(h.s.queuedPrompts)
+	h.s.mu.Unlock()
+	if active != `"phone-2"` || queued != 0 {
+		t.Fatalf("late response disturbed the queue: active=%q queued=%d", active, queued)
+	}
+	if strings.Count(h.log(), "phone-2") != logBefore {
+		t.Fatal("late response produced another synthetic response")
+	}
+}
+
+func TestOpenCodeStopAnsweredInTimeDoesNotFire(t *testing.T) {
+	fastOpenCodeTimers(t, 500*time.Millisecond)
+	h := openCodeHarness(t)
+	h.client(promptLine)
+	h.client(stopLine)
+	h.agent(`{"id":"dev-a-3","result":{"stopReason":"cancelled"}}`)
+	h.s.mu.Lock()
+	armed := h.s.cancelTimer != nil
+	h.s.mu.Unlock()
+	if armed {
+		t.Fatal("an answer in time must stop the cancel timer")
+	}
+	h.client(queuedPrompt)
+	time.Sleep(700 * time.Millisecond)
+	if strings.Count(h.stdin.String(), queuedPrompt) != 1 {
+		t.Fatalf("stale timer interfered: %s", h.stdin.String())
+	}
+	h.s.mu.Lock()
+	active := h.s.activePrompt
+	h.s.mu.Unlock()
+	if active != `"phone-2"` {
+		t.Fatalf("active = %q", active)
+	}
+}
+
+func TestOpenCodeQueueWaitIsLoggedOnce(t *testing.T) {
+	old := openCodeQueueWarnAfter
+	openCodeQueueWarnAfter = 20 * time.Millisecond
+	t.Cleanup(func() { openCodeQueueWarnAfter = old })
+	h := openCodeHarness(t)
+	var errs lockedBuffer
+	h.s.errf = &errs
+	h.client(promptLine)
+	h.client(queuedPrompt)
+	waitFor(t, "queue wait warning", func() bool { return strings.Contains(errs.String(), "phone-2") })
+	time.Sleep(60 * time.Millisecond)
+	if n := strings.Count(errs.String(), "phone-2"); n != 1 {
+		t.Fatalf("warned %d times", n)
 	}
 }
