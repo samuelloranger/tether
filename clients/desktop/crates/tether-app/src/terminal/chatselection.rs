@@ -155,11 +155,16 @@ impl Selection {
             let description =
                 item.accessible_string_property(AccessibleStringProperty::Description);
             let table_cell = description.as_deref() == Some("Table cell");
-            let empty_selected_cell = text.is_empty()
-                && self.anchor != self.focus
+            // A partial selection keeps column alignment: every table cell from the first to
+            // the last item touched by the drag contributes a field, holding its selected text
+            // or an empty string, so each copied row keeps its tab separators. Spreadsheet
+            // rule: the first row starts at the first selected cell (no tabs for columns
+            // before it) and the last row ends at the last selected cell (no tabs after it);
+            // every row in between is complete. Cells outside the drag range are skipped.
+            let in_drag_range = self.anchor != self.focus
                 && (self.anchor.0.min(self.focus.0)..=self.anchor.0.max(self.focus.0))
                     .contains(&index);
-            if a == b && !(table_cell && (all || empty_selected_cell)) {
+            if a == b && !(table_cell && (all || in_drag_range)) {
                 continue;
             }
             let Some(text) = text.get(a.min(b)..a.max(b)) else {
@@ -561,6 +566,82 @@ mod tests {
             );
             selected.clear();
         }
+        ui.hide().unwrap();
+    }
+
+    #[test]
+    fn partial_table_selection_keeps_column_alignment() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        use slint::platform::{Platform, WindowAdapter};
+        use slint::{ModelRc, Rgb8Pixel, VecModel};
+
+        struct Headless(Rc<MinimalSoftwareWindow>);
+        impl Platform for Headless {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        let ui = crate::AppWindow::new().unwrap();
+        ui.global::<crate::AppBridge>()
+            .set_page(crate::PageKind::Terminal);
+        ui.global::<crate::ChatVm>().set_active(true);
+        let md = tether_core::markdown::items(
+            "| A | B | C |\n|---|---|---|\n| d | | f |\n| g | h | i |",
+        );
+        ui.global::<crate::ChatVm>()
+            .set_rows(ModelRc::new(VecModel::from(vec![crate::ChatRowVm {
+                kind: 1,
+                key: "item:table".into(),
+                selectable: true,
+                markdown: ModelRc::new(VecModel::from(
+                    md.iter()
+                        .map(crate::terminal::chatview::md_vm)
+                        .collect::<Vec<_>>(),
+                )),
+                ..Default::default()
+            }])));
+        ui.window().set_size(slint::LogicalSize::new(1000., 800.));
+        ui.show().unwrap();
+        let mut pixels = vec![Rgb8Pixel::default(); 1000 * 800];
+        for delay in [0, 40, 350] {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            slint::platform::update_timers_and_animations();
+            window.draw_if_needed(|renderer| {
+                renderer.render(&mut pixels, 1000);
+            });
+        }
+        let inputs = blocks(
+            &ui,
+            ChatSelectionScope {
+                id: "item:table".into(),
+                ..Default::default()
+            },
+        );
+        // Reading order: 0 A, 1 B, 2 C / 3 d, 4 (empty), 5 f / 6 g, 7 h, 8 i.
+        assert_eq!(inputs.len(), 9);
+        let mut selected = Selection {
+            blocks: inputs.iter().map(ItemRc::downgrade).collect(),
+            ..Default::default()
+        };
+        let mut copy = |anchor, focus| {
+            selected.anchor = anchor;
+            selected.focus = focus;
+            selected.paint();
+            selected.copy(false)
+        };
+        // Starts in a later column: no leading tabs, following rows are complete.
+        assert_eq!(copy((2, 0), (8, 1)), "C\nd\t\tf\ng\th\ti");
+        // Spans an empty cell: it keeps its tab separators.
+        assert_eq!(copy((3, 0), (5, 1)), "d\t\tf");
+        // Ends mid-row: the row stops at the last touched cell.
+        assert_eq!(copy((1, 0), (7, 1)), "B\tC\nd\t\tf\ng\th");
+        // A cell touched with nothing selected still holds its column.
+        assert_eq!(copy((3, 0), (7, 0)), "d\t\tf\ng\t");
+        // Dragging backwards copies the same text.
+        assert_eq!(copy((7, 1), (1, 0)), "B\tC\nd\t\tf\ng\th");
+        selected.clear();
         ui.hide().unwrap();
     }
 
