@@ -24,23 +24,38 @@ type acpQuotaWindow struct {
 }
 
 type acpProviderUsage struct {
-	FiveHour  *acpQuotaWindow `json:"fiveHour"`
-	Weekly    *acpQuotaWindow `json:"weekly"`
-	UpdatedAt int64           `json:"updatedAt"`
-	Stale     bool            `json:"stale"`
-	Error     string          `json:"error,omitempty"`
+	Active       *bool            `json:"active,omitempty"`
+	FiveHour     *acpQuotaWindow  `json:"fiveHour"`
+	Weekly       *acpQuotaWindow  `json:"weekly"`
+	Monthly      *acpQuotaWindow  `json:"monthly,omitempty"`
+	MonthlyMeter *acpMonthlyMeter `json:"monthlyMeter,omitempty"`
+	UpdatedAt    int64            `json:"updatedAt"`
+	Stale        bool             `json:"stale"`
+	Error        string           `json:"error,omitempty"`
+}
+
+type acpMonthlyMeter struct {
+	Used      *float64 `json:"used"`
+	Limit     *float64 `json:"limit"`
+	Unit      string   `json:"unit"`
+	Unlimited bool     `json:"unlimited,omitempty"`
+	ResetsAt  int64    `json:"resetsAt"`
 }
 
 type acpUsageSnapshot struct {
 	Claude    acpProviderUsage `json:"claude"`
 	Codex     acpProviderUsage `json:"codex"`
+	OpenCode  acpProviderUsage `json:"opencode"`
+	Copilot   acpProviderUsage `json:"copilot"`
 	CheckedAt int64            `json:"checkedAt"`
 }
 
 type acpUsageDeps struct {
-	claude func() (acpProviderUsage, error)
-	codex  func() (acpProviderUsage, error)
-	now    func() time.Time
+	claude   func() (acpProviderUsage, error)
+	codex    func() (acpProviderUsage, error)
+	opencode func() (acpProviderUsage, error)
+	copilot  func() (acpProviderUsage, error)
+	now      func() time.Time
 }
 
 func acpUsage(args []string, w io.Writer) error {
@@ -52,7 +67,7 @@ func acpUsage(args []string, w io.Writer) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("usage: acp usage [--json]")
 	}
-	return acpUsageWith(w, acpUsageDeps{claude: readClaudePlanUsage, codex: readCodexPlanUsage, now: time.Now})
+	return acpUsageWith(w, acpUsageDeps{claude: readClaudePlanUsage, codex: readCodexPlanUsage, opencode: readOpenCodePlanUsage, copilot: readCopilotPlanUsage, now: time.Now})
 }
 
 // All devices on a host share one refresh. Failures are throttled too, and keep
@@ -71,16 +86,28 @@ func acpUsageWith(w io.Writer, deps acpUsageDeps) error {
 				defer wg.Done()
 				fresh, err := read()
 				if err == nil {
-					fresh.UpdatedAt = now
+					if fresh.Active == nil {
+						active := fresh.FiveHour != nil || fresh.Weekly != nil || fresh.Monthly != nil || fresh.MonthlyMeter != nil
+						fresh.Active = &active
+					}
+					if fresh.UpdatedAt <= 0 && !fresh.Stale {
+						fresh.UpdatedAt = now
+					}
 					*dst = fresh
 				} else {
 					dst.Error = err.Error()
-					dst.Stale = dst.UpdatedAt > 0
+					dst.Stale = dst.Stale || dst.UpdatedAt > 0
 				}
 			}
-			wg.Add(2)
-			go refresh(&out.Claude, deps.claude)
-			go refresh(&out.Codex, deps.codex)
+			for _, provider := range []struct {
+				dst  *acpProviderUsage
+				read func() (acpProviderUsage, error)
+			}{{&out.Claude, deps.claude}, {&out.Codex, deps.codex}, {&out.OpenCode, deps.opencode}, {&out.Copilot, deps.copilot}} {
+				if provider.read != nil {
+					wg.Add(1)
+					go refresh(provider.dst, provider.read)
+				}
+			}
 			wg.Wait()
 			out.CheckedAt = now
 			if err := writePrivateJSON(path, out); err != nil {
@@ -91,8 +118,8 @@ func acpUsageWith(w io.Writer, deps acpUsageDeps) error {
 	})
 }
 
-// Provider limits are read by the CLIs that already own host authentication.
-// No credential is read, copied to the phone, or included in an error message.
+// Claude, Codex and gh own their authentication. OpenCode's reader uses its host credential store.
+// No credential is copied to a client or included in an error message.
 // These control requests never submit a user prompt or start a model turn.
 func readClaudePlanUsage() (acpProviderUsage, error) {
 	command := []string{"claude", "--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--settings", `{"disableAllHooks":true}`, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`}

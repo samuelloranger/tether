@@ -88,7 +88,8 @@ export struct ChatTabVm {
 }
 
 export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, }
-export struct PlanUsageVm { provider: string, window: string, used: float, value: string, reset: string, }
+export struct QuotaWindowVm { window: string, short-window: string, used: float, value: string, detail-value: string, reset: string, }
+export struct PlanUsageVm { provider: string, agent: int, windows: [QuotaWindowVm], freshness: string, stale: bool, }
 
 export struct NcChoiceVm {
     value: string,
@@ -3354,29 +3355,100 @@ export component ChatOverlays inherits Rectangle {
     }
 }
 
-export component ChatPlanUsage inherits VerticalLayout {
-    // Sits under the stretching chat list; without this it takes a share of the spare height.
-    vertical-stretch: 0;
-    padding-left: 10px; padding-right: 10px; padding-top: 8px; padding-bottom: 8px; spacing: 7px;
-    Rectangle { height: 1px; background: Tokens.border; }
-    HorizontalLayout { spacing: 4px;
-        Text { text: "Plan usage · host accounts"; color: Tokens.text-faint; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
-        IconButton { icon: @image-url("icons/refresh.svg"); size: 26px; tooltip: "Refresh account usage (once per minute)"; clicked => { ChatVm.refresh-usage(); } }
+component QuotaBar inherits Rectangle {
+    in property <float> used;
+    height: 2px;
+    background: Tokens.raised;
+    border-radius: 2px;
+    Rectangle {
+        x: 0;
+        y: 0;
+        height: parent.height;
+        width: parent.width * clamp(root.used / 100, 0, 1);
+        background: root.used >= 80 ? Tokens.warning : Tokens.accent;
+        border-radius: 2px;
     }
-    HorizontalLayout { spacing: 12px;
-        for provider[i] in ["Claude", "Codex"]: VerticalLayout { spacing: 6px; horizontal-stretch: 1; alignment: start;
-            Text { text: provider; font-size: 12px; font-weight: 600; color: Tokens.text; }
-            for slot[j] in [0,1]: VerticalLayout { spacing: 3px; alignment: start;
-                HorizontalLayout {
-                    Text { text: ChatVm.plan-usage[i*2+j].window; font-size: 11px; color: Tokens.text-faint; horizontal-stretch: 1; }
-                    Text { text: ChatVm.plan-usage[i*2+j].value; font-size: 11px; color: Tokens.text-secondary; }
+}
+
+component SubscriptionQuotaRow inherits Rectangle {
+    in property <PlanUsageVm> usage;
+    private property <[QuotaWindowVm]> compact-windows: root.usage.windows.length > 1
+        ? [root.usage.windows[0], root.usage.windows[1]] : [root.usage.windows[0]];
+    height: 38px;
+    border-radius: 6px;
+    background: touch.has-hover || focus.has-focus ? Tokens.raised : transparent;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.usage.provider + ", " + root.usage.windows[0].window + " " + root.usage.windows[0].detail-value + (root.usage.windows.length > 1 ? ", " + root.usage.windows[1].window + " " + root.usage.windows[1].detail-value : "") + ". Show quota details";
+    focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " { details.show(); return accept; }
+            return reject;
+        }
+    }
+    HorizontalLayout {
+        padding-left: 6px; padding-right: 6px; spacing: 6px;
+        VerticalLayout { alignment: center; AgentMark { agent: root.usage.agent; size: 14px; ink: Tokens.text; } }
+        Text { text: root.usage.provider; color: Tokens.text; font-size: 12px; font-weight: 500; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        for slot in root.compact-windows: VerticalLayout {
+            width: root.compact-windows.length == 1 ? 96px : 42px;
+            spacing: 2px; alignment: center;
+            HorizontalLayout { spacing: 2px;
+                Text { text: slot.short-window; font-size: 10px; color: Tokens.text-faint; horizontal-stretch: 1; }
+                Text { text: slot.value; font-size: 11px; color: slot.used >= 80 ? Tokens.warning : Tokens.text-secondary; overflow: elide; }
+            }
+            QuotaBar { used: slot.used; visible: slot.used >= 0; }
+        }
+        VerticalLayout { alignment: center;
+            Image { width: 8px; height: 8px; source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; }
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { focus.focus(); details.show(); } }
+    details := PopupWindow {
+        x: root.width + 12px;
+        y: root.height - self.height;
+        width: 300px;
+        height: 112px + root.usage.windows.length * 65px + (root.usage.stale ? 34px : 0px);
+        Rectangle {
+            background: Tokens.surface;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            VerticalLayout {
+                padding: 16px; spacing: 12px;
+                HorizontalLayout { spacing: 8px;
+                    VerticalLayout { alignment: center; AgentMark { agent: root.usage.agent; size: 18px; ink: Tokens.text; } }
+                    Text { text: root.usage.agent == 2 ? "OpenCode Go" : root.usage.provider; font-size: 14px; font-weight: 600; color: Tokens.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    IconButton { icon: @image-url("icons/close.svg"); size: 24px; tooltip: "Close quota details"; clicked => { details.close(); } }
                 }
-                Rectangle { height: 3px; background: Tokens.raised; border-radius: 2px;
-                    Rectangle { x: 0; height: parent.height; width: parent.width * clamp(ChatVm.plan-usage[i*2+j].used / 100, 0, 1); background: ChatVm.plan-usage[i*2+j].used >= 80 ? Tokens.warning : Tokens.accent; border-radius: 2px; }
+                Rectangle { height: 1px; background: Tokens.border; }
+                if root.usage.stale: Text { text: "Couldn’t refresh. Showing last known usage."; font-size: 11px; color: Tokens.warning; wrap: word-wrap; }
+                for window in root.usage.windows: VerticalLayout { alignment: start; spacing: 6px;
+                    HorizontalLayout {
+                        Text { text: window.window; font-size: 12px; color: Tokens.text-secondary; horizontal-stretch: 1; wrap: word-wrap; }
+                        Text { text: window.detail-value; font-size: 12px; color: window.used >= 80 ? Tokens.warning : Tokens.text; wrap: word-wrap; horizontal-alignment: right; }
+                    }
+                    QuotaBar { used: window.used; height: 4px; visible: window.used >= 0; }
+                    Text { text: window.reset; font-size: 11px; color: Tokens.text-faint; wrap: word-wrap; }
                 }
-                Text { text: ChatVm.plan-usage[i*2+j].reset; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
+                Rectangle { height: 1px; background: Tokens.border; }
+                Text { text: root.usage.freshness; font-size: 11px; color: root.usage.stale ? Tokens.warning : Tokens.text-faint; }
             }
         }
     }
-    Text { text: ChatVm.usage-freshness; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
+}
+
+export component ChatPlanUsage inherits VerticalLayout {
+    vertical-stretch: 0;
+    padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; spacing: 2px;
+    if ChatVm.plan-usage.length > 0: VerticalLayout {
+        spacing: 2px;
+        Rectangle { height: 1px; background: Tokens.border; }
+        HorizontalLayout { spacing: 4px;
+            Text { text: "Subscriptions · used"; color: Tokens.text-faint; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+            IconButton { icon: @image-url("icons/refresh.svg"); size: 24px; tooltip: "Refresh account usage (once per minute)"; clicked => { ChatVm.refresh-usage(); } }
+        }
+        for provider in ChatVm.plan-usage: SubscriptionQuotaRow { usage: provider; }
+        Text { text: ChatVm.usage-freshness; font-size: 10px; color: Tokens.text-faint; overflow: elide; }
+    }
 }

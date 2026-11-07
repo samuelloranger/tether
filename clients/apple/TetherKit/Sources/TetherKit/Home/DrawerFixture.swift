@@ -121,7 +121,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
           """
       }
       return """
-        {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":\(now + 8280)},"weekly":{"usedPercent":68,"resetsAt":\(now + 273600)},"updatedAt":\(now),"stale":false},"codex":{"fiveHour":{"usedPercent":24,"resetsAt":\(now + 14760)},"weekly":{"usedPercent":83,"resetsAt":\(now + 115200)},"updatedAt":\(now),"stale":false}}
+        {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":\(now + 8280)},"weekly":{"usedPercent":68,"resetsAt":\(now + 273600)},"updatedAt":\(now),"stale":false},"codex":{"fiveHour":{"usedPercent":24,"resetsAt":\(now + 14760)},"weekly":{"usedPercent":83,"resetsAt":\(now + 115200)},"updatedAt":\(now),"stale":false},"opencode":{"active":true,"fiveHour":{"usedPercent":28,"resetsAt":\(now + 13320)},"weekly":{"usedPercent":46,"resetsAt":\(now + 378000)},"monthly":{"usedPercent":63,"resetsAt":\(now + 1036800)},"updatedAt":\(now),"stale":false},"copilot":{"active":true,"monthlyMeter":{"used":23.5,"limit":null,"unit":"credits","resetsAt":\(now + 1036800)},"updatedAt":\(now),"stale":false}}
         """
     }
     if command.contains("acp status") {

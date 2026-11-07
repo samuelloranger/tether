@@ -117,11 +117,22 @@ struct ChatQuotaWindow: Codable, Equatable, Sendable {
 }
 
 struct ChatProviderUsage: Codable, Equatable, Sendable {
+  var active: Bool?
   var fiveHour: ChatQuotaWindow?
   var weekly: ChatQuotaWindow?
+  var monthly: ChatQuotaWindow?
+  var monthlyMeter: ChatMonthlyMeter?
   var updatedAt: Double?
   var error: String?
   var stale: Bool?
+
+  var isActive: Bool {
+    active ?? ([fiveHour, weekly, monthly].contains { $0?.valid == true } || monthlyMeter != nil)
+  }
+
+  func isStale(now: Date) -> Bool {
+    stale == true || (updatedAt.map { $0 <= 0 || now.timeIntervalSince1970 - $0 >= 180 } ?? true)
+  }
 
   func freshness(now: Date) -> String {
     guard let updatedAt, updatedAt > 0 else { return "Usage unavailable" }
@@ -134,11 +145,67 @@ struct ChatProviderUsage: Codable, Equatable, Sendable {
 struct ChatPlanUsage: Codable, Equatable, Sendable {
   var claude: ChatProviderUsage?
   var codex: ChatProviderUsage?
+  var opencode: ChatProviderUsage?
+  var copilot: ChatProviderUsage?
+
+  var subscriptions: [ChatUsageSubscription] {
+    [ChatUsageSubscription(id: "claude", name: "Claude", agent: ChatAgents.claude, usage: claude),
+     ChatUsageSubscription(id: "codex", name: "Codex", agent: ChatAgents.codex, usage: codex),
+     ChatUsageSubscription(id: "opencode", name: "Go", agent: ChatAgents.opencode, usage: opencode),
+     ChatUsageSubscription(id: "copilot", name: "Copilot", agent: ChatAgents.copilot, usage: copilot)]
+      .filter { $0.usage?.isActive == true }
+  }
+
+  mutating func markStale() {
+    if claude != nil { claude?.stale = true }
+    if codex != nil { codex?.stale = true }
+    if opencode != nil { opencode?.stale = true }
+    if copilot != nil { copilot?.stale = true }
+  }
 
   static func parse(_ output: String) -> ChatPlanUsage? {
     guard let result = try? JSONDecoder().decode(Self.self, from: Data(output.utf8)) else { return nil }
-    return result.claude == nil && result.codex == nil ? nil : result
+    return result.claude == nil && result.codex == nil && result.opencode == nil && result.copilot == nil ? nil : result
   }
+}
+
+struct ChatMonthlyMeter: Codable, Equatable, Sendable {
+  var used: Double?
+  var limit: Double?
+  var unit: String
+  var unlimited: Bool?
+  var resetsAt: Double?
+
+  private func valid(_ value: Double?) -> Double? { value.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
+  private func number(_ value: Double) -> String {
+    value > 0 && value < 0.01 ? "<0.01" : value.formatted(.number.precision(.fractionLength(0...2)))
+  }
+  var percent: Double? {
+    guard unlimited != true, let used = valid(used), let limit = valid(limit), limit > 0 else { return nil }
+    return max(0, min(100, used / limit * 100))
+  }
+  var value: String {
+    if unlimited == true { return "Unlimited" }
+    if let percent { return "\(Int(percent.rounded()))%" }
+    return valid(used).map { "\(number($0)) \(unit)" } ?? "—"
+  }
+  var detailValue: String {
+    if unlimited == true { return "Unlimited" }
+    guard let used = valid(used) else { return "Usage unavailable" }
+    if let limit = valid(limit), limit > 0 { return "\(number(used)) / \(number(limit)) \(unit) used" }
+    return "\(number(used)) \(unit) used"
+  }
+  func resetLabel(now: Date) -> String {
+    let reset = resetsAt.flatMap { $0.isFinite && $0 > 0 ? ChatQuotaWindow(usedPercent: 0, resetsAt: $0).resetLabel(now: now) : nil } ?? "Reset time unavailable"
+    return unit == "credits" && limit == nil ? reset + " · Included allowance unavailable" : reset
+  }
+}
+
+struct ChatUsageSubscription: Identifiable {
+  let id: String
+  let name: String
+  let agent: ChatAgentProfile
+  let usage: ChatProviderUsage?
 }
 
 extension ACPHostCommand {

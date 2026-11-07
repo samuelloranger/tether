@@ -207,7 +207,7 @@ exempt from automatic retention; restoring/unpinning grants a fresh normal reten
 Unreadable organization metadata leaves the agent visible with an `organizationError` and
 conservatively prevents pruning until the metadata can be recovered.
 
-`acp usage --json` reads the Claude and Codex accounts signed in on this host:
+`acp usage --json` reads the Claude, Codex, OpenCode Go and Copilot accounts signed in on this host:
 
     {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":1800000000},"weekly":null,"updatedAt":1799999000,"stale":false},"codex":{"fiveHour":null,"weekly":null,"updatedAt":0,"stale":false,"error":"codex is not available on this host"},"checkedAt":1799999000}
 
@@ -218,12 +218,45 @@ Reset times are Unix seconds. A failed refresh retains a previous successful rea
 original `updatedAt`, `stale: true`, and an error. Refreshes, including failed attempts, are
 shared across devices and throttled to once per minute.
 
+OpenCode Go adds an optional `monthly` window. Its read-only usage endpoint is queried with
+`OPENCODE_API_KEY`, the active `opencode-go` account from `opencode auth export opencode-go`,
+or OpenCode 1.x's `opencode-go` API entry in `$XDG_DATA_HOME/opencode/auth.json`
+(default `~/.local/share/opencode/auth.json`). Credentials stay on the host, are used only
+for the usage request, and never enter the quota cache or client response. A Zen-only account
+does not add a Go subscription. No model request is submitted to fetch usage.
+
+An explicit `active: false` hides a subscription and clears its cached windows. Older helpers
+that omit `active` remain compatible: clients require at least one valid quota window to show
+a provider. A refresh failure retains a known subscription with its last reading marked stale;
+it never invents zero usage. Antigravity is not polled or displayed without quota support.
+
+Copilot first starts the installed `copilot --headless --no-auto-update --stdio` in a temporary
+working directory and uses its SDK's Content-Length-framed JSON-RPC connection. It calls only
+`connect`, `auth.getStatus`, `account.getCurrentAuth`, and, for an active subscription,
+`account.getQuota`. The account response is decoded only for Copilot subscription metadata;
+authentication fields never enter the usage response or cache. It creates no conversation,
+submits no prompt, and terminates the helper process group after reading or timing out.
+
+When the CLI is absent, cannot start/handshake, or has no Copilot sign-in, the helper falls back
+to `gh api --hostname github.com --method GET copilot_internal/user`, using the GitHub CLI's
+existing sign-in. The endpoint is internal and may change. A confirmed Free/ended CLI plan
+does not fall back to another account, and failures after a CLI sign-in is confirmed preserve
+the last known reading as stale. No token is sent to a client. Free and explicitly ended plans stay hidden.
+Copilot's monthly allowance is returned as `monthlyMeter` with `used`, `limit`, `unit`,
+`unlimited`, and `resetsAt`. Credit-billed seats can report consumed credits without an
+included-credit ceiling: `limit` remains `null`, and the UI shows a count without a percentage
+or progress bar. Legacy premium-request plans use the reported allowance and remaining count.
+Missing values, unlimited entitlements, and API failures are distinct from zero usage.
+CLI quotas can come from its cache: their original `timestamp_utc` is retained as `updatedAt`,
+and old or undated readings are marked stale. Reset times come from canonical subscription
+metadata rather than relabeling the SDK snapshot's observation date as a future reset.
+
 The host queries `codex app-server` through `account/rateLimits/read`, and Claude's stream-JSON
 control protocol through `initialize` then `get_usage` with `skip_behaviors: true`. The Claude
 control is experimental and unavailable on older CLIs. Its helper disables hooks and MCP,
 does not persist a conversation, and never submits a prompt. Both helpers have a 12-second
-timeout and are terminated after the reading. Tether never reads or exports provider
-credentials. Unsupported CLIs/sign-in methods produce an unavailable state, not an estimate
+timeout and are terminated after the reading. Claude and Codex authentication stays inside
+their CLIs. Unsupported CLIs/sign-in methods produce an unavailable state, not an estimate
 from token counts. Update the host tool and provider CLIs to enable these optional commands.
 
 `acp sessions <cwd> [--limit N]` starts the agent itself for a moment (not a holder session):
