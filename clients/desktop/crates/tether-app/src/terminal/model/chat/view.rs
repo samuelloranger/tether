@@ -532,7 +532,18 @@ pub struct SidebarView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageView {
     pub provider: String,
+    pub agent: i32,
+    pub windows: Vec<UsageWindowView>,
+    pub freshness: String,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageWindowView {
     pub window: String,
+    pub short_window: String,
+    pub value: String,
+    pub detail_value: String,
     pub used: Option<f32>,
     pub reset: String,
 }

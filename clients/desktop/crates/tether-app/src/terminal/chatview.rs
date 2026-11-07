@@ -14,7 +14,8 @@ use crate::{
     AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
     ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
     MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
-    PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, SavedSessionVm, WfAgentVm, WfPhaseVm,
+    PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm, SavedSessionVm,
+    WfAgentVm, WfPhaseVm,
 };
 
 thread_local! {
@@ -692,14 +693,22 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             .iter()
             .map(|u| PlanUsageVm {
                 provider: u.provider.as_str().into(),
-                window: u.window.as_str().into(),
-                used: u.used.unwrap_or(-1.0),
-                value: u
-                    .used
-                    .map(|v| format!("{v:.0}% used"))
-                    .unwrap_or_else(|| "—".into())
-                    .into(),
-                reset: u.reset.as_str().into(),
+                agent: u.agent,
+                freshness: u.freshness.as_str().into(),
+                stale: u.stale,
+                windows: model(
+                    u.windows
+                        .iter()
+                        .map(|w| QuotaWindowVm {
+                            window: w.window.as_str().into(),
+                            short_window: w.short_window.as_str().into(),
+                            detail_value: w.detail_value.as_str().into(),
+                            used: w.used.unwrap_or(-1.0),
+                            value: w.value.as_str().into(),
+                            reset: w.reset.as_str().into(),
+                        })
+                        .collect(),
+                ),
             })
             .collect(),
     ));

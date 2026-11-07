@@ -396,7 +396,7 @@ component Sidebar inherits Rectangle {
                 }
             }
         }
-        ChatPlanUsage { }
+        if ChatVm.plan-usage.length > 0: ChatPlanUsage { }
         Rectangle { height: 1px; background: Tokens.border; }
         Rectangle { height: 4px; }
         SidebarAction { icon: @image-url("icons/back.svg"); text: "Hosts"; clicked => { TerminalVm.back(); } }

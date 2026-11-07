@@ -104,6 +104,42 @@ final class ChatOrganizationTests: XCTestCase {
     XCTAssertFalse(ChatQuotaWindow(usedPercent: 101, resetsAt: 1000).valid)
   }
 
+  func test_active_subscriptions_include_go_monthly_and_hide_inactive_cached_accounts() throws {
+    var usage = try XCTUnwrap(ChatPlanUsage.parse("""
+      {"claude":{"fiveHour":{"usedPercent":0,"resetsAt":2000},"updatedAt":1000},"codex":{"active":false,"fiveHour":{"usedPercent":40,"resetsAt":2000}},"opencode":{"active":true,"monthly":{"usedPercent":63,"resetsAt":3000},"updatedAt":1000}}
+      """))
+    XCTAssertEqual(usage.subscriptions.map(\.id), ["claude", "opencode"])
+    XCTAssertEqual(usage.opencode?.monthly?.usedPercent, 63)
+    XCTAssertEqual(usage.claude?.fiveHour?.usedPercent, 0)
+    usage.markStale()
+    XCTAssertEqual(usage.subscriptions.map(\.id), ["claude", "opencode"])
+    XCTAssertTrue(usage.opencode?.isStale(now: Date(timeIntervalSince1970: 1100)) == true)
+    XCTAssertTrue(ChatPlanUsage().subscriptions.isEmpty)
+  }
+
+  func test_copilot_monthly_credits_keep_unknown_ceiling_and_partial_usage() throws {
+    var usage = try XCTUnwrap(ChatPlanUsage.parse("""
+      {"copilot":{"active":true,"monthlyMeter":{"used":0.25,"limit":null,"unit":"credits","resetsAt":2000},"updatedAt":1000}}
+      """))
+    XCTAssertEqual(usage.subscriptions.map(\.id), ["copilot"])
+    XCTAssertEqual(usage.copilot?.monthlyMeter?.value, "0.25 credits")
+    XCTAssertEqual(usage.copilot?.monthlyMeter?.detailValue, "0.25 credits used")
+    XCTAssertNil(usage.copilot?.monthlyMeter?.percent)
+    XCTAssertNil(usage.copilot?.fiveHour)
+    XCTAssertNil(usage.copilot?.weekly)
+    usage.markStale()
+    XCTAssertTrue(usage.copilot?.stale == true)
+    var meter = try XCTUnwrap(usage.copilot?.monthlyMeter)
+    meter.used = nil
+    XCTAssertEqual(meter.value, "—")
+    meter.unlimited = true
+    XCTAssertEqual(meter.value, "Unlimited")
+    XCTAssertNil(meter.percent)
+    meter.unlimited = false; meter.used = 210; meter.limit = 300; meter.unit = "requests"
+    XCTAssertEqual(meter.percent, 70)
+    XCTAssertEqual(meter.detailValue, "210 / 300 requests used")
+  }
+
   func test_branch_seed_and_unsent_draft_survive_journal_roundtrip_and_old_journals_decode() throws {
     var journal = ChatJournal()
     journal.branch = ChatBranch(parent: .init(name: "parent", title: "Source"), title: "Alternative", earlier: "[]")

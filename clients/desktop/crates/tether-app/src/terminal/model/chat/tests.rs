@@ -2469,6 +2469,58 @@ fn usage_polling_is_bounded_and_hidden_sidebar_never_polls() {
 }
 
 #[test]
+fn subscription_rows_hide_inactive_accounts_and_keep_monthly_and_stale_details() {
+    let mut h = Harness::new();
+    assert!(h.screen().usage.is_empty());
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Usage,
+        result: Ok(r#"{"claude":{"fiveHour":{"usedPercent":0,"resetsAt":1800000000},"updatedAt":1000},"codex":{"active":false,"fiveHour":{"usedPercent":40,"resetsAt":1800000000}},"opencode":{"active":true,"fiveHour":{"usedPercent":28,"resetsAt":1800000000},"monthly":{"usedPercent":63,"resetsAt":1800000000},"updatedAt":1000}}"#.into()),
+    });
+    let screen = h.screen();
+    assert_eq!(
+        screen
+            .usage
+            .iter()
+            .map(|u| u.provider.as_str())
+            .collect::<Vec<_>>(),
+        ["Claude", "Go"]
+    );
+    assert_eq!(screen.usage[0].windows[0].used, Some(0.0));
+    assert_eq!(screen.usage[0].windows[1].used, None);
+    assert_eq!(screen.usage[1].windows[2].used, Some(63.0));
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Usage,
+        result: Err(ConnectError::Transport("offline".into())),
+    });
+    let stale = h.screen();
+    assert_eq!(stale.usage.len(), 2);
+    assert!(stale.usage.iter().all(|u| u.stale));
+}
+
+#[test]
+fn copilot_is_a_monthly_credit_row_without_fake_five_hour_or_weekly_limits() {
+    let mut h = Harness::new();
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Usage,
+        result: Ok(r#"{"copilot":{"active":true,"monthlyMeter":{"used":0.25,"limit":null,"unit":"credits","resetsAt":1800000000},"updatedAt":1000}}"#.into()),
+    });
+    let screen = h.screen();
+    assert_eq!(screen.usage.len(), 1);
+    let copilot = &screen.usage[0];
+    assert_eq!(copilot.provider, "Copilot");
+    assert_eq!(copilot.agent, 3);
+    assert_eq!(copilot.windows.len(), 1);
+    assert_eq!(copilot.windows[0].short_window, "Month");
+    assert_eq!(copilot.windows[0].value, "0.25 credits");
+    assert_eq!(copilot.windows[0].used, None);
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Usage,
+        result: Err(ConnectError::Transport("offline".into())),
+    });
+    assert!(h.screen().usage[0].stale);
+}
+
+#[test]
 fn creating_a_branch_preserves_original_and_opens_distinct_unsent_draft() {
     let mut h = Harness::new();
     let (parent, _) = h.live_chat();

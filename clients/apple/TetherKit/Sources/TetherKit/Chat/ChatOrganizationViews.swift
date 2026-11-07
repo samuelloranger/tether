@@ -60,63 +60,186 @@ struct ChatPlanUsageView: View {
   let usage: ChatPlanUsage
   let loading: Bool
   let host: String
+  let onRefresh: () -> Void
   @Environment(\.dynamicTypeSize) private var size
+  @State private var selected: String?
+  @ScaledMetric(relativeTo: .caption2) private var quotaWidth = 48.0
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 60)) { timeline in
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Plan usage · \(host) accounts").font(.caption2).foregroundStyle(TetherColors.textSecondary)
-        if size.isAccessibilitySize {
-          provider("Claude", agent: ChatAgents.claude, usage: usage.claude, now: timeline.date)
-          provider("Codex", agent: ChatAgents.codex, usage: usage.codex, now: timeline.date)
-        } else {
-          HStack(alignment: .top, spacing: 16) {
-            provider("Claude", agent: ChatAgents.claude, usage: usage.claude, now: timeline.date)
-            provider("Codex", agent: ChatAgents.codex, usage: usage.codex, now: timeline.date)
+      VStack(alignment: .leading, spacing: 2) {
+        HStack {
+          Text("Subscriptions · used").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+          Spacer(minLength: 0)
+          Button(action: onRefresh) {
+            Image(systemName: "arrow.clockwise").font(.caption).frame(minWidth: 44, minHeight: 44)
           }
+          .buttonStyle(.plain).foregroundStyle(TetherColors.textSecondary)
+          .disabled(loading).accessibilityLabel("Refresh subscription usage")
+        }
+        ForEach(usage.subscriptions) { subscription in
+          Button { selected = subscription.id } label: {
+            row(subscription).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityIdentifier("quota-" + subscription.id)
+          .accessibilityHint("Show quota limits and reset times")
+          .popover(isPresented: Binding(get: { selected == subscription.id }, set: { if !$0 { selected = nil } })) {
+            ChatQuotaDetailView(subscription: subscription, host: host, onClose: { selected = nil })
+              .presentationCompactAdaptation(.sheet)
+              .presentationDetents([.medium, .large])
+          }
+        }
+        if let provider = usage.subscriptions.first(where: { $0.usage?.isStale(now: timeline.date) == true }) ?? usage.subscriptions.first,
+           let reading = provider.usage {
+          Text(reading.freshness(now: timeline.date) + (reading.isStale(now: timeline.date) ? " · stale" : ""))
+            .font(.caption2).foregroundStyle(reading.isStale(now: timeline.date) ? TetherColors.warning : TetherColors.textFaint)
         }
       }
     }
-    .padding(.horizontal, 16).padding(.vertical, 12)
+    .padding(.horizontal, 16).padding(.vertical, 6)
     .accessibilityIdentifier("drawerPlanUsage")
+    #if DEBUG
+    .onAppear {
+      if let id = ProcessInfo.processInfo.environment["TETHER_DEBUG_QUOTA"], usage.subscriptions.contains(where: { $0.id == id }) {
+        selected = id
+      }
+    }
+    #endif
   }
 
-  private func provider(_ name: String, agent: ChatAgentProfile, usage: ChatProviderUsage?, now: Date) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 5) {
-        ChatAgentMark(agent: agent, size: 12)
-        Text(name).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+  private func row(_ subscription: ChatUsageSubscription) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 7) {
+        ChatAgentMark(agent: subscription.agent, size: 14)
+        Text(subscription.name).font(.caption.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
+        Spacer(minLength: 2)
+        if !size.isAccessibilitySize { compactWindows(subscription.usage) }
+        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(TetherColors.textFaint)
       }
-      window("5 hours", usage?.fiveHour, now: now)
-      window("Weekly", usage?.weekly, now: now)
-      Text(loading && usage == nil ? "Updating…" : usage?.freshness(now: now) ?? "Usage unavailable")
-        .font(.caption2).foregroundStyle(TetherColors.textFaint).fixedSize(horizontal: false, vertical: true)
+      if size.isAccessibilitySize { compactWindows(subscription.usage) }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder private func compactWindows(_ reading: ChatProviderUsage?) -> some View {
+    if let meter = reading?.monthlyMeter {
+      VStack(spacing: 3) {
+        HStack(spacing: 3) {
+          Text("Month").foregroundStyle(TetherColors.textSecondary)
+          Spacer(minLength: 1)
+          Text(meter.value).foregroundStyle((meter.percent ?? 0) >= 80 ? TetherColors.warning : TetherColors.textPrimary).monospacedDigit()
+        }.font(.caption2)
+        if let percent = meter.percent { ChatQuotaBar(fraction: percent / 100, warning: percent >= 80).frame(height: 2) }
+      }
+      .frame(width: quotaWidth * 2 + 9)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("Monthly usage").accessibilityValue(meter.detailValue)
+    } else {
+      HStack(spacing: 9) {
+        compactWindow("5h", reading?.fiveHour)
+        compactWindow("wk", reading?.weekly)
+      }
+    }
+  }
+
+  private func compactWindow(_ label: String, _ raw: ChatQuotaWindow?) -> some View {
+    let window = raw.flatMap { $0.valid ? $0 : nil }
+    return VStack(spacing: 3) {
+      HStack(spacing: 2) {
+        Text(label).foregroundStyle(TetherColors.textSecondary)
+        Spacer(minLength: 1)
+        Text(window.map { "\(Int($0.usedPercent.rounded()))%" } ?? "—")
+          .foregroundStyle((window?.usedPercent ?? 0) >= 80 ? TetherColors.warning : TetherColors.textPrimary)
+          .monospacedDigit()
+      }.font(.caption2)
+      ChatQuotaBar(fraction: window?.fraction, warning: (window?.usedPercent ?? 0) >= 80).frame(height: 2)
+    }
+    .frame(width: quotaWidth)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(label == "5h" ? "5 hours" : "Weekly")
+    .accessibilityValue(window.map { "\(Int($0.usedPercent.rounded())) percent used" } ?? "Usage unavailable")
+  }
+}
+
+private struct ChatQuotaBar: View {
+  let fraction: Double?
+  let warning: Bool
+  var body: some View {
+    GeometryReader { proxy in
+      Capsule().fill(TetherColors.surfaceRaised)
+        .overlay(alignment: .leading) {
+          if let fraction {
+            Capsule().fill(warning ? TetherColors.warning : TetherColors.accent)
+              .frame(width: proxy.size.width * fraction)
+          }
+        }
+    }.accessibilityHidden(true)
+  }
+}
+
+private struct ChatQuotaDetailView: View {
+  let subscription: ChatUsageSubscription
+  let host: String
+  let onClose: () -> Void
+
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 60)) { timeline in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          HStack(spacing: 9) {
+            ChatAgentMark(agent: subscription.agent, size: 20)
+            VStack(alignment: .leading, spacing: 3) {
+              Text(subscription.id == "opencode" ? "OpenCode Go" : subscription.name)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+              Text(host + " account").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+            }
+            Spacer()
+            Button(action: onClose) {
+              Image(systemName: "xmark").frame(minWidth: 44, minHeight: 44)
+            }.buttonStyle(.plain).accessibilityLabel("Close quota details")
+          }
+          Divider()
+          if let reading = subscription.usage {
+            if reading.isStale(now: timeline.date) {
+              Text("Couldn’t refresh. Showing last known usage.")
+                .font(.caption).foregroundStyle(TetherColors.warning)
+            }
+            if let meter = reading.monthlyMeter {
+              VStack(alignment: .leading, spacing: 7) {
+                Text(meter.unit == "credits" ? "Monthly AI credits" : "Monthly requests")
+                  .foregroundStyle(TetherColors.textSecondary)
+                Text(meter.detailValue).foregroundStyle(TetherColors.textPrimary).monospacedDigit()
+                if let percent = meter.percent { ChatQuotaBar(fraction: percent / 100, warning: percent >= 80).frame(height: 4) }
+                Text(meter.resetLabel(now: timeline.date)).font(.caption2).foregroundStyle(TetherColors.textSecondary)
+              }.font(.caption).accessibilityElement(children: .combine)
+            } else {
+              window("5 hours", reading.fiveHour, now: timeline.date)
+              window("Weekly", reading.weekly, now: timeline.date)
+              if reading.monthly != nil { window("Monthly", reading.monthly, now: timeline.date) }
+            }
+            Divider()
+            Text(reading.freshness(now: timeline.date)).font(.caption2).foregroundStyle(TetherColors.textSecondary)
+          }
+        }.padding(16)
+      }
+    }
+    .frame(idealWidth: 310, idealHeight: subscription.usage?.monthly == nil ? 290 : 360)
+    .background(TetherColors.surface)
+    .tint(TetherColors.accent)
   }
 
   private func window(_ label: String, _ raw: ChatQuotaWindow?, now: Date) -> some View {
     let window = raw.flatMap { $0.valid ? $0 : nil }
-    return VStack(alignment: .leading, spacing: 3) {
-      HStack(alignment: .firstTextBaseline, spacing: 3) {
+    return VStack(alignment: .leading, spacing: 7) {
+      HStack {
         Text(label).foregroundStyle(TetherColors.textSecondary)
-        Spacer(minLength: 1)
+        Spacer()
         Text(window.map { "\(Int($0.usedPercent.rounded()))% used" } ?? "—")
-          .foregroundStyle(TetherColors.textPrimary).monospacedDigit()
-      }
-      .font(.caption2)
-      GeometryReader { proxy in
-        Capsule().fill(TetherColors.surfaceRaised)
-          .overlay(alignment: .leading) {
-            if let window {
-              Capsule().fill(window.usedPercent >= 80 ? TetherColors.warning : TetherColors.accent)
-                .frame(width: proxy.size.width * window.fraction)
-            }
-          }
-      }.frame(height: 3).accessibilityHidden(true)
-      Text(window?.resetLabel(now: now) ?? (loading ? "Updating…" : "Not available"))
-        .font(.caption2).foregroundStyle(TetherColors.textFaint)
-    }
-    .accessibilityElement(children: .combine)
+          .foregroundStyle((window?.usedPercent ?? 0) >= 80 ? TetherColors.warning : TetherColors.textPrimary)
+          .monospacedDigit()
+      }.font(.caption)
+      ChatQuotaBar(fraction: window?.fraction, warning: (window?.usedPercent ?? 0) >= 80).frame(height: 4)
+      Text(window?.resetLabel(now: now) ?? "Usage unavailable").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+    }.accessibilityElement(children: .combine)
   }
 }

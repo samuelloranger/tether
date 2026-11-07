@@ -662,8 +662,12 @@ public struct SSHTerminalView: View {
             .font(.caption.weight(.semibold)).frame(minHeight: 44)
         }.padding(.horizontal, 16).background(TetherColors.surfaceRaised)
       }
-      Divider().overlay(TetherColors.border)
-      ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title)
+      if !controller.planUsage.subscriptions.isEmpty {
+        Divider().overlay(TetherColors.border)
+        ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title) {
+          Task { await controller.refreshPlanUsage() }
+        }
+      }
     }
     .frame(maxHeight: .infinity, alignment: .top)
     .background(TetherColors.background.ignoresSafeArea())

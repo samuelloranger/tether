@@ -19,7 +19,10 @@ extension SSHTerminalController {
     planUsageLoading = true
     planUsageReadAt = Date()
     defer { planUsageLoading = false }
-    guard let output = try? await ghControl.exec(ACPHostCommand.usage), let usage = ChatPlanUsage.parse(output) else { return }
+    guard let output = try? await ghControl.exec(ACPHostCommand.usage), let usage = ChatPlanUsage.parse(output) else {
+      planUsage.markStale()
+      return
+    }
     planUsage = usage
   }
 

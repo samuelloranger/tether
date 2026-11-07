@@ -95,8 +95,11 @@ pub struct UsageWindow {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsage {
+    pub active: Option<bool>,
     pub five_hour: Option<UsageWindow>,
     pub weekly: Option<UsageWindow>,
+    pub monthly: Option<UsageWindow>,
+    pub monthly_meter: Option<MonthlyMeter>,
     #[serde(default)]
     pub updated_at: i64,
     #[serde(default)]
@@ -109,6 +112,122 @@ pub struct PlanUsage {
     pub claude: ProviderUsage,
     #[serde(default)]
     pub codex: ProviderUsage,
+    #[serde(default)]
+    pub opencode: ProviderUsage,
+    #[serde(default)]
+    pub copilot: ProviderUsage,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthlyMeter {
+    pub used: Option<f64>,
+    pub limit: Option<f64>,
+    pub unit: String,
+    #[serde(default)]
+    pub unlimited: bool,
+    #[serde(default)]
+    pub resets_at: i64,
+}
+
+impl MonthlyMeter {
+    fn number(value: f64) -> String {
+        if value > 0.0 && value < 0.01 {
+            return "<0.01".into();
+        }
+        format!("{value:.2}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+    fn valid_count(value: Option<f64>) -> Option<f64> {
+        value.filter(|v| v.is_finite() && *v >= 0.0)
+    }
+    pub fn percent(&self) -> Option<f32> {
+        if self.unlimited {
+            return None;
+        }
+        let used = Self::valid_count(self.used)?;
+        let limit = Self::valid_count(self.limit).filter(|v| *v > 0.0)?;
+        Some((used / limit * 100.0).clamp(0.0, 100.0) as f32)
+    }
+    pub fn value(&self) -> String {
+        if self.unlimited {
+            return "Unlimited".into();
+        }
+        if let Some(percent) = self.percent() {
+            return format!("{percent:.0}%");
+        }
+        Self::valid_count(self.used)
+            .map(|used| format!("{} {}", Self::number(used), self.unit))
+            .unwrap_or_else(|| "—".into())
+    }
+    pub fn detail_value(&self) -> String {
+        if self.unlimited {
+            return "Unlimited".into();
+        }
+        let Some(used) = Self::valid_count(self.used) else {
+            return "Usage unavailable".into();
+        };
+        if let Some(limit) = Self::valid_count(self.limit).filter(|v| *v > 0.0) {
+            format!(
+                "{} / {} {} used",
+                Self::number(used),
+                Self::number(limit),
+                self.unit
+            )
+        } else {
+            format!("{} {} used", Self::number(used), self.unit)
+        }
+    }
+    pub fn reset_text(&self, now: i64) -> String {
+        let reset = if self.resets_at > 0 {
+            UsageWindow {
+                used_percent: 0.0,
+                resets_at: self.resets_at,
+            }
+            .reset_text(now)
+        } else {
+            "Reset time unavailable".into()
+        };
+        if self.unit == "credits" && self.limit.is_none() {
+            format!("{reset} · Included allowance unavailable")
+        } else {
+            reset
+        }
+    }
+}
+
+impl ProviderUsage {
+    pub fn is_active(&self) -> bool {
+        self.active.unwrap_or_else(|| {
+            [&self.five_hour, &self.weekly, &self.monthly]
+                .into_iter()
+                .any(|w| w.as_ref().is_some_and(UsageWindow::valid))
+                || self.monthly_meter.is_some()
+        })
+    }
+
+    pub fn is_stale(&self, now: i64, connected: bool) -> bool {
+        self.stale
+            || !connected
+            || self.updated_at <= 0
+            || now.saturating_sub(self.updated_at) >= 180
+    }
+
+    pub fn freshness(&self, now: i64, connected: bool) -> String {
+        if self.updated_at <= 0 {
+            return "Usage unavailable".into();
+        }
+        let minutes = now.saturating_sub(self.updated_at).max(0) / 60;
+        if self.is_stale(now, connected) {
+            format!("Updated {minutes}m ago · stale")
+        } else if minutes == 0 {
+            "Updated just now".into()
+        } else {
+            format!("Updated {minutes}m ago")
+        }
+    }
 }
 
 impl UsageWindow {
@@ -134,6 +253,60 @@ impl UsageWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn copilot_credit_meters_keep_counts_without_inventing_percentages() {
+        let mut meter = MonthlyMeter {
+            used: Some(0.25),
+            unit: "credits".into(),
+            ..Default::default()
+        };
+        assert_eq!(meter.value(), "0.25 credits");
+        assert_eq!(meter.detail_value(), "0.25 credits used");
+        assert_eq!(meter.percent(), None);
+        assert!(
+            meter
+                .reset_text(1000)
+                .contains("Included allowance unavailable")
+        );
+        meter.used = None;
+        assert_eq!(meter.value(), "—");
+        meter.unlimited = true;
+        assert_eq!(meter.value(), "Unlimited");
+        assert_eq!(meter.percent(), None);
+        meter.unlimited = false;
+        meter.used = Some(210.0);
+        meter.limit = Some(300.0);
+        meter.unit = "requests".into();
+        assert_eq!(meter.percent(), Some(70.0));
+        assert_eq!(meter.detail_value(), "210 / 300 requests used");
+    }
+    #[test]
+    fn subscriptions_require_quota_evidence_and_explicit_inactive_overrides_cache() {
+        let mut usage = ProviderUsage::default();
+        assert!(!usage.is_active());
+        usage.five_hour = Some(UsageWindow {
+            used_percent: 0.0,
+            resets_at: 2000,
+        });
+        usage.updated_at = 1000;
+        assert!(usage.is_active());
+        assert!(!usage.is_stale(1100, true));
+        assert!(usage.is_stale(1100, false));
+        usage.stale = true;
+        assert!(usage.is_active());
+        assert_eq!(usage.freshness(2200, true), "Updated 20m ago · stale");
+        usage.active = Some(false);
+        assert!(!usage.is_active());
+    }
+
+    #[test]
+    fn go_monthly_limits_decode_without_breaking_legacy_usage() {
+        let usage: PlanUsage = serde_json::from_str(r#"{"claude":{"fiveHour":{"usedPercent":0,"resetsAt":2000}},"opencode":{"active":true,"monthly":{"usedPercent":63,"resetsAt":3000}}}"#).unwrap();
+        assert!(usage.claude.is_active());
+        assert!(!usage.codex.is_active());
+        assert!(usage.opencode.is_active());
+        assert_eq!(usage.opencode.monthly.unwrap().used_percent, 63.0);
+    }
     fn user(id: i64, text: &str) -> Item {
         Item {
             id,

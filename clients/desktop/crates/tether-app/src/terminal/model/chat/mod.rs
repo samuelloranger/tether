@@ -932,6 +932,7 @@ impl Chats {
                 updated_at: wall,
                 stale: false,
                 error: None,
+                ..Default::default()
             };
             self.plan_usage.codex = ProviderUsage {
                 five_hour: Some(UsageWindow {
@@ -945,6 +946,24 @@ impl Chats {
                 updated_at: wall,
                 stale: false,
                 error: None,
+                ..Default::default()
+            };
+            self.plan_usage.opencode = ProviderUsage {
+                active: Some(true),
+                five_hour: Some(UsageWindow {
+                    used_percent: 28.0,
+                    resets_at: wall + 13320,
+                }),
+                weekly: Some(UsageWindow {
+                    used_percent: 46.0,
+                    resets_at: wall + 378000,
+                }),
+                monthly: Some(UsageWindow {
+                    used_percent: 63.0,
+                    resets_at: wall + 1036800,
+                }),
+                updated_at: wall,
+                ..Default::default()
             };
             if let Some(c) = self.provisional.iter_mut().find(|c| c.name == "sample") {
                 c.organization.pinned = true;

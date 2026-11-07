@@ -212,49 +212,78 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         ));
     }
     let wall = unix_now();
-    for (provider, usage) in [
-        ("Claude", &chats.plan_usage.claude),
-        ("Codex", &chats.plan_usage.codex),
+    for (provider, profile, usage) in [
+        ("Claude", &agent::CLAUDE, &chats.plan_usage.claude),
+        ("Codex", &agent::CODEX, &chats.plan_usage.codex),
+        ("Go", &agent::OPENCODE, &chats.plan_usage.opencode),
+        ("Copilot", &agent::COPILOT, &chats.plan_usage.copilot),
     ] {
-        for (window, value) in [("5 hours", &usage.five_hour), ("Weekly", &usage.weekly)] {
+        if !usage.is_active() {
+            continue;
+        }
+        let mut windows = Vec::new();
+        for (label, value) in [
+            ("5 hours", &usage.five_hour),
+            ("Weekly", &usage.weekly),
+            ("Monthly", &usage.monthly),
+        ] {
+            if usage.monthly_meter.is_some() {
+                continue;
+            }
+            if label == "Monthly" && value.is_none() {
+                continue;
+            }
             let valid = value.as_ref().filter(|w| w.valid());
-            screen.usage.push(UsageView {
-                provider: provider.into(),
-                window: window.into(),
+            windows.push(UsageWindowView {
+                window: label.into(),
+                short_window: match label {
+                    "5 hours" => "5h",
+                    "Weekly" => "wk",
+                    _ => "Month",
+                }
+                .into(),
+                value: valid
+                    .map(|w| format!("{:.0}%", w.used_percent))
+                    .unwrap_or_else(|| "—".into()),
+                detail_value: valid
+                    .map(|w| format!("{:.0}% used", w.used_percent))
+                    .unwrap_or_else(|| "Usage unavailable".into()),
                 used: valid.map(|w| w.used_percent as f32),
-                reset: valid.map(|w| w.reset_text(wall)).unwrap_or_else(|| {
-                    if chats.usage_loading {
-                        "Loading…".into()
-                    } else {
-                        "Unavailable".into()
-                    }
-                }),
+                reset: valid
+                    .map(|w| w.reset_text(wall))
+                    .unwrap_or_else(|| "Unavailable".into()),
             });
         }
+        if let Some(meter) = &usage.monthly_meter {
+            windows.push(UsageWindowView {
+                window: if meter.unit == "credits" {
+                    "Monthly AI credits"
+                } else {
+                    "Monthly requests"
+                }
+                .into(),
+                short_window: "Month".into(),
+                value: meter.value(),
+                detail_value: meter.detail_value(),
+                used: meter.percent(),
+                reset: meter.reset_text(wall),
+            });
+        }
+        screen.usage.push(UsageView {
+            provider: provider.into(),
+            agent: i32::from(agent_index(Some(profile))),
+            windows,
+            freshness: usage.freshness(wall, chats.connected),
+            stale: usage.is_stale(wall, chats.connected),
+        });
     }
-    let oldest = [
-        chats.plan_usage.claude.updated_at,
-        chats.plan_usage.codex.updated_at,
-    ]
-    .into_iter()
-    .filter(|n| *n > 0)
-    .min();
-    screen.usage_freshness = if let Some(at) = oldest {
-        let mins = (wall - at).max(0) / 60;
-        format!(
-            "Updated {}m ago{}",
-            mins,
-            if !chats.connected || chats.plan_usage.claude.stale || chats.plan_usage.codex.stale {
-                " · stale"
-            } else {
-                ""
-            }
-        )
-    } else if chats.usage_loading {
-        "Loading account usage…".into()
-    } else {
-        "Usage unavailable · check host sign-in".into()
-    };
+    screen.usage_freshness = screen
+        .usage
+        .iter()
+        .find(|u| u.stale)
+        .or_else(|| screen.usage.first())
+        .map(|u| u.freshness.clone())
+        .unwrap_or_default();
     screen.tabs.retain(|t| {
         ordered
             .iter()

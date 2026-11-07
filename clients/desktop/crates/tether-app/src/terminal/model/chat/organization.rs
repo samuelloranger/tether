@@ -108,7 +108,12 @@ impl Chats {
                 {
                     Some(usage) => self.plan_usage = usage,
                     None => {
-                        for usage in [&mut self.plan_usage.claude, &mut self.plan_usage.codex] {
+                        for usage in [
+                            &mut self.plan_usage.claude,
+                            &mut self.plan_usage.codex,
+                            &mut self.plan_usage.opencode,
+                            &mut self.plan_usage.copilot,
+                        ] {
                             usage.stale = true;
                             usage.error=Some("Usage unavailable. Update tether on the host or check provider sign-in.".into());
                         }
