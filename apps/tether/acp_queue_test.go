@@ -152,7 +152,8 @@ func fastOpenCodeTimers(t *testing.T, grace time.Duration) {
 const stopLine = `{"method":"session/cancel","params":{"sessionId":"s"}}`
 
 func TestOpenCodeStopReleasesAnUnansweredPrompt(t *testing.T) {
-	fastOpenCodeTimers(t, 30*time.Millisecond)
+	// Long enough that the pre-release check below runs first even on a loaded -race runner.
+	fastOpenCodeTimers(t, 500*time.Millisecond)
 	h := openCodeHarness(t)
 	h.client(promptLine)
 	h.client(stopLine)
@@ -187,13 +188,19 @@ func TestOpenCodeStopReleasesAnUnansweredPrompt(t *testing.T) {
 }
 
 func TestOpenCodeStopAnsweredInTimeDoesNotFire(t *testing.T) {
-	fastOpenCodeTimers(t, 40*time.Millisecond)
+	fastOpenCodeTimers(t, 500*time.Millisecond)
 	h := openCodeHarness(t)
 	h.client(promptLine)
 	h.client(stopLine)
 	h.agent(`{"id":"dev-a-3","result":{"stopReason":"cancelled"}}`)
+	h.s.mu.Lock()
+	armed := h.s.cancelTimer != nil
+	h.s.mu.Unlock()
+	if armed {
+		t.Fatal("an answer in time must stop the cancel timer")
+	}
 	h.client(queuedPrompt)
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
 	if strings.Count(h.stdin.String(), queuedPrompt) != 1 {
 		t.Fatalf("stale timer interfered: %s", h.stdin.String())
 	}
