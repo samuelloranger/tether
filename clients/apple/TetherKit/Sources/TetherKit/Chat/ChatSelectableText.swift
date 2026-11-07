@@ -48,6 +48,7 @@ struct ChatSelectableText: UIViewRepresentable {
   var selectable = true
   var plain: String?
   var message: String?
+  var messageProvider: (() -> String)?
   var branch: (() -> Void)?
   var diff: [DiffRow]?
   var diffFile: DiffFile?
@@ -61,11 +62,13 @@ struct ChatSelectableText: UIViewRepresentable {
     self.branch = branch
   }
 
-  init(blocks: [MarkdownBlock], reading: Bool = true, selectable: Bool = true, message: String? = nil) {
+  init(blocks: [MarkdownBlock], reading: Bool = true, selectable: Bool = true, message: String? = nil,
+       messageProvider: (() -> String)? = nil) {
     self.blocks = blocks
     self.reading = reading
     self.selectable = selectable
     self.message = message
+    self.messageProvider = messageProvider
   }
 
   init(diff: [DiffRow], file: DiffFile? = nil, selectable: Bool = true) {
@@ -99,7 +102,11 @@ struct ChatSelectableText: UIViewRepresentable {
   }
 
   func configureCopyActions(_ view: ChatSelectionTextView) {
-    view.message = message ?? plain
+    if let fixed = message ?? plain {
+      view.message = fixed
+    } else {
+      view.messageProvider = messageProvider
+    }
     view.branch = branch
     view.copyMessageTitle = diffFile == nil ? "Copy message" : "Copy file"
     if let diff, let diffFile {
@@ -211,7 +218,12 @@ private extension UIFont {
 }
 
 final class ChatSelectionTextView: UITextView, UITextViewDelegate {
-  var message: String?
+  /// Resolved lazily: only a copy action pays for building the text.
+  var messageProvider: (() -> String)?
+  var message: String? {
+    get { messageProvider?() }
+    set { messageProvider = newValue.map { value in { value } } }
+  }
   var branch: (() -> Void)?
   var copyMessageTitle = "Copy message"
   var copyHunk: ((NSRange) -> String?)?
@@ -226,7 +238,7 @@ final class ChatSelectionTextView: UITextView, UITextViewDelegate {
     var actions = suggestedActions
     actions.append(UIAction(title: copyMessageTitle, image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
       guard let self else { return }
-      writeClipboard(message ?? ChatSelectionCopy.text(attributedText, range: NSRange(location: 0, length: attributedText.length)))
+      writeClipboard(messageProvider?() ?? ChatSelectionCopy.text(attributedText, range: NSRange(location: 0, length: attributedText.length)))
     })
     if let patch = copyHunk?(range) {
       actions.append(UIAction(title: "Copy hunk", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
