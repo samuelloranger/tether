@@ -23,20 +23,26 @@ struct ChatMarkdownView: View {
     return groups
   }
 
-  var copyMessage: String {
-    if let message { return message }
-    let text = ChatSelectableText(blocks: blocks, reading: reading).attributedText()
-    return ChatSelectionCopy.text(text, range: NSRange(location: 0, length: text.length))
+  var copyMessage: String { copyProvider() }
+
+  /// Resolved only when a copy action runs, so body evaluation never builds or scans the full text.
+  var copyProvider: () -> String {
+    if let message { return { message } }
+    let blocks = blocks, reading = reading
+    return {
+      let text = ChatSelectableText(blocks: blocks, reading: reading).attributedText()
+      return ChatSelectionCopy.text(text, range: NSRange(location: 0, length: text.length))
+    }
   }
 
   var body: some View {
-    let message = copyMessage
+    let provider = copyProvider
     VStack(alignment: .leading, spacing: reading ? 9 : 6) {
       ForEach(Array(Self.groups(blocks).enumerated()), id: \.offset) { _, group in
         if case let .table(header, rows)? = group.first {
-          ChatMarkdownTable(header: header, rows: rows, reading: reading, selectable: selectable, message: message)
+          ChatMarkdownTable(header: header, rows: rows, reading: reading, selectable: selectable, messageProvider: provider)
         } else {
-          ChatSelectableText(blocks: group, reading: reading, selectable: selectable, message: message)
+          ChatSelectableText(blocks: group, reading: reading, selectable: selectable, messageProvider: provider)
         }
       }
     }
@@ -48,7 +54,7 @@ struct ChatMarkdownTable: View {
   let rows: [[AttributedString]]
   var reading = true
   var selectable = true
-  var message: String?
+  var messageProvider: (() -> String)?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   /// A shared width per column keeps short versions compact and long descriptions readable.
@@ -92,7 +98,7 @@ struct ChatMarkdownTable: View {
       ForEach(Array(widths.enumerated()), id: \.offset) { column, width in
         let text = column < cells.count ? cells[column] : AttributedString()
         ChatSelectableText(blocks: [.paragraph(isHeader ? Self.emphasized(text) : text)],
-          reading: reading, selectable: selectable, message: message)
+          reading: reading, selectable: selectable, messageProvider: messageProvider)
           .frame(width: width, alignment: .topLeading)
           .padding(.horizontal, 10).padding(.vertical, 8)
           .accessibilityAddTraits(isHeader ? .isHeader : [])

@@ -44,6 +44,24 @@ final class ChatMarkdownTableTests: XCTestCase {
     XCTAssertEqual(textView.message, "Intro. A\tB one\ttwo End.")
   }
 
+  @MainActor func test_copy_message_is_built_only_when_a_copy_action_runs() {
+    var builds = 0
+    let provider: () -> String = { builds += 1; return "whole message" }
+    let textView = ChatSelectionTextView()
+    ChatSelectableText(blocks: [.paragraph(AttributedString("one"))], messageProvider: provider)
+      .configureCopyActions(textView)
+    XCTAssertEqual(builds, 0, "Configuring a view must not resolve the copy text")
+    var copied: [String] = []
+    textView.writeClipboard = { copied.append($0) }
+    XCTAssertEqual(textView.message, "whole message")
+    XCTAssertEqual(builds, 1)
+
+    let source = "Intro.\n\n| A | B |\n|---|---|\n| one | two |\n\nEnd."
+    let lazy = ChatMarkdownView(blocks: MarkdownDocument.parse(source), reading: false)
+    XCTAssertEqual(lazy.copyProvider(), "Intro. A\tB one\ttwo End.")
+    XCTAssertEqual(ChatMarkdownView(blocks: [], message: "explicit").copyProvider(), "explicit")
+  }
+
   @MainActor func test_columns_are_bounded_and_scale_with_dynamic_type() {
     guard case let .table(header, rows) = MarkdownDocument.parse(markdown)[1] else { return XCTFail("Expected a table") }
     let widths = ChatMarkdownTable.columnWidths(header: header, rows: rows, font: .systemFont(ofSize: 15))
