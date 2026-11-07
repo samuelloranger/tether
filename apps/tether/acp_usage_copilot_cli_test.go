@@ -187,22 +187,44 @@ func TestCopilotQuotaFramesAreBoundedAndHandleUTF8(t *testing.T) {
 }
 
 func TestCopilotCacheKeepsTheCLIsObservationTime(t *testing.T) {
-	acpEnv(t)
-	observed := int64(1800000000)
-	now := time.Unix(observed+600, 0)
-	used := 12.5
-	read := func() (acpProviderUsage, error) {
-		return acpProviderUsage{MonthlyMeter: &acpMonthlyMeter{Used: &used, Unit: "credits"}, UpdatedAt: observed, Stale: true}, nil
-	}
-	var output bytes.Buffer
-	if err := acpUsageWith(&output, acpUsageDeps{copilot: read, now: func() time.Time { return now }}); err != nil {
-		t.Fatal(err)
-	}
-	var usage acpUsageSnapshot
-	if err := json.Unmarshal(output.Bytes(), &usage); err != nil {
-		t.Fatal(err)
-	}
-	if usage.Copilot.UpdatedAt != observed || !usage.Copilot.Stale || usage.CheckedAt != now.Unix() {
-		t.Fatal("polling the CLI cache made an old reading fresh")
+	for _, fixture := range []struct {
+		name     string
+		observed int64
+	}{{"dated", 1800000000}, {"undated", 0}} {
+		t.Run(fixture.name, func(t *testing.T) {
+			acpEnv(t)
+			now := time.Unix(1800000600, 0)
+			used := 12.5
+			failed := false
+			read := func() (acpProviderUsage, error) {
+				if failed {
+					return acpProviderUsage{}, errors.New("temporarily unavailable")
+				}
+				return acpProviderUsage{MonthlyMeter: &acpMonthlyMeter{Used: &used, Unit: "credits"}, UpdatedAt: fixture.observed, Stale: true}, nil
+			}
+			var output bytes.Buffer
+			if err := acpUsageWith(&output, acpUsageDeps{copilot: read, now: func() time.Time { return now }}); err != nil {
+				t.Fatal(err)
+			}
+			var usage acpUsageSnapshot
+			if err := json.Unmarshal(output.Bytes(), &usage); err != nil {
+				t.Fatal(err)
+			}
+			if usage.Copilot.UpdatedAt != fixture.observed || !usage.Copilot.Stale || usage.CheckedAt != now.Unix() {
+				t.Fatal("polling the CLI cache made an old or undated reading fresh")
+			}
+			failed = true
+			now = now.Add(61 * time.Second)
+			output.Reset()
+			if err := acpUsageWith(&output, acpUsageDeps{copilot: read, now: func() time.Time { return now }}); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(output.Bytes(), &usage); err != nil {
+				t.Fatal(err)
+			}
+			if usage.Copilot.UpdatedAt != fixture.observed || !usage.Copilot.Stale || usage.Copilot.MonthlyMeter == nil {
+				t.Fatal("a failed refresh lost the cached reading's freshness state")
+			}
+		})
 	}
 }

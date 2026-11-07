@@ -90,13 +90,13 @@ func acpUsageWith(w io.Writer, deps acpUsageDeps) error {
 						active := fresh.FiveHour != nil || fresh.Weekly != nil || fresh.Monthly != nil || fresh.MonthlyMeter != nil
 						fresh.Active = &active
 					}
-					if fresh.UpdatedAt <= 0 {
+					if fresh.UpdatedAt <= 0 && !fresh.Stale {
 						fresh.UpdatedAt = now
 					}
 					*dst = fresh
 				} else {
 					dst.Error = err.Error()
-					dst.Stale = dst.UpdatedAt > 0
+					dst.Stale = dst.Stale || dst.UpdatedAt > 0
 				}
 			}
 			for _, provider := range []struct {
