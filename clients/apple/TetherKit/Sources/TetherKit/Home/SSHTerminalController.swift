@@ -126,6 +126,7 @@ public final class SSHTerminalController {
   @ObservationIgnored var chatStatusSupported = true
   /// A chat a notification tap asked for; the terminal screen swaps it in and clears this.
   var requestedChat: String?
+  @ObservationIgnored var chatRestorationPending = true
   #if DEBUG
   @ObservationIgnored var debugChatModel: ((ChatRoute) -> ChatSessionModel)?
   #endif
@@ -252,6 +253,8 @@ public final class SSHTerminalController {
     self.hostKeyStore = hostKeyStore
     self.attach = attach
     self.picked = picked
+    self.chatRestorationPending = !picked
+    if picked { ChatTitleStore(config: config).lastOpenedChat = nil }
     self.pushIdentity = pushIdentity
     self.dial = dial
     self.control = control ?? ControlConnection(config: config, store: hostKeyStore)
@@ -524,6 +527,8 @@ public final class SSHTerminalController {
     guard await mayAttach(name) else { return }
     picked = true
     let wasAttached = hasSession
+    chatRestorationPending = false
+    chatTitles.lastOpenedChat = nil
     let departing = attach
     attach = name
     sessionSwitches += 1

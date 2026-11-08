@@ -52,6 +52,7 @@ extension SSHTerminalController {
       let listing = ACPChatStatusListing.parse(output)
       if !listing.unsupported {
         if listing.chats != chats { chats = listing.chats }
+        restoreLastChat()
         return
       }
       chatStatusSupported = false
@@ -59,6 +60,18 @@ extension SSHTerminalController {
     guard let output = try? await control.exec(ACPHostCommand.list) else { return }
     let parsed = ACPChatListing.parse(output).chats
     if parsed != chats { chats = parsed }
+    restoreLastChat()
+  }
+
+  /// Restore once, after a successful host listing. Never recreate a missing or ended chat.
+  private func restoreLastChat() {
+    guard chatRestorationPending else { return }
+    chatRestorationPending = false
+    guard requestedChat == nil, sessionSwitches == 0, let name = chatTitles.lastOpenedChat else { return }
+    guard DrawerChatRows.rows(chats: chats, titles: [:], agents: chatTitles.agents(for: [name]))
+      .contains(where: { $0.name == name && $0.isRunning && !$0.archived })
+    else { chatTitles.lastOpenedChat = nil; return }
+    requestedChat = name
   }
 
   func killChat(_ name: String) async {
