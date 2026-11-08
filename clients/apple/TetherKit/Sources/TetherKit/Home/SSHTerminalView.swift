@@ -178,7 +178,7 @@ public struct SSHTerminalView: View {
     .task(id: "\(ObjectIdentifier(controller).hashValue)-\(scenePhase == .active && controller.status == .connected)") {
       while !Task.isCancelled, scenePhase == .active, controller.status == .connected {
         await controller.refreshAgentStatus()
-        if !controller.chats.isEmpty { await controller.refreshChats() }
+        await controller.refreshChats()
         try? await Task.sleep(nanoseconds: 5_000_000_000)
       }
     }
@@ -382,6 +382,8 @@ public struct SSHTerminalView: View {
   }
 
   private func openChat(_ route: ChatRoute) {
+    controller.chatRestorationPending = false
+    controller.chatTitles.lastOpenedChat = route.name
     focused = false
     focusedBeforeDrawer = false
     content.open(route)
@@ -389,6 +391,8 @@ public struct SSHTerminalView: View {
   }
 
   private func showTerminal() {
+    controller.chatRestorationPending = false
+    controller.chatTitles.lastOpenedChat = nil
     guard content.showsChat else { return }
     content.showTerminal()
   }
@@ -1285,50 +1289,67 @@ public struct SSHTerminalView: View {
   }
 
   private var emptyStateCard: some View {
-    VStack(spacing: 14) {
-      Image(systemName: "terminal").font(.largeTitle).foregroundStyle(TetherColors.textSecondary)
-      Text(controller.sessions.isEmpty ? "No session on \(controller.title)" : "Open a session on \(controller.title)")
-        .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-        .multilineTextAlignment(.center)
-      if controller.sessions.isEmpty {
-        Text("Nothing runs until you start one.")
-          .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
-      } else {
-        VStack(spacing: 6) {
-          ForEach(pickableSessions) { session in
-            Button { goToSession(session.name) } label: {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-                Text(session.displayCwd).font(.caption2.monospaced())
-                  .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+    let chats = DrawerLayout.waitingFirst(
+      DrawerChatRows.rows(
+        chats: controller.chats, titles: controller.chatTitles.titles(for: controller.chats.map(\.name)),
+        agents: controller.chatTitles.agents(for: controller.chats.map(\.name)))
+        .filter { $0.isRunning && !$0.archived }
+    ) { $0.state == .waiting }
+    return GeometryReader { geometry in
+      ScrollView {
+        VStack(spacing: 14) {
+          Image(systemName: "terminal").font(.largeTitle).foregroundStyle(TetherColors.textSecondary)
+          Text(controller.sessions.isEmpty && chats.isEmpty ? "No session on \(controller.title)" : "Open a session on \(controller.title)")
+            .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            .multilineTextAlignment(.center)
+          if controller.sessions.isEmpty && chats.isEmpty {
+            Text("Nothing runs until you start one.")
+              .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+          } else {
+            VStack(spacing: 6) {
+              if !controller.sessions.isEmpty { sectionHeader("Terminals", count: controller.sessions.count) }
+              ForEach(pickableSessions) { session in
+                Button { goToSession(session.name) } label: {
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+                    Text(session.displayCwd).font(.caption2.monospaced())
+                      .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+                  }
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .padding(.horizontal, 12).padding(.vertical, 8)
+                  .background(TetherColors.background, in: RoundedRectangle(cornerRadius: 10))
+                  .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+                }
+                .buttonStyle(TetherPressStyle())
+                .accessibilityIdentifier("sshEmptyStateSession_\(session.name)")
               }
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.horizontal, 12).padding(.vertical, 8)
-              .background(TetherColors.background, in: RoundedRectangle(cornerRadius: 10))
-              .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+              if controller.sessions.count > pickableSessions.count, tabs == nil {
+                Button("All sessions") { setDrawer(open: true) }
+                  .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+              }
+              if !chats.isEmpty {
+                sectionHeader("Active chats", count: chats.count)
+                ForEach(chats) { chatRow($0) }
+              }
             }
-            .buttonStyle(TetherPressStyle())
-            .accessibilityIdentifier("sshEmptyStateSession_\(session.name)")
           }
-          if controller.sessions.count > pickableSessions.count, tabs == nil {
-            Button("All sessions") { setDrawer(open: true) }
-              .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+          Button("New session") {
+            if let tabs { tabs.beginNewSession() } else {
+              setDrawer(open: true)
+            }
           }
+          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+          .padding(.horizontal, 20).padding(.vertical, 10)
+          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+          .buttonStyle(TetherPressStyle())
+          .accessibilityIdentifier("sshEmptyStateNew")
         }
+        .padding(24).frame(maxWidth: 300)
+        .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
-      Button("New session") {
-        if let tabs { tabs.beginNewSession() } else {
-          setDrawer(open: true)
-        }
-      }
-      .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
-      .padding(.horizontal, 20).padding(.vertical, 10)
-      .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
-      .buttonStyle(TetherPressStyle())
-      .accessibilityIdentifier("sshEmptyStateNew")
     }
-    .padding(24).frame(maxWidth: 300)
-    .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
   }
 }
 

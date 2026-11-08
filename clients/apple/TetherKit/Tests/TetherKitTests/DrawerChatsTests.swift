@@ -84,6 +84,23 @@ final class DrawerChatsTests: XCTestCase {
     let failed = await ChatRoute.fresh(cwdText: "~") { _ in throw SSHConnectError.transport("down") }
     XCTAssertNil(failed)
   }
+
+  func test_last_opened_chat_survives_reopening_and_is_scoped_to_its_host() {
+    let suite = "last-chat-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let one = ChatTitleStore(scope: "one:22", defaults: defaults)
+    one.lastOpenedChat = "chat-a"
+    XCTAssertEqual(ChatTitleStore(scope: "one:22", defaults: defaults).lastOpenedChat, "chat-a")
+    XCTAssertNil(ChatTitleStore(scope: "two:22", defaults: defaults).lastOpenedChat)
+    one.clear("chat-b")
+    XCTAssertEqual(one.lastOpenedChat, "chat-a")
+    one.clear("chat-a")
+    XCTAssertNil(one.lastOpenedChat)
+    one.lastOpenedChat = "chat-b"
+    one.lastOpenedChat = nil
+    XCTAssertNil(ChatTitleStore(scope: "one:22", defaults: defaults).lastOpenedChat)
+  }
 }
 
 @MainActor
@@ -99,6 +116,63 @@ final class ControllerChatsTests: XCTestCase {
   }
 
   private let statusLine = #"{"name":"chat-a","state":"running","turn":"waiting","title":"T","cwd":"/srv/x","created":100,"logBytes":10,"endedReason":""}"#
+
+  func test_last_chat_is_restored_once_after_listing_without_spawning() async {
+    let ops = FakeOps()
+    ops.execResult = { _ in self.statusLine }
+    let controller = controller(ops)
+    controller.chatTitles.lastOpenedChat = "chat-a"
+    defer { controller.chatTitles.lastOpenedChat = nil }
+    await controller.refreshChats()
+    XCTAssertEqual(controller.requestedChat, "chat-a")
+    controller.requestedChat = nil
+    await controller.refreshChats()
+    XCTAssertNil(controller.requestedChat)
+    XCTAssertFalse(ops.commands.contains { $0.contains("--spawn") || $0.contains(" attach ") })
+  }
+
+  func test_failed_listing_retries_restoration_and_a_notification_takes_priority() async {
+    let ops = FakeOps()
+    let controller = controller(ops)
+    controller.chatTitles.lastOpenedChat = "chat-a"
+    defer { controller.chatTitles.lastOpenedChat = nil }
+    ops.execResult = { _ in throw SSHConnectError.transport("down") }
+    await controller.refreshChats()
+    XCTAssertTrue(controller.chatRestorationPending)
+    controller.requestedChat = "chat-notification"
+    ops.execResult = { _ in self.statusLine }
+    await controller.refreshChats()
+    XCTAssertEqual(controller.requestedChat, "chat-notification")
+  }
+
+  func test_missing_ended_and_archived_chats_are_not_restored() async {
+    for listing in ["", statusLine.replacingOccurrences(of: "running", with: "ended"),
+      statusLine.replacingOccurrences(of: "\"state\"", with: "\"archived\":true,\"state\"")]
+    {
+      let ops = FakeOps()
+      ops.execResult = { _ in listing }
+      let controller = controller(ops)
+      controller.chatTitles.lastOpenedChat = "chat-a"
+      await controller.refreshChats()
+      XCTAssertNil(controller.requestedChat)
+      XCTAssertNil(controller.chatTitles.lastOpenedChat)
+    }
+  }
+
+  func test_an_explicit_terminal_choice_clears_the_remembered_chat() async {
+    let titles = ChatTitleStore(config: config)
+    titles.lastOpenedChat = "chat-a"
+    defer { titles.lastOpenedChat = nil }
+    let ops = FakeOps()
+    ops.execResult = { _ in self.statusLine }
+    let store = InMemoryHostKeyStore()
+    let controller = SSHTerminalController(
+      title: "t", config: config, hostKeyStore: store, attach: "work", picked: true,
+      control: ControlConnection(config: config, store: store) { ops })
+    await controller.refreshChats()
+    XCTAssertNil(controller.requestedChat)
+    XCTAssertNil(titles.lastOpenedChat)
+  }
 
   func test_refresh_reads_status_and_a_host_without_the_commands_shows_none() async {
     let ops = FakeOps()

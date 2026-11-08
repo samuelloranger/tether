@@ -15,6 +15,15 @@ final class ChatTitleStore: @unchecked Sendable {
 
   convenience init(config: SSHConnectionConfig) { self.init(scope: Self.scope(for: config)) }
 
+  /// The last chat selected on this host; nil means the terminal was selected.
+  var lastOpenedChat: String? {
+    get { defaults.string(forKey: "tether.acp.selected.\(scope)") }
+    set {
+      if let newValue { defaults.set(newValue, forKey: "tether.acp.selected.\(scope)") }
+      else { defaults.removeObject(forKey: "tether.acp.selected.\(scope)") }
+    }
+  }
+
   private func key(_ name: String) -> String { "tether.acp.title.\(scope).\(name)" }
 
   func title(for name: String) -> String? {
@@ -28,6 +37,7 @@ final class ChatTitleStore: @unchecked Sendable {
   }
 
   func clear(_ name: String) {
+    if lastOpenedChat == name { lastOpenedChat = nil }
     defaults.removeObject(forKey: key(name))
     defaults.removeObject(forKey: agentKey(name))
   }
