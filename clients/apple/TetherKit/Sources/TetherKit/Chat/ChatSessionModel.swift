@@ -44,6 +44,9 @@ final class ChatSessionModel {
   private(set) var state = ChatState()
   private(set) var link = ChatLinkTracker()
   private(set) var outbox = ChatOutbox()
+  /// Unsent messages remain editable until the running turn finishes.
+  private(set) var queuedMessages: [ChatOutbox.Failed] = []
+  private var sendingQueuedMessage = false
   /// Permission cards whose last answer did not reach the agent; they stay answerable.
   private(set) var answerFailures: Set<ACPID> = []
   var notice: String?
@@ -217,7 +220,7 @@ final class ChatSessionModel {
   /// Send, Stop and Approve wait for the replay: until then the transcript may still be partial
   /// and a pending permission may already have been answered.
   var canInteract: Bool { link.allowsInteraction && !readOnly }
-  /// A message can be sent at any time a turn is running too: the agent queues it.
+  /// During a running turn, messages wait locally so they can still be edited or removed.
   var canSend: Bool { canInteract && !needsSignIn }
   /// The agent refused to start for want of a login on the host, so there is no session to talk to yet.
   var needsSignIn: Bool {
@@ -405,7 +408,7 @@ final class ChatSessionModel {
   func send(text: String, images: [ChatImageAttachment] = []) -> Bool {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty || !images.isEmpty, canSend else { return false }
-    Task { await deliver(trimmed, images) }
+    enqueue(trimmed, images)
     return true
   }
 
@@ -413,7 +416,7 @@ final class ChatSessionModel {
     guard canSend, let entry = outbox.entry(for: id) else { return }
     guard entry.canRetry else { return }
     outbox.discard(id)
-    Task { await deliver(entry.text, entry.images, imagesLost: entry.imagesLost) }
+    enqueue(entry.text, entry.images, imagesLost: entry.imagesLost)
   }
 
   /// One after the other, each picked from the options as the last answer left them; a refusal is
@@ -492,7 +495,56 @@ final class ChatSessionModel {
     persistOutbox()
   }
 
-  private func persistOutbox() { outboxStore?.save(outbox.persisted) }
+  /// On reopening the app, unsent messages use the existing Retry / Discard recovery flow.
+  private func persistOutbox() {
+    outboxStore?.save(outbox.persisted + queuedMessages.map {
+      PersistedFailedMessage(id: $0.id, text: $0.text, imageCount: $0.imageCount)
+    })
+  }
+
+  func removeQueuedMessage(_ id: UUID) {
+    queuedMessages.removeAll { $0.id == id }
+    persistOutbox()
+  }
+
+  /// A queued message returns to an empty composer; an existing draft stays untouched.
+  func editQueuedMessage(_ id: UUID, replacing text: String, images: [ChatImageAttachment]) -> ChatOutbox.Failed? {
+    guard let index = queuedMessages.firstIndex(where: { $0.id == id }) else { return nil }
+    guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, images.isEmpty else {
+      notice = "Send or clear your draft before editing a queued message."
+      return nil
+    }
+    let message = queuedMessages.remove(at: index)
+    draft = message.text
+    persistOutbox()
+    return message
+  }
+
+  private func enqueue(_ text: String, _ images: [ChatImageAttachment], imagesLost: Int = 0) {
+    queuedMessages.append(.init(id: UUID(), text: text, images: images, imagesLost: imagesLost))
+    persistOutbox()
+    sendNextQueuedMessage()
+  }
+
+  private func sendNextQueuedMessage() {
+    guard !left, canSend, !isWorking, !sendingQueuedMessage, !queuedMessages.isEmpty, let client else { return }
+    sendingQueuedMessage = true
+    let mine = generation
+    Task {
+      // UI updates are coalesced; check the actor before releasing another prompt.
+      let current = await client.state
+      guard mine == generation, !left, canSend, current.turn == .idle, current.connection == .live,
+        !queuedMessages.isEmpty else {
+        sendingQueuedMessage = false
+        return
+      }
+      let message = queuedMessages.removeFirst()
+      await deliver(message.text, message.images, imagesLost: message.imagesLost)
+      receive(await client.state, generation: mine)
+      sendingQueuedMessage = false
+      sendNextQueuedMessage()
+    }
+  }
 
   /// Stop drops what was waiting; as in Claude Code, it goes out next instead.
   func cancel() {
@@ -594,6 +646,7 @@ final class ChatSessionModel {
       persistTitle()
     }
     scheduleSettle()
+    sendNextQueuedMessage()
   }
 
   /// A stream that ends is either a dropped connection, a resume the host could not serve, or a
@@ -625,6 +678,7 @@ final class ChatSessionModel {
       if self.link.settleIfQuiet(at: .now) {
         self.holdingForReplay = false
         self.flushHeld()
+        self.sendNextQueuedMessage()
       } else {
         self.scheduleSettle()
       }

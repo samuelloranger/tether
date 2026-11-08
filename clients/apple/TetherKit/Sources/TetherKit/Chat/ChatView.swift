@@ -296,7 +296,7 @@ struct ChatView: View {
       }
       #endif
     }
-    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16 + CGFloat(queuedTexts.count) * 40)
+    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16 + (queuedTexts.isEmpty ? 0 : chipsHeight + 8))
   }
 
   /// iOS 17: the transcript follows by scrolling to a sentinel when the tail changes.
@@ -370,12 +370,27 @@ struct ChatView: View {
     }?.id ?? 0
   }
 
-  private var queuedTexts: [(id: Int, text: String)] {
-    model.state.items.compactMap { item in
+  private var queuedTexts: [(id: String, text: String, localID: UUID?)] {
+    let remote: [(id: String, text: String, localID: UUID?)] = model.state.items.compactMap { item in
       guard model.state.isQueued(item.id), case let .user(text, count, _, _) = item.kind else { return nil }
-      if text.isEmpty { return (item.id, ChatComposerRule.imageLabel(count)) }
-      return (item.id, count > 0 ? "\(ChatComposerRule.imageLabel(count)) · \(text)" : text)
+      if text.isEmpty { return ("remote-\(item.id)", ChatComposerRule.imageLabel(count), nil) }
+      return ("remote-\(item.id)", count > 0 ? "\(ChatComposerRule.imageLabel(count)) · \(text)" : text, nil)
     }
+    return remote + model.queuedMessages.map { message in
+      let label = message.text.isEmpty ? ChatComposerRule.imageLabel(message.imageCount)
+        : message.imageCount > 0 ? "\(ChatComposerRule.imageLabel(message.imageCount)) · \(message.text)" : message.text
+      return (message.id.uuidString, label, message.id)
+    }
+  }
+
+  private func editQueuedMessage(_ id: UUID) {
+    guard attachments.encoding == 0,
+      let message = model.editQueuedMessage(id, replacing: draft, images: attachments.ready) else { return }
+    draft = message.text
+    attachments.restore(message.images)
+    cursor = draft.count
+    caretRequest = draft.count
+    composerFocused = true
   }
 
   /// Floats on the bar's top edge, over the end of the transcript, which keeps room for it.
@@ -384,23 +399,52 @@ struct ChatView: View {
     if !queued.isEmpty {
       VStack(alignment: .trailing, spacing: 6) {
         ForEach(queued, id: \.id) { entry in
-          HStack(spacing: 6) {
-            Text(entry.text).font(.subheadline).foregroundStyle(TetherColors.textSecondary)
-              .lineLimit(1).truncationMode(.tail)
-            Image(systemName: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
+          HStack(spacing: 0) {
+            if let id = entry.localID {
+              Button { editQueuedMessage(id) } label: {
+                queuedLabel(entry.text)
+                  .frame(minHeight: 44)
+                  .padding(.leading, 12)
+                  .contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+              .disabled(attachments.encoding > 0)
+              .accessibilityLabel("Edit queued message: \(entry.text)")
+              .accessibilityIdentifier("chatQueueEdit-\(id)")
+              Button { model.removeQueuedMessage(id) } label: {
+                Image(systemName: "xmark").font(.caption2.weight(.semibold))
+                  .foregroundStyle(TetherColors.textSecondary)
+                  .frame(width: 44, height: 44)
+                  .contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Remove queued message: \(entry.text)")
+              .accessibilityIdentifier("chatQueueRemove-\(id)")
+            } else {
+              queuedLabel(entry.text)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .accessibilityLabel("Queued: \(entry.text)")
+            }
           }
-          .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 7)
           .background(TetherColors.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 14))
           .overlay(RoundedRectangle(cornerRadius: 14).stroke(TetherColors.border, lineWidth: 1))
           .shadow(color: .black.opacity(0.35), radius: 9, y: 6)
-          .accessibilityElement(children: .ignore)
-          .accessibilityLabel("Queued: \(entry.text)")
+          .accessibilityElement(children: .contain)
         }
       }
       .frame(maxWidth: .infinity, alignment: .trailing)
       .padding(.leading, 44).padding(.trailing, 16)
       .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chipsHeight = $0 }
+      .onDisappear { chipsHeight = 0 }
       .offset(y: -chipsHeight - 8)
+    }
+  }
+
+  private func queuedLabel(_ text: String) -> some View {
+    HStack(spacing: 6) {
+      Text(text).font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+        .lineLimit(1).truncationMode(.tail)
+      Image(systemName: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
     }
   }
 
