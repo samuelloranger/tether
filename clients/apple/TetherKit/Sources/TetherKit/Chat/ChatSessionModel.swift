@@ -47,6 +47,7 @@ final class ChatSessionModel {
   /// Unsent messages remain editable until the running turn finishes.
   private(set) var queuedMessages: [ChatOutbox.Failed] = []
   private var sendingQueuedMessage = false
+  private var inFlightQueuedMessage: ChatOutbox.Failed?
   /// Permission cards whose last answer did not reach the agent; they stay answerable.
   private(set) var answerFailures: Set<ACPID> = []
   var notice: String?
@@ -497,7 +498,8 @@ final class ChatSessionModel {
 
   /// On reopening the app, unsent messages use the existing Retry / Discard recovery flow.
   private func persistOutbox() {
-    outboxStore?.save(outbox.persisted + queuedMessages.map {
+    let unsent = (inFlightQueuedMessage.map { [$0] } ?? []) + queuedMessages
+    outboxStore?.save(outbox.persisted + unsent.map {
       PersistedFailedMessage(id: $0.id, text: $0.text, imageCount: $0.imageCount)
     })
   }
@@ -539,7 +541,8 @@ final class ChatSessionModel {
         return
       }
       let message = queuedMessages.removeFirst()
-      await deliver(message.text, message.images, imagesLost: message.imagesLost)
+      inFlightQueuedMessage = message
+      await deliver(message.text, message.images, imagesLost: message.imagesLost, queuedID: message.id)
       receive(await client.state, generation: mine)
       sendingQueuedMessage = false
       sendNextQueuedMessage()
@@ -609,9 +612,10 @@ final class ChatSessionModel {
 
   /// A retry takes the entry out of memory first but the stored copy only changes with the
   /// outcome, so a message is never lost between the tap and the answer.
-  private func deliver(_ text: String, _ images: [ChatImageAttachment], imagesLost: Int = 0) async {
+  private func deliver(_ text: String, _ images: [ChatImageAttachment], imagesLost: Int = 0, queuedID: UUID? = nil) async {
     guard let client else {
       outbox.recordFailure(text, images: images, imagesLost: imagesLost)
+      if let queuedID, inFlightQueuedMessage?.id == queuedID { inFlightQueuedMessage = nil }
       persistOutbox()
       return
     }
@@ -624,6 +628,7 @@ final class ChatSessionModel {
     } catch {
       outbox.recordFailure(text, images: images, imagesLost: imagesLost)
     }
+    if let queuedID, inFlightQueuedMessage?.id == queuedID { inFlightQueuedMessage = nil }
     persistOutbox()
   }
 

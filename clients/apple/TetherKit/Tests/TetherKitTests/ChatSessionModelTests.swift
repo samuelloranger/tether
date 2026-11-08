@@ -8,6 +8,32 @@ private struct FailingWriteStream: TerminalByteStream {
   func close() async { await inner.close() }
 }
 
+private actor SuspendedQueueWriteStream: TerminalByteStream {
+  let inner: ScriptedByteStream
+  nonisolated let writing = LockedBox(false)
+  private var pending: CheckedContinuation<Void, Error>?
+
+  init(inner: ScriptedByteStream) { self.inner = inner }
+  func read() async throws -> Data? { try await inner.read() }
+  func write(_ bytes: Data) async throws {
+    try await withCheckedThrowingContinuation { continuation in
+      pending = continuation
+      writing.value = true
+    }
+    try await inner.write(bytes)
+  }
+  func release(failing: Bool) {
+    let continuation = pending
+    pending = nil
+    if failing { continuation?.resume(throwing: ACPClientError.connectionLost) }
+    else { continuation?.resume() }
+  }
+  func close() async {
+    release(failing: true)
+    await inner.close()
+  }
+}
+
 @MainActor
 final class ChatSessionModelTests: XCTestCase {
   private final class Dialer: @unchecked Sendable {
@@ -116,6 +142,36 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertNil(model.editQueuedMessage(id, replacing: "keep", images: []))
     XCTAssertEqual(model.draft, "edit me")
     model.leave()
+  }
+
+  func test_a_suspended_queue_write_keeps_its_recovery_copy_until_the_outcome() async throws {
+    for failing in [false, true] {
+      let inner = ScriptedByteStream()
+      let stream = SuspendedQueueWriteStream(inner: inner)
+      let recovery = InMemoryChatOutboxStore()
+      let model = ChatSessionModel(
+        chatName: "chat-t", cwd: "/work/project", readOnly: false,
+        store: InMemoryChatJournalStore(ACPFixture.journal), outbox: recovery
+      ) { _, _ in stream }
+      Task { await model.connect() }
+      inner.push(ACPFixture.log())
+      let live = await settled(model)
+      XCTAssertTrue(live)
+      XCTAssertTrue(model.send("sending"))
+      let writing = await eventually { stream.writing.value }
+      XCTAssertTrue(writing)
+      XCTAssertTrue(model.send("waiting"))
+      XCTAssertEqual(recovery.load().map(\.text), ["sending", "waiting"])
+      model.removeQueuedMessage(try XCTUnwrap(model.queuedMessages.first?.id))
+      XCTAssertEqual(recovery.load().map(\.text), ["sending"])
+      await stream.release(failing: failing)
+      let completed = await eventually {
+        failing ? model.outbox.failed.count == 1 : recovery.load().isEmpty
+      }
+      XCTAssertTrue(completed)
+      XCTAssertEqual(recovery.load().map(\.text), failing ? ["sending"] : [])
+      model.leave()
+    }
   }
 
   func test_rapid_sends_release_only_one_prompt_at_a_time() async throws {
