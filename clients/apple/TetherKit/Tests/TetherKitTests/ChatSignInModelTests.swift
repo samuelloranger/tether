@@ -63,11 +63,11 @@ final class ChatSignInModelTests: XCTestCase {
     model.leave()
   }
 
-  func test_a_message_sent_while_the_agent_works_is_queued_and_stop_sends_it_again() async throws {
+  func test_a_message_waits_locally_until_the_stopped_turn_ends() async throws {
     var journal = ChatJournal()
     journal.sessionId = "sess-1"
     journal.nextRequestId = 4
-    journal.entries = [.init(kind: .prompt, offset: ACPFixture.promptOffset, text: ACPFixture.promptText)]
+    journal.entries = [.init(kind: .prompt, offset: ACPFixture.promptOffset, text: ACPFixture.promptText, requestId: .int(3))]
     let stream = ScriptedByteStream()
     let store = InMemoryChatJournalStore(journal)
     let model = ChatSessionModel(
@@ -79,24 +79,24 @@ final class ChatSignInModelTests: XCTestCase {
     XCTAssertTrue(live)
     XCTAssertTrue(model.canSend)
     XCTAssertTrue(model.send("and then tidy up"))
-    let sent = await eventually { stream.writtenText.contains("and then tidy up") }
-    XCTAssertTrue(sent)
-    let queued = await eventually { model.state.queuedItemIds.count == 1 }
-    XCTAssertTrue(queued)
+    XCTAssertEqual(model.queuedMessages.map(\.text), ["and then tidy up"])
+    XCTAssertFalse(stream.writtenText.contains("and then tidy up"))
     XCTAssertEqual(model.state.turn, .working)
 
     model.cancel()
     let stopped = await eventually { stream.writtenText.contains("session/cancel") }
     XCTAssertTrue(stopped)
-    let resent = await eventually { stream.writtenText.components(separatedBy: "and then tidy up").count == 3 }
-    XCTAssertTrue(resent, "Stop sends the waiting message again")
-    // The model takes the client's state a frame later.
+    XCTAssertFalse(stream.writtenText.contains("and then tidy up"), "the cancelled turn must finish first")
+    stream.push(line("{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"stopReason\":\"cancelled\"}}"))
+    let sent = await eventually { stream.writtenText.contains("and then tidy up") }
+    XCTAssertTrue(sent)
+    XCTAssertEqual(stream.writtenText.components(separatedBy: "and then tidy up").count, 2, "sent exactly once")
     let shown = await eventually {
       let copies = model.state.items.filter { if case let .user(text, _, _, _) = $0.kind { text == "and then tidy up" } else { false } }
       return model.state.items.contains { $0.kind == .notice("Stopped") } && copies.count == 1
     }
-    XCTAssertTrue(shown, "stopped, with the dropped copy gone and the resent one in its place")
-    XCTAssertEqual(model.state.queuedTexts, ["and then tidy up"], "it waits for the stopped turn to end")
+    XCTAssertTrue(shown)
+    XCTAssertTrue(model.queuedMessages.isEmpty)
     model.leave()
   }
 }

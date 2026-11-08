@@ -254,7 +254,6 @@ enum ChatFixture {
       ]
       journal.entries = [
         .init(kind: .prompt, offset: 0, text: promptText, requestId: .int(3)),
-        .init(kind: .prompt, offset: 0, text: "After that, update the README too.", requestId: .int(4)),
       ]
     case "clear":
       lines += [
@@ -278,10 +277,18 @@ enum ChatFixture {
       journal.entries = [.init(kind: .prompt, offset: 0, text: promptText, requestId: .int(3))]
     }
     let log = Data((lines.joined(separator: "\n") + "\n").utf8)
-    return ChatSessionModel(
+    let model = ChatSessionModel(
       chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal),
       hostLabel: "devbox"
     ) { _, _ in FixtureByteStream(log: log) }
+    if kind == "queue" {
+      Task { @MainActor in
+        for _ in 0..<100 where !model.canSend { try? await Task.sleep(for: .milliseconds(100)) }
+        _ = model.send("After that, update the README too.")
+        _ = model.send("Add a test for the timeout case as well.")
+      }
+    }
+    return model
   }
 
   private static func backgroundCommand(_ id: String, _ command: String) -> [String] {

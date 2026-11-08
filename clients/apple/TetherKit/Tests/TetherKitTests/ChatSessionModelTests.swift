@@ -8,6 +8,32 @@ private struct FailingWriteStream: TerminalByteStream {
   func close() async { await inner.close() }
 }
 
+private actor SuspendedQueueWriteStream: TerminalByteStream {
+  let inner: ScriptedByteStream
+  nonisolated let writing = LockedBox(false)
+  private var pending: CheckedContinuation<Void, Error>?
+
+  init(inner: ScriptedByteStream) { self.inner = inner }
+  func read() async throws -> Data? { try await inner.read() }
+  func write(_ bytes: Data) async throws {
+    try await withCheckedThrowingContinuation { continuation in
+      pending = continuation
+      writing.value = true
+    }
+    try await inner.write(bytes)
+  }
+  func release(failing: Bool) {
+    let continuation = pending
+    pending = nil
+    if failing { continuation?.resume(throwing: ACPClientError.connectionLost) }
+    else { continuation?.resume() }
+  }
+  func close() async {
+    release(failing: true)
+    await inner.close()
+  }
+}
+
 @MainActor
 final class ChatSessionModelTests: XCTestCase {
   private final class Dialer: @unchecked Sendable {
@@ -49,6 +75,120 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertTrue(model.canSend)
     XCTAssertEqual(model.state.title, "Hello.txt to out.txt")
     XCTAssertEqual(model.state.turn, .idle)
+    model.leave()
+  }
+
+  func test_queued_messages_wait_for_the_running_turn_and_removed_messages_never_send() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    XCTAssertTrue(model.send("remove me"))
+    XCTAssertTrue(model.send("next"))
+    XCTAssertEqual(model.queuedMessages.map(\.text), ["remove me", "next"])
+    XCTAssertFalse(stream.writtenText.contains("remove me"))
+    XCTAssertFalse(stream.writtenText.contains("next"))
+    model.removeQueuedMessage(try XCTUnwrap(model.queuedMessages.first?.id))
+
+    let request = try XCTUnwrap(stream.writtenText.split(separator: "\n").compactMap {
+      try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+    }.first { $0["method"] as? String == "session/prompt" })
+    let response = try JSONSerialization.data(withJSONObject: [
+      "jsonrpc": "2.0", "id": try XCTUnwrap(request["id"]), "result": ["stopReason": "end_turn"],
+    ])
+    stream.push(response + Data("\n".utf8))
+    let advanced = await eventually { stream.writtenText.contains("next") }
+    XCTAssertTrue(advanced)
+    XCTAssertFalse(stream.writtenText.contains("remove me"))
+    XCTAssertTrue(model.queuedMessages.isEmpty)
+    model.leave()
+  }
+
+  func test_editing_a_queued_message_restores_images_and_preserves_the_current_draft() async throws {
+    let stream = ScriptedByteStream()
+    let recovery = InMemoryChatOutboxStore()
+    let model = ChatSessionModel(
+      chatName: "chat-t", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(ACPFixture.journal), outbox: recovery
+    ) { _, _ in stream }
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking }
+    XCTAssertTrue(started)
+    let image = ChatImageAttachment(mimeType: "image/png", data: "AAAA")
+    XCTAssertTrue(model.send(text: "edit me", images: [image]))
+    XCTAssertTrue(model.send("last"))
+    let id = try XCTUnwrap(model.queuedMessages.first?.id)
+    model.draft = "unsent draft"
+    XCTAssertNil(model.editQueuedMessage(id, replacing: "unsent draft", images: [image]))
+    XCTAssertEqual(model.draft, "unsent draft")
+    XCTAssertEqual(model.queuedMessages.map(\.text), ["edit me", "last"])
+    let edited = try XCTUnwrap(model.editQueuedMessage(id, replacing: "", images: []))
+    XCTAssertEqual(edited.text, "edit me")
+    XCTAssertEqual(edited.images, [image])
+    XCTAssertEqual(model.draft, "edit me")
+    XCTAssertEqual(model.queuedMessages.map(\.text), ["last"])
+    XCTAssertEqual(recovery.load().map(\.text), ["last"])
+    model.removeQueuedMessage(try XCTUnwrap(model.queuedMessages.first?.id))
+    XCTAssertTrue(recovery.load().isEmpty)
+    XCTAssertNil(model.editQueuedMessage(id, replacing: "keep", images: []))
+    XCTAssertEqual(model.draft, "edit me")
+    model.leave()
+  }
+
+  func test_a_suspended_queue_write_keeps_its_recovery_copy_until_the_outcome() async throws {
+    for failing in [false, true] {
+      let inner = ScriptedByteStream()
+      let stream = SuspendedQueueWriteStream(inner: inner)
+      let recovery = InMemoryChatOutboxStore()
+      let model = ChatSessionModel(
+        chatName: "chat-t", cwd: "/work/project", readOnly: false,
+        store: InMemoryChatJournalStore(ACPFixture.journal), outbox: recovery
+      ) { _, _ in stream }
+      Task { await model.connect() }
+      inner.push(ACPFixture.log())
+      let live = await settled(model)
+      XCTAssertTrue(live)
+      XCTAssertTrue(model.send("sending"))
+      let writing = await eventually { stream.writing.value }
+      XCTAssertTrue(writing)
+      XCTAssertTrue(model.send("waiting"))
+      XCTAssertEqual(recovery.load().map(\.text), ["sending", "waiting"])
+      model.removeQueuedMessage(try XCTUnwrap(model.queuedMessages.first?.id))
+      XCTAssertEqual(recovery.load().map(\.text), ["sending"])
+      await stream.release(failing: failing)
+      let completed = await eventually {
+        failing ? model.outbox.failed.count == 1 : recovery.load().isEmpty
+      }
+      XCTAssertTrue(completed)
+      XCTAssertEqual(recovery.load().map(\.text), failing ? ["sending"] : [])
+      model.leave()
+    }
+  }
+
+  func test_rapid_sends_release_only_one_prompt_at_a_time() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("first"))
+    XCTAssertTrue(model.send("second"))
+    XCTAssertTrue(model.send("third"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("first") }
+    XCTAssertTrue(started)
+    XCTAssertEqual(model.queuedMessages.map(\.text), ["second", "third"])
+    XCTAssertFalse(stream.writtenText.contains("second"))
+    XCTAssertFalse(stream.writtenText.contains("third"))
     model.leave()
   }
 

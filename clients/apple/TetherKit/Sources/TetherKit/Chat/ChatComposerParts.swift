@@ -41,6 +41,13 @@ final class ChatAttachments {
 
   func clear() { items = [] }
 
+  func restore(_ images: [ChatImageAttachment]) {
+    items = images.map { image in
+      let bytes = Data(base64Encoded: image.data)
+      return Item(thumbnail: bytes.flatMap(Self.thumbnail), encoded: image)
+    }
+  }
+
   func seed(_ thumbnails: [UIImage]) {
     items = thumbnails.map { Item(thumbnail: $0, encoded: ChatImageAttachment(mimeType: "image/jpeg", data: "")) }
   }
