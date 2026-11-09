@@ -19,7 +19,8 @@ import (
 
 // `acp workflows` reads Claude Code's own session files, a private layout that can change between
 // releases: the transcript says when a background Workflow run was launched and when it ended,
-// the run's journal says which agents started and finished. ACP carries neither.
+// the run's journal says which agents started and finished. ACP carries neither. A background
+// Agent launch is reported the same way (kind "agent"), from its launch to its end notification.
 
 type wfAgent struct {
 	Label     string `json:"label"`
@@ -44,6 +45,7 @@ type wfCounts struct {
 type wfRun struct {
 	ToolCallID  string `json:"toolCallId"`
 	RunID       string `json:"runId"`
+	Kind        string `json:"kind,omitempty"`
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Status      string `json:"status"`
@@ -64,6 +66,7 @@ var (
 	wfRunIDRe     = regexp.MustCompile(`^wf_[A-Za-z0-9_-]+$`)
 	wfAgentIDRe   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	wfRunLineRe   = regexp.MustCompile(`(?m)^Run ID: (wf_[A-Za-z0-9_-]+)\s*$`)
+	wfAgentLineRe = regexp.MustCompile(`(?m)^agentId: ([A-Za-z0-9_-]+)`)
 	wfSummaryRe   = regexp.MustCompile(`(?m)^Summary: (.*)$`)
 	wfNoteIDRe    = regexp.MustCompile(`<tool-use-id>([^<\s]+)</tool-use-id>`)
 	wfNoteStateRe = regexp.MustCompile(`<status>([^<]*)</status>`)
@@ -202,6 +205,7 @@ func parseTS(s string) int64 {
 
 var (
 	wfLaunchMarker = []byte("Workflow launched in background")
+	wfAgentMarker  = []byte("Async agent launched successfully")
 	wfNoteMarker   = []byte("<task-notification>")
 	wfNoteMarkerU  = []byte(`\u003ctask-notification`)
 )
@@ -215,12 +219,14 @@ type wfNote struct {
 type wfLaunch struct {
 	ToolCallID  string `json:"toolCallId"`
 	RunID       string `json:"runId"`
+	Kind        string `json:"kind,omitempty"`
 	Description string `json:"description,omitempty"`
 	StartedAt   int64  `json:"startedAt,omitempty"`
 }
 
 // wfScan is what a transcript scan found, plus how far it got; it is the unit that is cached.
 type wfScan struct {
+	Version  int               `json:"version"`
 	Path     string            `json:"path"`
 	Inode    uint64            `json:"inode"`
 	Offset   int64             `json:"offset"`
@@ -230,6 +236,9 @@ type wfScan struct {
 }
 
 const wfHeadCheckBytes = 4096
+
+// wfCacheVersion changes when a scan learns to find something new, so older caches rescan.
+const wfCacheVersion = 2
 
 func fileInode(st os.FileInfo) uint64 {
 	if s, ok := st.Sys().(*syscall.Stat_t); ok {
@@ -260,7 +269,7 @@ func loadWfCache(sessionID string) *wfScan {
 		return nil
 	}
 	var c wfScan
-	if json.Unmarshal(b, &c) != nil || c.Notes == nil {
+	if json.Unmarshal(b, &c) != nil || c.Notes == nil || c.Version != wfCacheVersion {
 		return nil
 	}
 	return &c
@@ -337,7 +346,7 @@ func scanWorkflowTranscript(path, sessionID string) []wfRun {
 		return runs
 	}
 	inode := fileInode(st)
-	scan := &wfScan{Path: path, Inode: inode, Notes: map[string]wfNote{}}
+	scan := &wfScan{Version: wfCacheVersion, Path: path, Inode: inode, Notes: map[string]wfNote{}}
 	if c := loadWfCache(sessionID); c != nil && c.Path == path && c.Inode == inode && c.Offset <= st.Size() {
 		if crc, ok := headCRC(f, c.Offset); ok && crc == c.HeadCRC {
 			scan = c
@@ -370,7 +379,10 @@ func scanWorkflowTranscript(path, sessionID string) []wfRun {
 		}
 	}
 	for _, l := range scan.Launches {
-		run := wfRun{ToolCallID: l.ToolCallID, RunID: l.RunID, Status: "running", Title: "Workflow", Description: l.Description, StartedAt: l.StartedAt, Phases: []wfPhase{}}
+		run := wfRun{ToolCallID: l.ToolCallID, RunID: l.RunID, Kind: l.Kind, Status: "running", Title: "Workflow", Description: l.Description, StartedAt: l.StartedAt, Phases: []wfPhase{}}
+		if l.Kind == "agent" {
+			run.Title = "Agent"
+		}
 		if n, ok := scan.Notes[l.ToolCallID]; ok {
 			run.Status, run.Summary, run.EndedAt = n.Status, n.Summary, n.At
 		}
@@ -381,7 +393,7 @@ func scanWorkflowTranscript(path, sessionID string) []wfRun {
 
 func scanWorkflowLine(scan *wfScan, seen map[string]bool, line []byte, long bool) {
 	isNote := bytes.Contains(line, wfNoteMarker) || bytes.Contains(line, wfNoteMarkerU)
-	launch := !long && bytes.Contains(line, wfLaunchMarker)
+	launch := !long && (bytes.Contains(line, wfLaunchMarker) || bytes.Contains(line, wfAgentMarker))
 	if !isNote && !launch {
 		return
 	}
@@ -416,6 +428,13 @@ func appendLaunches(launches []wfLaunch, seen map[string]bool, l wfTranscriptLin
 			continue
 		}
 		text := rawText(b.Content)
+		if strings.HasPrefix(text, string(wfAgentMarker)) {
+			if m := wfAgentLineRe.FindStringSubmatch(text); m != nil {
+				seen[b.ToolUseID] = true
+				launches = append(launches, wfLaunch{ToolCallID: b.ToolUseID, RunID: m[1], Kind: "agent", StartedAt: parseTS(l.Timestamp)})
+			}
+			continue
+		}
 		m := wfRunLineRe.FindStringSubmatch(text)
 		if !strings.HasPrefix(text, string(wfLaunchMarker)) || m == nil {
 			continue

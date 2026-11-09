@@ -38,6 +38,8 @@ struct ChatWorkflowRun: Equatable, Identifiable, Sendable {
   var lastActivityAt: Date?
   var summary: String?
   var phases: [Phase]
+  /// A background subagent (`"kind":"agent"`): only its status is used, to settle the subagent's row.
+  var isAgent = false
 
   var id: String { toolCallId }
   var isRunning: Bool { status == .running }
@@ -180,11 +182,11 @@ enum ChatWorkflowListing {
       status: status == "running" ? .running : status == "completed" ? .completed : .ended(status),
       startedAt: date("startedAt", in: object), endedAt: date("endedAt", in: object),
       lastActivityAt: date("lastActivityAt", in: object), summary: text("summary"),
-      phases: phases)
+      phases: phases, isAgent: object["kind"] as? String == "agent")
   }
 }
 
-/// What the chat knows of its Workflow runs, and whether it is worth asking the host again.
+/// What the chat knows of its Workflow runs and background subagents, and whether it is worth asking the host again.
 struct ChatWorkflowTracker: Equatable, Sendable {
   static let toolName = "Workflow"
   static let pollInterval: Duration = .seconds(5)
@@ -197,7 +199,9 @@ struct ChatWorkflowTracker: Equatable, Sendable {
   /// How a Workflow tool row reads once the host has spoken.
   enum RowStatus: Equatable, Sendable { case running, done, failed }
 
-  private(set) var runs: [ChatWorkflowRun] = []
+  /// Everything the host listed, background subagents included.
+  private var listed: [ChatWorkflowRun] = []
+  var runs: [ChatWorkflowRun] { listed.filter { !$0.isAgent } }
   /// False once the host answered like one without the command: nothing is asked again.
   private(set) var supported = true
   private var misses: [String: Int] = [:]
@@ -206,6 +210,12 @@ struct ChatWorkflowTracker: Equatable, Sendable {
   var running: [ChatWorkflowRun] { runs.filter(\.isRunning) }
 
   func run(forCall id: String) -> ChatWorkflowRun? { runs.first { $0.toolCallId == id } }
+
+  private func listing(forCall id: String) -> ChatWorkflowRun? { listed.first { $0.toolCallId == id } }
+
+  /// A call whose end only the host knows: a Workflow, or a subagent sent to the background (its
+  /// launch completes at once, and the rows between its tool calls would otherwise read as done).
+  static func tracks(_ call: ChatToolCall) -> Bool { call.isWorkflow == true || call.subagent?.background == true }
 
   /// The wait before the next ask: `base`, or six times that once answers have not changed for two minutes.
   func interval(base: Duration, now: Date) -> Duration {
@@ -220,30 +230,30 @@ struct ChatWorkflowTracker: Equatable, Sendable {
     let listing = ChatWorkflowListing.parse(output)
     if listing.unsupported {
       supported = false
-      runs = []
+      listed = []
       return
     }
     guard !listing.failed else { return }
-    if listing.runs != runs || changedAt == nil { changedAt = now }
-    runs = listing.runs
+    if listing.runs != listed || changedAt == nil { changedAt = now }
+    listed = listing.runs
     for call in calls {
-      misses[call.id] = run(forCall: call.id) == nil ? (misses[call.id] ?? 0) + 1 : 0
+      misses[call.id] = self.listing(forCall: call.id) == nil ? (misses[call.id] ?? 0) + 1 : 0
     }
   }
 
-  /// True while a Workflow call is not known to be over: its run is running, or the host has not
+  /// True while a tracked call is not known to be over: its run is running, or the host has not
   /// listed it yet (a launch can show here before the host's file does).
   func needsPolling(calls: [ChatToolCall]) -> Bool {
     guard supported else { return false }
     return calls.contains { call in
-      guard call.isWorkflow == true, call.status != .failed else { return false }
-      if let run = run(forCall: call.id) { return run.isRunning }
+      guard Self.tracks(call), call.status != .failed else { return false }
+      if let run = listing(forCall: call.id) { return run.isRunning }
       return (misses[call.id] ?? 0) < Self.maxMisses
     }
   }
 
   func rowStatus(forCall id: String) -> RowStatus? {
-    guard supported, let run = run(forCall: id) else { return nil }
+    guard supported, let run = listing(forCall: id) else { return nil }
     switch run.status {
     case .running: return .running
     case .completed: return .done
@@ -251,12 +261,12 @@ struct ChatWorkflowTracker: Equatable, Sendable {
     }
   }
 
-  /// The items as the transcript shows them: a Workflow row is running until the host reports its
+  /// The items as the transcript shows them: a tracked row is running until the host reports its
   /// end, then done or failed. A call the host does not list keeps what ACP said.
   func display(_ items: [ChatItem]) -> [ChatItem] {
-    guard supported, !runs.isEmpty else { return items }
+    guard supported, !listed.isEmpty else { return items }
     return items.map { item in
-      guard case var .tool(call) = item.kind, call.isWorkflow == true, let status = rowStatus(forCall: call.id) else {
+      guard case var .tool(call) = item.kind, Self.tracks(call), let status = rowStatus(forCall: call.id) else {
         return item
       }
       switch status {

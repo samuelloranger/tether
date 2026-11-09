@@ -248,6 +248,34 @@ final class ChatWorkflowTests: XCTestCase {
     tracker.apply(output: runLine(status: "failed", summary: "no"), calls: [call()])
     XCTAssertEqual(status(tracker.display([item]), 0), .failed)
   }
+
+  func test_a_background_subagent_spins_between_its_calls_until_the_host_reports_its_end() {
+    var fields = ACPToolFields(id: "toolu_a")
+    fields.title = "Agent"
+    fields.status = .completed
+    fields.toolName = "Agent"
+    fields.input = ["run_in_background": "true"]
+    let agent = ChatToolCall(fields)
+    let foreground = call("toolu_f", name: "Agent")
+    XCTAssertTrue(ChatWorkflowTracker.tracks(agent))
+    XCTAssertFalse(ChatWorkflowTracker.tracks(foreground))
+    func shown(_ tracker: ChatWorkflowTracker) -> ChatToolCall? {
+      if case let .tool(call) = tracker.display([ChatItem(id: 1, kind: .tool(agent))])[0].kind { return call }
+      return nil
+    }
+    let line = #"{"toolCallId":"toolu_a","runId":"a8f1","kind":"agent","title":"Agent","status":"STATUS","phases":[]}"#
+    var tracker = ChatWorkflowTracker()
+    XCTAssertTrue(tracker.needsPolling(calls: [agent]))
+    tracker.apply(output: runLine() + "\n" + line.replacingOccurrences(of: "STATUS", with: "running"), calls: [agent])
+    XCTAssertEqual(shown(tracker)?.isActive, true, "no child is running, yet the agent is not done")
+    XCTAssertEqual(tracker.runs.map(\.toolCallId), ["toolu_1"], "an agent is not a Workflow run")
+    XCTAssertEqual(tracker.running.count, 1)
+    XCTAssertTrue(tracker.needsPolling(calls: [agent]))
+    tracker.apply(output: line.replacingOccurrences(of: "STATUS", with: "completed"), calls: [agent])
+    XCTAssertEqual(shown(tracker)?.isActive, false)
+    XCTAssertEqual(shown(tracker)?.status, .completed)
+    XCTAssertFalse(tracker.needsPolling(calls: [agent]))
+  }
 }
 
 @MainActor

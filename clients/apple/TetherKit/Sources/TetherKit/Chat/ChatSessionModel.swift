@@ -717,18 +717,18 @@ final class ChatSessionModel {
 
   private var workflowCalls: [ChatToolCall] {
     state.items.compactMap {
-      if case let .tool(call) = $0.kind, call.isWorkflow == true { return call }
+      if case let .tool(call) = $0.kind, ChatWorkflowTracker.tracks(call) { return call }
       return nil
     }
   }
 
-  /// The transcript with each Workflow row as the host reports it (see `ChatWorkflowTracker`).
+  /// The transcript with each Workflow and background subagent row as the host reports it (see `ChatWorkflowTracker`).
   var displayItems: [ChatItem] { hasEnded ? state.items : workflowTracker.display(state.items) }
 
   /// Running workflows for the strip; a chat that has ended shows none.
   var runningWorkflows: [ChatWorkflowRun] { hasEnded ? [] : workflowTracker.running }
 
-  /// Asks the host every few seconds while a Workflow call is not known to be over. A host that
+  /// Asks the host every few seconds while a Workflow or background subagent is not known to be over. A host that
   /// answers like one without the command is left alone, and the rows keep what ACP said.
   private func startWorkflowPolling(generation mine: Int) {
     workflowTask?.cancel()

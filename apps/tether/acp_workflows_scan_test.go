@@ -219,3 +219,43 @@ func TestWorkflowMetaEscapes(t *testing.T) {
 		t.Fatalf("lenient escapes: %q", got)
 	}
 }
+
+func wfAgentLaunchLine(t *testing.T, ts, toolID, agentID string) string {
+	text := "Async agent launched successfully. (internal metadata)\nagentId: " + agentID + " (internal ID)\nThe agent is working in the background."
+	return wfJSON(t, map[string]any{
+		"type": "user", "timestamp": ts,
+		"message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": toolID, "content": []any{map[string]any{"type": "text", "text": text}}}}},
+	})
+}
+
+func TestBackgroundAgentRunsUntilItsNotification(t *testing.T) {
+	cfg := wfFixture(t)
+	path := filepath.Join(wfProject(cfg), wfTestSession+".jsonl")
+	readWorkflowRuns(cfg, wfTestSession)
+	// A cache written before agents were scanned for is not trusted: its offset is past the launch.
+	c := loadWfCache(wfTestSession)
+	c.Version = 0
+	saveWfCache(wfTestSession, c)
+
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = f.WriteString(wfAgentLaunchLine(t, "2026-01-01T11:00:00.000Z", "toolu_G", "a8f1a8991"))
+	f.Close()
+	runs := readWorkflowRuns(cfg, wfTestSession)
+	if len(runs) != 4 {
+		t.Fatalf("runs = %+v", runs)
+	}
+	g := runs[3]
+	if g.ToolCallID != "toolu_G" || g.RunID != "a8f1a8991" || g.Kind != "agent" || g.Title != "Agent" || g.Status != "running" {
+		t.Fatalf("agent run = %+v", g)
+	}
+	if runs[0].Kind != "" {
+		t.Fatalf("a workflow run has kind %q", runs[0].Kind)
+	}
+
+	f, _ = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = f.WriteString(wfNoteLine(t, "queue-operation", "2026-01-01T11:04:00.000Z", "toolu_G", "completed", "Agent done"))
+	f.Close()
+	if g := readWorkflowRuns(cfg, wfTestSession)[3]; g.Status != "completed" || g.EndedAt-g.StartedAt != 240 {
+		t.Fatalf("ended agent run = %+v", g)
+	}
+}
