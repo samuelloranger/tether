@@ -865,19 +865,19 @@ impl Session {
         changed
     }
 
-    /// The Workflow tool calls in the transcript.
+    /// The Workflow and background subagent calls in the transcript.
     fn workflow_calls(&self) -> Vec<&ToolCall> {
         self.state()
             .items
             .iter()
             .filter_map(|i| match &i.kind {
-                ItemKind::Tool(call) if call.is_workflow => Some(call),
+                ItemKind::Tool(call) if workflows::tracks(call) => Some(call),
                 _ => None,
             })
             .collect()
     }
 
-    /// Asks the host every few seconds while a Workflow call is not known to be over: only with
+    /// Asks the host every few seconds while a tracked call is not known to be over: only with
     /// the stream up, so a chat that left the front or lost its connection asks nothing. A host
     /// that answers like one without the command is left alone.
     fn poll_workflows(&mut self, ctx: &mut Ctx<'_>) {
@@ -931,7 +931,7 @@ impl Session {
         before != (self.workflows.runs().to_vec(), self.workflows.supported())
     }
 
-    /// How a tool row reads: a Workflow row follows the host until it reports the end, and a
+    /// How a tool row reads: a Workflow or background subagent row follows the host until it reports the end, and a
     /// chat that has ended keeps what ACP said.
     pub fn tool_status(&self, call: &ToolCall) -> ToolStatus {
         if self.has_ended() {

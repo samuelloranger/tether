@@ -1,7 +1,8 @@
 //! Background `Workflow` runs, as `tether acp workflows --session <id> --json` reports them. ACP
 //! says nothing after the launch; the host reads a run's progress and end from Claude Code's own
 //! session files. Port of the iOS client's `ChatWorkflows`: parsing, the tracker, the polling
-//! decision and the strip and sheet text, all without I/O. Times are Unix seconds.
+//! decision and the strip and sheet text, all without I/O. Times are Unix seconds. The host lists
+//! background subagents the same way (`"kind":"agent"`); only their status is used.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -67,6 +68,8 @@ pub struct Run {
     pub last_activity_at: Option<i64>,
     pub summary: Option<String>,
     pub phases: Vec<Phase>,
+    /// A background subagent: it settles the subagent's row and is not a Workflow run.
+    pub is_agent: bool,
 }
 
 impl Run {
@@ -295,6 +298,7 @@ fn parse_run(line: &str) -> Option<Run> {
         last_activity_at: time(&object, "lastActivityAt"),
         summary: text(&object, "summary"),
         phases,
+        is_agent: non_empty("kind") == Some("agent"),
     })
 }
 
@@ -331,7 +335,14 @@ pub enum RowStatus {
     Failed,
 }
 
-/// What the chat knows of its Workflow runs, and whether it is worth asking the host again.
+/// A call whose end only the host knows: a Workflow, or a subagent sent to the background (its
+/// launch completes at once, and the rows between its tool calls would otherwise read as done).
+pub fn tracks(call: &ToolCall) -> bool {
+    call.is_workflow || call.subagent.as_ref().is_some_and(|s| s.background)
+}
+
+/// What the chat knows of its Workflow runs and background subagents, and whether it is worth
+/// asking the host again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tracker {
     runs: Vec<Run>,
@@ -362,7 +373,10 @@ impl Tracker {
     }
 
     pub fn running(&self) -> Vec<&Run> {
-        self.runs.iter().filter(|r| r.is_running()).collect()
+        self.runs
+            .iter()
+            .filter(|r| r.is_running() && !r.is_agent)
+            .collect()
     }
 
     pub fn run_for_call(&self, id: &str) -> Option<&Run> {
@@ -409,14 +423,14 @@ impl Tracker {
         }
     }
 
-    /// True while a Workflow call is not known to be over: its run is running, or the host has not
+    /// True while a tracked call is not known to be over: its run is running, or the host has not
     /// listed it yet (a launch can show here before the host's file does).
     pub fn needs_polling(&self, calls: &[&ToolCall]) -> bool {
         if !self.supported {
             return false;
         }
         calls.iter().any(|call| {
-            if !call.is_workflow || call.status == ToolStatus::Failed {
+            if !tracks(call) || call.status == ToolStatus::Failed {
                 return false;
             }
             match self.run_for_call(&call.id) {
@@ -437,10 +451,10 @@ impl Tracker {
         })
     }
 
-    /// The status a Workflow row shows: running until the host reports its end, then done or
+    /// The status a tracked row shows: running until the host reports its end, then done or
     /// failed. A call the host does not list keeps what ACP said.
     pub fn display_status(&self, call: &ToolCall) -> ToolStatus {
-        if !call.is_workflow {
+        if !tracks(call) {
             return call.status;
         }
         match self.row_status(&call.id) {
@@ -824,5 +838,30 @@ mod tests {
         let failed = run_line("toolu_1", "failed", Some("no"), PHASES);
         tracker.apply(Some(&failed), &calls, T0);
         assert_eq!(tracker.display_status(&call), ToolStatus::Failed);
+    }
+
+    #[test]
+    fn a_background_subagent_runs_between_its_calls_until_the_host_reports_its_end() {
+        let mut agent = call("toolu_a", Some("Agent"), ToolStatus::Completed);
+        agent.subagent.as_mut().unwrap().background = true;
+        let foreground = call("toolu_f", Some("Agent"), ToolStatus::Completed);
+        assert!(tracks(&agent));
+        assert!(!tracks(&foreground));
+        let line = |status: &str| {
+            format!(
+                r#"{{"toolCallId":"toolu_a","runId":"a8f1","kind":"agent","title":"Agent","status":"{status}","phases":[]}}"#
+            )
+        };
+        let calls = [&agent];
+        let mut tracker = Tracker::default();
+        assert!(tracker.needs_polling(&calls));
+        let both = format!("{}\n{}", running(), line("running"));
+        tracker.apply(Some(&both), &calls, T0);
+        assert_eq!(tracker.display_status(&agent), ToolStatus::InProgress);
+        assert_eq!(tracker.running().len(), 1, "an agent is not a Workflow run");
+        assert!(tracker.needs_polling(&calls));
+        tracker.apply(Some(&line("completed")), &calls, T0);
+        assert_eq!(tracker.display_status(&agent), ToolStatus::Completed);
+        assert!(!tracker.needs_polling(&calls));
     }
 }

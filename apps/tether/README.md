@@ -289,6 +289,10 @@ the run has ended, an agent with no result is `stopped` (counted in `agents.stop
 newest write to the run's journal or agent transcripts: a run whose notification never arrives
 stays `running`, and a client can show how long it has been quiet. Times are Unix seconds.
 
+A background `Agent` launch is listed too, with `"kind":"agent"`, `title` `Agent`, its agent id as
+`runId` and no phases: `running` from the launch until its own `<task-notification>`. Clients use it
+to tell a background subagent that is between tool calls from one that has finished.
+
 The transcript is scanned incrementally: `~/.tether-notify/workflows/<sessionId>.json` keeps the
 file's identity, the offset scanned so far and the launches and endings found, and a call reads
 only what was appended. A file that shrank or whose start changed is scanned again from the top.

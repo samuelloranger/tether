@@ -539,6 +539,7 @@ fn subagent(
         .filter(|p| !p.trim().is_empty());
     let expandable = !call.children.is_empty() || brief.is_some() || report.is_some();
     let open = expandable && s.expanded.contains(key);
+    let shown = s.tool_status(call);
     let mut parts = Vec::new();
     if let Some(model) = info.and_then(|i| i.model.clone()) {
         parts.push(model);
@@ -559,7 +560,10 @@ fn subagent(
             icon: Icon::Subagent,
             title: call.subagent_title(),
             subtitle: parts.join(" \u{00B7} "),
-            state: status(call.status, call.is_active()),
+            state: status(
+                shown,
+                matches!(shown, ToolStatus::Pending | ToolStatus::InProgress) || call.is_active(),
+            ),
             added: 0,
             removed: 0,
             expandable,
