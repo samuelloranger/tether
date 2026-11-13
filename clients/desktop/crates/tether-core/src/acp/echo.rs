@@ -20,7 +20,7 @@ pub fn events(message: &Value, at_offset: usize) -> Vec<ChatEvent> {
     };
     let id = parse_id(line.get("id"));
     match line.get("method").and_then(Value::as_str) {
-        Some("session/prompt") => {
+        Some(method @ ("session/prompt" | "_session/steering")) => {
             let blocks = line
                 .get("params")
                 .and_then(|p| p.get("prompt"))
@@ -43,6 +43,18 @@ pub fn events(message: &Value, at_offset: usize) -> Vec<ChatEvent> {
                     Some("image") => image_count += 1,
                     _ => {}
                 }
+            }
+            if method == "_session/steering" {
+                return id
+                    .map(|request_id| ChatEvent::UserSteered {
+                        text,
+                        image_count,
+                        at_offset,
+                        request_id,
+                        images: Vec::new(),
+                    })
+                    .into_iter()
+                    .collect();
             }
             vec![ChatEvent::UserPrompt {
                 text,

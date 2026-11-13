@@ -11,7 +11,8 @@ use tether_core::acp::client::{ChatClient, ClientError, Completion, Outbound, Re
 use tether_core::acp::defaults::ChatDefaults;
 use tether_core::acp::files::ChatFiles;
 use tether_core::acp::format::{
-    self, AfterLoss, Attempt, LinkTracker, Outbox, Phase as LinkPhase, Resume,
+    self, AfterLoss, Attempt, Failed, LinkTracker, Outbox, PersistedFailed, Phase as LinkPhase,
+    Resume,
 };
 use tether_core::acp::host;
 use tether_core::acp::images::{ImageAttachment, ImageSink};
@@ -93,6 +94,16 @@ pub struct Session {
     holding: bool,
     pub link: LinkTracker,
     pub outbox: Outbox,
+    /// Messages sent while a turn runs, kept here until a tool call ends and they go into the turn,
+    /// or the turn ends and the oldest goes as a prompt.
+    held: Vec<Failed>,
+    /// The held message whose `_session/steering` is out, until the agent answers.
+    steering: Option<Failed>,
+    /// How many held messages, from the front, go into the running turn now.
+    steer_budget: usize,
+    seen_boundaries: Option<u64>,
+    /// The agent refused `_session/steering`: messages go straight out as prompts, which it queues.
+    pub steer_refused: bool,
     pub answer_failures: HashSet<AcpId>,
     pub notice: Option<String>,
     pub option_changes: HashMap<String, OptionChange>,
@@ -198,6 +209,11 @@ impl Session {
             holding: false,
             link: LinkTracker::default(),
             outbox,
+            held: Vec::new(),
+            steering: None,
+            steer_budget: 0,
+            seen_boundaries: None,
+            steer_refused: false,
             answer_failures: HashSet::new(),
             notice: None,
             option_changes: HashMap::new(),
@@ -364,6 +380,8 @@ impl Session {
         }
         self.dialing = true;
         self.generation += 1;
+        self.seen_boundaries = None;
+        self.steer_budget = 0;
         self.workflow_asked = None;
         self.workflow_next = Duration::ZERO;
         self.detach(ctx);
@@ -621,6 +639,7 @@ impl Session {
         }
         self.feed(bytes, ctx);
         self.receive(ctx);
+        self.drive_held(ctx);
         self.snapshot_if_due(ctx);
     }
 
@@ -713,7 +732,103 @@ impl Session {
                 }
             },
             RequestKind::Prompt => {}
+            RequestKind::Steer => {
+                let Some(m) = self.steering.take() else {
+                    return;
+                };
+                match c.outcome {
+                    Ok(r) if r.steer_outcome.as_deref() == Some("injected") => {}
+                    Ok(_) => self.deliver(m.text, m.images, m.images_lost, ctx),
+                    Err(e) => {
+                        if matches!(e, ClientError::Agent { .. }) {
+                            self.steer_refused = true;
+                        }
+                        self.held.insert(0, m);
+                        self.steer_budget = 0;
+                    }
+                }
+                self.persist_outbox(ctx);
+            }
         }
+    }
+
+    /// Steers, or sends as prompts, the messages held for the running turn.
+    fn drive_held(&mut self, ctx: &mut Ctx<'_>) {
+        let state = self.state();
+        let (working, boundaries) = (state.turn == Turn::Working, state.tool_boundaries);
+        if !working {
+            self.steer_budget = 0;
+        } else if let Some(seen) = self.seen_boundaries
+            && boundaries > seen
+            && self.link.allows_interaction()
+        {
+            self.steer_budget = self.held.len();
+        }
+        self.seen_boundaries = Some(boundaries);
+        while !self.held.is_empty() && self.can_send() && self.steering.is_none() {
+            let steer = working && self.steer_budget > 0 && !self.steer_refused;
+            if working && !steer && !self.steer_refused {
+                return;
+            }
+            let message = self.held.remove(0);
+            if steer {
+                // A message held after this boundary waits for the next one.
+                self.steer_budget = if self.held.is_empty() {
+                    0
+                } else {
+                    self.steer_budget - 1
+                };
+                self.steer_in(message, ctx);
+                self.persist_outbox(ctx);
+                return;
+            }
+            self.deliver(message.text, message.images, message.images_lost, ctx);
+            if !self.steer_refused {
+                return;
+            }
+        }
+    }
+
+    fn steer_in(&mut self, message: Failed, ctx: &mut Ctx<'_>) {
+        let store = ctx.files.map(|f| f.images(&self.name));
+        let out = match (self.client.as_mut(), matches!(self.chan, Chan::Live(_))) {
+            (Some(client), true) => client
+                .steer(&message.text, &message.images, store.as_ref())
+                .ok(),
+            _ => None,
+        };
+        let Some(out) = out else {
+            self.held.insert(0, message);
+            self.steer_budget = 0;
+            return;
+        };
+        self.steering = Some(message);
+        self.persist_journal(ctx);
+        self.write(out.line.clone(), Some(WriteTag::Steer(out)), ctx);
+    }
+
+    /// Sends a held message into the running turn without waiting for a tool call to end.
+    pub fn send_held_now(&mut self, key: &str, ctx: &mut Ctx<'_>) {
+        let Ok(id) = uuid::Uuid::parse_str(key) else {
+            return;
+        };
+        if !self.is_working() || self.steer_refused {
+            return;
+        }
+        let Some(at) = self.held.iter().position(|m| m.id == id) else {
+            return;
+        };
+        let message = self.held.remove(at);
+        self.held.insert(0, message);
+        self.steer_budget = self.steer_budget.max(1);
+        self.drive_held(ctx);
+        self.persist_outbox(ctx);
+        self.touched();
+    }
+
+    /// What the chips show: the messages the agent queued itself, then the ones held here.
+    pub fn held(&self) -> &[Failed] {
+        &self.held
     }
 
     fn remember(&self, id: String, value: String, ctx: &mut Ctx<'_>) {
@@ -845,6 +960,9 @@ impl Session {
             self.persist_title(ctx);
             self.publish_options(ctx);
             changed = true;
+        }
+        if changed {
+            self.drive_held(ctx);
         }
         if let Some(at) = self.learn_at
             && ctx.now >= at
@@ -1151,6 +1269,7 @@ impl Session {
         };
         let kinds: &[EntryKind] = match out.undo {
             Undo::Prompt => &[EntryKind::Prompt],
+            Undo::Steer => &[EntryKind::Steer],
             Undo::Permission { .. } | Undo::Question { .. } => {
                 &[EntryKind::Answer, EntryKind::QuestionAnswer]
             }
@@ -1174,7 +1293,11 @@ impl Session {
             let current = generation == s.generation;
             match s.client.as_mut() {
                 // A request id belongs to its own connection: a newer client may reuse it.
-                Some(_) if !current && matches!(out.undo, Undo::Request | Undo::None) => None,
+                Some(_)
+                    if !current && matches!(out.undo, Undo::Request | Undo::Steer | Undo::None) =>
+                {
+                    None
+                }
                 Some(c) => {
                     let done = c.undelivered(out);
                     current.then_some(done).flatten()
@@ -1203,6 +1326,11 @@ impl Session {
                 undo(self, &out, ctx);
                 self.outbox.record_failure(&text, images, lost, None);
                 self.persist_outbox(ctx);
+            }
+            WriteTag::Steer(out) => {
+                if let Some(c) = undo(self, &out, ctx) {
+                    self.on_completion(c, ctx);
+                }
             }
             WriteTag::Answer(out) => {
                 undo(self, &out, ctx);
@@ -1244,7 +1372,14 @@ impl Session {
 
     fn persist_outbox(&self, ctx: &mut Ctx<'_>) {
         if let Some(files) = ctx.files {
-            saved(files.save_outbox(&self.name, &self.outbox.persisted()));
+            // Held messages are stored as unsent ones: a restart offers them through Retry.
+            let mut stored = self.outbox.persisted();
+            stored.extend(self.held.iter().map(|m| PersistedFailed {
+                id: m.id,
+                text: m.text.clone(),
+                image_count: m.image_count(),
+            }));
+            saved(files.save_outbox(&self.name, &stored));
         }
     }
 
@@ -1282,7 +1417,7 @@ impl Session {
         }
         let text = self.draft.trim().to_string();
         let images = self.ready_images();
-        self.deliver(text, images, 0, ctx);
+        self.submit(text, images, ctx);
         self.draft.clear();
         if let Some(branch) = self.branch.as_mut() {
             branch.draft.clear();
@@ -1303,6 +1438,22 @@ impl Session {
         }
         self.deliver(text.to_string(), Vec::new(), 0, ctx);
         true
+    }
+
+    /// A message typed while a turn runs is held for it; otherwise it goes out as a prompt.
+    fn submit(&mut self, text: String, images: Vec<ImageAttachment>, ctx: &mut Ctx<'_>) {
+        if self.is_working() && !self.steer_refused {
+            self.held.push(Failed {
+                id: uuid::Uuid::new_v4(),
+                text,
+                images,
+                images_lost: 0,
+            });
+            self.persist_outbox(ctx);
+            self.touched();
+        } else {
+            self.deliver(text, images, 0, ctx);
+        }
     }
 
     fn deliver(
@@ -1621,6 +1772,7 @@ impl Session {
                 }
             }
             ChatMsg::Retry(key) => self.retry(&key, ctx),
+            ChatMsg::SendNow(key) => self.send_held_now(&key, ctx),
             ChatMsg::Discard(key) => {
                 if let Ok(id) = uuid::Uuid::parse_str(&key) {
                     self.outbox.discard(id);

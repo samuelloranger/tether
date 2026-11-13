@@ -537,10 +537,15 @@ fn queue_shift<'a>(shown: &[String], next: &'a [String]) -> (usize, &'a [String]
 /// How long a leaving chip stays to fade out (`Motion.base` and a frame).
 const QUEUED_FADE: std::time::Duration = std::time::Duration::from_millis(200);
 
-fn sync_queued(vm: &ChatVm, next: &[String]) {
+fn sync_queued(vm: &ChatVm, next: &[String], keys: &[String]) {
     let current = vm.get_queued();
     let Some(rows) = current.as_any().downcast_ref::<VecModel<QueuedVm>>() else {
-        vm.set_queued(model(next.iter().map(|t| queued_vm(t, false)).collect()));
+        vm.set_queued(model(
+            next.iter()
+                .zip(keys)
+                .map(|(t, k)| queued_vm(t, k, false))
+                .collect(),
+        ));
         return;
     };
     let staying: Vec<(usize, String)> = rows
@@ -552,10 +557,11 @@ fn sync_queued(vm: &ChatVm, next: &[String]) {
     let shown: Vec<String> = staying.iter().map(|(_, t)| t.clone()).collect();
     let (leaving, arriving) = queue_shift(&shown, next);
     for (i, text) in staying.iter().take(leaving) {
-        rows.set_row_data(*i, queued_vm(text, true));
+        rows.set_row_data(*i, queued_vm(text, "", true));
     }
-    for text in arriving {
-        rows.push(queued_vm(text, false));
+    let first = next.len() - arriving.len();
+    for (text, key) in arriving.iter().zip(&keys[first..]) {
+        rows.push(queued_vm(text, key, false));
     }
     if leaving > 0 {
         let rows = current.clone();
@@ -571,9 +577,10 @@ fn sync_queued(vm: &ChatVm, next: &[String]) {
     }
 }
 
-fn queued_vm(text: &str, leaving: bool) -> QueuedVm {
+fn queued_vm(text: &str, key: &str, leaving: bool) -> QueuedVm {
     QueuedVm {
         text: text.into(),
+        key: key.into(),
         leaving,
     }
 }
@@ -847,7 +854,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
         }
     });
 
-    sync_queued(&vm, &s.queued);
+    sync_queued(&vm, &s.queued, &s.queued_keys);
 
     let tasks: Vec<ChatTaskVm> = s
         .tasks
@@ -1227,6 +1234,7 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_earlier(|| send(ChatMsg::Earlier));
     vm.on_following(|at_end| send(ChatMsg::Following(at_end)));
     vm.on_retry(|k| send(ChatMsg::Retry(k.into())));
+    vm.on_send_now(|k| send(ChatMsg::SendNow(k.into())));
     vm.on_discard(|k| send(ChatMsg::Discard(k.into())));
     vm.on_sign_in_retry(|| send(ChatMsg::SignInRetry));
     vm.on_dismiss_notice(|| send(ChatMsg::DismissNotice));

@@ -113,23 +113,35 @@ fn pictures(s: &Session, refs: &[ImageRef], ctx: &mut RowCtx<'_>) -> Vec<Picture
 }
 
 /// Messages waiting for the running turn, oldest first, as one line each.
-pub fn queued(s: &Session) -> Vec<String> {
+pub fn queued(s: &Session) -> (Vec<String>, Vec<String>) {
     let state = s.state();
-    state
+    let line = |text: &str, images: usize| match (text.trim(), images) {
+        ("", n) => format::image_label(n),
+        (t, 0) => t.to_string(),
+        (t, n) => format!("{} \u{00B7} {t}", format::image_label(n)),
+    };
+    let mut lines: Vec<String> = state
         .queued_item_ids
         .iter()
         .filter_map(|id| state.items.iter().find(|i| i.id == *id))
         .filter_map(|item| match &item.kind {
             ItemKind::User {
                 text, image_count, ..
-            } => Some(match (text.trim(), *image_count) {
-                ("", n) => format::image_label(n),
-                (t, 0) => t.to_string(),
-                (t, n) => format!("{} \u{00B7} {t}", format::image_label(n)),
-            }),
+            } => Some(line(text, *image_count)),
             _ => None,
         })
-        .collect()
+        .collect();
+    let mut keys = vec![String::new(); lines.len()];
+    let steerable = s.is_working() && !s.steer_refused;
+    for m in s.held() {
+        lines.push(line(&m.text, m.image_count()));
+        keys.push(if steerable {
+            m.id.to_string()
+        } else {
+            String::new()
+        });
+    }
+    (lines, keys)
 }
 
 /// The background commands still running, each with the key of the row that opens it.

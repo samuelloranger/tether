@@ -42,7 +42,12 @@ pub enum RequestKind {
     NewSession,
     LoadSession,
     Prompt,
-    SetConfig { id: String, value: String },
+    /// `_session/steering`: `injected` in the result, or `promptRequired` when no turn was running.
+    Steer,
+    SetConfig {
+        id: String,
+        value: String,
+    },
 }
 
 /// How to take a write back when it fails.
@@ -51,6 +56,7 @@ pub enum Undo {
     None,
     Prompt,
     Request,
+    Steer,
     Permission {
         option_id: String,
     },
@@ -372,6 +378,87 @@ impl ChatClient {
         })
     }
 
+    /// A message into the running turn, journaled and shown before the write. The answer arrives as
+    /// a `Steer` completion; if the write fails, `undelivered` takes it back.
+    pub fn steer(
+        &mut self,
+        text: &str,
+        images: &[ImageAttachment],
+        store: Option<&ImageStore>,
+    ) -> Result<Outbound, ClientError> {
+        let session_id = self
+            .journal
+            .session_id
+            .clone()
+            .ok_or(ClientError::NoSession)?;
+        if self.ended {
+            return Err(ClientError::ConnectionLost);
+        }
+        let offset = self.builder.consumed_offset();
+        let refs: Vec<_> = images
+            .iter()
+            .filter_map(|image| store.and_then(|s| s.put(image)))
+            .collect();
+        let id = self.allocate_id();
+        let mut entry = Entry::new(EntryKind::Steer, offset)
+            .with_text(text)
+            .with_request(id.clone());
+        entry.image_count = images.len();
+        entry.images = refs.clone();
+        self.journal.entries.push(entry);
+        self.builder.apply(ChatEvent::UserSteered {
+            text: text.to_string(),
+            image_count: images.len(),
+            at_offset: offset,
+            request_id: id.clone(),
+            images: refs,
+        });
+        self.save();
+        let mut blocks: Vec<Value> = images
+            .iter()
+            .map(|i| json!({"type": "image", "mimeType": i.mime_type, "data": i.data}))
+            .collect();
+        if !text.is_empty() {
+            blocks.push(json!({"type": "text", "text": text}));
+        }
+        let line = encode(json!({
+            "jsonrpc": "2.0", "id": id.to_json(), "method": "_session/steering",
+            "params": {
+                "sessionId": session_id,
+                "prompt": blocks,
+                "_meta": {"steering": {"idleBehavior": "promptRequired"}},
+            },
+        }));
+        self.pending.insert(
+            id.clone(),
+            Pending {
+                kind: RequestKind::Steer,
+                load_id: None,
+            },
+        );
+        Ok(Outbound {
+            id: Some(id),
+            line,
+            undo: Undo::Steer,
+        })
+    }
+
+    fn steer_undelivered(&mut self, id: &AcpId) {
+        let Some(index) = self
+            .journal
+            .entries
+            .iter()
+            .rposition(|e| e.kind == EntryKind::Steer && e.request_id.as_ref() == Some(id))
+        else {
+            return;
+        };
+        self.journal.entries.remove(index);
+        self.save();
+        self.builder.apply(ChatEvent::SteerUndelivered {
+            request_id: id.clone(),
+        });
+    }
+
     /// The prompt's write failed: take it back out of the journal and the transcript.
     pub fn prompt_undelivered(&mut self, id: &AcpId) {
         self.pending.remove(id);
@@ -614,6 +701,15 @@ impl ChatClient {
         match &out.undo {
             Undo::None => {}
             Undo::Prompt => self.prompt_undelivered(id),
+            Undo::Steer => {
+                self.steer_undelivered(id);
+                let pending = self.pending.remove(id)?;
+                return Some(Completion {
+                    id: id.clone(),
+                    kind: pending.kind,
+                    outcome: Err(ClientError::ConnectionLost),
+                });
+            }
             Undo::Request => {
                 let pending = self.pending.remove(id)?;
                 return Some(Completion {
@@ -724,7 +820,7 @@ impl ChatClient {
                 Inbound::ClientEcho { message, .. } => {
                     if matches!(
                         message.get("method").and_then(Value::as_str),
-                        Some("session/prompt" | "session/load")
+                        Some("session/prompt" | "_session/steering" | "session/load")
                     ) {
                         let session = message
                             .get("params")

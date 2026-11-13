@@ -1278,19 +1278,178 @@ fn a_chat_started_elsewhere_on_a_shared_holder_is_joined_live() {
     assert!(writes[0].contains("\"sessionId\":\"s1\""), "{writes:?}");
 }
 
+fn send(h: &mut Harness, text: &str) {
+    h.msg(ChatMsg::DraftEdited {
+        text: text.into(),
+        cursor_byte: text.len(),
+    });
+    h.msg(ChatMsg::Send);
+}
+
+fn tool_line(status: &str, kind: &str) -> String {
+    format!(
+        r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s1","update":{{"sessionUpdate":"{kind}","toolCallId":"t1","title":"Bash","kind":"execute","status":"{status}"}}}}}}"#
+    )
+}
+
+fn method_count(writes: &[String], method: &str) -> usize {
+    writes
+        .iter()
+        .filter(|w| w.contains(&format!("\"method\":\"{method}\"")))
+        .count()
+}
+
+#[test]
+fn queued_messages_go_into_the_running_turn_when_a_tool_call_ends() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    send(&mut h, "running");
+    let mut writes = h.writes();
+    h.feed(&name, generation, &tool_line("in_progress", "tool_call"));
+    send(&mut h, "one");
+    send(&mut h, "two");
+    writes.extend(h.writes());
+    assert_eq!(method_count(&writes, "_session/steering"), 0);
+    assert_eq!(h.screen().queued, ["one", "two"]);
+
+    h.feed(
+        &name,
+        generation,
+        &tool_line("completed", "tool_call_update"),
+    );
+    let first = h.writes();
+    assert_eq!(method_count(&first, "_session/steering"), 1, "{first:?}");
+    assert!(first[0].contains("\"idleBehavior\":\"promptRequired\""));
+    assert!(first[0].contains("\"text\":\"one\""));
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":4,"result":{"outcome":"injected"}}"#,
+    );
+    let second = h.writes();
+    assert_eq!(method_count(&second, "_session/steering"), 1, "{second:?}");
+    assert!(second[0].contains("\"text\":\"two\""));
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":5,"result":{"outcome":"injected"}}"#,
+    );
+    let s = h.screen();
+    assert!(s.queued.is_empty());
+    let users: Vec<_> = rows(&s)
+        .into_iter()
+        .filter_map(|r| match r {
+            RowBody::User { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(users, ["running", "one", "two"]);
+
+    send(&mut h, "after");
+    let after = h.writes();
+    assert!(after.is_empty(), "waits for the next boundary: {after:?}");
+    assert_eq!(h.screen().queued, ["after"]);
+}
+
+#[test]
+fn send_now_steers_at_once_and_an_agent_without_steering_gets_prompts_straight_away() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    send(&mut h, "running");
+    h.writes();
+    send(&mut h, "first");
+    send(&mut h, "urgent");
+    let s = h.screen();
+    assert_eq!(s.queued_keys.len(), 2);
+    h.msg(ChatMsg::SendNow(s.queued_keys[1].clone()));
+    let writes = h.writes();
+    assert_eq!(method_count(&writes, "_session/steering"), 1, "{writes:?}");
+    assert!(writes[0].contains("urgent") && !writes[0].contains("first"));
+
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}"#,
+    );
+    let writes = h.writes();
+    assert_eq!(method_count(&writes, "session/prompt"), 2, "{writes:?}");
+    assert!(writes[0].contains("urgent") && writes[1].contains("first"));
+    let s = h.screen();
+    assert_eq!(s.queued, ["urgent", "first"]);
+    assert!(s.queued_keys.iter().all(String::is_empty));
+    assert!(
+        !rows(&s).iter().any(|r| matches!(r, RowBody::Error(_))),
+        "a refused steer is no error row"
+    );
+
+    h.feed(&name, generation, &tool_line("in_progress", "tool_call"));
+    h.feed(
+        &name,
+        generation,
+        &tool_line("completed", "tool_call_update"),
+    );
+    send(&mut h, "later");
+    let writes = h.writes();
+    assert_eq!(method_count(&writes, "_session/steering"), 0);
+    assert_eq!(method_count(&writes, "session/prompt"), 1, "{writes:?}");
+}
+
+#[test]
+fn stop_sends_a_held_message_when_the_turn_ends_and_the_rest_wait() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    send(&mut h, "running");
+    send(&mut h, "two");
+    send(&mut h, "three");
+    h.writes();
+    h.msg(ChatMsg::Stop);
+    let tag = h
+        .take()
+        .into_iter()
+        .find_map(|j| match j {
+            ChatJob::Write {
+                tag: Some(tag),
+                ack: true,
+                ..
+            } => Some(tag),
+            _ => None,
+        })
+        .expect("an acknowledged cancel");
+    h.msg(ChatMsg::Written {
+        name: name.clone(),
+        generation,
+        tag,
+    });
+    assert!(h.writes().iter().all(|w| !w.contains("session/prompt")));
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled"}}"#,
+    );
+    let writes = h.writes();
+    assert_eq!(method_count(&writes, "session/prompt"), 1, "{writes:?}");
+    assert!(writes[0].contains("\"text\":\"two\""));
+    assert_eq!(h.screen().queued, ["three"]);
+}
+
 #[test]
 fn stop_sends_the_queued_messages_as_the_next_prompt() {
     let mut h = Harness::new();
     let (name, generation) = h.live_chat();
-    for text in ["one", "two", "three"] {
-        h.msg(ChatMsg::DraftEdited {
-            text: text.into(),
-            cursor_byte: text.len(),
-        });
-        h.msg(ChatMsg::Send);
+    send(&mut h, "one");
+    send(&mut h, "steer me");
+    let s = h.screen();
+    h.msg(ChatMsg::SendNow(s.queued_keys[0].clone()));
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}"#,
+    );
+    for text in ["two", "three"] {
+        send(&mut h, text);
     }
     h.writes();
-    assert_eq!(h.screen().queued, ["two", "three"]);
+    assert_eq!(h.screen().queued, ["steer me", "two", "three"]);
     h.msg(ChatMsg::Stop);
     let tag = h
         .take()
@@ -1315,7 +1474,10 @@ fn stop_sends_the_queued_messages_as_the_next_prompt() {
         .filter(|w| w.contains("session/prompt"))
         .collect();
     assert_eq!(resent.len(), 1, "{writes:?}");
-    assert!(resent[0].contains(r#""text":"two\n\nthree""#), "{writes:?}");
+    assert!(
+        resent[0].contains(r#""text":"steer me\n\ntwo\n\nthree""#),
+        "{writes:?}"
+    );
     let users = |s: &ChatScreen| -> Vec<String> {
         rows(s)
             .iter()
@@ -1328,7 +1490,7 @@ fn stop_sends_the_queued_messages_as_the_next_prompt() {
     let s = h.screen();
     assert_eq!(
         s.queued,
-        ["two\n\nthree"],
+        ["steer me\n\ntwo\n\nthree"],
         "waits for the stopped turn to end"
     );
     assert_eq!(
@@ -1349,7 +1511,7 @@ fn stop_sends_the_queued_messages_as_the_next_prompt() {
     );
     let s = h.screen();
     assert!(s.queued.is_empty());
-    assert_eq!(users(&s), ["one", "two\n\nthree"]);
+    assert_eq!(users(&s), ["one", "steer me\n\ntwo\n\nthree"]);
 }
 
 #[cfg(debug_assertions)]
