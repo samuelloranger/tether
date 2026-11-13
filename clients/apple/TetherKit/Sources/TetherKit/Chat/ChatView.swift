@@ -403,8 +403,8 @@ struct ChatView: View {
             if let id = entry.localID {
               Button { editQueuedMessage(id) } label: {
                 queuedLabel(entry.text)
-                  .frame(minHeight: 44)
-                  .padding(.leading, 12)
+                  .padding(.leading, 12).padding(.trailing, 4)
+                  .frame(minHeight: 36)
                   .contentShape(Rectangle())
               }
               .buttonStyle(.plain)
@@ -413,9 +413,11 @@ struct ChatView: View {
               .accessibilityIdentifier("chatQueueEdit-\(id)")
               if model.isWorking, !model.steerRefused {
                 Button { model.sendQueuedMessageNow(id) } label: {
-                  Image(systemName: "arrow.up").font(.caption2.weight(.semibold))
-                    .foregroundStyle(TetherColors.textSecondary)
-                    .frame(width: 44, height: 44)
+                  Image(systemName: "arrow.up").font(.caption2.weight(.bold))
+                    .foregroundStyle(TetherColors.onAccent)
+                    .frame(width: 22, height: 22)
+                    .background(TetherColors.accent, in: Circle())
+                    .frame(width: 32, height: 36)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -424,8 +426,8 @@ struct ChatView: View {
               }
               Button { model.removeQueuedMessage(id) } label: {
                 Image(systemName: "xmark").font(.caption2.weight(.semibold))
-                  .foregroundStyle(TetherColors.textSecondary)
-                  .frame(width: 44, height: 44)
+                  .foregroundStyle(TetherColors.textFaint)
+                  .frame(width: 32, height: 36)
                   .contentShape(Rectangle())
               }
               .buttonStyle(.plain)
@@ -433,13 +435,14 @@ struct ChatView: View {
               .accessibilityIdentifier("chatQueueRemove-\(id)")
             } else {
               queuedLabel(entry.text)
-                .padding(.horizontal, 12).padding(.vertical, 7)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 36)
                 .accessibilityLabel("Queued: \(entry.text)")
             }
           }
-          .background(TetherColors.surface.opacity(0.96), in: RoundedRectangle(cornerRadius: 14))
-          .overlay(RoundedRectangle(cornerRadius: 14).stroke(TetherColors.border, lineWidth: 1))
-          .shadow(color: .black.opacity(0.35), radius: 9, y: 6)
+          .padding(.trailing, entry.localID == nil ? 0 : 2)
+          .background(TetherColors.surfaceRaised, in: Capsule())
+          .overlay(Capsule().stroke(TetherColors.border, lineWidth: 1))
           .accessibilityElement(children: .contain)
         }
       }
@@ -453,9 +456,9 @@ struct ChatView: View {
 
   private func queuedLabel(_ text: String) -> some View {
     HStack(spacing: 6) {
-      Text(text).font(.subheadline).foregroundStyle(TetherColors.textSecondary)
-        .lineLimit(1).truncationMode(.tail)
       Image(systemName: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
+      Text(text).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        .lineLimit(1).truncationMode(.tail)
     }
   }
 
