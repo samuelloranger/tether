@@ -146,9 +146,6 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
       - name: Test
         run: cargo test --workspace
 
@@ -173,6 +170,35 @@ jobs:
 
   # The desktop client builds, lints and tests on Linux as well as Windows, and ships there
   # as an AppImage.
+  # Clippy for the Windows target, cross-checked from Linux: a third compile on the Windows
+  # runner cost more than the whole job takes here.
+  windows-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: x86_64-pc-windows-msvc
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-xwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop
+          shared-key: desktop-windows-lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-directories: ~/.cache/cargo-xwin
+
+      - name: Clippy
+        run: cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets --locked -- -D warnings
+
   desktop-linux:
     runs-on: ubuntu-latest
     container: ubuntu:24.04
