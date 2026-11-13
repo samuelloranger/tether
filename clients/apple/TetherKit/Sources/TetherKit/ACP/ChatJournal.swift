@@ -12,6 +12,8 @@ struct ChatJournal: Codable, Equatable, Sendable {
       case questionAnswer
       /// An answer the host recorded while no client was attached; offset 0, applied before the replay.
       case hostAnswer
+      /// A message sent into the running turn; the agent's answer to `requestId` says if it took it.
+      case steer
     }
     var kind: Kind
     var offset: Int
@@ -54,6 +56,9 @@ struct ChatJournal: Codable, Equatable, Sendable {
       switch kind {
       case .prompt:
         return text.map { .userPrompt(text: $0, imageCount: imageCount, atOffset: offset, requestId: requestId, images: images) }
+      case .steer:
+        guard let text, let requestId else { return nil }
+        return .userSteered(text: text, imageCount: imageCount, atOffset: offset, requestId: requestId, images: images)
       case .cancel:
         return .cancelRequested
       case .silentRequest:

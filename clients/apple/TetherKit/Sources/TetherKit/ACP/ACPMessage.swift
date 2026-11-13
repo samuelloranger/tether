@@ -161,6 +161,8 @@ struct ACPResult: Equatable, Sendable {
   var sessionId: String?
   var stopReason: String?
   var configOptions: [ACPConfigOption]?
+  /// `_session/steering`'s answer: `injected`, or `promptRequired` when no turn was running.
+  var steerOutcome: String?
 }
 
 enum ACPInbound: Equatable, Sendable {
@@ -228,16 +230,18 @@ enum ACPDecoder {
 
   private static func clientLine(_ line: JSON) -> ACPClientLine {
     let id = parseID(line["id"])
+    let params = line["params"] as? JSON
+    let blocks = params?["prompt"] as? [JSON] ?? []
+    let text = blocks.filter { $0["type"] as? String == "text" && ($0["_meta"] as? JSON)?["tether/branchContext"] as? Bool != true }.compactMap { $0["text"] as? String }.joined()
+    let imageCount = blocks.filter { $0["type"] as? String == "image" }.count
     switch line["method"] as? String {
     case "session/prompt":
-      let params = line["params"] as? JSON
-      let blocks = params?["prompt"] as? [JSON] ?? []
-      let text = blocks.filter { $0["type"] as? String == "text" && ($0["_meta"] as? JSON)?["tether/branchContext"] as? Bool != true }.compactMap { $0["text"] as? String }.joined()
-      return .prompt(
-        id: id, text: text, imageCount: blocks.filter { $0["type"] as? String == "image" }.count,
-        sessionId: params?["sessionId"] as? String)
+      return .prompt(id: id, text: text, imageCount: imageCount, sessionId: params?["sessionId"] as? String)
+    case "_session/steering":
+      guard let id else { return .other }
+      return .steer(id: id, text: text, imageCount: imageCount)
     case "session/load":
-      return .load(sessionId: (line["params"] as? JSON)?["sessionId"] as? String)
+      return .load(sessionId: params?["sessionId"] as? String)
     case "session/cancel":
       return .cancel
     case .some:
@@ -280,7 +284,8 @@ enum ACPDecoder {
       loadSession: capabilities?["loadSession"] as? Bool,
       sessionId: result["sessionId"] as? String,
       stopReason: result["stopReason"] as? String,
-      configOptions: (result["configOptions"] as? [JSON]).map(configOptions))
+      configOptions: (result["configOptions"] as? [JSON]).map(configOptions),
+      steerOutcome: result["outcome"] as? String)
   }
 
   private static func decodeUpdate(_ update: JSON, images: (any ChatImageSink)?) -> ACPUpdate {

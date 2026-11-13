@@ -78,6 +78,19 @@ func TestACPLoadReplayIsNoTurnAndEndsTasks(t *testing.T) {
 	}
 }
 
+func TestACPSteeringIsEchoedAndOpensNoTurn(t *testing.T) {
+	acpEnv(t)
+	_ = os.MkdirAll(acpDir("sr"), 0o700)
+	tr := loadACPTracker("sr")
+	forward, echo := tr.clientLine([]byte(`{"jsonrpc":"2.0","id":"a-4","method":"_session/steering","params":{"sessionId":"x","prompt":[{"type":"text","text":"also"}]}}`))
+	if !forward || !echo {
+		t.Fatalf("forward %v echo %v", forward, echo)
+	}
+	if len(tr.st.Prompts) != 0 {
+		t.Fatalf("a steer counted as a prompt: %v", tr.st.Prompts)
+	}
+}
+
 func TestACPCancelEndsAgentStartedTurn(t *testing.T) {
 	acpEnv(t)
 	_ = os.MkdirAll(acpDir("cx"), 0o700)

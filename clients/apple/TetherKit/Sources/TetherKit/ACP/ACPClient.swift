@@ -224,6 +224,39 @@ actor ACPClient {
     }
   }
 
+  /// Sends a message into the running turn. False when no turn was running any more: nothing went
+  /// in and the caller sends it as a prompt. An agent without steering answers with an error.
+  func steer(text: String, images: [ChatImageAttachment] = []) async throws -> Bool {
+    guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
+    guard !ended else { throw ACPClientError.connectionLost }
+    let offset = builder.consumedOffset
+    let count = images.count
+    let refs = images.compactMap { self.images?.put($0) }
+    let requestId = allocateId()
+    journal.entries.append(
+      .init(kind: .steer, offset: offset, text: text, requestId: requestId, imageCount: count, images: refs))
+    builder.apply(.userSteered(text: text, imageCount: count, atOffset: offset, requestId: requestId, images: refs))
+    publish()
+    store.save(journal)
+    var blocks: [[String: Any]] = images.map { ["type": "image", "mimeType": $0.mimeType, "data": $0.data] }
+    if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
+    let params: [String: Any] = [
+      "sessionId": sessionId, "prompt": blocks, "_meta": ["steering": ["idleBehavior": "promptRequired"]],
+    ]
+    do {
+      return try await request("_session/steering", params, id: requestId).steerOutcome == "injected"
+    } catch {
+      // The agent answered, so the log holds the outcome and the transcript already dropped the row.
+      if case ACPClientError.agent = error { throw error }
+      // Taken back so the caller can queue it again; one that did reach the agent then goes twice.
+      journal.entries.removeAll { $0.kind == .steer && $0.requestId == requestId }
+      store.save(journal)
+      builder.apply(.steerUndelivered(requestId: requestId))
+      publish()
+      throw error
+    }
+  }
+
   /// Returns once the agent confirmed; the new value reaches `state` through the result's options.
   func setConfigOption(id: String, value: String) async throws {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
@@ -362,8 +395,10 @@ actor ACPClient {
     return id
   }
 
-  private func request(_ method: String, _ params: [String: Any], silent: Bool = false) async throws -> ACPResult {
-    let id = allocateId()
+  private func request(
+    _ method: String, _ params: [String: Any], silent: Bool = false, id: ACPID? = nil
+  ) async throws -> ACPResult {
+    let id = id ?? allocateId()
     if silent {
       journal.entries.append(.init(kind: .silentRequest, offset: builder.consumedOffset, requestId: id))
       builder.apply(.silentRequest(requestId: id))
