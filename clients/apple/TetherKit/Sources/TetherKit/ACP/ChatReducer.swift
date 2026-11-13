@@ -229,6 +229,11 @@ struct ChatState: Codable, Equatable, Sendable {
   /// Until the answer to `session/new` or `session/load`, agent output is replayed history, not a
   /// live turn. A snapshot from before this field was taken after that answer, so it decodes false.
   fileprivate(set) var loading = true
+  /// Bumped each time a top-level tool call of the running turn ends with no other still running:
+  /// the point where a waiting message can go into the turn (see `_session/steering`).
+  fileprivate(set) var toolBoundaries = 0
+  /// Messages sent into the running turn, by request id, until the agent says whether it took them.
+  fileprivate var steerItemIds: [ACPID: Int] = [:]
 
   struct InFlightPrompt: Codable, Equatable, Sendable {
     var itemId: Int
@@ -336,6 +341,8 @@ extension ChatState {
     lastUserMessageId = try c.decodeIfPresent(String.self, forKey: .lastUserMessageId)
     agentStarted = try c.decodeIfPresent(Bool.self, forKey: .agentStarted) ?? false
     loading = try c.decodeIfPresent(Bool.self, forKey: .loading) ?? false
+    toolBoundaries = try c.decodeIfPresent(Int.self, forKey: .toolBoundaries) ?? 0
+    steerItemIds = try c.decodeIfPresent([ACPID: Int].self, forKey: .steerItemIds) ?? [:]
   }
 
   var pendingQuestions: [ChatQuestion] {
@@ -366,6 +373,11 @@ enum ChatEvent: Equatable, Sendable {
   case questionAnswerUndelivered(requestId: ACPID, action: ChatQuestionAction, content: [String: ChatQuestionValue])
   /// The prompt never reached the agent: drop it from the transcript and end the turn it opened.
   case promptUndelivered(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID? = nil, images: [ChatImageRef] = [])
+  /// A message sent into the running turn: a user row that opens no turn of its own. The agent's
+  /// answer to `requestId` keeps it or, when the agent did not take it, removes it.
+  case userSteered(text: String, imageCount: Int = 0, atOffset: Int, requestId: ACPID, images: [ChatImageRef] = [])
+  /// The steer never reached the agent.
+  case steerUndelivered(requestId: ACPID)
   case connectionLost
   case failure(String)
 }
@@ -426,6 +438,11 @@ enum ChatReducer {
         if next.queuedItemIds.isEmpty { next.startPending = false }
       }
       next.turn = next.inFlight.isEmpty ? .idle : .working
+    case let .userSteered(text, imageCount, offset, requestId, images):
+      next.steerItemIds[requestId] = next.nextItemId
+      append(.user(text: text, imageCount: imageCount, offset: offset, images: images), to: &next)
+    case let .steerUndelivered(requestId):
+      dropSteer(requestId, in: &next)
     case .connectionLost:
       next.connection = .lost
     case let .failure(message):
@@ -471,6 +488,14 @@ enum ChatReducer {
   private static func apply(_ message: ACPInbound, to state: inout ChatState) {
     switch message {
     case let .response(responseId, result):
+      if state.steerItemIds[responseId] != nil {
+        if result.steerOutcome == "injected" {
+          state.steerItemIds[responseId] = nil
+        } else {
+          dropSteer(responseId, in: &state)
+        }
+        return
+      }
       if let id = result.sessionId {
         state.sessionId = id
         endSession(in: &state)
@@ -484,6 +509,11 @@ enum ChatReducer {
         endPendingQuestions(in: &state)
       }
     case let .errorResponse(id, code, text):
+      // The sender keeps an unaccepted steer queued or sends it as a prompt; it is no error row.
+      if let id, state.steerItemIds[id] != nil {
+        dropSteer(id, in: &state)
+        return
+      }
       // A failed session/load is the session answer too: what follows is live, not history.
       if let id, !state.inFlight.contains(where: { $0.requestId == id }) { state.loading = false }
       if let id, state.silentRequestIds.contains(id) { return }
@@ -775,12 +805,34 @@ enum ChatReducer {
     if let mode = options.first(where: { $0.id == "mode" }) { state.modeId = mode.currentValue }
   }
 
+  private static func dropSteer(_ requestId: ACPID, in state: inout ChatState) {
+    guard let itemId = state.steerItemIds.removeValue(forKey: requestId) else { return }
+    state.items.removeAll { $0.id == itemId }
+  }
+
+  /// A top-level call of this turn that stops running, with none of the turn's others still running.
+  private static func noteToolEnd(at index: Int, wasRunning: Bool, in state: inout ChatState) {
+    guard wasRunning, !state.loading, state.turn == .working,
+      case let .tool(call) = state.items[index].kind, !call.isRunning
+    else { return }
+    // The running prompt's row; a steered row inside the turn is no start of one.
+    let turnStart = state.inFlight.first.flatMap { prompt in state.items.firstIndex { $0.id == prompt.itemId } }
+      ?? (state.items[..<index].lastIndex { if case .user = $0.kind { return true }; return false }) ?? -1
+    let othersRunning = state.items[(turnStart + 1)..<openEnd(state)].contains {
+      if case let .tool(other) = $0.kind { return other.isRunning }
+      return false
+    }
+    if !othersRunning { state.toolBoundaries += 1 }
+  }
+
   private static func mergeTool(_ fields: ACPToolFields, creating: Bool, into state: inout ChatState) {
     for index in state.items.indices.reversed() {
       guard case var .tool(call) = state.items[index].kind else { continue }
       if call.id == fields.id {
+        let wasRunning = call.isRunning
         call.merge(fields)
         state.items[index].kind = .tool(call)
+        noteToolEnd(at: index, wasRunning: wasRunning, in: &state)
         if let launched = fields.launchedSessionId { adoptOrphans(of: launched, in: &state) }
         return
       }

@@ -22,6 +22,8 @@ pub enum EntryKind {
     QuestionAnswer,
     /// An answer the host recorded while no client was attached; offset 0, applied before the replay.
     HostAnswer,
+    /// A message sent into the running turn; the agent's answer to `request_id` says if it took it.
+    Steer,
 }
 
 impl EntryKind {
@@ -33,6 +35,7 @@ impl EntryKind {
             Self::Cancel => "cancel",
             Self::QuestionAnswer => "questionAnswer",
             Self::HostAnswer => "hostAnswer",
+            Self::Steer => "steer",
         }
     }
 }
@@ -95,6 +98,13 @@ impl Entry {
                 image_count: self.image_count,
                 at_offset: self.offset,
                 request_id: self.request_id.clone(),
+                images: self.images.clone(),
+            }),
+            EntryKind::Steer => Some(ChatEvent::UserSteered {
+                text: self.text.clone()?,
+                image_count: self.image_count,
+                at_offset: self.offset,
+                request_id: self.request_id.clone()?,
                 images: self.images.clone(),
             }),
             EntryKind::Cancel => Some(ChatEvent::CancelRequested),
@@ -1280,5 +1290,51 @@ mod tests {
         assert_eq!(state.cost.as_ref().unwrap().amount, 1.0);
         assert_eq!(state.context_used, Some(3));
         assert_eq!(state.model_id.as_deref(), Some("m"));
+    }
+
+    #[test]
+    fn another_clients_steer_shows_from_its_echo_and_replay_equals_live() {
+        let lines = [
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"},"messageId":"m1"}}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","method":"_tether/client","params":{"client":"b","message":{"id":"b-2","jsonrpc":"2.0","method":"_session/steering","params":{"prompt":[{"text":"from b","type":"text"}],"sessionId":"s"}}}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":"b-2","result":{"outcome":"injected"}}"#.to_string(),
+        ];
+        let log: Vec<u8> = lines
+            .iter()
+            .flat_map(|l| format!("{l}\n").into_bytes())
+            .collect();
+        let users = |s: &ChatState| -> Vec<String> {
+            s.items
+                .iter()
+                .filter_map(|i| match &i.kind {
+                    ItemKind::User { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let other = Journal {
+            client_id: Some("a".into()),
+            entries: vec![
+                Entry::new(EntryKind::Prompt, 0)
+                    .with_text("go")
+                    .with_request(AcpId::Str("a-1".into())),
+            ],
+            ..Journal::default()
+        };
+        assert_eq!(users(&replay(&log, &other)), ["go", "from b"]);
+
+        let own = Journal {
+            client_id: Some("b".into()),
+            entries: vec![
+                Entry::new(EntryKind::Prompt, 0)
+                    .with_text("go")
+                    .with_request(AcpId::Str("a-1".into())),
+                Entry::new(EntryKind::Steer, lines[0].len() + 1)
+                    .with_text("from b")
+                    .with_request(AcpId::Str("b-2".into())),
+            ],
+            ..Journal::default()
+        };
+        assert_eq!(users(&replay(&log, &own)), ["go", "from b"]);
     }
 }

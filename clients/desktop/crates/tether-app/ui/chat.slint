@@ -108,6 +108,8 @@ export struct NcMenuVm {
 // A queued message; `leaving` while it fades out after it started or was removed.
 export struct QueuedVm {
     text: string,
+    // The held message a send-now acts on; empty when the agent queued it itself or steering is off.
+    key: string,
     leaving: bool,
 }
 
@@ -403,6 +405,7 @@ export global ChatVm {
     // The reader left the end of the transcript (false) or came back to it (true).
     callback following(bool);
     callback retry(string);
+    callback send-now(string);
     callback discard(string);
     callback sign-in-retry();
     callback dismiss-notice();
@@ -1956,6 +1959,8 @@ component Composer inherits VerticalLayout {
 component QueuedChip inherits Rectangle {
     in property <string> text;
     in property <bool> leaving;
+    in property <string> key;
+    callback send-now(string);
     in property <length> max-chip: 480px;
     property <bool> entered;
     Timer { interval: 30ms; running: !root.entered; triggered => { root.entered = true; } }
@@ -1985,6 +1990,7 @@ component QueuedChip inherits Rectangle {
             VerticalLayout { alignment: center; Glyph { which: 19; size: 11px; } }
             Text { text: "Queued"; font-size: 11px; color: Tokens.text-faint; vertical-alignment: center; }
         }
+        if root.key != "": IconButton { flat: true; size: 22px; icon: @image-url("icons/arrow-up.svg"); tooltip: "Send now"; clicked => { root.send-now(root.key); } }
     }
 }
 
@@ -2068,7 +2074,7 @@ component BottomBar inherits Rectangle {
         spacing: 6px;
         for q in ChatVm.queued: HorizontalLayout {
             alignment: end;
-            QueuedChip { text: q.text; leaving: q.leaving; max-chip: queue.width * 0.78; }
+            QueuedChip { text: q.text; key: q.key; leaving: q.leaving; max-chip: queue.width * 0.78; send-now(k) => { ChatVm.send-now(k); } }
         }
     }
     col := VerticalLayout {

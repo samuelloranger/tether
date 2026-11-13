@@ -277,6 +277,8 @@ pub struct AcpResult {
     pub config_options: Option<Vec<ConfigOption>>,
     /// The answer carries `modes`: it is a `session/new` or `session/load` answer.
     pub session_established: bool,
+    /// `_session/steering`'s answer: `injected`, or `promptRequired` when no turn was running.
+    pub steer_outcome: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -452,6 +454,7 @@ fn decode_result(result: &Json) -> AcpResult {
         stop_reason: string(result.get("stopReason")),
         config_options: objects(result.get("configOptions")).map(|o| config_options(&o)),
         session_established: result.contains_key("modes") || result.contains_key("sessionId"),
+        steer_outcome: string(result.get("outcome")),
     }
 }
 

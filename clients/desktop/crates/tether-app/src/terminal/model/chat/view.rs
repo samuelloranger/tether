@@ -502,6 +502,8 @@ pub struct ChatScreen {
     pub rows: Vec<Row>,
     /// Sent while a turn runs and not started yet; shown above the composer, not in the transcript.
     pub queued: Vec<String>,
+    /// Per queued line: the held message's key while a send-now is possible, else empty.
+    pub queued_keys: Vec<String>,
     pub tasks: Vec<TaskView>,
     pub workflows: Vec<WorkflowStripView>,
     pub workflow: Option<WorkflowSheetView>,

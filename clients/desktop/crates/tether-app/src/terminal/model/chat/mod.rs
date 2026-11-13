@@ -107,6 +107,8 @@ pub enum WriteTag {
     /// A permission or question answer: the host may have taken one first.
     Answer(Outbound),
     Cancel(Outbound),
+    /// A held message sent into the running turn.
+    Steer(Outbound),
     Config {
         out: Outbound,
         id: String,
@@ -202,6 +204,7 @@ pub enum ChatMsg {
     Earlier,
     Following(bool),
     Retry(String),
+    SendNow(String),
     Discard(String),
     SignInRetry,
     DismissNotice,

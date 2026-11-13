@@ -411,6 +411,17 @@ struct ChatView: View {
               .disabled(attachments.encoding > 0)
               .accessibilityLabel("Edit queued message: \(entry.text)")
               .accessibilityIdentifier("chatQueueEdit-\(id)")
+              if model.isWorking, !model.steerRefused {
+                Button { model.sendQueuedMessageNow(id) } label: {
+                  Image(systemName: "arrow.up").font(.caption2.weight(.semibold))
+                    .foregroundStyle(TetherColors.textSecondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Send now: \(entry.text)")
+                .accessibilityIdentifier("chatQueueSendNow-\(id)")
+              }
               Button { model.removeQueuedMessage(id) } label: {
                 Image(systemName: "xmark").font(.caption2.weight(.semibold))
                   .foregroundStyle(TetherColors.textSecondary)

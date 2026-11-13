@@ -397,6 +397,13 @@ pub struct ChatState {
     /// A snapshot from before this field was taken after that answer, hence the false default on decode.
     #[serde(default)]
     awaiting_session: bool,
+    /// Bumped each time a top-level tool call of the running turn ends with none of the turn's
+    /// others still running: where a waiting message can go into the turn (`_session/steering`).
+    #[serde(default)]
+    pub tool_boundaries: u64,
+    /// Messages sent into the running turn, by request id, until the agent says whether it took them.
+    #[serde(default)]
+    steer_item_ids: Vec<(AcpId, i64)>,
 }
 
 impl Default for ChatState {
@@ -427,6 +434,8 @@ impl Default for ChatState {
             last_user_message_id: None,
             agent_started: false,
             awaiting_session: true,
+            tool_boundaries: 0,
+            steer_item_ids: Vec::new(),
         }
     }
 }
@@ -606,6 +615,19 @@ pub enum ChatEvent {
         request_id: Option<AcpId>,
         images: Vec<ImageRef>,
     },
+    /// A message sent into the running turn: a user row that opens no turn of its own. The agent's
+    /// answer to `request_id` keeps it or, when the agent did not take it, removes it.
+    UserSteered {
+        text: String,
+        image_count: usize,
+        at_offset: usize,
+        request_id: AcpId,
+        images: Vec<ImageRef>,
+    },
+    /// The steer never reached the agent.
+    SteerUndelivered {
+        request_id: AcpId,
+    },
     ConnectionLost,
     Failure(String),
 }
@@ -736,6 +758,25 @@ pub fn reduce(state: &mut ChatState, event: ChatEvent) {
             }
             state.turn = turn_for(state);
         }
+        ChatEvent::UserSteered {
+            text,
+            image_count,
+            at_offset,
+            request_id,
+            images,
+        } => {
+            state.steer_item_ids.push((request_id, state.next_item_id));
+            append(
+                ItemKind::User {
+                    text,
+                    image_count,
+                    offset: at_offset,
+                    images,
+                },
+                state,
+            );
+        }
+        ChatEvent::SteerUndelivered { request_id } => drop_steer(&request_id, state),
         ChatEvent::ConnectionLost => state.connection = LinkState::Lost,
         ChatEvent::Failure(message) => {
             append(ItemKind::Error(message), state);
@@ -782,6 +823,14 @@ fn append(kind: ItemKind, state: &mut ChatState) {
 fn apply(message: &Inbound, state: &mut ChatState) {
     match message {
         Inbound::Response { id, result } => {
+            if state.steer_item_ids.iter().any(|(r, _)| r == id) {
+                if result.steer_outcome.as_deref() == Some("injected") {
+                    forget_steer(id, state);
+                } else {
+                    drop_steer(id, state);
+                }
+                return;
+            }
             if let Some(s) = &result.session_id {
                 state.session_id = Some(s.clone());
             }
@@ -805,6 +854,13 @@ fn apply(message: &Inbound, state: &mut ChatState) {
             }
         }
         Inbound::ErrorResponse { id, code, message } => {
+            // The sender keeps an unaccepted steer queued or sends it as a prompt; it is no error row.
+            if let Some(id) = id
+                && state.steer_item_ids.iter().any(|(r, _)| r == id)
+            {
+                drop_steer(id, state);
+                return;
+            }
             // A failed session/load is the session answer too: what follows is live, not history.
             if let Some(id) = id
                 && !state
@@ -1294,14 +1350,59 @@ fn set_config_options(options: &[ConfigOption], state: &mut ChatState) {
     }
 }
 
+fn drop_steer(request_id: &AcpId, state: &mut ChatState) {
+    if let Some(item_id) = forget_steer(request_id, state) {
+        state.items.retain(|i| i.id != item_id);
+    }
+}
+
+fn forget_steer(request_id: &AcpId, state: &mut ChatState) -> Option<i64> {
+    let at = state
+        .steer_item_ids
+        .iter()
+        .position(|(r, _)| r == request_id)?;
+    Some(state.steer_item_ids.remove(at).1)
+}
+
+/// A top-level call of this turn that stops running, with none of the turn's others still running.
+fn note_tool_end(index: usize, was_running: bool, state: &mut ChatState) {
+    if !was_running
+        || state.awaiting_session
+        || state.turn != Turn::Working
+        || !matches!(&state.items[index].kind, ItemKind::Tool(c) if !c.is_running())
+    {
+        return;
+    }
+    // The running prompt's row; a steered row inside the turn is no start of one.
+    let turn_start = state
+        .in_flight
+        .first()
+        .and_then(|p| state.items.iter().position(|i| i.id == p.item_id))
+        .or_else(|| {
+            state.items[..index]
+                .iter()
+                .rposition(|i| matches!(i.kind, ItemKind::User { .. }))
+        })
+        .map_or(0, |i| i + 1);
+    let others_running = state.items[turn_start..open_end(state)]
+        .iter()
+        .any(|i| matches!(&i.kind, ItemKind::Tool(c) if c.is_running()));
+    if !others_running {
+        state.tool_boundaries += 1;
+    }
+}
+
 fn merge_tool(fields: &ToolFields, creating: bool, state: &mut ChatState) {
     let mut merged = false;
-    for item in state.items.iter_mut().rev() {
+    let mut ended = None;
+    for (index, item) in state.items.iter_mut().enumerate().rev() {
         let ItemKind::Tool(call) = &mut item.kind else {
             continue;
         };
         if call.id == fields.id {
+            let was_running = call.is_running();
             call.merge(fields);
+            ended = Some((index, was_running));
             merged = true;
             break;
         }
@@ -1310,6 +1411,9 @@ fn merge_tool(fields: &ToolFields, creating: bool, state: &mut ChatState) {
             merged = true;
             break;
         }
+    }
+    if let Some((index, was_running)) = ended {
+        note_tool_end(index, was_running, state);
     }
     if merged {
         if let Some(launched) = &fields.launched_session_id {
@@ -2598,5 +2702,178 @@ mod tests {
         };
         assert_eq!(call(ToolStatus::Failed, "").display_title(), "Terminal");
         assert_eq!(call(ToolStatus::Pending, "out").display_title(), "Terminal");
+    }
+
+    fn tool(id: &str, status: &str, parent: Option<&str>, update: bool) -> Inbound {
+        let meta = parent
+            .map(|p| format!(r#","_meta":{{"claudeCode":{{"parentToolUseId":"{p}"}}}}"#))
+            .unwrap_or_default();
+        let kind = if update {
+            "tool_call_update"
+        } else {
+            "tool_call"
+        };
+        decode(
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"{kind}","toolCallId":"{id}","title":"Bash","kind":"execute","status":"{status}"{meta}}}}}}}"#
+            )
+            .as_bytes(),
+            None,
+        )
+    }
+
+    fn answer(line: &str) -> Inbound {
+        decode(line.as_bytes(), None)
+    }
+
+    fn running_turn() -> ChatState {
+        let mut s = ChatState::default();
+        msg(
+            &mut s,
+            answer(r#"{"jsonrpc":"2.0","id":0,"result":{"sessionId":"s","modes":{}}}"#),
+        );
+        prompt(&mut s, "go", 1);
+        s
+    }
+
+    fn users(s: &ChatState) -> Vec<&str> {
+        s.items
+            .iter()
+            .filter_map(|i| match &i.kind {
+                ItemKind::User { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn steered(s: &mut ChatState, text: &str, id: i64) {
+        reduce(
+            s,
+            ChatEvent::UserSteered {
+                text: text.into(),
+                image_count: 0,
+                at_offset: 0,
+                request_id: AcpId::Int(id),
+                images: Vec::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn a_boundary_is_a_top_level_call_ending_with_none_of_the_turn_still_running() {
+        let mut s = running_turn();
+        msg(&mut s, tool("a", "in_progress", None, false));
+        msg(&mut s, tool("b", "in_progress", None, false));
+        msg(&mut s, tool("a", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 0, "b still runs");
+        msg(&mut s, tool("b", "failed", None, true));
+        assert_eq!(s.tool_boundaries, 1);
+        msg(&mut s, tool("b", "failed", None, true));
+        assert_eq!(
+            s.tool_boundaries, 1,
+            "a call that already ended is no new boundary"
+        );
+    }
+
+    #[test]
+    fn a_subagents_own_calls_are_no_boundary() {
+        let mut s = running_turn();
+        msg(&mut s, tool("agent", "in_progress", None, false));
+        msg(&mut s, tool("inner", "in_progress", Some("agent"), false));
+        msg(&mut s, tool("inner", "completed", Some("agent"), true));
+        assert_eq!(s.tool_boundaries, 0);
+        msg(&mut s, tool("agent", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 1);
+    }
+
+    #[test]
+    fn a_call_left_running_by_an_earlier_turn_does_not_hold_back_this_one() {
+        let mut s = running_turn();
+        msg(&mut s, tool("stuck", "in_progress", None, false));
+        msg(&mut s, done(1, "end_turn"));
+        prompt(&mut s, "again", 2);
+        msg(&mut s, tool("c", "in_progress", None, false));
+        msg(&mut s, tool("c", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 1);
+    }
+
+    #[test]
+    fn a_steered_row_does_not_hide_a_call_still_running_from_before_it() {
+        let mut s = running_turn();
+        msg(&mut s, tool("a", "in_progress", None, false));
+        steered(&mut s, "now", 2);
+        msg(&mut s, tool("c", "in_progress", None, false));
+        msg(&mut s, tool("c", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 0, "a still runs");
+        msg(&mut s, tool("a", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 1);
+    }
+
+    #[test]
+    fn a_call_ending_in_replayed_history_is_no_boundary() {
+        let mut s = ChatState::default();
+        prompt(&mut s, "go", 1);
+        msg(&mut s, tool("a", "in_progress", None, false));
+        msg(&mut s, tool("a", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 0);
+    }
+
+    #[test]
+    fn a_steered_message_joins_the_turn_and_one_the_agent_did_not_take_leaves() {
+        let mut s = running_turn();
+        steered(&mut s, "also this", 2);
+        assert_eq!(users(&s), ["go", "also this"]);
+        assert!(s.queued_item_ids.is_empty());
+        msg(
+            &mut s,
+            answer(r#"{"jsonrpc":"2.0","id":2,"result":{"outcome":"injected"}}"#),
+        );
+        assert_eq!(users(&s), ["go", "also this"]);
+        assert_eq!(
+            s.turn,
+            Turn::Working,
+            "a steer answer is not the end of the prompt"
+        );
+
+        steered(&mut s, "late", 3);
+        msg(
+            &mut s,
+            answer(
+                r#"{"jsonrpc":"2.0","id":3,"result":{"outcome":"promptRequired","reason":"noRunningTurn"}}"#,
+            ),
+        );
+        steered(&mut s, "refused", 4);
+        msg(
+            &mut s,
+            answer(
+                r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}"#,
+            ),
+        );
+        assert_eq!(users(&s), ["go", "also this"]);
+        assert!(!s.items.iter().any(|i| matches!(i.kind, ItemKind::Error(_))));
+        assert_eq!(s.turn, Turn::Working);
+    }
+
+    #[test]
+    fn a_steer_that_never_reached_the_agent_leaves() {
+        let mut s = running_turn();
+        steered(&mut s, "x", 2);
+        reduce(
+            &mut s,
+            ChatEvent::SteerUndelivered {
+                request_id: AcpId::Int(2),
+            },
+        );
+        assert_eq!(users(&s), ["go"]);
+    }
+
+    #[test]
+    fn an_old_snapshot_without_steer_fields_decodes() {
+        let mut value = serde_json::to_value(running_turn()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("tool_boundaries");
+        object.remove("steer_item_ids");
+        let back: ChatState = serde_json::from_value(value).unwrap();
+        assert_eq!(back.tool_boundaries, 0);
     }
 }

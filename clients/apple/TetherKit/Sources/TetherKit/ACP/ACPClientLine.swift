@@ -7,6 +7,8 @@ enum ACPClientLine: Equatable, Sendable {
   static let echoMethod = "_tether/client"
 
   case prompt(id: ACPID?, text: String, imageCount: Int, sessionId: String?)
+  /// A message into the running turn (`_session/steering`).
+  case steer(id: ACPID, text: String, imageCount: Int)
   /// Continuing an earlier conversation: names the session before any prompt does.
   case load(sessionId: String?)
   case cancel
@@ -19,6 +21,8 @@ enum ACPClientLine: Equatable, Sendable {
     switch self {
     case let .prompt(id, text, imageCount, _):
       return [.userPrompt(text: text, imageCount: imageCount, atOffset: offset, requestId: id)]
+    case let .steer(id, text, imageCount):
+      return [.userSteered(text: text, imageCount: imageCount, atOffset: offset, requestId: id)]
     case .cancel:
       return [.cancelRequested]
     case let .permissionAnswer(id, optionId):

@@ -109,6 +109,122 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  private func requests(_ stream: ScriptedByteStream, _ method: String) -> [[String: Any]] {
+    stream.writtenText.split(separator: "\n").compactMap {
+      try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+    }.filter { $0["method"] as? String == method }
+  }
+
+  private func answer(_ stream: ScriptedByteStream, _ request: [String: Any], _ body: [String: Any]) throws {
+    var message: [String: Any] = ["jsonrpc": "2.0", "id": try XCTUnwrap(request["id"])]
+    message.merge(body) { $1 }
+    stream.push(try JSONSerialization.data(withJSONObject: message) + Data("\n".utf8))
+  }
+
+  private func toolLine(_ status: String) -> Data {
+    Data("{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":\"t1\",\"title\":\"Bash\",\"kind\":\"execute\",\"status\":\"\(status)\"}}}\n".utf8)
+  }
+
+  func test_queued_messages_go_into_the_running_turn_when_a_tool_call_ends() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    stream.push(toolLine("in_progress"))
+    XCTAssertTrue(model.send("one"))
+    XCTAssertTrue(model.send("two"))
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertTrue(requests(stream, "_session/steering").isEmpty, "nothing goes in while the tool runs")
+
+    stream.push(toolLine("completed"))
+    let first = await eventually { self.requests(stream, "_session/steering").count == 1 }
+    XCTAssertTrue(first)
+    let steer = requests(stream, "_session/steering")[0]
+    let params = try XCTUnwrap(steer["params"] as? [String: Any])
+    XCTAssertEqual(((params["_meta"] as? [String: Any])?["steering"] as? [String: Any])?["idleBehavior"] as? String, "promptRequired")
+    try answer(stream, steer, ["result": ["outcome": "injected"]])
+    let both = await eventually { self.requests(stream, "_session/steering").count == 2 }
+    XCTAssertTrue(both, "every message queued before the boundary goes")
+    try answer(stream, requests(stream, "_session/steering")[1], ["result": ["outcome": "injected"]])
+    let shown = await eventually {
+      model.queuedMessages.isEmpty && model.state.items.filter { if case .user = $0.kind { return true }; return false }.count >= 3
+    }
+    XCTAssertTrue(shown)
+    XCTAssertTrue(model.isWorking)
+    XCTAssertEqual(requests(stream, "session/prompt").count, 1)
+
+    XCTAssertTrue(model.send("after"))
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(requests(stream, "_session/steering").count, 2, "a message queued after the boundary waits for the next")
+    model.leave()
+  }
+
+  func test_a_message_removed_after_a_boundary_leaves_no_steer_for_the_next_one_typed() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    stream.push(toolLine("in_progress"))
+    XCTAssertTrue(model.send("one"))
+    XCTAssertTrue(model.send("two"))
+    stream.push(toolLine("completed"))
+    let first = await eventually { self.requests(stream, "_session/steering").count == 1 }
+    XCTAssertTrue(first)
+    model.removeQueuedMessage(try XCTUnwrap(model.queuedMessages.first?.id))
+    try answer(stream, requests(stream, "_session/steering")[0], ["result": ["outcome": "injected"]])
+    let drained = await eventually { model.queuedMessages.isEmpty }
+    XCTAssertTrue(drained)
+    XCTAssertTrue(model.send("later"))
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(requests(stream, "_session/steering").count, 1, "the next message waits for the next boundary")
+    model.leave()
+  }
+
+  func test_send_now_steers_at_once_and_an_agent_without_steering_keeps_the_queue_for_the_turn_end() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    XCTAssertTrue(model.send("first"))
+    XCTAssertTrue(model.send("urgent"))
+    model.sendQueuedMessageNow(try XCTUnwrap(model.queuedMessages.last?.id))
+    let sent = await eventually { self.requests(stream, "_session/steering").count == 1 }
+    XCTAssertTrue(sent)
+    XCTAssertTrue(stream.writtenText.contains("urgent"))
+    XCTAssertFalse(stream.writtenText.contains("first"), "only the message picked goes")
+
+    try answer(stream, requests(stream, "_session/steering")[0], ["error": ["code": -32601, "message": "Method not found"]])
+    let refused = await eventually { model.steerRefused && model.queuedMessages.map(\.text) == ["urgent", "first"] }
+    XCTAssertTrue(refused)
+    stream.push(toolLine("completed"))
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(requests(stream, "_session/steering").count, 1)
+
+    try answer(stream, requests(stream, "session/prompt")[0], ["result": ["stopReason": "end_turn"]])
+    let next = await eventually { self.requests(stream, "session/prompt").count == 2 }
+    XCTAssertTrue(next)
+    XCTAssertFalse(stream.writtenText.contains("first"))
+    try answer(stream, requests(stream, "session/prompt")[1], ["result": ["stopReason": "end_turn"]])
+    let last = await eventually { stream.writtenText.contains("first") }
+    XCTAssertTrue(last)
+    model.leave()
+  }
+
   func test_editing_a_queued_message_restores_images_and_preserves_the_current_draft() async throws {
     let stream = ScriptedByteStream()
     let recovery = InMemoryChatOutboxStore()

@@ -44,10 +44,16 @@ final class ChatSessionModel {
   private(set) var state = ChatState()
   private(set) var link = ChatLinkTracker()
   private(set) var outbox = ChatOutbox()
-  /// Unsent messages remain editable until the running turn finishes.
+  /// Unsent messages stay editable until the agent ends a tool call, which is when they go into the
+  /// running turn, as in Claude Code; with an agent that cannot take them there, until the turn ends.
   private(set) var queuedMessages: [ChatOutbox.Failed] = []
   private var sendingQueuedMessage = false
   private var inFlightQueuedMessage: ChatOutbox.Failed?
+  /// How many queued messages, from the front, go into the running turn now.
+  private var steerBudget = 0
+  private var seenToolBoundaries: Int?
+  /// The agent refused `_session/steering`: queued messages wait for the end of the turn.
+  private(set) var steerRefused = false
   /// Permission cards whose last answer did not reach the agent; they stay answerable.
   private(set) var answerFailures: Set<ACPID> = []
   var notice: String?
@@ -241,6 +247,8 @@ final class ChatSessionModel {
     dialInFlight = true
     generation += 1
     let mine = generation
+    seenToolBoundaries = nil
+    steerBudget = 0
     detachClient()
     await stopping?.value
     link.dialStarted()
@@ -504,8 +512,18 @@ final class ChatSessionModel {
     })
   }
 
+  /// Sends a queued message into the running turn without waiting for the next tool call to end.
+  func sendQueuedMessageNow(_ id: UUID) {
+    guard isWorking, !steerRefused, let index = queuedMessages.firstIndex(where: { $0.id == id }) else { return }
+    queuedMessages.insert(queuedMessages.remove(at: index), at: 0)
+    steerBudget = max(steerBudget, 1)
+    persistOutbox()
+    sendNextQueuedMessage()
+  }
+
   func removeQueuedMessage(_ id: UUID) {
     queuedMessages.removeAll { $0.id == id }
+    steerBudget = min(steerBudget, queuedMessages.count)
     persistOutbox()
   }
 
@@ -517,6 +535,7 @@ final class ChatSessionModel {
       return nil
     }
     let message = queuedMessages.remove(at: index)
+    steerBudget = min(steerBudget, queuedMessages.count)
     draft = message.text
     persistOutbox()
     return message
@@ -529,24 +548,48 @@ final class ChatSessionModel {
   }
 
   private func sendNextQueuedMessage() {
-    guard !left, canSend, !isWorking, !sendingQueuedMessage, !queuedMessages.isEmpty, let client else { return }
+    guard !left, canSend, !sendingQueuedMessage, !queuedMessages.isEmpty, let client else { return }
+    guard !isWorking || (steerBudget > 0 && !steerRefused) else { return }
     sendingQueuedMessage = true
     let mine = generation
     Task {
       // UI updates are coalesced; check the actor before releasing another prompt.
       let current = await client.state
-      guard mine == generation, !left, canSend, current.turn == .idle, current.connection == .live,
+      let steer = current.turn == .working && steerBudget > 0 && !steerRefused
+      guard mine == generation, !left, canSend, current.turn == .idle || steer, current.connection == .live,
         !queuedMessages.isEmpty else {
         sendingQueuedMessage = false
         return
       }
       let message = queuedMessages.removeFirst()
       inFlightQueuedMessage = message
-      await deliver(message.text, message.images, imagesLost: message.imagesLost, queuedID: message.id)
+      if steer {
+        // A message queued after this boundary waits for the next one.
+        steerBudget = queuedMessages.isEmpty ? 0 : steerBudget - 1
+        await steerIn(message, on: client)
+      } else {
+        await deliver(message.text, message.images, imagesLost: message.imagesLost, queuedID: message.id)
+      }
       receive(await client.state, generation: mine)
       sendingQueuedMessage = false
       sendNextQueuedMessage()
     }
+  }
+
+  private func steerIn(_ message: ChatOutbox.Failed, on client: ACPClient) async {
+    do {
+      let injected = try await client.steer(text: message.text, images: message.images)
+      if !injected {
+        await deliver(message.text, message.images, imagesLost: message.imagesLost, queuedID: message.id)
+        return
+      }
+    } catch {
+      if case ACPClientError.agent = error { steerRefused = true }
+      queuedMessages.insert(message, at: 0)
+      steerBudget = 0
+    }
+    if inFlightQueuedMessage?.id == message.id { inFlightQueuedMessage = nil }
+    persistOutbox()
   }
 
   /// Stop drops what was waiting; as in Claude Code, it goes out next instead.
@@ -651,6 +694,12 @@ final class ChatSessionModel {
       persistTitle()
     }
     scheduleSettle()
+    if next.turn == .idle {
+      steerBudget = 0
+    } else if let seen = seenToolBoundaries, next.toolBoundaries > seen, link.allowsInteraction {
+      steerBudget = queuedMessages.count
+    }
+    seenToolBoundaries = next.toolBoundaries
     sendNextQueuedMessage()
   }
 

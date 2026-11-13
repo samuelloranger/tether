@@ -386,6 +386,9 @@ func (t *acpTracker) clientLine(line []byte) (forward, echo bool) {
 		t.st.Autonomous = false
 		t.saveLocked()
 		return true, true
+	case m.Method == "_session/steering":
+		// A message into the running turn: the agent does not echo it, so replay needs ours.
+		return true, true
 	case m.Method == "":
 		if _, ok := t.st.Requests[key]; ok {
 			delete(t.st.Requests, key)
