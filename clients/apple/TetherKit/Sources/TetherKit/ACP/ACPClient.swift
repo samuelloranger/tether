@@ -42,6 +42,7 @@ actor ACPClient {
   private var pending: [ACPID: Pending] = [:]
   private var readTask: Task<Void, Never>?
   private var ended = false
+  private var stopped = false
   private var subscribers: [UUID: AsyncStream<ChatState>.Continuation] = [:]
   private let snapshotStore: (any ChatSnapshotStore)?
   private let images: ChatImageStore?
@@ -359,6 +360,8 @@ actor ACPClient {
   }
 
   func stop() async {
+    guard !stopped else { return }
+    stopped = true
     if !ended { saveSnapshot() }
     readTask?.cancel()
     await stream.close()

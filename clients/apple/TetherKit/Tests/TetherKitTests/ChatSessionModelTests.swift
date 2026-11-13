@@ -52,9 +52,11 @@ final class ChatSessionModelTests: XCTestCase {
   private func model(
     _ dialer: Dialer, journal: ChatJournal = ACPFixture.journal, readOnly: Bool = false
   ) -> ChatSessionModel {
-    ChatSessionModel(
+    let model = ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: readOnly, store: InMemoryChatJournalStore(journal)
     ) { try dialer.dial(spawn: $0, from: $1) }
+    model.holdBackgroundTime = { {} }
+    return model
   }
 
   private func settled(_ model: ChatSessionModel) async -> Bool {
@@ -124,8 +126,7 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertFalse(stream.writtenText.contains("first"))
 
     model.sceneEnteredBackground()
-    XCTAssertTrue(model.queuedMessages.isEmpty)
-    let handed = await eventually { self.requests(stream, "session/prompt").count == 3 }
+    let handed = await eventually { self.requests(stream, "session/prompt").count == 3 && model.queuedMessages.isEmpty }
     XCTAssertTrue(handed)
     let texts = requests(stream, "session/prompt").compactMap {
       (($0["params"] as? [String: Any])?["prompt"] as? [[String: Any]])?.last?["text"] as? String
