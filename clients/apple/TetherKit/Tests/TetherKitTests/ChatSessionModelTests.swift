@@ -52,9 +52,11 @@ final class ChatSessionModelTests: XCTestCase {
   private func model(
     _ dialer: Dialer, journal: ChatJournal = ACPFixture.journal, readOnly: Bool = false
   ) -> ChatSessionModel {
-    ChatSessionModel(
+    let model = ChatSessionModel(
       chatName: "chat-t", cwd: "/work/project", readOnly: readOnly, store: InMemoryChatJournalStore(journal)
     ) { try dialer.dial(spawn: $0, from: $1) }
+    model.holdBackgroundTime = { {} }
+    return model
   }
 
   private func settled(_ model: ChatSessionModel) async -> Bool {
@@ -106,6 +108,52 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertTrue(advanced)
     XCTAssertFalse(stream.writtenText.contains("remove me"))
     XCTAssertTrue(model.queuedMessages.isEmpty)
+    model.leave()
+  }
+
+  func test_going_to_the_background_hands_queued_messages_to_the_agent_before_hanging_up() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    XCTAssertTrue(model.send("first"))
+    XCTAssertTrue(model.send("second"))
+    XCTAssertFalse(stream.writtenText.contains("first"))
+
+    model.sceneEnteredBackground()
+    let handed = await eventually { self.requests(stream, "session/prompt").count == 3 && model.queuedMessages.isEmpty }
+    XCTAssertTrue(handed)
+    let texts = requests(stream, "session/prompt").compactMap {
+      (($0["params"] as? [String: Any])?["prompt"] as? [[String: Any]])?.last?["text"] as? String
+    }
+    XCTAssertEqual(texts, ["running", "first", "second"])
+    XCTAssertTrue(requests(stream, "_session/steering").isEmpty)
+    model.leave()
+  }
+
+  func test_a_handoff_that_cannot_be_written_keeps_the_messages_queued() async throws {
+    let inner = ScriptedByteStream()
+    let stream = SwitchableWriteStream(inner, failing: false)
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    inner.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && inner.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    XCTAssertTrue(model.send("first"))
+    XCTAssertTrue(model.send("second"))
+    stream.failing = true
+
+    model.sceneEnteredBackground()
+    let kept = await eventually { model.queuedMessages.map { $0.text } == ["first", "second"] }
+    XCTAssertTrue(kept, "\(model.queuedMessages.map { $0.text })")
     model.leave()
   }
 

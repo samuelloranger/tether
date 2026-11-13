@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// One chat: the exec channel, the `ACPClient` on it, and what the screen needs from both.
 @MainActor
@@ -60,6 +63,9 @@ final class ChatSessionModel {
   /// The composer's text. It lives here so a chat kept connected behind another keeps what was
   /// typed in it; the view keeps its own copy for editing.
   @ObservationIgnored var draft = ""
+  /// Keeps the app running while queued messages go out on the way to the background; returns the
+  /// call that lets it go. A chat opened from the chat list has no terminal holding that time.
+  @ObservationIgnored var holdBackgroundTime: @MainActor () -> @MainActor () -> Void = ChatSessionModel.backgroundTask
   /// Option changes in flight or refused, by option id; the shown value only changes once the agent confirms.
   private(set) var optionChanges: [String: OptionChange] = [:]
   /// The folder's files for `@` mentions; loaded when the palette first opens.
@@ -373,10 +379,14 @@ final class ChatSessionModel {
   }
 
   /// The socket would be reaped while suspended; dropping it now makes the return a clean redial.
+  /// Queued messages go to the agent first, as prompts it runs after the turn: on a suspended
+  /// phone they would wait until the app came back.
   func sceneEnteredBackground() {
     guard !left, client != nil else { return }
+    let handing = canSend ? queuedMessages : []
+    steerBudget = 0
     generation += 1
-    detachClient()
+    detachClient(handingOff: handing)
     flushHeld()
     link.connectionLost()
   }
@@ -664,15 +674,19 @@ final class ChatSessionModel {
     }
     do {
       try await client.prompt(text: text, images: images)
-      sentBranchPrompt = true
-      pendingBranchDraft = nil
-      draftTask?.cancel()
-      branchDraft = ""
+      promptSent()
     } catch {
       outbox.recordFailure(text, images: images, imagesLost: imagesLost)
     }
     if let queuedID, inFlightQueuedMessage?.id == queuedID { inFlightQueuedMessage = nil }
     persistOutbox()
+  }
+
+  private func promptSent() {
+    sentBranchPrompt = true
+    pendingBranchDraft = nil
+    draftTask?.cancel()
+    branchDraft = ""
   }
 
   private func receive(_ next: ChatState, generation mine: Int) {
@@ -795,7 +809,8 @@ final class ChatSessionModel {
     }
   }
 
-  private func detachClient() {
+  /// A reconnect waits for `stopping`, so messages handed off here reach the host before it redials.
+  private func detachClient(handingOff messages: [ChatOutbox.Failed] = []) {
     workflowTask?.cancel()
     workflowTask = nil
     forwardTask?.cancel()
@@ -804,6 +819,46 @@ final class ChatSessionModel {
     settleTask = nil
     let old = client
     client = nil
-    if let old { stopping = Task { await old.stop() } }
+    guard let old else { return }
+    guard !messages.isEmpty else {
+      stopping = Task { await old.stop() }
+      return
+    }
+    let release = holdBackgroundTime()
+    stopping = Task {
+      // Closing the stream fails a write stuck on a dead socket, which ends the handoff.
+      let deadline = Task {
+        do { try await Task.sleep(for: .seconds(5)) } catch { return }
+        await old.stop()
+      }
+      await handOff(messages, on: old)
+      deadline.cancel()
+      await old.stop()
+      release()
+    }
+  }
+
+  /// In order, each leaving the queue once written; the first that cannot be written and every one
+  /// after it stay queued.
+  private func handOff(_ messages: [ChatOutbox.Failed], on old: ACPClient) async {
+    for message in messages where queuedMessages.contains(where: { $0.id == message.id }) {
+      do {
+        try await old.prompt(text: message.text, images: message.images)
+      } catch {
+        return
+      }
+      queuedMessages.removeAll { $0.id == message.id }
+      persistOutbox()
+      promptSent()
+    }
+  }
+
+  private static func backgroundTask() -> @MainActor () -> Void {
+    #if canImport(UIKit)
+    let id = UIApplication.shared.beginBackgroundTask(withName: "tether.chat.handoff")
+    return { if id != .invalid { UIApplication.shared.endBackgroundTask(id) } }
+    #else
+    return {}
+    #endif
   }
 }
