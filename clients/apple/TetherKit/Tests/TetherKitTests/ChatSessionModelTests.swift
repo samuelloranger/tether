@@ -109,6 +109,53 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  func test_going_to_the_background_hands_queued_messages_to_the_agent_before_hanging_up() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    XCTAssertTrue(model.send("first"))
+    XCTAssertTrue(model.send("second"))
+    XCTAssertFalse(stream.writtenText.contains("first"))
+
+    model.sceneEnteredBackground()
+    XCTAssertTrue(model.queuedMessages.isEmpty)
+    let handed = await eventually { self.requests(stream, "session/prompt").count == 3 }
+    XCTAssertTrue(handed)
+    let texts = requests(stream, "session/prompt").compactMap {
+      (($0["params"] as? [String: Any])?["prompt"] as? [[String: Any]])?.last?["text"] as? String
+    }
+    XCTAssertEqual(texts, ["running", "first", "second"])
+    XCTAssertTrue(requests(stream, "_session/steering").isEmpty)
+    model.leave()
+  }
+
+  func test_a_handoff_that_cannot_be_written_keeps_the_messages_queued() async throws {
+    let inner = ScriptedByteStream()
+    let stream = SwitchableWriteStream(inner, failing: false)
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    inner.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && inner.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    XCTAssertTrue(model.send("first"))
+    XCTAssertTrue(model.send("second"))
+    stream.failing = true
+
+    model.sceneEnteredBackground()
+    let kept = await eventually { model.queuedMessages.map { $0.text } == ["first", "second"] }
+    XCTAssertTrue(kept, "\(model.queuedMessages.map { $0.text })")
+    model.leave()
+  }
+
   private func requests(_ stream: ScriptedByteStream, _ method: String) -> [[String: Any]] {
     stream.writtenText.split(separator: "\n").compactMap {
       try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]

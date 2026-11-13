@@ -373,10 +373,15 @@ final class ChatSessionModel {
   }
 
   /// The socket would be reaped while suspended; dropping it now makes the return a clean redial.
+  /// Queued messages go to the agent first, as prompts it runs after the turn: on a suspended
+  /// phone they would wait until the app came back.
   func sceneEnteredBackground() {
     guard !left, client != nil else { return }
+    let handing = canSend ? queuedMessages : []
+    queuedMessages.removeAll()
+    steerBudget = 0
     generation += 1
-    detachClient()
+    detachClient(handingOff: handing)
     flushHeld()
     link.connectionLost()
   }
@@ -795,7 +800,8 @@ final class ChatSessionModel {
     }
   }
 
-  private func detachClient() {
+  /// A reconnect waits for `stopping`, so messages handed off here reach the host before it redials.
+  private func detachClient(handingOff messages: [ChatOutbox.Failed] = []) {
     workflowTask?.cancel()
     workflowTask = nil
     forwardTask?.cancel()
@@ -804,6 +810,29 @@ final class ChatSessionModel {
     settleTask = nil
     let old = client
     client = nil
-    if let old { stopping = Task { await old.stop() } }
+    if let old {
+      stopping = Task {
+        if !messages.isEmpty { await handOff(messages, on: old) }
+        await old.stop()
+      }
+    }
+  }
+
+  /// In order; the first that cannot be written and every one after it stay queued.
+  private func handOff(_ messages: [ChatOutbox.Failed], on old: ACPClient) async {
+    var unsent: [ChatOutbox.Failed] = []
+    for message in messages {
+      guard unsent.isEmpty else {
+        unsent.append(message)
+        continue
+      }
+      do {
+        try await old.prompt(text: message.text, images: message.images)
+      } catch {
+        unsent.append(message)
+      }
+    }
+    queuedMessages.insert(contentsOf: unsent, at: 0)
+    persistOutbox()
   }
 }
