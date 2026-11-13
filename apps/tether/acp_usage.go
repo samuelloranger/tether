@@ -303,6 +303,7 @@ func parseCodexPlanUsage(raw json.RawMessage) (acpProviderUsage, error) {
 	}
 	type limits struct {
 		ID        string  `json:"limitId"`
+		Plan      string  `json:"planType"`
 		Primary   *bucket `json:"primary"`
 		Secondary *bucket `json:"secondary"`
 	}
@@ -320,6 +321,11 @@ func parseCodexPlanUsage(raw json.RawMessage) (acpProviderUsage, error) {
 	// Never relabel a different metered product or a changed time window as 5h/weekly.
 	if current.ID != "" && current.ID != "codex" {
 		return acpProviderUsage{}, errors.New("codex plan bucket unavailable")
+	}
+	// A subscription that ended reads as the free plan; account/read still reports the plan
+	// the sign-in token was issued for.
+	if current.Plan == "free" {
+		return inactivePlanUsage(), nil
 	}
 	out := acpProviderUsage{}
 	for _, b := range []*bucket{current.Primary, current.Secondary} {
