@@ -164,6 +164,32 @@ final class ChatSessionModelTests: XCTestCase {
     model.leave()
   }
 
+  func test_a_message_removed_after_a_boundary_leaves_no_steer_for_the_next_one_typed() async throws {
+    let stream = ScriptedByteStream()
+    let model = model(Dialer([stream]))
+    Task { await model.connect() }
+    stream.push(ACPFixture.log())
+    let live = await settled(model)
+    XCTAssertTrue(live)
+    XCTAssertTrue(model.send("running"))
+    let started = await eventually { model.isWorking && stream.writtenText.contains("running") }
+    XCTAssertTrue(started)
+    stream.push(toolLine("in_progress"))
+    XCTAssertTrue(model.send("one"))
+    XCTAssertTrue(model.send("two"))
+    stream.push(toolLine("completed"))
+    let first = await eventually { self.requests(stream, "_session/steering").count == 1 }
+    XCTAssertTrue(first)
+    model.removeQueuedMessage(try XCTUnwrap(model.queuedMessages.first?.id))
+    try answer(stream, requests(stream, "_session/steering")[0], ["result": ["outcome": "injected"]])
+    let drained = await eventually { model.queuedMessages.isEmpty }
+    XCTAssertTrue(drained)
+    XCTAssertTrue(model.send("later"))
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(requests(stream, "_session/steering").count, 1, "the next message waits for the next boundary")
+    model.leave()
+  }
+
   func test_send_now_steers_at_once_and_an_agent_without_steering_keeps_the_queue_for_the_turn_end() async throws {
     let stream = ScriptedByteStream()
     let model = model(Dialer([stream]))

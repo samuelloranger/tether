@@ -57,6 +57,17 @@ final class ChatSteerTests: XCTestCase {
     XCTAssertEqual(state.toolBoundaries, 1)
   }
 
+  func test_a_steered_row_does_not_hide_a_call_still_running_from_before_it() {
+    var state = running()
+    state = reduce(state, tool("a", "in_progress", update: false))
+    state = ChatReducer.reduce(state, .userSteered(text: "now", atOffset: 0, requestId: .int(2)))
+    state = reduce(state, tool("c", "in_progress", update: false))
+    state = reduce(state, tool("c", "completed"))
+    XCTAssertEqual(state.toolBoundaries, 0, "a still runs")
+    state = reduce(state, tool("a", "completed"))
+    XCTAssertEqual(state.toolBoundaries, 1)
+  }
+
   func test_a_steered_message_joins_the_turn_and_one_the_agent_did_not_take_leaves() {
     var state = running()
     state = ChatReducer.reduce(state, .userSteered(text: "also this", atOffset: 0, requestId: .int(2)))

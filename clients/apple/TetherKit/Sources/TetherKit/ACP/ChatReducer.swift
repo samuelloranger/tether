@@ -815,7 +815,9 @@ enum ChatReducer {
     guard wasRunning, !state.loading, state.turn == .working,
       case let .tool(call) = state.items[index].kind, !call.isRunning
     else { return }
-    let turnStart = (state.items[..<index].lastIndex { if case .user = $0.kind { return true }; return false }) ?? -1
+    // The running prompt's row; a steered row inside the turn is no start of one.
+    let turnStart = state.inFlight.first.flatMap { prompt in state.items.firstIndex { $0.id == prompt.itemId } }
+      ?? (state.items[..<index].lastIndex { if case .user = $0.kind { return true }; return false }) ?? -1
     let othersRunning = state.items[(turnStart + 1)..<openEnd(state)].contains {
       if case let .tool(other) = $0.kind { return other.isRunning }
       return false

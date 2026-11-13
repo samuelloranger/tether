@@ -97,8 +97,8 @@ pub struct Session {
     /// Messages sent while a turn runs, kept here until a tool call ends and they go into the turn,
     /// or the turn ends and the oldest goes as a prompt.
     held: Vec<Failed>,
-    /// The held message whose `_session/steering` is out, until the agent answers.
-    steering: Option<Failed>,
+    /// The held message whose `_session/steering` is out, with its request id, until the agent answers.
+    steering: Option<(AcpId, Failed)>,
     /// How many held messages, from the front, go into the running turn now.
     steer_budget: usize,
     seen_boundaries: Option<u64>,
@@ -733,7 +733,7 @@ impl Session {
             },
             RequestKind::Prompt => {}
             RequestKind::Steer => {
-                let Some(m) = self.steering.take() else {
+                let Some((_, m)) = self.steering.take() else {
                     return;
                 };
                 match c.outcome {
@@ -742,6 +742,9 @@ impl Session {
                     Err(e) => {
                         if matches!(e, ClientError::Agent { .. }) {
                             self.steer_refused = true;
+                        } else if let Some(client) = self.client.as_mut() {
+                            client.steer_undelivered(&c.id);
+                            self.persist_journal(ctx);
                         }
                         self.held.insert(0, m);
                         self.steer_budget = 0;
@@ -802,7 +805,11 @@ impl Session {
             self.steer_budget = 0;
             return;
         };
-        self.steering = Some(message);
+        let Some(id) = out.id.clone() else {
+            self.held.insert(0, message);
+            return;
+        };
+        self.steering = Some((id, message));
         self.persist_journal(ctx);
         self.write(out.line.clone(), Some(WriteTag::Steer(out)), ctx);
     }
@@ -1154,6 +1161,16 @@ impl Session {
 
     /// Drops the stream and keeps the transcript; a later `connect` resumes from the snapshot.
     fn detach(&mut self, ctx: &mut Ctx<'_>) {
+        // An unanswered steer is held again; its answer would reach a client that is gone.
+        if let Some((id, message)) = self.steering.take() {
+            if let Some(client) = self.client.as_mut() {
+                client.steer_undelivered(&id);
+            }
+            self.persist_journal(ctx);
+            self.held.insert(0, message);
+            self.steer_budget = 0;
+            self.persist_outbox(ctx);
+        }
         if let Some(client) = self.client.take() {
             if !client.ended()
                 && let (Some(files), Some(identity)) = (ctx.files, self.identity)

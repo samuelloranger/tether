@@ -1373,9 +1373,16 @@ fn note_tool_end(index: usize, was_running: bool, state: &mut ChatState) {
     {
         return;
     }
-    let turn_start = state.items[..index]
-        .iter()
-        .rposition(|i| matches!(i.kind, ItemKind::User { .. }))
+    // The running prompt's row; a steered row inside the turn is no start of one.
+    let turn_start = state
+        .in_flight
+        .first()
+        .and_then(|p| state.items.iter().position(|i| i.id == p.item_id))
+        .or_else(|| {
+            state.items[..index]
+                .iter()
+                .rposition(|i| matches!(i.kind, ItemKind::User { .. }))
+        })
         .map_or(0, |i| i + 1);
     let others_running = state.items[turn_start..open_end(state)]
         .iter()
@@ -2787,6 +2794,18 @@ mod tests {
         prompt(&mut s, "again", 2);
         msg(&mut s, tool("c", "in_progress", None, false));
         msg(&mut s, tool("c", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 1);
+    }
+
+    #[test]
+    fn a_steered_row_does_not_hide_a_call_still_running_from_before_it() {
+        let mut s = running_turn();
+        msg(&mut s, tool("a", "in_progress", None, false));
+        steered(&mut s, "now", 2);
+        msg(&mut s, tool("c", "in_progress", None, false));
+        msg(&mut s, tool("c", "completed", None, true));
+        assert_eq!(s.tool_boundaries, 0, "a still runs");
+        msg(&mut s, tool("a", "completed", None, true));
         assert_eq!(s.tool_boundaries, 1);
     }
 

@@ -443,7 +443,8 @@ impl ChatClient {
         })
     }
 
-    fn steer_undelivered(&mut self, id: &AcpId) {
+    /// The steer may never have reached the agent: take it back so it can be held again.
+    pub fn steer_undelivered(&mut self, id: &AcpId) {
         let Some(index) = self
             .journal
             .entries

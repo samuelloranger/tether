@@ -523,6 +523,7 @@ final class ChatSessionModel {
 
   func removeQueuedMessage(_ id: UUID) {
     queuedMessages.removeAll { $0.id == id }
+    steerBudget = min(steerBudget, queuedMessages.count)
     persistOutbox()
   }
 
@@ -534,6 +535,7 @@ final class ChatSessionModel {
       return nil
     }
     let message = queuedMessages.remove(at: index)
+    steerBudget = min(steerBudget, queuedMessages.count)
     draft = message.text
     persistOutbox()
     return message

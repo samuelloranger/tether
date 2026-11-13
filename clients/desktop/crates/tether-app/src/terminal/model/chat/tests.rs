@@ -1351,6 +1351,42 @@ fn queued_messages_go_into_the_running_turn_when_a_tool_call_ends() {
     assert_eq!(h.screen().queued, ["after"]);
 }
 
+fn user_texts(s: &ChatScreen) -> Vec<String> {
+    rows(s)
+        .into_iter()
+        .filter_map(|r| match r {
+            RowBody::User { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_steer_lost_with_the_connection_or_the_tab_is_held_again_without_its_row() {
+    for drop_tab in [false, true] {
+        let mut h = Harness::new();
+        let (name, generation) = h.live_chat();
+        send(&mut h, "running");
+        send(&mut h, "steer me");
+        h.writes();
+        let key = h.screen().queued_keys[0].clone();
+        h.msg(ChatMsg::SendNow(key));
+        assert_eq!(method_count(&h.writes(), "_session/steering"), 1);
+        assert_eq!(user_texts(&h.screen()), ["running", "steer me"]);
+        if drop_tab {
+            h.run(|chats, now, out| chats.on_dropped(now, out));
+        } else {
+            h.msg(ChatMsg::Closed {
+                name: name.clone(),
+                generation,
+            });
+        }
+        let s = h.screen();
+        assert_eq!(s.queued, ["steer me"], "drop_tab {drop_tab}");
+        assert_eq!(user_texts(&s), ["running"], "drop_tab {drop_tab}");
+    }
+}
+
 #[test]
 fn send_now_steers_at_once_and_an_agent_without_steering_gets_prompts_straight_away() {
     let mut h = Harness::new();
