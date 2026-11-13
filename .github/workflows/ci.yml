@@ -196,6 +196,13 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-directories: ~/.cache/cargo-xwin
 
+      # cc-rs needs llvm-lib for ring's C code; the runner has it only under LLVM's own bin dir.
+      - name: LLVM tools on PATH
+        run: |
+          bin=$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -1)
+          test -x "$bin/llvm-lib"
+          echo "$bin" >> "$GITHUB_PATH"
+
       - name: Clippy
         run: cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets --locked -- -D warnings
 
