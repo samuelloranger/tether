@@ -39,7 +39,13 @@ fn copy_licenses() {
         ),
     ];
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let licenses = out.ancestors().nth(3).unwrap().join("licenses");
+    // Next to the binary: OUT_DIR is target/<profile>/build/<pkg>[-hash|/hash]/out, its depth
+    // differs between cargo versions.
+    let build = out
+        .ancestors()
+        .find(|p| p.file_name().is_some_and(|n| n == "build"))
+        .unwrap();
+    let licenses = build.parent().unwrap().join("licenses");
     fs::create_dir_all(&licenses).unwrap();
     for (from, name) in sources {
         println!("cargo:rerun-if-changed={}", from.display());
