@@ -49,6 +49,14 @@ final class LiveChatModels {
     }
   }
 
+  /// Back from the background: every kept chat redials, not only the one on screen, so messages
+  /// queued in a chat behind another one still go out.
+  func sceneBecameActive() {
+    for entry in entries.values {
+      entry.model.sceneBecameActive()
+    }
+  }
+
   func leaveAll() {
     for entry in entries.values {
       entry.model.leave()

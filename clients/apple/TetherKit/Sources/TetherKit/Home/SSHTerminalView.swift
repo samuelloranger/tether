@@ -190,6 +190,7 @@ public struct SSHTerminalView: View {
           refocusOnMac()
         } else {
           backgroundDetach.end(controller: controller)
+          liveChats.sceneBecameActive()
           Task { await controller.enterForeground() }
         }
       case .background:
