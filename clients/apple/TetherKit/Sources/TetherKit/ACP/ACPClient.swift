@@ -224,8 +224,9 @@ actor ACPClient {
     }
   }
 
-  /// Sends a message into the running turn. False when no turn was running any more: nothing went
-  /// in and the caller sends it as a prompt. An agent without steering answers with an error.
+  /// Sends a message into the running turn, or a turn the agent began for it. False when no turn was
+  /// running any more: nothing went in and the caller sends it as a prompt. An agent without
+  /// steering answers with an error.
   func steer(text: String, images: [ChatImageAttachment] = []) async throws -> Bool {
     guard let sessionId = journal.sessionId else { throw ACPClientError.noSession }
     guard !ended else { throw ACPClientError.connectionLost }
@@ -244,7 +245,7 @@ actor ACPClient {
       "sessionId": sessionId, "prompt": blocks, "_meta": ["steering": ["idleBehavior": "promptRequired"]],
     ]
     do {
-      return try await request("_session/steering", params, id: requestId).steerOutcome == "injected"
+      return try await request("_session/steering", params, id: requestId).steerDelivered
     } catch {
       // The agent answered, so the log holds the outcome and the transcript already dropped the row.
       if case ACPClientError.agent = error { throw error }

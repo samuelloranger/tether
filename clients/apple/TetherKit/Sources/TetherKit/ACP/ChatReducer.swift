@@ -489,7 +489,7 @@ enum ChatReducer {
     switch message {
     case let .response(responseId, result):
       if state.steerItemIds[responseId] != nil {
-        if result.steerOutcome == "injected" {
+        if result.steerDelivered {
           state.steerItemIds[responseId] = nil
         } else {
           dropSteer(responseId, in: &state)

@@ -824,7 +824,7 @@ fn apply(message: &Inbound, state: &mut ChatState) {
     match message {
         Inbound::Response { id, result } => {
             if state.steer_item_ids.iter().any(|(r, _)| r == id) {
-                if result.steer_outcome.as_deref() == Some("injected") {
+                if result.steer_delivered() {
                     forget_steer(id, state);
                 } else {
                     drop_steer(id, state);
@@ -2852,6 +2852,17 @@ mod tests {
         assert_eq!(users(&s), ["go", "also this"]);
         assert!(!s.items.iter().any(|i| matches!(i.kind, ItemKind::Error(_))));
         assert_eq!(s.turn, Turn::Working);
+    }
+
+    #[test]
+    fn a_steer_codex_turned_into_a_new_turn_stays() {
+        let mut s = running_turn();
+        steered(&mut s, "after the end", 2);
+        msg(
+            &mut s,
+            answer(r#"{"jsonrpc":"2.0","id":2,"result":{"outcome":"startedNewTurn"}}"#),
+        );
+        assert_eq!(users(&s), ["go", "after the end"]);
     }
 
     #[test]

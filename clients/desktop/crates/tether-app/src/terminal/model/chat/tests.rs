@@ -1351,6 +1351,28 @@ fn queued_messages_go_into_the_running_turn_when_a_tool_call_ends() {
     assert_eq!(h.screen().queued, ["after"]);
 }
 
+#[test]
+fn a_steer_codex_answers_with_a_new_turn_is_not_sent_again() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    send(&mut h, "running");
+    send(&mut h, "late");
+    h.writes();
+    let key = h.screen().queued_keys[0].clone();
+    h.msg(ChatMsg::SendNow(key));
+    assert_eq!(method_count(&h.writes(), "_session/steering"), 1);
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":4,"result":{"outcome":"startedNewTurn"}}"#,
+    );
+    let after = h.writes();
+    assert_eq!(method_count(&after, "session/prompt"), 0, "{after:?}");
+    let s = h.screen();
+    assert!(s.queued.is_empty());
+    assert_eq!(user_texts(&s), ["running", "late"]);
+}
+
 fn user_texts(s: &ChatScreen) -> Vec<String> {
     rows(s)
         .into_iter()

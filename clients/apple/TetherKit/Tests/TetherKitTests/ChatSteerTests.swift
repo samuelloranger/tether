@@ -86,6 +86,13 @@ final class ChatSteerTests: XCTestCase {
     XCTAssertEqual(state.turn, .working)
   }
 
+  func test_a_steer_codex_turned_into_a_new_turn_stays() {
+    var state = running()
+    state = ChatReducer.reduce(state, .userSteered(text: "after the end", atOffset: 0, requestId: .int(2)))
+    state = reduce(state, line(#"{"jsonrpc":"2.0","id":2,"result":{"outcome":"startedNewTurn"}}"#))
+    XCTAssertEqual(users(state), ["go", "after the end"])
+  }
+
   func test_another_clients_steer_shows_from_its_echo_and_replay_equals_live() throws {
     let steer = #"{"id":"b-2","jsonrpc":"2.0","method":"_session/steering","params":{"prompt":[{"text":"from b","type":"text"}],"sessionId":"s"}}"#
     let echo = "{\"jsonrpc\":\"2.0\",\"method\":\"_tether/client\",\"params\":{\"client\":\"b\",\"message\":\(steer)}}"
