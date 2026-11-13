@@ -42,6 +42,47 @@ func TestCodexPlanWindowsMatchDurationsAndProductBucket(t *testing.T) {
 	}
 }
 
+func TestCodexFreePlanIsNoSubscription(t *testing.T) {
+	got, err := parseCodexPlanUsage(json.RawMessage(`{"rateLimits":{"limitId":"codex","planType":"free","primary":{"usedPercent":2,"windowDurationMins":43200,"resetsAt":100}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","planType":"free","primary":{"usedPercent":2,"windowDurationMins":43200,"resetsAt":100}}}}`))
+	if err != nil || got.Active == nil || *got.Active || got.FiveHour != nil || got.Weekly != nil {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = parseCodexPlanUsage(json.RawMessage(`{"rateLimits":{"limitId":"codex","planType":"plus","primary":{"usedPercent":5,"windowDurationMins":300,"resetsAt":100}}}`))
+	if err != nil || got.Active != nil || got.FiveHour == nil {
+		t.Fatalf("paid plan: %+v %v", got, err)
+	}
+}
+
+func TestAnEndedSubscriptionReplacesTheStaleReading(t *testing.T) {
+	acpEnv(t)
+	now := time.Unix(1800000000, 0)
+	ended := false
+	read := func() (acpProviderUsage, error) {
+		if ended {
+			return inactivePlanUsage(), nil
+		}
+		return acpProviderUsage{Weekly: &acpQuotaWindow{UsedPercent: 2, ResetsAt: now.Unix() + 1000}}, nil
+	}
+	deps := acpUsageDeps{codex: read, now: func() time.Time { return now }}
+	var b bytes.Buffer
+	if err := acpUsageWith(&b, deps); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(61 * time.Second)
+	ended = true
+	b.Reset()
+	if err := acpUsageWith(&b, deps); err != nil {
+		t.Fatal(err)
+	}
+	var out acpUsageSnapshot
+	if err := json.Unmarshal(b.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Codex.Active == nil || *out.Codex.Active || out.Codex.Weekly != nil || out.Codex.Stale || out.Codex.Error != "" {
+		t.Fatalf("%+v", out.Codex)
+	}
+}
+
 func TestUsageCacheThrottlesAndPreservesTimestampOnFailure(t *testing.T) {
 	acpEnv(t)
 	now := time.Unix(1800000000, 0)
