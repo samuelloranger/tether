@@ -45,6 +45,28 @@ final class LiveChatModelsTests: XCTestCase {
     XCTAssertEqual(cache.liveCount, 1)
   }
 
+  func testComingBackRedialsEveryKeptChatNotOnlyTheOneOnScreen() async {
+    let cache = LiveChatModels()
+    var dials: [String: Int] = [:]
+    var opened: [ChatSessionModel] = []
+    for name in ["chat-a", "chat-b"] {
+      let kept = cache.model(for: route(name), fresh: 0) {
+        ChatSessionModel(chatName: name, cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore()) {
+          _, _ in
+          dials[name, default: 0] += 1
+          throw CancellationError()
+        }
+      }
+      await kept.connect()
+      opened.append(kept)
+    }
+    XCTAssertEqual(dials, ["chat-a": 1, "chat-b": 1])
+    cache.sceneBecameActive()
+    let redialed = await eventually { dials == ["chat-a": 2, "chat-b": 2] }
+    XCTAssertTrue(redialed, "\(dials)")
+    opened.forEach { $0.leave() }
+  }
+
   func testLeavingAllForgetsEveryModel() {
     let cache = LiveChatModels()
     for i in 0..<3 {

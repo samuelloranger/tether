@@ -162,7 +162,11 @@ struct ACPResult: Equatable, Sendable {
   var stopReason: String?
   var configOptions: [ACPConfigOption]?
   /// `_session/steering`'s answer: `injected`, or `promptRequired` when no turn was running.
+  /// codex-acp starts a turn itself instead (`startedNewTurn`).
   var steerOutcome: String?
+
+  /// The agent has the message: it joined the running turn or began a new one.
+  var steerDelivered: Bool { steerOutcome == "injected" || steerOutcome == "startedNewTurn" }
 }
 
 enum ACPInbound: Equatable, Sendable {

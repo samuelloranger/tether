@@ -737,7 +737,7 @@ impl Session {
                     return;
                 };
                 match c.outcome {
-                    Ok(r) if r.steer_outcome.as_deref() == Some("injected") => {}
+                    Ok(r) if r.steer_delivered() => {}
                     Ok(_) => self.deliver(m.text, m.images, m.images_lost, ctx),
                     Err(e) => {
                         if matches!(e, ClientError::Agent { .. }) {

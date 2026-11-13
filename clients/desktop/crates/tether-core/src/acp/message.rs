@@ -278,7 +278,18 @@ pub struct AcpResult {
     /// The answer carries `modes`: it is a `session/new` or `session/load` answer.
     pub session_established: bool,
     /// `_session/steering`'s answer: `injected`, or `promptRequired` when no turn was running.
+    /// codex-acp starts a turn itself instead (`startedNewTurn`).
     pub steer_outcome: Option<String>,
+}
+
+impl AcpResult {
+    /// The agent has the message: it joined the running turn or began a new one.
+    pub fn steer_delivered(&self) -> bool {
+        matches!(
+            self.steer_outcome.as_deref(),
+            Some("injected" | "startedNewTurn")
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
