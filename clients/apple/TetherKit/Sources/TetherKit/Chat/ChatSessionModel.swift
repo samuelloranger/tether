@@ -576,7 +576,8 @@ final class ChatSessionModel {
 
   private func steerIn(_ message: ChatOutbox.Failed, on client: ACPClient) async {
     do {
-      if try await !client.steer(text: message.text, images: message.images) {
+      let injected = try await client.steer(text: message.text, images: message.images)
+      if !injected {
         await deliver(message.text, message.images, imagesLost: message.imagesLost, queuedID: message.id)
         return
       }

@@ -19,8 +19,10 @@ private func users(_ state: ChatState) -> [String] {
 }
 
 final class ChatSteerTests: XCTestCase {
+  /// A live session (its `session/new` answered) with a prompt running.
   private func running() -> ChatState {
-    ChatReducer.reduce(ChatState(), .userPrompt(text: "go", atOffset: 0, requestId: .int(1)))
+    let started = reduce(ChatState(), line(#"{"jsonrpc":"2.0","id":0,"result":{"sessionId":"s"}}"#))
+    return ChatReducer.reduce(started, .userPrompt(text: "go", atOffset: 0, requestId: .int(1)))
   }
 
   func test_a_boundary_is_a_top_level_call_ending_with_none_of_the_turn_still_running() {
