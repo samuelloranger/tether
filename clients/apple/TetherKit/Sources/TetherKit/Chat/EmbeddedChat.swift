@@ -135,11 +135,11 @@ struct NewChatSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
-        Text(mode == .new ? "New chat" : "Continue a chat").font(.headline)
+        Text(mode == .new ? "New chat" : "Continue a chat").font(.chat(.headline))
           .foregroundStyle(TetherColors.textPrimary)
           .accessibilityAddTraits(.isHeader)
         Spacer()
-        Button("Cancel", action: onCancel).font(.subheadline).foregroundStyle(TetherColors.accent)
+        Button("Cancel", action: onCancel).font(.chat(.subheadline)).foregroundStyle(TetherColors.accent)
           .frame(minHeight: 44).buttonStyle(TetherPressStyle())
           .disabled(starting || creatingFolder || continuing != nil)
       }
@@ -158,7 +158,7 @@ struct NewChatSheet: View {
               disabled: starting || continuing != nil, hostName: hostName,
               checkFolder: checkFolder, onSubmit: submitFolder)
             if let shownFailure {
-              Text(shownFailure).font(.caption).foregroundStyle(TetherColors.warning)
+              Text(shownFailure).font(.chat(.caption)).foregroundStyle(TetherColors.warning)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("sshNewChatError")
             }
@@ -199,7 +199,7 @@ struct NewChatSheet: View {
     Button(action: start) {
       Group {
         if starting { ProgressView().tint(TetherColors.onAccent) } else {
-          Text("Start chat").font(.subheadline.weight(.semibold))
+          Text("Start chat").font(.chat(.subheadline).weight(.semibold))
         }
       }
       .frame(maxWidth: .infinity, minHeight: 44)
@@ -225,7 +225,7 @@ struct NewChatSheet: View {
 
   private var agentPicker: some View {
     HStack(spacing: 12) {
-      Text("Agent").font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+      Text("Agent").font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
       Menu {
         ForEach(ChatAgents.all) { option in
           let missing = unavailable[option.key] != nil
@@ -243,7 +243,7 @@ struct NewChatSheet: View {
       } label: {
         HStack(spacing: 8) {
           ChatAgentMark(agent: agent, size: 16)
-          Text(agent.label).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+          Text(agent.label).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(1)
           Spacer(minLength: 4)
           Image(systemName: "chevron.up.chevron.down")
@@ -279,14 +279,14 @@ struct NewChatSheet: View {
     VStack(spacing: 0) {
       Button { withAnimation(.easeInOut(duration: 0.18)) { optionsOpen.toggle() } } label: {
         HStack(spacing: 8) {
-          Text("Options").font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          Text("Options").font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           if !optionsOpen {
-            Text(optionsSummary).font(.caption)
+            Text(optionsSummary).font(.chat(.caption))
               .foregroundStyle(summaryIsDefaults ? TetherColors.textFaint : TetherColors.textPrimary)
               .lineLimit(1).truncationMode(.tail)
           }
           Spacer(minLength: 4)
-          Image(systemName: optionsOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
+          Image(systemName: optionsOpen ? "chevron.down" : "chevron.right").font(.chat(.caption2).weight(.semibold))
             .foregroundStyle(TetherColors.textFaint)
         }
         .padding(.horizontal, 10).frame(minHeight: 44)
@@ -298,7 +298,7 @@ struct NewChatSheet: View {
       .accessibilityIdentifier("sshNewChatOptions")
       if optionsOpen {
         if optionRows.isEmpty {
-          Text(ChatNewOptions.note(agent: agent)).font(.caption).foregroundStyle(TetherColors.textFaint)
+          Text(ChatNewOptions.note(agent: agent)).font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
             .fixedSize(horizontal: false, vertical: true)
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
@@ -322,7 +322,7 @@ struct NewChatSheet: View {
 
   private func optionRow(_ row: ChatNewOptions.Row) -> some View {
     HStack(spacing: 8) {
-      Text(row.name).font(.subheadline).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+      Text(row.name).font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
       Spacer(minLength: 8)
       Menu {
         Picker(row.name, selection: Binding(get: { row.selected }, set: { set(row, $0) })) {
@@ -330,7 +330,7 @@ struct NewChatSheet: View {
         }
       } label: {
         HStack(spacing: 5) {
-          Text(row.selectedName).font(.footnote).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+          Text(row.selectedName).font(.chat(.footnote)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
           Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
             .foregroundStyle(TetherColors.textFaint)
         }
@@ -374,7 +374,7 @@ struct NewChatSheet: View {
         }
         Spacer(minLength: 0)
       }
-      .font(.caption)
+      .font(.chat(.caption))
       .padding(.horizontal, 10).padding(.vertical, 8)
       .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
     }
@@ -386,24 +386,24 @@ struct NewChatSheet: View {
       case .idle, .loading:
         HStack(spacing: 8) {
           ProgressView().controlSize(.small).tint(TetherColors.textFaint)
-          Text("Looking for earlier conversations…").font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+          Text("Looking for earlier conversations…").font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .accessibilityIdentifier("sshContinueLoading")
       case let .failed(message):
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-          Text(message).font(.caption).foregroundStyle(TetherColors.warning)
+          Text(message).font(.chat(.caption)).foregroundStyle(TetherColors.warning)
             .fixedSize(horizontal: false, vertical: true)
           Spacer(minLength: 0)
           Button("Retry") { reloads += 1 }
-            .frame(minHeight: 44).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .frame(minHeight: 44).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.accent)
             .buttonStyle(TetherPressStyle())
             .accessibilityIdentifier("sshContinueRetry")
         }
         .padding(.vertical, 8)
         .accessibilityIdentifier("sshContinueError")
       case let .loaded(sessions) where sessions.isEmpty:
-        Text("No earlier \(agent.label) conversations in this folder").font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+        Text("No earlier \(agent.label) conversations in this folder").font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
           .accessibilityIdentifier("sshContinueEmpty")
       case let .loaded(sessions):
@@ -432,17 +432,17 @@ struct NewChatSheet: View {
     Button { resume(session) } label: {
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 8) {
-          Text(session.displayTitle).font(.subheadline).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+          Text(session.displayTitle).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
           Spacer(minLength: 4)
           if continuing == session.id {
             ProgressView().controlSize(.small).tint(TetherColors.textFaint)
           } else {
-            Text(ChatContinueFormat.relative(session.updatedAt, now: now)).font(.caption)
+            Text(ChatContinueFormat.relative(session.updatedAt, now: now)).font(.chat(.caption))
               .foregroundStyle(TetherColors.textFaint).fixedSize()
           }
         }
         if ChatContinueFormat.isRecent(session.updatedAt, now: now) {
-          Text(ChatContinueFormat.recentNote).font(.caption2).foregroundStyle(TetherColors.warning)
+          Text(ChatContinueFormat.recentNote).font(.chat(.caption2)).foregroundStyle(TetherColors.warning)
             .lineLimit(2).fixedSize(horizontal: false, vertical: true)
         }
       }

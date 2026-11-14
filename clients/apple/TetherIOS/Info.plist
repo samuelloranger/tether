@@ -37,6 +37,8 @@
 	<string>Tether connects to your own server on your local network or private tunnel.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Tether uses the camera to scan a host's pairing QR code.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Tether saves images from your chats to your photo library when you ask it to.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- A tether server is the user's own machine, reached over LAN, Tailscale or

@@ -25,10 +25,10 @@ struct ChatCardView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Label(card.title, systemImage: symbol).font(.subheadline.weight(.semibold))
+      Label(card.title, systemImage: symbol).font(.chat(.subheadline).weight(.semibold))
         .foregroundStyle(TetherColors.textPrimary)
       if !card.supported {
-        Text(card.fallback).font(.subheadline).textSelection(.enabled)
+        Text(card.fallback).font(.chat(.subheadline)).textSelection(.enabled)
       } else if card.kind == "weather" {
         weather
       } else if card.kind == "docker" {
@@ -36,11 +36,11 @@ struct ChatCardView: View {
       } else {
         if let image = card.image { ChatImageView(ref: image).accessibilityLabel(card.payload.alt ?? card.title) }
         else { ChatImagePlaceholder() }
-        Text(card.payload.alt ?? card.fallback).font(.caption).foregroundStyle(TetherColors.textSecondary)
+        Text(card.payload.alt ?? card.fallback).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
       VStack(alignment: .leading, spacing: 3) {
-        Text(card.source).font(.caption)
-        Text("Fetched \(card.fetchedAt)").font(.caption2)
+        Text(card.source).font(.chat(.caption))
+        Text("Fetched \(card.fetchedAt)").font(.chat(.caption2))
       }
       .foregroundStyle(TetherColors.textFaint).textSelection(.enabled)
       if card.supported && card.kind != "image" {
@@ -48,7 +48,7 @@ struct ChatCardView: View {
       }
       if requested {
         Label("Requested · see conversation", systemImage: "clock")
-          .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
     }
     .padding(14)
@@ -76,28 +76,28 @@ struct ChatCardView: View {
 
   private var weather: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(card.payload.location ?? "").font(.subheadline).foregroundStyle(TetherColors.textSecondary)
-      Text(temperature(card.payload.temperature)).font(.title.weight(.medium)).monospacedDigit()
-      Text(card.payload.conditions ?? "").font(.subheadline)
+      Text(card.payload.location ?? "").font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
+      Text(temperature(card.payload.temperature)).font(.chat(.title).weight(.medium)).monospacedDigit()
+      Text(card.payload.conditions ?? "").font(.chat(.subheadline))
       if let feels = card.payload.feelsLike {
-        Text("Feels like \(temperature(feels))").font(.caption).foregroundStyle(TetherColors.textSecondary)
+        Text("Feels like \(temperature(feels))").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
       if let hours = card.payload.hourly, !hours.isEmpty {
         ScrollView(.horizontal) {
           HStack(alignment: .top, spacing: 20) {
             ForEach(Array(hours.enumerated()), id: \.offset) { _, hour in
               VStack(alignment: .leading, spacing: 6) {
-                Text(hourLabel(hour.time)).font(.caption).foregroundStyle(TetherColors.textSecondary)
-                Text(temperature(hour.temperature)).font(.subheadline.weight(.medium)).monospacedDigit()
-                Text(hour.conditions).font(.caption).fixedSize(horizontal: false, vertical: true)
+                Text(hourLabel(hour.time)).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+                Text(temperature(hour.temperature)).font(.chat(.subheadline).weight(.medium)).monospacedDigit()
+                Text(hour.conditions).font(.chat(.caption)).fixedSize(horizontal: false, vertical: true)
                 if let rain = hour.precipitation {
-                  Text("\(rain.formatted())% rain").font(.caption).foregroundStyle(TetherColors.textSecondary)
+                  Text("\(rain.formatted())% rain").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
                 }
               }.frame(width: 100, alignment: .leading)
             }
           }.padding(.vertical, 4)
         }
-        Text(card.payload.timeZone ?? "").font(.caption2).foregroundStyle(TetherColors.textFaint)
+        Text(card.payload.timeZone ?? "").font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
       }
     }
   }
@@ -113,11 +113,11 @@ struct ChatCardView: View {
 
   private var docker: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text(card.payload.host ?? "").font(.subheadline).textSelection(.enabled)
+      Text(card.payload.host ?? "").font(.chat(.subheadline)).textSelection(.enabled)
       let rows = card.payload.containers ?? []
       Text("\(rows.count) listed · \(rows.filter { $0.health == "healthy" }.count) healthy")
-        .font(.caption).foregroundStyle(TetherColors.textSecondary)
-      if rows.isEmpty { Text("No containers").font(.subheadline) }
+        .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+      if rows.isEmpty { Text("No containers").font(.chat(.subheadline)) }
       ForEach(rows) { container in
         Divider().overlay(TetherColors.border)
         DisclosureGroup(isExpanded: Binding(get: { expandedContainers.contains(container.id) }, set: { if $0 { expandedContainers.insert(container.id) } else { expandedContainers.remove(container.id) } })) {
@@ -130,17 +130,17 @@ struct ChatCardView: View {
               HStack { containerActions(container) }
               VStack(alignment: .leading) { containerActions(container) }
             }
-          }.frame(maxWidth: .infinity, alignment: .leading).font(.caption).padding(.top, 8)
+          }.frame(maxWidth: .infinity, alignment: .leading).font(.chat(.caption)).padding(.top, 8)
         } label: {
           VStack(alignment: .leading, spacing: 3) {
-            Text(container.name).font(.subheadline.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
+            Text(container.name).font(.chat(.subheadline).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
             Text("\(container.state) · \(container.health ?? "Health unavailable")")
-              .font(.caption).foregroundStyle(container.health == "unhealthy" ? TetherColors.warning : TetherColors.textSecondary)
+              .font(.chat(.caption)).foregroundStyle(container.health == "unhealthy" ? TetherColors.warning : TetherColors.textSecondary)
           }
         }.tint(TetherColors.textSecondary)
       }
       if let total = card.payload.total, total > rows.count {
-        Text("Showing \(rows.count) of \(total) containers").font(.caption).foregroundStyle(TetherColors.textSecondary)
+        Text("Showing \(rows.count) of \(total) containers").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
     }
   }
@@ -156,7 +156,7 @@ struct ChatCardView: View {
         guard !requested, actions.enabled else { return }
         _ = actions.send(card, request, container)
       } label: {
-        Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        Text(title).font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           .padding(.horizontal, 10).padding(.vertical, 6)
           .background(TetherColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
           .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
@@ -167,7 +167,7 @@ struct ChatCardView: View {
         guard !requested, actions.enabled else { return }
         _ = actions.send(card, request, container)
       } label: {
-        Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        Text(title).font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
       }
       .buttonStyle(.bordered)

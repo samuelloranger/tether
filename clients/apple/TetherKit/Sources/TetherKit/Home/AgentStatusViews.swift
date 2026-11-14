@@ -66,7 +66,7 @@ struct AgentAlertBanner: View {
       .accessibilityLabel(text)
       .accessibilityHint("Switches to \(alert.session)")
       Button(action: onDismiss) {
-        Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        Image(systemName: "xmark").font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
           .frame(width: 32, height: 32).contentShape(Rectangle())
       }
       .buttonStyle(TetherPressStyle())
@@ -91,20 +91,20 @@ struct HeldQuestionBanner: View {
       Image(systemName: "questionmark.bubble.fill").foregroundStyle(TetherColors.accent)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 1) {
-        Text("Claude is asking").font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+        Text("Claude is asking").font(.app(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
         Text(status.message.isEmpty ? "A question" : status.message)
-          .font(.footnote).foregroundStyle(TetherColors.textPrimary).lineLimit(1).truncationMode(.tail)
+          .font(.app(.footnote)).foregroundStyle(TetherColors.textPrimary).lineLimit(1).truncationMode(.tail)
       }
       Spacer(minLength: 4)
       Button(action: onAnswer) {
-        Text("Answer").font(.footnote.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+        Text("Answer").font(.app(.footnote).weight(.semibold)).foregroundStyle(TetherColors.onAccent)
           .padding(.horizontal, 14).padding(.vertical, 7)
           .background(TetherColors.accent, in: Capsule())
       }
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("heldQuestionAnswer")
       Button(action: onDismiss) {
-        Image(systemName: "xmark").font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        Image(systemName: "xmark").font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
           .frame(width: 28, height: 28).contentShape(Rectangle())
       }
       .buttonStyle(TetherPressStyle())

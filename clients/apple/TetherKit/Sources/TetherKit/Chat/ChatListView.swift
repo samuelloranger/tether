@@ -21,7 +21,7 @@ struct ChatListView: View {
         newChatRow.themedRow()
         if let message = model.startError {
           Label(message, systemImage: "exclamationmark.triangle")
-            .font(.footnote).foregroundStyle(TetherColors.warning)
+            .font(.chat(.footnote)).foregroundStyle(TetherColors.warning)
             .themedRow()
             .accessibilityIdentifier("chatStartError")
         }
@@ -78,7 +78,7 @@ struct ChatListView: View {
           if starting {
             ProgressView().tint(TetherColors.onAccent)
           } else {
-            Text("Start chat").font(.subheadline.weight(.semibold))
+            Text("Start chat").font(.chat(.subheadline).weight(.semibold))
           }
         }
         .frame(maxWidth: .infinity)
@@ -113,14 +113,14 @@ struct ChatListView: View {
     case let .failed(message):
       VStack(alignment: .leading, spacing: 8) {
         Label("Couldn't list chats", systemImage: "exclamationmark.triangle")
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.warning)
-        Text(message).font(.footnote).foregroundStyle(TetherColors.textSecondary)
-        Button("Try again") { Task { await model.refresh() } }.font(.footnote.weight(.semibold))
+          .font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.warning)
+        Text(message).font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
+        Button("Try again") { Task { await model.refresh() } }.font(.chat(.footnote).weight(.semibold))
       }
       .themedRow()
     default:
       if model.chats.isEmpty {
-        Text("No chats on this host yet.").font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        Text("No chats on this host yet.").font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           .themedRow()
       }
       ForEach(model.chats) { chat in
@@ -147,10 +147,10 @@ private struct ChatListRow: View {
       ChatAgentMark(agent: agent, size: 18)
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
-          Text(chat.title).font(.body.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
+          Text(chat.title).font(.chat(.body).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(1)
           if let agentTag {
-            Text(agentTag).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+            Text(agentTag).font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
               .padding(.horizontal, 6).padding(.vertical, 1)
               .background(TetherColors.textPrimary.opacity(0.06), in: Capsule())
               .fixedSize()
@@ -165,9 +165,9 @@ private struct ChatListRow: View {
       VStack(alignment: .trailing, spacing: 4) {
         statusPill
         Text(chat.created, format: .relative(presentation: .named))
-          .font(.caption2).foregroundStyle(TetherColors.textFaint)
+          .font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
       }
-      Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+      Image(systemName: "chevron.right").font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
     }
     .padding(.vertical, 4)
     .contentShape(Rectangle())
@@ -182,7 +182,7 @@ private struct ChatListRow: View {
     let tint = chat.isRunning ? TetherColors.success : TetherColors.textFaint
     return HStack(spacing: 5) {
       Circle().fill(tint).frame(width: 6, height: 6)
-      Text(status).font(.caption2.weight(.semibold)).foregroundStyle(chat.isRunning ? tint : TetherColors.textSecondary)
+      Text(status).font(.chat(.caption2).weight(.semibold)).foregroundStyle(chat.isRunning ? tint : TetherColors.textSecondary)
     }
     .padding(.horizontal, 9)
     .frame(height: 24)

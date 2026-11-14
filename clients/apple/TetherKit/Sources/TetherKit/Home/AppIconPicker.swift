@@ -51,7 +51,7 @@ struct AppIconPicker: View {
           .opacity(choice == current ? 1 : 0)
       )
       Text(choice.name)
-        .font(.caption)
+        .font(.app(.caption))
         .foregroundStyle(choice == current ? .primary : .secondary)
     }
   }

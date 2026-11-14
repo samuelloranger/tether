@@ -52,6 +52,8 @@ struct ChatSelectableText: UIViewRepresentable {
   var branch: (() -> Void)?
   var diff: [DiffRow]?
   var diffFile: DiffFile?
+  /// Read where the view is built, so the parent redraws it when the chat font changes.
+  var face = TetherTypography.shared.chat
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -126,7 +128,7 @@ struct ChatSelectableText: UIViewRepresentable {
   }
 
   func attributedText() -> NSAttributedString {
-    let font = UIFont.preferredFont(forTextStyle: reading ? .subheadline : .footnote)
+    let font = face.uiFont(reading ? .subheadline : .footnote)
     let ink = UIColor(reading ? TetherColors.textPrimary : TetherColors.textSecondary)
     let out = NSMutableAttributedString(string: "")
     func append(_ text: AttributedString, font: UIFont = font, color: UIColor = ink, code: Bool = false) {
@@ -177,7 +179,7 @@ struct ChatSelectableText: UIViewRepresentable {
       }
       switch block {
       case let .heading(level, text):
-        append(text, font: .preferredFont(forTextStyle: level == 1 ? .headline : .subheadline).withTraits(.traitBold))
+        append(text, font: face.uiFont(level == 1 ? .headline : .subheadline).withTraits(.traitBold))
       case let .paragraph(text): append(text)
       case let .quote(text): append(text, font: font.withTraits(.traitItalic), color: UIColor(TetherColors.textFaint))
       case let .code(lines):

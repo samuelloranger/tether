@@ -1092,7 +1092,7 @@ private struct TasksDrawerFixture: View {
     VStack(spacing: 0) {
       ForEach(rows) { row in
         HStack {
-          Text(row.title).font(.subheadline).foregroundStyle(TetherColors.textPrimary)
+          Text(row.title).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
           Spacer()
           ChatStateTag(state: row.state)
         }

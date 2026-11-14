@@ -44,15 +44,15 @@ struct AgentQuestionSheet: View {
     case .loading:
       VStack(spacing: 10) {
         ProgressView().tint(TetherColors.accent)
-        Text("Loading the question…").font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        Text("Loading the question…").font(.app(.footnote)).foregroundStyle(TetherColors.textSecondary)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     case let .failed(message):
       VStack(spacing: 12) {
-        Image(systemName: "questionmark.bubble").font(.largeTitle).foregroundStyle(TetherColors.textFaint)
-        Text(message).font(.callout).foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
+        Image(systemName: "questionmark.bubble").font(.app(.largeTitle)).foregroundStyle(TetherColors.textFaint)
+        Text(message).font(.app(.callout)).foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
         Button("Try again") { Task { await load() } }
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.accent)
+          .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.accent)
       }
       .padding(24)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -63,7 +63,7 @@ struct AgentQuestionSheet: View {
             questionSection(question, at: index)
           }
           if let sendError {
-            Section { Text(sendError).font(.footnote).foregroundStyle(TetherColors.danger) }
+            Section { Text(sendError).font(.app(.footnote)).foregroundStyle(TetherColors.danger) }
           }
         }
         .themedRow()
@@ -83,7 +83,7 @@ struct AgentQuestionSheet: View {
             VStack(alignment: .leading, spacing: 2) {
               Text(option.label).foregroundStyle(TetherColors.textPrimary)
               if let description = option.description, !description.isEmpty {
-                Text(description).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+                Text(description).font(.app(.footnote)).foregroundStyle(TetherColors.textSecondary)
               }
             }
           }
@@ -97,10 +97,10 @@ struct AgentQuestionSheet: View {
       )
     } header: {
       VStack(alignment: .leading, spacing: 4) {
-        Text(question.header.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.accent)
-        Text(question.question).font(.headline).foregroundStyle(TetherColors.textPrimary).textCase(nil)
+        Text(question.header.uppercased()).font(.app(.caption2).weight(.semibold)).foregroundStyle(TetherColors.accent)
+        Text(question.question).font(.app(.headline)).foregroundStyle(TetherColors.textPrimary).textCase(nil)
         if question.multiSelect {
-          Text("Pick any").font(.caption).foregroundStyle(TetherColors.textSecondary).textCase(nil)
+          Text("Pick any").font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).textCase(nil)
         }
       }
       .padding(.bottom, 4)

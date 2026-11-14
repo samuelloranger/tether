@@ -47,7 +47,7 @@ struct TerminalFontPicker: View {
             }
           }
           if let failure {
-            Label(failure, systemImage: "exclamationmark.triangle").font(.footnote)
+            Label(failure, systemImage: "exclamationmark.triangle").font(.app(.footnote))
               .foregroundStyle(TetherColors.danger)
           }
         } header: {
@@ -85,7 +85,7 @@ struct TerminalFontPicker: View {
         VStack(alignment: .leading, spacing: 2) {
           Text(font.label).font(.custom(font.postScriptName, size: 17)).foregroundStyle(TetherColors.textPrimary)
           if proportional {
-            Text("Proportional — letters are spaced to the grid").font(.caption)
+            Text("Proportional — letters are spaced to the grid").font(.app(.caption))
               .foregroundStyle(TetherColors.textSecondary)
           }
         }

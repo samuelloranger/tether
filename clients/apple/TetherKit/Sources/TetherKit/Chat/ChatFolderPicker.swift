@@ -17,7 +17,7 @@ struct ChatFolderPicker: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(hostName.isEmpty ? "Working folder on the host" : "Folder on \(hostName)")
-        .font(.caption).foregroundStyle(TetherColors.textSecondary)
+        .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       HStack(spacing: 8) {
         Image(systemName: "folder").foregroundStyle(TetherColors.textFaint).accessibilityHidden(true)
         TextField("Folder on the host", text: $folder)
@@ -59,7 +59,7 @@ struct ChatFolderPicker: View {
           }
         }
       }
-      .font(.caption).fixedSize(horizontal: false, vertical: true)
+      .font(.chat(.caption)).fixedSize(horizontal: false, vertical: true)
       .accessibilityElement(children: .contain)
     }
     .task {
@@ -130,14 +130,14 @@ private struct ChatFolderBrowser: View {
     NavigationStack {
       VStack(alignment: .leading, spacing: 12) {
         if !hostName.isEmpty {
-          Text("On \(hostName)").font(.caption).foregroundStyle(TetherColors.textSecondary)
+          Text("On \(hostName)").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
         }
         ScrollView(.horizontal) {
           HStack(spacing: 4) {
             ForEach(ChatFolders.breadcrumbs(info?.path ?? location), id: \.self) { path in
-              if path != "/" { Image(systemName: "chevron.right").font(.caption2).accessibilityHidden(true) }
+              if path != "/" { Image(systemName: "chevron.right").font(.chat(.caption2)).accessibilityHidden(true) }
               Button(path == "/" ? "/" : (path as NSString).lastPathComponent) { navigate(path) }
-                .font(.subheadline).frame(minHeight: 44).disabled(locked || loading)
+                .font(.chat(.subheadline)).frame(minHeight: 44).disabled(locked || loading)
                 .accessibilityLabel(path)
             }
           }
@@ -158,7 +158,7 @@ private struct ChatFolderBrowser: View {
               ProgressView("Loading folders…").frame(maxWidth: .infinity, minHeight: 44)
             } else if let info {
               if let message = info.message {
-                Text(message).font(.callout).foregroundStyle(TetherColors.warning)
+                Text(message).font(.chat(.callout)).foregroundStyle(TetherColors.warning)
                 Button("Retry") { reloads += 1 }.frame(minHeight: 44).disabled(locked)
               }
               if info.path != "/", info.path.hasPrefix("/") {
@@ -170,10 +170,10 @@ private struct ChatFolderBrowser: View {
               }
               if children.isEmpty, info.ready {
                 Text(filter.isEmpty ? "No subfolders in this folder." : "No matching folders.")
-                  .font(.callout).foregroundStyle(TetherColors.textSecondary).padding(.vertical, 12)
+                  .font(.chat(.callout)).foregroundStyle(TetherColors.textSecondary).padding(.vertical, 12)
               }
               if info.children.count >= 200 {
-                Text("First 200 folders shown.").font(.caption).foregroundStyle(TetherColors.textSecondary)
+                Text("First 200 folders shown.").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
               }
             }
           }
@@ -205,13 +205,13 @@ private struct ChatFolderBrowser: View {
 
   private var nameEntry: some View {
     VStack(alignment: .leading, spacing: 4) {
-      Text("New folder name").font(.caption).foregroundStyle(TetherColors.textSecondary)
+      Text("New folder name").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       TextField("Folder name", text: $name)
         .textInputAutocapitalization(.never).autocorrectionDisabled().focused($nameFocused)
         .padding(10).background(TetherColors.input, in: RoundedRectangle(cornerRadius: 8))
         .disabled(creating).submitLabel(.done).onSubmit(createChild)
         .accessibilityIdentifier("sshFolderName")
-      if let createError { Text(createError).font(.caption).foregroundStyle(TetherColors.warning) }
+      if let createError { Text(createError).font(.chat(.caption)).foregroundStyle(TetherColors.warning) }
       HStack {
         Spacer()
         Button("Cancel") { naming = false; createError = nil }.disabled(creating)
@@ -231,7 +231,7 @@ private struct ChatFolderBrowser: View {
         guard let info, info.ready, !locked, !loading else { return }
         onUse(info)
       } label: {
-        Text("Use this folder").font(.subheadline.weight(.semibold))
+        Text("Use this folder").font(.chat(.subheadline).weight(.semibold))
           .frame(maxWidth: .infinity, minHeight: 44)
           .foregroundStyle(TetherColors.onAccent)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
@@ -250,7 +250,7 @@ private struct ChatFolderBrowser: View {
         Image(systemName: icon).foregroundStyle(TetherColors.textSecondary)
         Text(title).foregroundStyle(TetherColors.textPrimary).multilineTextAlignment(.leading)
         Spacer()
-        Image(systemName: "chevron.right").font(.caption).foregroundStyle(TetherColors.textFaint)
+        Image(systemName: "chevron.right").font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
       }
       .frame(minHeight: 44).contentShape(Rectangle())
     }

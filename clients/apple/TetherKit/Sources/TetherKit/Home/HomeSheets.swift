@@ -33,7 +33,7 @@ struct AddServerSheet: View {
           }
           tofuNote
           Button(action: save) {
-            Text("Save server").font(.subheadline.weight(.semibold))
+            Text("Save server").font(.app(.subheadline).weight(.semibold))
               .frame(maxWidth: .infinity).padding(.vertical, 13)
               .background(canSave ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
               .foregroundStyle(canSave ? TetherColors.onAccent : TetherColors.textFaint)
@@ -44,7 +44,7 @@ struct AddServerSheet: View {
           .accessibilityHint(saveBlocker ?? "")
           .padding(.top, 4)
           if let saveBlocker {
-            Text(saveBlocker).font(.caption).foregroundStyle(TetherColors.textFaint)
+            Text(saveBlocker).font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
               .frame(maxWidth: .infinity, alignment: .center)
               .accessibilityHidden(true)
           }
@@ -87,7 +87,7 @@ struct AddServerSheet: View {
   }
 
   private func segment(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
-    Text(label).font(.caption.weight(.semibold))
+    Text(label).font(.app(.caption).weight(.semibold))
       .frame(maxWidth: .infinity).padding(.vertical, 7)
       .foregroundStyle(selected ? TetherColors.onAccent : TetherColors.textSecondary)
       .background { if selected { RoundedRectangle(cornerRadius: 8).fill(TetherColors.accent) } }
@@ -131,7 +131,7 @@ struct AddServerSheet: View {
 
   private func field(_ label: String, @ViewBuilder _ control: () -> some View) -> some View {
     VStack(alignment: .leading, spacing: 5) {
-      Text(label).font(.caption2.weight(.medium)).foregroundStyle(TetherColors.textSecondary)
+      Text(label).font(.app(.caption2).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
       control()
     }
   }
@@ -185,12 +185,12 @@ struct KeyEntrySheet: View {
           }
           if mode == .generate {
             Text("A new ed25519 key is created in the Keychain. Only its public half is shown — paste that into the host's authorized_keys.")
-              .font(.caption).foregroundStyle(TetherColors.textSecondary)
+              .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
           } else {
             if mode == .importFile {
               Button { showImporter = true } label: {
                 Label("Load private key file…", systemImage: "folder")
-                  .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+                  .font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent)
                   .frame(maxWidth: .infinity).padding(.vertical, 10)
                   .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 11))
                   .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TetherColors.border))
@@ -200,7 +200,7 @@ struct KeyEntrySheet: View {
             labeled("Public key (OpenSSH)") { editor($publicKey, "ssh-ed25519 AAAA…") }
           }
           Button(action: commit) {
-            Text(mode == .generate ? "Generate key" : "Save key").font(.subheadline.weight(.semibold))
+            Text(mode == .generate ? "Generate key" : "Save key").font(.app(.subheadline).weight(.semibold))
               .frame(maxWidth: .infinity).padding(.vertical, 13)
               .background(canCommit ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
               .foregroundStyle(canCommit ? TetherColors.onAccent : TetherColors.textFaint)
@@ -210,7 +210,7 @@ struct KeyEntrySheet: View {
           .accessibilityIdentifier("keyEntryCommit")
           .accessibilityHint(commitBlocker ?? "")
           if let commitBlocker {
-            Text(commitBlocker).font(.caption).foregroundStyle(TetherColors.textFaint)
+            Text(commitBlocker).font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
               .frame(maxWidth: .infinity, alignment: .center)
               .accessibilityHidden(true)
           }
@@ -257,7 +257,7 @@ struct KeyEntrySheet: View {
 
   private func labeled(_ label: String, @ViewBuilder _ control: () -> some View) -> some View {
     VStack(alignment: .leading, spacing: 5) {
-      Text(label).font(.caption2.weight(.medium)).foregroundStyle(TetherColors.textSecondary)
+      Text(label).font(.app(.caption2).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
       control()
     }
   }

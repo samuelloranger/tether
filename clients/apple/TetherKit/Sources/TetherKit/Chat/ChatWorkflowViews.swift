@@ -33,7 +33,7 @@ struct ChatWorkflowStrip: View {
         Text(text).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
           .lineLimit(1).truncationMode(.tail)
           .frame(maxWidth: .infinity, alignment: .leading)
-        Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        Image(systemName: "chevron.right").font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
           .accessibilityHidden(true)
       }
       .padding(.horizontal, 10).frame(minHeight: 30)
@@ -59,7 +59,7 @@ struct ChatWorkflowSheet: View {
           TimelineView(.periodic(from: .now, by: 1)) { context in content(run, now: context.date) }
         } else {
           Text("This workflow is no longer listed on the host.")
-            .font(.footnote).foregroundStyle(TetherColors.textSecondary).padding(16)
+            .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary).padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
@@ -82,7 +82,7 @@ struct ChatWorkflowSheet: View {
           phaseSection(phase, now: now)
         }
         if let summary = run.summary, !run.isRunning {
-          Text(summary).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          Text(summary).font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
             .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 10))
@@ -99,13 +99,13 @@ struct ChatWorkflowSheet: View {
     return VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 6) {
         runGlyph(run)
-        Text(ChatWorkflowText.statusWord(run)).font(.footnote.weight(.semibold))
+        Text(ChatWorkflowText.statusWord(run)).font(.chat(.footnote).weight(.semibold))
           .foregroundStyle(run.isRunning ? TetherColors.accent : TetherColors.textSecondary)
-        Text("\(run.doneCount)/\(run.totalCount) agents").font(.footnote.monospacedDigit())
+        Text("\(run.doneCount)/\(run.totalCount) agents").font(.chat(.footnote).monospacedDigit())
           .foregroundStyle(TetherColors.textFaint)
         Spacer(minLength: 0)
         if let elapsed = ChatWorkflowText.elapsed(run, now: now) {
-          Text(elapsed).font(.footnote.monospacedDigit()).foregroundStyle(TetherColors.textFaint)
+          Text(elapsed).font(.chat(.footnote).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
         }
       }
       .accessibilityElement(children: .ignore)
@@ -115,10 +115,10 @@ struct ChatWorkflowSheet: View {
           ChatWorkflowText.elapsed(run, now: now), quiet,
         ].compactMap { $0 }.joined(separator: ", "))
       if let quiet {
-        Text(quiet).font(.caption).foregroundStyle(TetherColors.warning)
+        Text(quiet).font(.chat(.caption)).foregroundStyle(TetherColors.warning)
       }
       if let description = run.description {
-        Text(description).font(.caption).foregroundStyle(TetherColors.textFaint).lineLimit(3)
+        Text(description).font(.chat(.caption)).foregroundStyle(TetherColors.textFaint).lineLimit(3)
       }
     }
   }
@@ -126,19 +126,19 @@ struct ChatWorkflowSheet: View {
   @ViewBuilder private func runGlyph(_ run: ChatWorkflowRun) -> some View {
     switch run.status {
     case .running: ProgressView().controlSize(.mini).tint(TetherColors.accent)
-    case .completed: Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
-    case .ended: Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.danger)
+    case .completed: Image(systemName: "checkmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.success)
+    case .ended: Image(systemName: "xmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.danger)
     }
   }
 
   private func phaseSection(_ phase: ChatWorkflowRun.Phase, now: Date) -> some View {
     VStack(alignment: .leading, spacing: 0) {
-      Text(phase.title.isEmpty ? "Agents" : phase.title).font(.caption.weight(.semibold))
+      Text(phase.title.isEmpty ? "Agents" : phase.title).font(.chat(.caption).weight(.semibold))
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.bottom, 6)
       VStack(spacing: 0) {
         if phase.agents.isEmpty {
-          Text("Not started").font(.footnote).foregroundStyle(TetherColors.textFaint)
+          Text("Not started").font(.chat(.footnote)).foregroundStyle(TetherColors.textFaint)
             .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
         }
         ForEach(Array(phase.agents.enumerated()), id: \.offset) { index, agent in
@@ -158,14 +158,14 @@ struct ChatWorkflowSheet: View {
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
       Group {
         switch agent.state {
-        case .done: Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
+        case .done: Image(systemName: "checkmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.success)
         case .stopped: Image(systemName: "stop.fill").font(.system(size: 8)).foregroundStyle(TetherColors.textFaint)
         case .running: ProgressView().controlSize(.mini).tint(TetherColors.accent)
         }
       }
       .frame(width: 14)
       VStack(alignment: .leading, spacing: 1) {
-        Text(agent.label).font(.footnote).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+        Text(agent.label).font(.chat(.footnote)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
         if let activity {
           Text(activity).font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
             .lineLimit(1).truncationMode(.tail)
@@ -173,7 +173,7 @@ struct ChatWorkflowSheet: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       if let elapsed {
-        Text(elapsed).font(.caption.monospacedDigit()).foregroundStyle(TetherColors.textFaint)
+        Text(elapsed).font(.chat(.caption).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
       }
     }
     .padding(.horizontal, 10).padding(.vertical, 7)

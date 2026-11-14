@@ -71,6 +71,7 @@ struct ChatView: View {
   var body: some View {
     scroller
     .environment(\.chatImages, model.imageLibrary)
+    .environment(\.chatImageGallery, { [model] in ChatImageGallery.refs(model.state.items) })
     .environment(\.chatCardActions, ChatCardActions(enabled: model.canSend, pending: { model.cardActionPending($0) }, send: { model.sendCardAction($0, action: $1, container: $2) }))
     .onChange(of: atBottom) { _, near in windowFollowing(near) }
     #if DEBUG
@@ -78,11 +79,7 @@ struct ChatView: View {
     #endif
     .background(TetherColors.background.ignoresSafeArea())
     .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar.overlay(alignment: .top) { queuedChips } }
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbarBackground(TetherColors.background, for: .navigationBar)
-    .toolbarBackground(.visible, for: .navigationBar)
     .navigationBarBackButtonHidden(true)
-    .overlay(alignment: .top) { headerRule }
     #if DEBUG
     .overlay(alignment: .topTrailing) {
       if probeLastRow {
@@ -94,27 +91,10 @@ struct ChatView: View {
       }
     }
     #endif
-    .toolbar {
-      ToolbarItem(placement: .topBarLeading) { backButton }.withoutGlass()
-      ToolbarItem(placement: .principal) { titleBlock }.withoutGlass()
-      ToolbarItem(placement: .topBarTrailing) {
-        HStack(spacing: 12) {
-          connectionBadge
-          if let onShowGit {
-            Button(action: onShowGit) {
-              Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(TetherColors.textSecondary)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Git changes")
-            .accessibilityIdentifier("chatGit")
-          }
-          moreMenu
-        }
-      }.withoutGlass()
-    }
+    // A row of our own, not the navigation bar: the bar sizes items to their content and folds the
+    // trailing ones into an overflow pill when the title is wide.
+    .toolbar(.hidden, for: .navigationBar)
+    .safeAreaInset(edge: .top, spacing: 0) { header }
     .task { await model.connect() }
     .task {
       if draft.isEmpty {
@@ -232,14 +212,14 @@ struct ChatView: View {
         VStack(alignment: .leading, spacing: 6) {
           Button { onOpenParent?(branch.parent) } label: {
             Label("Branched from \(branch.parent.title)", systemImage: "arrow.triangle.branch")
-              .font(.caption).multilineTextAlignment(.leading)
+              .font(.chat(.caption)).multilineTextAlignment(.leading)
           }
           .accessibilityIdentifier("chatBranchParent")
-          Text("Earlier context copied · original chat preserved").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+          Text("Earlier context copied · original chat preserved").font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
           if !branch.earlier.isEmpty {
             DisclosureGroup("Earlier messages", isExpanded: $earlierBranchOpen) {
-              Text(branch.readableEarlier).font(.caption).foregroundStyle(TetherColors.textSecondary).textSelection(.enabled)
-            }.font(.caption)
+              Text(branch.readableEarlier).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).textSelection(.enabled)
+            }.font(.chat(.caption))
           }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -413,7 +393,7 @@ struct ChatView: View {
               .accessibilityIdentifier("chatQueueEdit-\(id)")
               if model.isWorking, !model.steerRefused {
                 Button { model.sendQueuedMessageNow(id) } label: {
-                  Image(systemName: "arrow.up").font(.caption2.weight(.bold))
+                  Image(systemName: "arrow.up").font(.chat(.caption2).weight(.bold))
                     .foregroundStyle(TetherColors.onAccent)
                     .frame(width: 22, height: 22)
                     .background(TetherColors.accent, in: Circle())
@@ -425,7 +405,7 @@ struct ChatView: View {
                 .accessibilityIdentifier("chatQueueSendNow-\(id)")
               }
               Button { model.removeQueuedMessage(id) } label: {
-                Image(systemName: "xmark").font(.caption2.weight(.semibold))
+                Image(systemName: "xmark").font(.chat(.caption2).weight(.semibold))
                   .foregroundStyle(TetherColors.textFaint)
                   .frame(width: 32, height: 36)
                   .contentShape(Rectangle())
@@ -456,8 +436,8 @@ struct ChatView: View {
 
   private func queuedLabel(_ text: String) -> some View {
     HStack(spacing: 6) {
-      Image(systemName: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
-      Text(text).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+      Image(systemName: "clock").font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
+      Text(text).font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(1).truncationMode(.tail)
     }
   }
@@ -469,6 +449,8 @@ struct ChatView: View {
     if ChatFixture.openSubagents, case let .tool(call) = item.kind, call.subagent != nil { return true }
     if ChatFixture.openImages, case let .tool(call) = item.kind, !call.images.isEmpty { return true }
     #endif
+    // Image rows start open, so for them membership in `expanded` means closed.
+    if case let .tool(call) = item.kind, !call.images.isEmpty { return !expanded.contains(item.id) }
     return expanded.contains(item.id)
   }
 
@@ -499,9 +481,9 @@ struct ChatView: View {
 
   private var emptyState: some View {
     VStack(spacing: 8) {
-      Image(systemName: "text.bubble").font(.title).foregroundStyle(TetherColors.textFaint)
+      Image(systemName: "text.bubble").font(.chat(.title)).foregroundStyle(TetherColors.textFaint)
       Text(model.readOnly ? "Nothing here yet" : "Ask the agent anything")
-        .font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+        .font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
       Text(model.cwd).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
         .lineLimit(1).truncationMode(.head)
     }
@@ -511,6 +493,21 @@ struct ChatView: View {
   }
 
   // MARK: Header
+
+  private var header: some View {
+    HStack(spacing: 10) {
+      backButton
+      titleBlock.frame(maxWidth: .infinity, alignment: .leading)
+      HStack(spacing: 12) {
+        connectionBadge
+        moreMenu
+      }
+    }
+    .padding(.leading, 12).padding(.trailing, 14).padding(.bottom, 6)
+    .frame(minHeight: 48)
+    .background(TetherColors.background)
+    .overlay(alignment: .bottom) { headerRule }
+  }
 
   private var backButton: some View {
     Button { if let onSessions { onSessions() } else { dismiss() } } label: {
@@ -523,8 +520,9 @@ struct ChatView: View {
               .accessibilityHidden(true)
           }
         }
-        .frame(width: 44, height: 44, alignment: .leading)
-        .contentShape(Rectangle())
+        .frame(width: 24, height: 44, alignment: .leading)
+        // Narrow so the title sits close; the tap area keeps a full 44pt.
+        .contentShape(Rectangle().inset(by: -10))
     }
     .accessibilityLabel(onSessions == nil ? "Chats" : sessionsNeedYou ? "Open session list, a session needs you" : "Open session list")
     .accessibilityIdentifier(onSessions == nil ? "chatBack" : "chatSessions")
@@ -532,11 +530,11 @@ struct ChatView: View {
 
   private var titleBlock: some View {
     let line = ChatStatusLine(state: model.state, agent: model.agent)
-    return VStack(spacing: 2) {
+    return VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 6) {
         if model.agent?.key != ChatAgents.claude.key { ChatAgentMark(agent: model.agent, size: 13) }
         Text(copiedFolder ? "Folder copied" : model.title)
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+          .font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
       }
       .onLongPressGesture(minimumDuration: 0.4) { copyFolder() }
       .accessibilityElement(children: .combine)
@@ -549,7 +547,7 @@ struct ChatView: View {
           .accessibilityHint("Opens the session controls")
           .accessibilityIdentifier("chatControls")
       } else {
-        Text(ChatFormat.folderName(model.cwd)).font(.caption).foregroundStyle(TetherColors.textSecondary)
+        Text(ChatFormat.folderName(model.cwd)).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
           .lineLimit(1)
           .accessibilityLabel(model.cwd)
       }
@@ -621,6 +619,10 @@ struct ChatView: View {
 
   private var moreMenu: some View {
     Menu {
+      if let onShowGit {
+        Button(action: onShowGit) { MenuLabel("Git changes", systemImage: "arrow.triangle.branch") }
+          .accessibilityIdentifier("chatGit")
+      }
       if onContinueInTerminal != nil, model.state.sessionId != nil, !model.readOnly {
         Button { confirmingTerminal = true } label: { MenuLabel("Continue in terminal", systemImage: "terminal") }
       }
@@ -653,7 +655,7 @@ struct ChatView: View {
     switch model.link.phase {
     case .lost:
       Button { model.reconnect() } label: {
-        Label("Reconnect", systemImage: "arrow.clockwise").font(.caption.weight(.semibold))
+        Label("Reconnect", systemImage: "arrow.clockwise").font(.chat(.caption).weight(.semibold))
           .lineLimit(1).fixedSize()
           .frame(height: 24).hitSlop(vertical: 10)
       }
@@ -670,7 +672,7 @@ struct ChatView: View {
   private func badge(color: Color, text: String) -> some View {
     HStack(spacing: 5) {
       Circle().fill(color).frame(width: 6, height: 6)
-      Text(text).font(.caption).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+      Text(text).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
     }
     // A long title gives way first; the badge never wraps.
     .fixedSize()
@@ -685,10 +687,10 @@ struct ChatView: View {
       if let notice = model.notice {
         HStack(alignment: .top, spacing: 8) {
           Image(systemName: "exclamationmark.triangle").foregroundStyle(TetherColors.warning)
-          Text(notice).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          Text(notice).font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 0)
           Button { model.notice = nil } label: { Image(systemName: "xmark") }
-            .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+            .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
             .accessibilityLabel("Dismiss")
         }
         .padding(10)
@@ -705,7 +707,7 @@ struct ChatView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
         if model.answerFailures.contains(question.requestId) {
           Text("Couldn't send your answer. Try again.")
-            .font(.caption).foregroundStyle(TetherColors.textFaint)
+            .font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
             .accessibilityIdentifier("chatAnswerRetry")
@@ -720,7 +722,7 @@ struct ChatView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
         if model.answerFailures.contains(permission.requestId) {
           Text("Couldn't send your answer. Choose again to retry.")
-            .font(.caption).foregroundStyle(TetherColors.textFaint)
+            .font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
             .accessibilityIdentifier("chatAnswerRetry")
@@ -734,11 +736,11 @@ struct ChatView: View {
       }
       if model.readOnly {
         Label("Started on another device. Read only.", systemImage: "eye")
-          .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
       } else if model.hasEnded {
         Label("This chat has ended. You can still read it.", systemImage: "moon.zzz")
-          .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+          .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
           .accessibilityIdentifier("chatEnded")
       } else if !(questionTyping && pendingQuestion != nil) {
@@ -753,7 +755,7 @@ struct ChatView: View {
       if catchingUp {
         HStack(spacing: 6) {
           ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
-          Text("Catching up…").font(.caption).foregroundStyle(TetherColors.textSecondary)
+          Text("Catching up…").font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(TetherColors.surfaceRaised, in: Capsule())
@@ -798,7 +800,7 @@ struct ChatView: View {
         attachButton
         composerField
           .lineLimit(1...6)
-          .font(.subheadline)
+          .font(.chat(.subheadline))
           .padding(.horizontal, 14).padding(.vertical, 8)
           .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
           .opacity(answerPending ? 0.55 : 1)
@@ -1004,13 +1006,13 @@ struct PermissionCard: View {
       HStack(spacing: 8) {
         Image(systemName: permission.kind.symbolName).foregroundStyle(TetherColors.accent)
         VStack(alignment: .leading, spacing: 1) {
-          Text(isPlan ? "PLAN" : "PERMISSION").font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
-          Text(permission.title).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+          Text(isPlan ? "PLAN" : "PERMISSION").font(.chat(.caption2).weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
+          Text(permission.title).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(2)
         }
         Spacer(minLength: 0)
         if let position {
-          Text(position).font(.caption2.weight(.semibold).monospaced()).foregroundStyle(TetherColors.textFaint)
+          Text(position).font(.chat(.caption2).weight(.semibold).monospaced()).foregroundStyle(TetherColors.textFaint)
         }
       }
       preview
@@ -1075,8 +1077,8 @@ struct PermissionCard: View {
         }
         Button(action: review) {
           HStack(spacing: 6) {
-            Text("Show full diff").font(.footnote.weight(.semibold))
-            Image(systemName: "arrow.up.left.and.arrow.down.right").font(.footnote)
+            Text("Show full diff").font(.chat(.footnote).weight(.semibold))
+            Image(systemName: "arrow.up.left.and.arrow.down.right").font(.chat(.footnote))
             Spacer(minLength: 0)
           }
           .foregroundStyle(TetherColors.accent)
@@ -1146,7 +1148,7 @@ struct PermissionCard: View {
       if layout.collapsed, !layout.more.isEmpty {
         Button { withAnimation(.easeOut(duration: 0.18)) { showMore.toggle() } } label: {
           HStack(spacing: 4) {
-            Text("More options").font(.footnote.weight(.medium))
+            Text("More options").font(.chat(.footnote).weight(.medium))
             Image(systemName: showMore ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
           }
           .foregroundStyle(TetherColors.textSecondary)
@@ -1161,7 +1163,7 @@ struct PermissionCard: View {
           VStack(spacing: 6) {
             ForEach(layout.more, id: \.optionId) { option in
               Button { approve(option) } label: {
-                Text(option.name).font(.subheadline.weight(.medium)).foregroundStyle(TetherColors.accent)
+                Text(option.name).font(.chat(.subheadline).weight(.medium)).foregroundStyle(TetherColors.accent)
                   .multilineTextAlignment(.center)
                   .frame(maxWidth: .infinity, minHeight: 36)
                   .padding(.horizontal, 10)
@@ -1177,7 +1179,7 @@ struct PermissionCard: View {
       } else {
         ForEach(layout.more, id: \.optionId) { option in
           Button { approve(option) } label: {
-            Text(option.name).font(.footnote.weight(.medium)).foregroundStyle(TetherColors.accent)
+            Text(option.name).font(.chat(.footnote).weight(.medium)).foregroundStyle(TetherColors.accent)
               .multilineTextAlignment(.center)
               .frame(maxWidth: .infinity, minHeight: 24)
               .hitSlop(vertical: 10)
@@ -1195,7 +1197,7 @@ struct PermissionCard: View {
     let deny = option.optionId == rejectId
     return Button { approve(option) } label: {
       Text(option.name)
-        .font(.subheadline.weight(deny ? .medium : .semibold))
+        .font(.chat(.subheadline).weight(deny ? .medium : .semibold))
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, minHeight: 34)
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -1234,8 +1236,8 @@ private struct PlanPreview: View {
       Rectangle().fill(TetherColors.border).frame(height: 0.5)
       Button(action: review) {
         HStack(spacing: 6) {
-          Text("Show full plan").font(.footnote.weight(.semibold))
-          Image(systemName: "arrow.up.left.and.arrow.down.right").font(.footnote)
+          Text("Show full plan").font(.chat(.footnote).weight(.semibold))
+          Image(systemName: "arrow.up.left.and.arrow.down.right").font(.chat(.footnote))
           Spacer(minLength: 0)
         }
         .foregroundStyle(TetherColors.accent)
@@ -1287,8 +1289,8 @@ struct JumpToLatestButton: View {
   var body: some View {
     Button(action: action) {
       HStack(spacing: 5) {
-        Image(systemName: "arrow.down").font(.caption2.weight(.bold))
-        Text("Jump to latest").font(.caption.weight(.medium))
+        Image(systemName: "arrow.down").font(.chat(.caption2).weight(.bold))
+        Text("Jump to latest").font(.chat(.caption).weight(.medium))
       }
       .foregroundStyle(TetherColors.textPrimary)
       .padding(.horizontal, 12).frame(height: 28)
@@ -1404,7 +1406,7 @@ private struct EarlierMessagesButton: View {
   var body: some View {
     Button(action: action) {
       Text("Earlier messages")
-        .font(.footnote.weight(.medium))
+        .font(.chat(.footnote).weight(.medium))
         .foregroundStyle(TetherColors.textSecondary)
         .frame(maxWidth: .infinity, minHeight: 36)
     }

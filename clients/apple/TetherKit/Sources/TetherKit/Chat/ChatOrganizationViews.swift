@@ -17,7 +17,7 @@ struct ChatBranchSheet: View {
           Text("Try another approach in a new chat. The original conversation stays available.")
             .foregroundStyle(TetherColors.textSecondary)
           Label("Before your selected message", systemImage: "arrow.triangle.branch")
-          Text(sourceTitle).font(.caption).foregroundStyle(TetherColors.textSecondary)
+          Text(sourceTitle).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
         }
         Section("New chat name") {
           TextField("Name", text: $title).accessibilityIdentifier("chatBranchTitle")
@@ -28,7 +28,7 @@ struct ChatBranchSheet: View {
         Section("Carry over context") {
           Label("Copy earlier messages", systemImage: "doc.on.doc")
           Text("Starts a new agent session with earlier conversation text. This creates a fresh agent session, not a native session fork. Files stay as they are.")
-            .font(.caption).foregroundStyle(TetherColors.textSecondary)
+            .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
         }
         if let error = point.failure ?? failure { Text(error).foregroundStyle(TetherColors.warning) }
       }
@@ -69,10 +69,10 @@ struct ChatPlanUsageView: View {
     TimelineView(.periodic(from: .now, by: 60)) { timeline in
       VStack(alignment: .leading, spacing: 2) {
         HStack {
-          Text("Subscriptions · used").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+          Text("Subscriptions · used").font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 0)
           Button(action: onRefresh) {
-            Image(systemName: "arrow.clockwise").font(.caption).frame(minWidth: 44, minHeight: 44)
+            Image(systemName: "arrow.clockwise").font(.chat(.caption)).frame(minWidth: 44, minHeight: 44)
           }
           .buttonStyle(.plain).foregroundStyle(TetherColors.textSecondary)
           .disabled(loading).accessibilityLabel("Refresh subscription usage")
@@ -93,7 +93,7 @@ struct ChatPlanUsageView: View {
         if let provider = usage.subscriptions.first(where: { $0.usage?.isStale(now: timeline.date) == true }) ?? usage.subscriptions.first,
            let reading = provider.usage {
           Text(reading.freshness(now: timeline.date) + (reading.isStale(now: timeline.date) ? " · stale" : ""))
-            .font(.caption2).foregroundStyle(reading.isStale(now: timeline.date) ? TetherColors.warning : TetherColors.textFaint)
+            .font(.chat(.caption2)).foregroundStyle(reading.isStale(now: timeline.date) ? TetherColors.warning : TetherColors.textFaint)
         }
       }
     }
@@ -112,10 +112,10 @@ struct ChatPlanUsageView: View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 7) {
         ChatAgentMark(agent: subscription.agent, size: 14)
-        Text(subscription.name).font(.caption.weight(.medium)).foregroundStyle(TetherColors.textPrimary)
+        Text(subscription.name).font(.chat(.caption).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 2)
         if !size.isAccessibilitySize { compactWindows(subscription.usage) }
-        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(TetherColors.textFaint)
+        Image(systemName: "chevron.right").font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
       }
       if size.isAccessibilitySize { compactWindows(subscription.usage) }
     }
@@ -128,7 +128,7 @@ struct ChatPlanUsageView: View {
           Text("Month").foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 1)
           Text(meter.value).foregroundStyle((meter.percent ?? 0) >= 80 ? TetherColors.warning : TetherColors.textPrimary).monospacedDigit()
-        }.font(.caption2)
+        }.font(.chat(.caption2))
         if let percent = meter.percent { ChatQuotaBar(fraction: percent / 100, warning: percent >= 80).frame(height: 2) }
       }
       .frame(width: quotaWidth * 2 + 9)
@@ -151,7 +151,7 @@ struct ChatPlanUsageView: View {
         Text(window.map { "\(Int($0.usedPercent.rounded()))%" } ?? "—")
           .foregroundStyle((window?.usedPercent ?? 0) >= 80 ? TetherColors.warning : TetherColors.textPrimary)
           .monospacedDigit()
-      }.font(.caption2)
+      }.font(.chat(.caption2))
       ChatQuotaBar(fraction: window?.fraction, warning: (window?.usedPercent ?? 0) >= 80).frame(height: 2)
     }
     .frame(width: quotaWidth)
@@ -190,8 +190,8 @@ private struct ChatQuotaDetailView: View {
             ChatAgentMark(agent: subscription.agent, size: 20)
             VStack(alignment: .leading, spacing: 3) {
               Text(subscription.id == "opencode" ? "OpenCode Go" : subscription.name)
-                .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-              Text(host + " account").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+                .font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+              Text(host + " account").font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
             }
             Spacer()
             Button(action: onClose) {
@@ -202,7 +202,7 @@ private struct ChatQuotaDetailView: View {
           if let reading = subscription.usage {
             if reading.isStale(now: timeline.date) {
               Text("Couldn’t refresh. Showing last known usage.")
-                .font(.caption).foregroundStyle(TetherColors.warning)
+                .font(.chat(.caption)).foregroundStyle(TetherColors.warning)
             }
             if let meter = reading.monthlyMeter {
               VStack(alignment: .leading, spacing: 7) {
@@ -210,15 +210,15 @@ private struct ChatQuotaDetailView: View {
                   .foregroundStyle(TetherColors.textSecondary)
                 Text(meter.detailValue).foregroundStyle(TetherColors.textPrimary).monospacedDigit()
                 if let percent = meter.percent { ChatQuotaBar(fraction: percent / 100, warning: percent >= 80).frame(height: 4) }
-                Text(meter.resetLabel(now: timeline.date)).font(.caption2).foregroundStyle(TetherColors.textSecondary)
-              }.font(.caption).accessibilityElement(children: .combine)
+                Text(meter.resetLabel(now: timeline.date)).font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
+              }.font(.chat(.caption)).accessibilityElement(children: .combine)
             } else {
               window("5 hours", reading.fiveHour, now: timeline.date)
               window("Weekly", reading.weekly, now: timeline.date)
               if reading.monthly != nil { window("Monthly", reading.monthly, now: timeline.date) }
             }
             Divider()
-            Text(reading.freshness(now: timeline.date)).font(.caption2).foregroundStyle(TetherColors.textSecondary)
+            Text(reading.freshness(now: timeline.date)).font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
           }
         }.padding(16)
       }
@@ -237,9 +237,9 @@ private struct ChatQuotaDetailView: View {
         Text(window.map { "\(Int($0.usedPercent.rounded()))% used" } ?? "—")
           .foregroundStyle((window?.usedPercent ?? 0) >= 80 ? TetherColors.warning : TetherColors.textPrimary)
           .monospacedDigit()
-      }.font(.caption)
+      }.font(.chat(.caption))
       ChatQuotaBar(fraction: window?.fraction, warning: (window?.usedPercent ?? 0) >= 80).frame(height: 4)
-      Text(window?.resetLabel(now: now) ?? "Usage unavailable").font(.caption2).foregroundStyle(TetherColors.textSecondary)
+      Text(window?.resetLabel(now: now) ?? "Usage unavailable").font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
     }.accessibilityElement(children: .combine)
   }
 }

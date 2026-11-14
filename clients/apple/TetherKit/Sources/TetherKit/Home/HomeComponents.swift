@@ -61,10 +61,10 @@ struct MachineCardView: View {
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 10) {
             Circle().fill(TetherColors.heatCool).frame(width: 11, height: 11).opacity(0.6)
-            Text(profile.name).font(.headline)
+            Text(profile.name).font(.app(.headline))
               .foregroundStyle(TetherColors.textPrimary)
             Spacer()
-            Text("saved").font(.caption2.weight(.semibold).monospaced())
+            Text("saved").font(.app(.caption2).weight(.semibold).monospaced())
               .padding(.horizontal, 8).padding(.vertical, 3)
               .foregroundStyle(TetherColors.textFaint)
               .background(TetherColors.textPrimary.opacity(0.04), in: Capsule())
@@ -93,7 +93,7 @@ struct MachineCardView: View {
         if let onChat {
           Button(action: onChat) {
             Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
-              .font(.caption.weight(.semibold))
+              .font(.app(.caption).weight(.semibold))
               .padding(.horizontal, 12)
               .frame(height: 28)
               .background(TetherColors.accent.opacity(0.12), in: Capsule())
@@ -107,8 +107,8 @@ struct MachineCardView: View {
         Spacer(minLength: 0)
         Button(action: onOpen) {
           HStack(spacing: 4) {
-            Text("Open").font(.subheadline.weight(.semibold))
-            Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+            Text("Open").font(.app(.subheadline).weight(.semibold))
+            Image(systemName: "chevron.right").font(.app(.caption2).weight(.semibold))
           }
           .foregroundStyle(TetherColors.accent)
           .frame(height: 28)
@@ -142,10 +142,10 @@ struct KeyCardView: View {
       }
       VStack(alignment: .leading, spacing: 4) {
         titleLayout {
-          Text(record.name).font(.subheadline.weight(.semibold))
+          Text(record.name).font(.app(.subheadline).weight(.semibold))
             .foregroundStyle(TetherColors.textPrimary)
           Text(record.origin.rawValue)
-            .font(.caption2.weight(.bold).monospaced())
+            .font(.app(.caption2).weight(.bold).monospaced())
             .padding(.horizontal, 6).padding(.vertical, 2)
             .foregroundStyle(TetherColors.accent)
             .background(TetherColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
@@ -160,7 +160,7 @@ struct KeyCardView: View {
         Button {
           UIPasteboard.general.string = record.publicKey
         } label: {
-          Text("Copy public key").font(.caption.weight(.semibold))
+          Text("Copy public key").font(.app(.caption).weight(.semibold))
             .foregroundStyle(TetherColors.accent)
         }
         .padding(.top, 3)
@@ -281,7 +281,7 @@ private struct CopyConfirmation: ViewModifier {
       .overlay(alignment: .bottom) {
         if isPresented {
           Label("Copied", systemImage: "checkmark.circle.fill")
-            .font(.caption.weight(.semibold))
+            .font(.app(.caption).weight(.semibold))
             .tetherPill(border: TetherColors.accent.opacity(0.5))
             .padding(.bottom, 24)
             .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))

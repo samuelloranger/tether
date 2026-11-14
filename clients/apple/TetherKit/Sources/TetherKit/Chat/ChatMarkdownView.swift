@@ -71,7 +71,7 @@ struct ChatMarkdownTable: View {
   }
 
   var body: some View {
-    let font = UIFont.preferredFont(forTextStyle: reading ? .subheadline : .footnote)
+    let font = TetherTypography.shared.chat.uiFont(reading ? .subheadline : .footnote)
     let widths = Self.columnWidths(header: header, rows: rows, font: font)
     ScrollView(.horizontal) {
       Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {

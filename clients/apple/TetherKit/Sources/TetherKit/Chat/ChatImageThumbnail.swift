@@ -65,9 +65,42 @@ private struct ChatImagesKey: EnvironmentKey {
   static let defaultValue: ChatImageLibrary? = nil
 }
 
+private struct ChatImageGalleryKey: EnvironmentKey {
+  static let defaultValue: @MainActor () -> [ChatImageRef] = { [] }
+}
+
 extension EnvironmentValues {
   var chatImages: ChatImageLibrary? {
     get { self[ChatImagesKey.self] }
     set { self[ChatImagesKey.self] = newValue }
+  }
+
+  /// Every image in the chat, in transcript order, read when the viewer opens.
+  var chatImageGallery: @MainActor () -> [ChatImageRef] {
+    get { self[ChatImageGalleryKey.self] }
+    set { self[ChatImageGalleryKey.self] = newValue }
+  }
+}
+
+enum ChatImageGallery {
+  static func refs(_ items: [ChatItem]) -> [ChatImageRef] {
+    var seen = Set<String>()
+    var out: [ChatImageRef] = []
+    func add(_ refs: [ChatImageRef]) {
+      for ref in refs where seen.insert(ref.id).inserted { out.append(ref) }
+    }
+    func add(_ call: ChatToolCall) {
+      add(call.images)
+      call.children.forEach(add)
+    }
+    for item in items {
+      switch item.kind {
+      case let .user(_, _, _, images): add(images)
+      case let .images(refs, _): add(refs)
+      case let .tool(call): add(call)
+      default: break
+      }
+    }
+    return out
   }
 }
