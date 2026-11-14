@@ -130,6 +130,10 @@ public final class TetherTypography: @unchecked Sendable {
     TerminalFonts.registerBundledFonts()
     appFontID = UserDefaults.standard.string(forKey: Key.app) ?? ReadingFont.system.id
     chatFontID = UserDefaults.standard.string(forKey: Key.chat) ?? ""
+    #if DEBUG
+    // For screenshots: shown, never saved (didSet does not run in init).
+    if let id = ProcessInfo.processInfo.environment["TETHER_APP_FONT"] { appFontID = id }
+    #endif
   }
 
   public var app: ReadingFont { ReadingFont.named(appFontID) ?? .system }

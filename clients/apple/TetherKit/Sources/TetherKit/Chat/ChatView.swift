@@ -505,7 +505,7 @@ struct ChatView: View {
     }
     .padding(.leading, 12).padding(.trailing, 14).padding(.bottom, 6)
     .frame(minHeight: 48)
-    .background(TetherColors.background)
+    .background(TetherColors.background.ignoresSafeArea(edges: .top))
     .overlay(alignment: .bottom) { headerRule }
   }
 
