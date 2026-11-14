@@ -118,7 +118,7 @@ struct DiffReviewView: View {
       withAnimation(.snappy(duration: 0.2)) { toggle(untrackedKey(path)) }
     } label: {
       headerLabel(path: path, open: open) {
-        Text("NEW").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
+        Text("NEW").font(.app(.caption2).weight(.bold)).foregroundStyle(TetherColors.success)
           .padding(.horizontal, 6).padding(.vertical, 2)
           .background(TetherColors.success.opacity(0.15), in: Capsule())
       }
@@ -155,7 +155,7 @@ struct DiffReviewView: View {
   private func headerLabel(path: String, open: Bool, @ViewBuilder trailing: () -> some View) -> some View {
     HStack(spacing: 8) {
       Image(systemName: open ? "chevron.down" : "chevron.right")
-        .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        .font(.app(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
         .frame(width: 10)
       Text(path)
         .font(.caption.monospaced()).foregroundStyle(TetherColors.textPrimary)
@@ -172,7 +172,7 @@ struct DiffReviewView: View {
 
   private func pageButton(_ title: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+      Text(title).font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent)
         .frame(maxWidth: .infinity).padding(.vertical, 10)
     }
     .buttonStyle(.plain)
@@ -255,7 +255,7 @@ struct MarkdownBodyView: View {
   /// Chat prose: body-sized, full contrast, a little more air between blocks.
   var reading = false
 
-  private var proseFont: Font { reading ? .subheadline : .footnote }
+  private var proseFont: Font { reading ? .chat(.subheadline) : .app(.footnote) }
   private var proseColor: Color { reading ? TetherColors.textPrimary : TetherColors.textSecondary }
 
   /// Chat prose sets inline code a notch under the text with a faint tint.
@@ -276,8 +276,8 @@ struct MarkdownBodyView: View {
         case let .heading(level, text):
           Text(text)
             .font(reading
-              ? (level == 1 ? .headline : .subheadline.weight(.semibold))
-              : (level == 1 ? .headline : level == 2 ? .subheadline.weight(.semibold) : .footnote.weight(.semibold)))
+              ? (level == 1 ? .chat(.headline) : .chat(.subheadline).weight(.semibold))
+              : (level == 1 ? .app(.headline) : level == 2 ? .app(.subheadline).weight(.semibold) : .app(.footnote).weight(.semibold)))
             .foregroundStyle(TetherColors.textPrimary)
             .padding(.top, 2)
         case let .paragraph(text):
@@ -330,7 +330,7 @@ struct MarkdownBodyView: View {
       Text("\(n).").font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
     case let .task(done):
       Image(systemName: done ? "checkmark.square.fill" : "square")
-        .font(.caption)
+        .font(.app(.caption))
         .foregroundStyle(done ? TetherColors.success : TetherColors.textFaint)
         .accessibilityLabel(done ? "Done" : "To do")
     case .continuation:
@@ -343,14 +343,14 @@ struct MarkdownBodyView: View {
       Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
         GridRow {
           ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
-            Text(cell).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            Text(cell).font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           }
         }
         Rectangle().fill(TetherColors.border).frame(height: 0.5).gridCellUnsizedAxes(.horizontal)
         ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
           GridRow {
             ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-              Text(cell).font(reading ? .footnote : .caption).foregroundStyle(proseColor)
+              Text(cell).font(reading ? .chat(.footnote) : .app(.caption)).foregroundStyle(proseColor)
             }
           }
         }

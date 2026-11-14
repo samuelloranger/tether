@@ -500,7 +500,7 @@ public struct SSHTerminalView: View {
         .scaleEffect(controller.status == .connected ? 1 : 1.12)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 0) {
-        Text(controller.title).font(.subheadline.weight(.semibold))
+        Text(controller.title).font(.app(.subheadline).weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary)
         HStack(spacing: 4) {
           Text(sessionLabel)
@@ -536,7 +536,7 @@ public struct SSHTerminalView: View {
         }
         .macMenuIcons()
       } label: {
-        Image(systemName: "ellipsis").font(.title3.weight(.semibold))
+        Image(systemName: "ellipsis").font(.app(.title3).weight(.semibold))
           .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
       }
       .macPlainMenu()
@@ -576,7 +576,7 @@ public struct SSHTerminalView: View {
 
   private func headerButton(_ icon: String, id: String, label: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      Image(systemName: icon).font(.title3.weight(.semibold))
+      Image(systemName: icon).font(.app(.title3).weight(.semibold))
         .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
@@ -611,13 +611,13 @@ public struct SSHTerminalView: View {
           }
           if showingArchive {
             Button { showingArchive = false } label: {
-              Label("Archived chats", systemImage: "chevron.backward").font(.subheadline.weight(.semibold))
+              Label("Archived chats", systemImage: "chevron.backward").font(.app(.subheadline).weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
             Text("History stays available. Archiving does not stop an agent.")
-              .font(.caption).foregroundStyle(TetherColors.textSecondary)
+              .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
             ForEach(archived) { chatRow($0) }
-            if archived.isEmpty { Text("No archived chats.").font(.caption).foregroundStyle(TetherColors.textSecondary) }
+            if archived.isEmpty { Text("No archived chats.").font(.app(.caption)).foregroundStyle(TetherColors.textSecondary) }
           } else {
             if !attention.isEmpty {
               sectionHeader("Needs you · archived", count: attention.count)
@@ -636,8 +636,8 @@ public struct SSHTerminalView: View {
                 HStack(spacing: 6) {
                   Image(systemName: collapsedProjects.contains(group.path) ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                  Image(systemName: "folder").font(.caption)
-                  Text(group.title).font(.caption.weight(.semibold))
+                  Image(systemName: "folder").font(.app(.caption))
+                  Text(group.title).font(.app(.caption).weight(.semibold))
                   Spacer(minLength: 0)
                   if group.needsYou && collapsedProjects.contains(group.path) {
                     Circle().fill(TetherColors.accent).frame(width: 8, height: 8)
@@ -652,7 +652,7 @@ public struct SSHTerminalView: View {
             }
             Button { showingArchive = true } label: {
               HStack { Label("Archived chats", systemImage: "archivebox"); Spacer(); Text("\(archived.count)") }
-                .font(.caption).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
+                .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
             }
             .accessibilityIdentifier("drawerArchive")
           }
@@ -661,10 +661,10 @@ public struct SSHTerminalView: View {
       }
       if let archivedChat {
         HStack {
-          Text("Chat archived").font(.caption)
+          Text("Chat archived").font(.app(.caption))
           Spacer()
           Button("Undo") { updateChat(archivedChat, patch: ["archived": false]); self.archivedChat = nil }
-            .font(.caption.weight(.semibold)).frame(minHeight: 44)
+            .font(.app(.caption).weight(.semibold)).frame(minHeight: 44)
         }.padding(.horizontal, 16).background(TetherColors.surfaceRaised)
       }
       if !controller.planUsage.subscriptions.isEmpty {
@@ -688,19 +688,26 @@ public struct SSHTerminalView: View {
   private func drawerHeader(terminals: Int, chats: Int) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
-        Text(controller.title).font(.subheadline.weight(.semibold))
+        Text(controller.title).font(.app(.subheadline).weight(.semibold))
           .foregroundStyle(TetherColors.textPrimary).lineLimit(1)
         Spacer(minLength: 4)
         Button {
           setDrawer(open: false)
           onHome()
         } label: {
-          Text("Switch").font(.footnote.weight(.semibold)).foregroundStyle(TetherColors.accent)
+          Text("Switch").font(.app(.footnote).weight(.semibold)).foregroundStyle(TetherColors.accent)
             .padding(.horizontal, 6).frame(minHeight: max(44, tapTarget)).contentShape(Rectangle())
         }
         .buttonStyle(TetherPressStyle())
         .accessibilityIdentifier("sshDrawerHome")
         .accessibilityLabel("Switch machine")
+        Button { showSettings = true } label: {
+          Image(systemName: "gearshape").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+            .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
+        }
+        .buttonStyle(TetherPressStyle())
+        .accessibilityIdentifier("sshDrawerSettings")
+        .accessibilityLabel("Settings")
         Menu {
           Button(action: startNewTerminal) { Label("New terminal", systemImage: "terminal") }
             .accessibilityIdentifier("sshNewTerminal")
@@ -711,7 +718,7 @@ public struct SSHTerminalView: View {
           }
           .accessibilityIdentifier("sshContinueChat")
         } label: {
-          Image(systemName: "plus").font(.body.weight(.semibold)).foregroundStyle(TetherColors.accent)
+          Image(systemName: "plus").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.accent)
             .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
         }
         .accessibilityIdentifier("sshNewSessionAdd")
@@ -720,7 +727,7 @@ public struct SSHTerminalView: View {
       HStack(alignment: .firstTextBaseline, spacing: 5) {
         Circle().fill(lampColor).frame(width: 6, height: 6).accessibilityHidden(true)
         Text(DrawerLayout.summary(state: drawerStateLabel, terminals: terminals, chats: chats))
-          .font(.caption2).foregroundStyle(TetherColors.textFaint)
+          .font(.app(.caption2)).foregroundStyle(TetherColors.textFaint)
       }
       .padding(.bottom, 8)
       .accessibilityElement(children: .combine)
@@ -733,7 +740,7 @@ public struct SSHTerminalView: View {
       Text(title)
       Text("\(count)")
     }
-    .font(.caption2.weight(.semibold)).tracking(0.6).textCase(.uppercase)
+    .font(.app(.caption2).weight(.semibold)).tracking(0.6).textCase(.uppercase)
     .foregroundStyle(TetherColors.textFaint)
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 2).padding(.top, 10)
@@ -752,7 +759,7 @@ public struct SSHTerminalView: View {
     HStack(spacing: 6) {
       main()
       Button(action: onKill) {
-        Image(systemName: killSymbol).font(.footnote.weight(.semibold))
+        Image(systemName: killSymbol).font(.app(.footnote).weight(.semibold))
           .foregroundStyle(TetherColors.textFaint.opacity(0.6))
           .frame(width: 44, height: 44).contentShape(Rectangle())
       }
@@ -789,7 +796,7 @@ public struct SSHTerminalView: View {
             .frame(width: lampSize, height: lampSize)
             .frame(width: glyphSlot).padding(.top, 4)
           VStack(alignment: .leading, spacing: 2) {
-            Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            Text(session.name).font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
               .lineLimit(1)
             if shownFolder != nil || hasStatus {
               HStack(spacing: 4) {
@@ -877,7 +884,7 @@ public struct SSHTerminalView: View {
             .frame(width: glyphSlot).padding(.top, 1)
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 2) {
-            Text(row.title).font(.subheadline.weight(.semibold))
+            Text(row.title).font(.app(.subheadline).weight(.semibold))
               .foregroundStyle(ended ? TetherColors.textSecondary : TetherColors.textPrimary)
               .lineLimit(2).multilineTextAlignment(.leading)
             Group {
@@ -1246,15 +1253,15 @@ public struct SSHTerminalView: View {
         case .spinner:
           ProgressView().tint(TetherColors.accent)
         case let .warning(symbol):
-          Image(systemName: symbol).font(.largeTitle).foregroundStyle(TetherColors.warning)
+          Image(systemName: symbol).font(.app(.largeTitle)).foregroundStyle(TetherColors.warning)
         case let .error(symbol):
-          Image(systemName: symbol).font(.largeTitle).foregroundStyle(TetherColors.danger)
+          Image(systemName: symbol).font(.app(.largeTitle)).foregroundStyle(TetherColors.danger)
         }
         Text(copy.message).font(.footnote.monospaced())
           .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
         if copy.indicator.offersRetry {
           Button("Retry") { Task { await controller.connect(trigger: .manual) } }
-            .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+            .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.onAccent)
             .padding(.horizontal, 20).padding(.vertical, 10)
             .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
             .buttonStyle(TetherPressStyle())
@@ -1299,9 +1306,9 @@ public struct SSHTerminalView: View {
     return GeometryReader { geometry in
       ScrollView {
         VStack(spacing: 14) {
-          Image(systemName: "terminal").font(.largeTitle).foregroundStyle(TetherColors.textSecondary)
+          Image(systemName: "terminal").font(.app(.largeTitle)).foregroundStyle(TetherColors.textSecondary)
           Text(controller.sessions.isEmpty && chats.isEmpty ? "No session on \(controller.title)" : "Open a session on \(controller.title)")
-            .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .multilineTextAlignment(.center)
           if controller.sessions.isEmpty && chats.isEmpty {
             Text("Nothing runs until you start one.")
@@ -1312,7 +1319,7 @@ public struct SSHTerminalView: View {
               ForEach(pickableSessions) { session in
                 Button { goToSession(session.name) } label: {
                   VStack(alignment: .leading, spacing: 2) {
-                    Text(session.name).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+                    Text(session.name).font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
                     Text(session.displayCwd).font(.caption2.monospaced())
                       .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
                   }
@@ -1326,7 +1333,7 @@ public struct SSHTerminalView: View {
               }
               if controller.sessions.count > pickableSessions.count, tabs == nil {
                 Button("All sessions") { setDrawer(open: true) }
-                  .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+                  .font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent)
               }
               if !chats.isEmpty {
                 sectionHeader("Active chats", count: chats.count)
@@ -1339,7 +1346,7 @@ public struct SSHTerminalView: View {
               setDrawer(open: true)
             }
           }
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+          .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.onAccent)
           .padding(.horizontal, 20).padding(.vertical, 10)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
           .buttonStyle(TetherPressStyle())

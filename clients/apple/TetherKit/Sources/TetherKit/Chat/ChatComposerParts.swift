@@ -129,10 +129,10 @@ struct AttachmentErrorRow: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      Image(systemName: "exclamationmark.circle").font(.caption)
-      Text(message).font(.caption)
+      Image(systemName: "exclamationmark.circle").font(.chat(.caption))
+      Text(message).font(.chat(.caption))
       Spacer(minLength: 0)
-      Button(action: dismiss) { Image(systemName: "xmark").font(.caption2.weight(.semibold)).hitSlop(vertical: 12, horizontal: 12) }
+      Button(action: dismiss) { Image(systemName: "xmark").font(.chat(.caption2).weight(.semibold)).hitSlop(vertical: 12, horizontal: 12) }
         .buttonStyle(.plain)
         .accessibilityLabel("Dismiss")
     }
@@ -159,7 +159,7 @@ struct SlashPalette: View {
       EmptyView()
     } else if matches.isEmpty {
       Text("No command")
-        .font(.caption).foregroundStyle(TetherColors.textFaint)
+        .font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
         .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
         .padding(.horizontal, 12)
         .card
@@ -190,7 +190,7 @@ struct SlashPalette: View {
         }
       }
       .lineLimit(1).layoutPriority(1)
-      Text(command.description).font(.caption).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+      Text(command.description).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
       Spacer(minLength: 0)
     }
     .padding(.horizontal, 12)

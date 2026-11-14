@@ -19,11 +19,11 @@ struct GitDiffView: View {
       VStack(spacing: 0) {
         HStack(spacing: 9) {
           Image(systemName: "arrow.triangle.branch").foregroundStyle(TetherColors.accent)
-          Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.subheadline.weight(.semibold).monospaced()).lineLimit(1)
+          Text(controller.gitBranch.isEmpty ? "Loading repository…" : controller.gitBranch).font(.app(.subheadline).weight(.semibold).monospaced()).lineLimit(1)
             .opacity(loadedOnce ? 1 : 0.5)
           if let upstream = controller.gitUpstream {
             if !upstream.counts.isEmpty {
-              Text(upstream.counts).font(.caption.weight(.semibold).monospaced()).foregroundStyle(TetherColors.accent)
+              Text(upstream.counts).font(.app(.caption).weight(.semibold).monospaced()).foregroundStyle(TetherColors.accent)
             }
             Text(upstream.upstream).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
           }
@@ -49,7 +49,7 @@ struct GitDiffView: View {
               Text("+\(stat.added)").foregroundStyle(TetherColors.success)
               Text("−\(stat.removed)").foregroundStyle(TetherColors.danger)
             }
-            .font(.caption.weight(.semibold).monospaced())
+            .font(.app(.caption).weight(.semibold).monospaced())
           }
         }
         ToolbarItem(placement: .primaryAction) {
@@ -103,7 +103,7 @@ struct GitDiffView: View {
       Text("Couldn't refresh: \(error)").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(2)
       Spacer(minLength: 4)
-      Button("Retry") { Task { await manualRefresh() } }.font(.caption.weight(.semibold))
+      Button("Retry") { Task { await manualRefresh() } }.font(.app(.caption).weight(.semibold))
     }
     .padding(.horizontal, 14).padding(.vertical, 8)
     .background(TetherColors.warning.opacity(0.1))
@@ -173,7 +173,7 @@ struct GitDiffView: View {
 
   private func badgeLabel(_ text: String, tint: Color) -> some View {
     Text(text.uppercased())
-      .font(.caption2.weight(.bold))
+      .font(.app(.caption2).weight(.bold))
       .foregroundStyle(tint)
       .padding(.horizontal, 7).padding(.vertical, 3)
       .background(tint.opacity(0.15), in: Capsule())
@@ -198,7 +198,7 @@ struct GitDiffView: View {
     await refreshVisiblePayload()
   }
 
-  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await manualRefresh() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
+  private func errorState(_ error: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(.app(.largeTitle)).foregroundStyle(TetherColors.warning); Text(error).font(.footnote.monospaced()).multilineTextAlignment(.center); Button("Reload") { Task { await manualRefresh() } } }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity) }
 }
 
 private struct PullRequestDetailView: View {
@@ -275,7 +275,7 @@ private struct PullRequestDetailView: View {
 
   private var header: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("#\(pullRequest.number) \(pullRequest.title)").font(.title3.weight(.bold))
+      Text("#\(pullRequest.number) \(pullRequest.title)").font(.app(.title3).weight(.bold))
         .foregroundStyle(TetherColors.textPrimary)
       Text("\(pullRequest.head) → \(pullRequest.base)").font(.caption.monospaced())
         .foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
@@ -296,7 +296,7 @@ private struct PullRequestDetailView: View {
       HStack(spacing: 8) {
         Image(systemName: rollupIcon).foregroundStyle(rollupTint)
         Text(GitRepositoryModel.checkHeadline(detail.checks))
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+          .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 4)
         Button {
           Task { await refreshDetail() }
@@ -317,11 +317,11 @@ private struct PullRequestDetailView: View {
         } label: {
           HStack(spacing: 9) {
             Image(systemName: icon(for: check.state)).foregroundStyle(tint(for: check.state))
-              .font(.caption)
+              .font(.app(.caption))
             Text(check.name).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
             Spacer(minLength: 0)
             if !check.url.isEmpty {
-              Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(TetherColors.textFaint)
+              Image(systemName: "arrow.up.right").font(.app(.caption2)).foregroundStyle(TetherColors.textFaint)
             }
           }
           .contentShape(Rectangle())
@@ -331,7 +331,7 @@ private struct PullRequestDetailView: View {
 
       if detail.fetchedAt != .distantPast {
         Text("Updated \(detail.fetchedAt, style: .relative) ago")
-          .font(.caption2).foregroundStyle(TetherColors.textFaint)
+          .font(.app(.caption2)).foregroundStyle(TetherColors.textFaint)
       }
     }
     .padding(14)
@@ -359,7 +359,7 @@ private struct PullRequestDetailView: View {
       } else {
         Image(systemName: icon).foregroundStyle(tint)
       }
-      Text(text).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+      Text(text).font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
       Spacer(minLength: 0)
     }
     .padding(14)
@@ -376,13 +376,13 @@ private struct PullRequestDetailView: View {
           Image(systemName: gateIcon).foregroundStyle(gateTint)
         }
         Text(detail.gate.reason)
-          .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+          .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
         Spacer(minLength: 0)
       }
 
       Button { confirmMerge = true } label: {
         Text(defaultMethod?.label ?? "Merge pull request")
-          .font(.subheadline.weight(.semibold))
+          .font(.app(.subheadline).weight(.semibold))
           .frame(maxWidth: .infinity).padding(.vertical, 12)
           // A Text only hit-tests its glyphs; without this the padded capsule
           // around the label is dead to taps.
@@ -401,16 +401,16 @@ private struct PullRequestDetailView: View {
       if detail.gate == .behind {
         HStack(spacing: 10) {
           Text("Update the branch to merge.")
-            .font(.caption).foregroundStyle(TetherColors.textSecondary)
+            .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 0)
           Button("Update") { Task { await controller.updatePullRequest(pullRequest) } }
-            .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent)
         }
       }
 
       if canMerge, methods.isEmpty {
         Text("This repository allows no merge method.")
-          .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
     }
     .padding(14)
@@ -448,9 +448,9 @@ private struct PullRequestDetailView: View {
           }
         }
         .frame(width: 22)
-        Text("Review changes").font(.subheadline.weight(.semibold))
+        Text("Review changes").font(.app(.subheadline).weight(.semibold))
         Spacer(minLength: 0)
-        Image(systemName: "chevron.right").font(.caption).foregroundStyle(TetherColors.textFaint)
+        Image(systemName: "chevron.right").font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
       }
       .padding(.horizontal, 14).padding(.vertical, 13)
       .contentShape(Rectangle())
@@ -565,13 +565,13 @@ private struct PullRequestDetailView: View {
   }
 
   private func chip(_ text: String, tint: Color) -> some View {
-    Text(text).font(.caption2.weight(.semibold).monospaced()).foregroundStyle(tint)
+    Text(text).font(.app(.caption2).weight(.semibold).monospaced()).foregroundStyle(tint)
       .padding(.horizontal, 8).padding(.vertical, 4)
       .background(tint.opacity(0.12), in: Capsule())
   }
 
   private func sectionTitle(_ title: String) -> some View {
-    Text(title).font(.caption.weight(.bold)).foregroundStyle(TetherColors.textSecondary)
+    Text(title).font(.app(.caption).weight(.bold)).foregroundStyle(TetherColors.textSecondary)
   }
 
   private func refreshDetail() async {
@@ -601,12 +601,12 @@ private struct CommitDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 14) {
         VStack(alignment: .leading, spacing: 6) {
-          Text(commit.subject).font(.headline).foregroundStyle(TetherColors.textPrimary)
+          Text(commit.subject).font(.app(.headline)).foregroundStyle(TetherColors.textPrimary)
           Text(commit.id).font(.caption.monospaced()).foregroundStyle(TetherColors.accent)
           Text("\(commit.author) · \(Date(timeIntervalSince1970: TimeInterval(commit.timestamp)).formatted(date: .abbreviated, time: .shortened))")
-            .font(.caption).foregroundStyle(TetherColors.textSecondary)
+            .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
           if !patch.body.isEmpty {
-            Text(patch.body).font(.callout).foregroundStyle(TetherColors.textSecondary)
+            Text(patch.body).font(.app(.callout)).foregroundStyle(TetherColors.textSecondary)
               .textSelection(.enabled).padding(.top, 4)
           }
         }
@@ -661,7 +661,7 @@ private struct PatchSheet: View {
         ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
         ToolbarItem(placement: .principal) {
           VStack(spacing: 1) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            Text(title).font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             HStack(spacing: 6) {
               Text("+\(stat.added)").foregroundStyle(TetherColors.success)
               Text("−\(stat.removed)").foregroundStyle(TetherColors.danger)

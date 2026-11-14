@@ -18,7 +18,7 @@ struct TerminalThemePicker: View {
           TerminalThemeSwatch(theme: theme, fontName: preferences.terminalFont.postScriptName)
           VStack(alignment: .leading, spacing: 2) {
             Text(theme.name).foregroundStyle(TetherColors.textPrimary)
-            Text(theme.isLight ? "Light" : "Dark").font(.caption).foregroundStyle(TetherColors.textSecondary)
+            Text(theme.isLight ? "Light" : "Dark").font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
           }
           Spacer()
           if theme.id == preferences.terminalTheme.id {

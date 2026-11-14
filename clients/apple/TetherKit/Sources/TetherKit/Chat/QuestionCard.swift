@@ -49,14 +49,14 @@ struct QuestionCard: View {
       Image(systemName: "questionmark.bubble").foregroundStyle(TetherColors.accent)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 1) {
-        Text("QUESTION").font(.caption2.weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
-        Text(question.message).font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        Text("QUESTION").font(.chat(.caption2).weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
+        Text(question.message).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           .lineLimit(4)
           .fixedSize(horizontal: false, vertical: true)
       }
       Spacer(minLength: 0)
       if let position {
-        Text(position).font(.caption2.weight(.semibold).monospaced()).foregroundStyle(TetherColors.textFaint)
+        Text(position).font(.chat(.caption2).weight(.semibold).monospaced()).foregroundStyle(TetherColors.textFaint)
       }
     }
     .accessibilityElement(children: .combine)
@@ -90,7 +90,7 @@ struct QuestionCard: View {
     VStack(alignment: .leading, spacing: 6) {
       if fields.count > 1 || field.required {
         Text(field.title + (field.required ? " *" : ""))
-          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+          .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
           .accessibilityLabel(field.required ? "\(field.title), required" : field.title)
           .accessibilityAddTraits(.isHeader)
       }
@@ -126,11 +126,11 @@ struct QuestionCard: View {
         let stacked = dynamicTypeSize.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 1)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         layout {
-          Text(choice.title).font(.subheadline).foregroundStyle(TetherColors.textPrimary)
+          Text(choice.title).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(stacked ? 4 : 2)
             .multilineTextAlignment(.leading)
           if showsDescription(choice) {
-            Text(choice.description).font(.caption).foregroundStyle(TetherColors.textSecondary)
+            Text(choice.description).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
               .lineLimit(stacked ? 3 : 1)
               .multilineTextAlignment(.leading)
           }
@@ -165,7 +165,7 @@ struct QuestionCard: View {
           Image(systemName: "pencil").font(.system(size: 15)).foregroundStyle(TetherColors.textFaint)
             .frame(width: 22)
             .accessibilityHidden(true)
-          Text("Other\u{2026}").font(.subheadline).foregroundStyle(TetherColors.textSecondary)
+          Text("Other\u{2026}").font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
@@ -186,7 +186,7 @@ struct QuestionCard: View {
       prompt: Text(placeholder).foregroundStyle(TetherColors.placeholder), axis: .vertical
     )
     .lineLimit(1...4)
-    .font(.subheadline)
+    .font(.chat(.subheadline))
     .foregroundStyle(TetherColors.textPrimary)
     .focused($focused, equals: name)
     .submitLabel(.done)
@@ -203,7 +203,7 @@ struct QuestionCard: View {
   private func booleanRow(_ field: ChatQuestionField) -> some View {
     Toggle(isOn: Binding(get: { draft.flag(field.name) }, set: { draft.setFlag(field.name, $0) })) {
       Text(field.description.isEmpty ? field.title : field.description)
-        .font(.subheadline).foregroundStyle(TetherColors.textPrimary)
+        .font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
     }
     .tint(TetherColors.accent)
     .padding(.horizontal, 10)
@@ -216,7 +216,7 @@ struct QuestionCard: View {
       ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
     return layout {
       Button { respond(.decline, [:]) } label: {
-        Text("Decline").font(.subheadline.weight(.medium))
+        Text("Decline").font(.chat(.subheadline).weight(.medium))
           .frame(maxWidth: .infinity, minHeight: 34).padding(.horizontal, 10)
           .foregroundStyle(TetherColors.danger)
           .background(TetherColors.danger.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
@@ -231,7 +231,7 @@ struct QuestionCard: View {
           focused = nil
           respond(.accept, draft.content(fields))
         } label: {
-          Text("Submit").font(.subheadline.weight(.semibold))
+          Text("Submit").font(.chat(.subheadline).weight(.semibold))
             .frame(maxWidth: .infinity, minHeight: 34).padding(.horizontal, 10)
             .foregroundStyle(TetherColors.onAccent)
             .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
@@ -264,9 +264,9 @@ struct ResolvedQuestionRow: View {
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
       Image(systemName: answered ? "checkmark.bubble" : "bubble")
-        .font(.caption).foregroundStyle(TetherColors.textFaint)
+        .font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
       Text("\(Text(question.message).foregroundStyle(TetherColors.textFaint)) \u{2192} \(Text(answer).foregroundStyle(answered ? TetherColors.textSecondary : TetherColors.textFaint).fontWeight(answered ? .medium : .regular))")
-        .font(.footnote)
+        .font(.chat(.footnote))
         .textSelection(.enabled)
     }
     .frame(maxWidth: .infinity, alignment: .leading)

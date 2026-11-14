@@ -5,6 +5,7 @@ struct TerminalSettingsSheet: View {
   @Bindable var preferences: AppPreferences
   var onDone: () -> Void
   @State private var appIcon = AppIconChoice.primary
+  @Bindable private var typography = TetherTypography.shared
 
   var body: some View {
     NavigationStack {
@@ -18,6 +19,24 @@ struct TerminalSettingsSheet: View {
                 Text("Color scheme")
                 Spacer()
                 Text(preferences.terminalTheme.name).foregroundStyle(.secondary)
+              }
+            }
+            NavigationLink {
+              ReadingFontPicker(selection: $typography.appFontID)
+            } label: {
+              HStack {
+                Text("App font")
+                Spacer()
+                Text(typography.app.label).foregroundStyle(.secondary)
+              }
+            }
+            NavigationLink {
+              ReadingFontPicker(selection: $typography.chatFontID, followsApp: typography.app)
+            } label: {
+              HStack {
+                Text("Chat font")
+                Spacer()
+                Text(typography.chatFontID.isEmpty ? "Same as app" : typography.chat.label).foregroundStyle(.secondary)
               }
             }
             if !TetherPlatform.isMac {

@@ -106,7 +106,7 @@ public struct HomeView: View {
   private var header: some View {
     HStack(alignment: .bottom) {
       VStack(alignment: .leading, spacing: 3) {
-        Text("Home").font(.largeTitle.weight(.bold)).foregroundStyle(TetherColors.textPrimary)
+        Text("Home").font(.app(.largeTitle).weight(.bold)).foregroundStyle(TetherColors.textPrimary)
         Text(summary)
           .font(.caption2.monospaced())
           .foregroundStyle(TetherColors.textFaint)
@@ -114,7 +114,7 @@ public struct HomeView: View {
       Spacer()
       if let onClose {
         Button(action: onClose) {
-          Image(systemName: "xmark").font(.footnote.weight(.semibold))
+          Image(systemName: "xmark").font(.app(.footnote).weight(.semibold))
         }
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.trailing, 6)
@@ -122,7 +122,7 @@ public struct HomeView: View {
       }
       if TetherPlatform.isMac, preferences != nil {
         Button { showSettings = true } label: {
-          Image(systemName: "gearshape").font(.title3.weight(.medium))
+          Image(systemName: "gearshape").font(.app(.title3).weight(.medium))
             .frame(width: addButtonSize, height: addButtonSize)
             .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
@@ -134,7 +134,7 @@ public struct HomeView: View {
         .padding(.trailing, 6)
       }
       Button { showAdd = true } label: {
-        Image(systemName: "plus").font(.title3.weight(.medium))
+        Image(systemName: "plus").font(.app(.title3).weight(.medium))
           .frame(width: addButtonSize, height: addButtonSize)
           .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
           .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
@@ -176,7 +176,7 @@ public struct HomeView: View {
       withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { tab = value }
     } label: {
       Text(label)
-        .font(.footnote.weight(.semibold))
+        .font(.app(.footnote).weight(.semibold))
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .foregroundStyle(selected ? TetherColors.textPrimary : TetherColors.textSecondary)
@@ -208,13 +208,13 @@ public struct HomeView: View {
       Image(systemName: "point.3.connected.trianglepath.dotted")
         .font(.system(.largeTitle, design: .default, weight: .light))
         .foregroundStyle(TetherColors.accent)
-      Text("No machines tethered yet").font(.title3.weight(.semibold))
+      Text("No machines tethered yet").font(.app(.title3).weight(.semibold))
         .foregroundStyle(TetherColors.textPrimary)
       Text("Add a server to open a shell that stays alive between visits.")
-        .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        .font(.app(.footnote)).foregroundStyle(TetherColors.textSecondary)
         .multilineTextAlignment(.center).frame(maxWidth: 240)
       Button { showAdd = true } label: {
-        Text("Add a server").font(.subheadline.weight(.semibold))
+        Text("Add a server").font(.app(.subheadline).weight(.semibold))
           .padding(.horizontal, 20).padding(.vertical, 11)
           .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 12))
           .foregroundStyle(TetherColors.onAccent)
@@ -278,7 +278,7 @@ public struct HomeView: View {
           }
           if model.keys.isEmpty {
             Text("No keys yet. Generate one, or paste an existing key.")
-              .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+              .font(.app(.footnote)).foregroundStyle(TetherColors.textSecondary)
               .multilineTextAlignment(.center).padding(.top, 40).frame(maxWidth: 240)
           }
         }
@@ -302,9 +302,9 @@ public struct HomeView: View {
     Button(action: action) {
       VStack(spacing: 6) {
         // SF Symbols differ in height; a fixed icon box keeps the three buttons level.
-        Image(systemName: icon).font(.body.weight(.semibold))
+        Image(systemName: icon).font(.app(.body).weight(.semibold))
           .frame(height: keyActionIconSize)
-        Text(label).font(.caption.weight(.semibold))
+        Text(label).font(.app(.caption).weight(.semibold))
           .lineLimit(2).minimumScaleFactor(0.75).multilineTextAlignment(.center)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 12)

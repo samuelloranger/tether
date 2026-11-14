@@ -61,23 +61,23 @@ struct SubagentRow: View {
 
   private var header: some View {
     HStack(spacing: 10) {
-      Image(systemName: "arrow.triangle.branch").font(.footnote)
+      Image(systemName: "arrow.triangle.branch").font(.chat(.footnote))
         .foregroundStyle(failed ? TetherColors.danger : TetherColors.textFaint)
         .frame(width: 24)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 1) {
-        Text(call.subagentTitle).font(.footnote)
+        Text(call.subagentTitle).font(.chat(.footnote))
           .foregroundStyle(failed ? TetherColors.danger : TetherColors.textSecondary)
           .lineLimit(1).truncationMode(.middle)
         if !subtitle.isEmpty {
-          Text(subtitle).font(.caption2).foregroundStyle(TetherColors.textFaint).lineLimit(1)
+          Text(subtitle).font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint).lineLimit(1)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       ToolStatusGlyph(status: call.status, active: call.isActive).frame(width: 14)
       if expandable {
         Image(systemName: expanded ? "chevron.down" : "chevron.right")
-          .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+          .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
       }
     }
     .padding(.horizontal, 12).padding(.vertical, 6)
@@ -94,7 +94,7 @@ struct SubagentRow: View {
         VStack(spacing: 0) {
           ForEach(Array(call.children.enumerated()), id: \.element.id) { index, child in
             if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
-            ToolCallRow(call: child, cwd: cwd, expanded: openChildren.contains(child.id), toggle: { toggleChild(child.id) })
+            ToolCallRow(call: child, cwd: cwd, expanded: openChildren.contains(child.id) != !child.images.isEmpty, toggle: { toggleChild(child.id) })
           }
         }
         .padding(.leading, 10)
@@ -116,8 +116,8 @@ struct SubagentRow: View {
     VStack(alignment: .leading, spacing: 6) {
       Button { briefOpen.toggle() } label: {
         HStack(spacing: 6) {
-          Text("Brief").font(.caption.weight(.medium))
-          Image(systemName: briefOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
+          Text("Brief").font(.chat(.caption).weight(.medium))
+          Image(systemName: briefOpen ? "chevron.down" : "chevron.right").font(.chat(.caption2).weight(.semibold))
         }
         .foregroundStyle(TetherColors.textFaint)
         .contentShape(Rectangle())
@@ -136,7 +136,7 @@ struct SubagentRow: View {
 
   private func reportView(_ text: String) -> some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text("Report").font(.caption.weight(.medium)).foregroundStyle(TetherColors.textFaint)
+      Text("Report").font(.chat(.caption).weight(.medium)).foregroundStyle(TetherColors.textFaint)
       ChatSelectableText(blocks: ChatToolDetail.blocks(text: text, rawOutput: nil), reading: false, selectable: !call.isActive)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

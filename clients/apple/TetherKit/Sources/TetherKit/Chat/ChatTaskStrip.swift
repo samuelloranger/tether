@@ -25,7 +25,7 @@ struct ChatTaskStrip: View {
             Text("\(commands.count) running").font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
             Spacer(minLength: 6)
             Image(systemName: expanded ? "chevron.down" : "chevron.right")
-              .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+              .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
           }
           .padding(.horizontal, 10).frame(minHeight: 30)
           .contentShape(Rectangle())

@@ -24,13 +24,13 @@ struct TerminalHistoryView: View {
           .ignoresSafeArea(edges: .bottom)
         } else if text != nil {
           VStack(spacing: 10) {
-            Image(systemName: "clock.arrow.circlepath").font(.largeTitle)
+            Image(systemName: "clock.arrow.circlepath").font(.app(.largeTitle))
               .foregroundStyle(TetherColors.textFaint)
             Text("Nothing in this session's scrollback yet.")
               .font(.system(.footnote, design: .monospaced))
               .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
             Button("Reload") { Task { text = await controller.historyText() } }
-              .font(.subheadline.weight(.semibold)).foregroundStyle(TetherColors.accent)
+              .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.accent)
               .accessibilityIdentifier("historyReload")
           }
           .padding(24)

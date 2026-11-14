@@ -20,7 +20,7 @@ struct ChatControlsSheet: View {
         header
         if model.readOnly {
           Label("Started on another device. Read only.", systemImage: "eye")
-            .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+            .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
         }
         ForEach(model.state.configOptions) { option in optionSection(option) }
         sessionSection
@@ -47,7 +47,7 @@ struct ChatControlsSheet: View {
 
   private var header: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(model.title).font(.headline).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+      Text(model.title).font(.chat(.headline)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
       Text(model.cwd).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
         .lineLimit(1).truncationMode(.head)
     }
@@ -70,10 +70,10 @@ struct ChatControlsSheet: View {
       .sheetGroup
       if case let .failed(_, message)? = change {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Text(message).font(.caption).foregroundStyle(TetherColors.danger)
+          Text(message).font(.chat(.caption)).foregroundStyle(TetherColors.danger)
           Spacer(minLength: 0)
           Button { model.dismissOptionFailure(id: option.id) } label: {
-            Image(systemName: "xmark").font(.caption2.weight(.semibold)).hitSlop(vertical: 12, horizontal: 12)
+            Image(systemName: "xmark").font(.chat(.caption2).weight(.semibold)).hitSlop(vertical: 12, horizontal: 12)
           }
           .buttonStyle(.plain)
           .foregroundStyle(TetherColors.textFaint)
@@ -97,9 +97,9 @@ struct ChatControlsSheet: View {
     } label: {
       HStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 1) {
-          Text(choice.name).font(.subheadline).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
+          Text(choice.name).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
           if !choice.description.isEmpty {
-            Text(choice.description).font(.caption).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+            Text(choice.description).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
           }
         }
         Spacer(minLength: 8)
@@ -131,10 +131,10 @@ struct ChatControlsSheet: View {
         if let fraction = ChatFormat.contextFraction(used: state.contextUsed, size: state.contextSize) {
           VStack(alignment: .leading, spacing: 6) {
             HStack {
-              Text("Context").font(.subheadline).foregroundStyle(TetherColors.textPrimary)
+              Text("Context").font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
               Spacer(minLength: 8)
               Text(ChatFormat.contextSummary(used: state.contextUsed, size: state.contextSize) ?? "")
-                .font(.caption.monospacedDigit()).foregroundStyle(TetherColors.textSecondary)
+                .font(.chat(.caption).monospacedDigit()).foregroundStyle(TetherColors.textSecondary)
             }
             Capsule().fill(TetherColors.border).frame(height: 4)
               .overlay(alignment: .leading) {
@@ -186,11 +186,11 @@ struct ChatControlsSheet: View {
 
   private func infoRow(_ label: String, _ value: String, mono: Bool = false, head: Bool = false, dot: Color? = nil) -> some View {
     HStack(spacing: 12) {
-      Text(label).font(.subheadline).foregroundStyle(TetherColors.textPrimary)
+      Text(label).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
       Spacer(minLength: 8)
       if let dot { Circle().fill(dot).frame(width: 6, height: 6) }
       Text(value)
-        .font(mono ? .caption.monospaced() : .subheadline)
+        .font(mono ? .caption.monospaced() : .chat(.subheadline))
         .foregroundStyle(TetherColors.textSecondary)
         .lineLimit(1).truncationMode(head ? .head : .tail)
         .textSelection(.enabled)
@@ -215,8 +215,8 @@ struct ChatControlsSheet: View {
             } label: {
               HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
-                  Text(command.title).font(.subheadline).foregroundStyle(TetherColors.textPrimary)
-                  Text(command.detail).font(.caption).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+                  Text(command.title).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
+                  Text(command.detail).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Text(command.text).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
@@ -237,7 +237,7 @@ struct ChatControlsSheet: View {
   }
 
   private func sectionTitle(_ text: String) -> some View {
-    Text(text.uppercased()).font(.caption2.weight(.semibold)).tracking(0.6)
+    Text(text.uppercased()).font(.chat(.caption2).weight(.semibold)).tracking(0.6)
       .foregroundStyle(TetherColors.textFaint).padding(.horizontal, 4)
       .accessibilityAddTraits(.isHeader)
   }

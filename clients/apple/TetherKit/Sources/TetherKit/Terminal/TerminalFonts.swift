@@ -53,6 +53,14 @@ public enum TerminalFonts {
     "MapleMono-Regular.ttf", "MapleMono-Bold.ttf",
     "ComicMono.ttf", "ComicMono-Bold.ttf",
     "SymbolsNerdFontMono-Regular.ttf",
+    // Reading faces for the app and chat text (`ReadingFont`).
+    "AtkinsonHyperlegibleNext-Regular.ttf", "AtkinsonHyperlegibleNext-Bold.ttf",
+    "Lexend-Regular.ttf", "Lexend-Bold.ttf",
+    "OpenDyslexic-Regular.otf", "OpenDyslexic-Bold.otf",
+    "Inter-Regular.ttf", "Inter-Bold.ttf", "Outfit-Regular.ttf", "Outfit-Bold.ttf",
+    "SpaceGrotesk-Regular.ttf", "SpaceGrotesk-Bold.ttf", "Fraunces-Regular.ttf", "Fraunces-Bold.ttf",
+    "Nunito-Regular.ttf", "Nunito-Bold.ttf", "Comfortaa-Regular.ttf", "Comfortaa-Bold.ttf",
+    "BricolageGrotesque-Regular.ttf", "BricolageGrotesque-Bold.ttf", "Caveat-Regular.ttf", "Caveat-Bold.ttf",
   ]
 
   private static let builtInBoldFaces: [String: String] = Dictionary(

@@ -121,7 +121,7 @@ struct ChatDividerRow: View {
   var body: some View {
     HStack(spacing: 10) {
       Rectangle().fill(TetherColors.border).frame(height: 0.5)
-      Text(text).font(.caption).foregroundStyle(TetherColors.textFaint).fixedSize()
+      Text(text).font(.chat(.caption)).foregroundStyle(TetherColors.textFaint).fixedSize()
       Rectangle().fill(TetherColors.border).frame(height: 0.5)
     }
     .padding(.vertical, 4)
@@ -152,7 +152,7 @@ struct AgentNoticeRow: View {
       Rectangle().fill(tint).frame(width: 2)
       (Text(notice.title).bold()
         + Text(notice.detail.flatMap { $0.isEmpty ? nil : " \u{00B7} \($0)" } ?? ""))
-        .font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
         .textSelection(.enabled)
         .padding(.leading, 8).padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -189,11 +189,11 @@ struct CompactionRow: View {
           Rectangle().fill(TetherColors.border).frame(height: 0.5)
           HStack(spacing: 5) {
             if compaction.status == .inProgress { ProgressView().controlSize(.mini).tint(TetherColors.textFaint) }
-            Text(text).font(.caption)
+            Text(text).font(.chat(.caption))
               .foregroundStyle(compaction.status == .failed ? TetherColors.danger : TetherColors.textFaint)
             if summary != nil {
               Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+                .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
             }
           }
           .fixedSize()
@@ -208,7 +208,7 @@ struct CompactionRow: View {
       .accessibilityHint(summary == nil ? "" : (expanded ? "Hides the summary" : "Shows the summary"))
       if expanded, let summary {
         ScrollView {
-          Text(summary).font(.caption).foregroundStyle(TetherColors.textSecondary)
+          Text(summary).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
@@ -236,8 +236,8 @@ struct SignedOutRow: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Image(systemName: "person.crop.circle.badge.exclamationmark").font(.caption).foregroundStyle(TetherColors.warning)
-        Text(ChatSignInCopy.message(host: host, agent: agent)).font(.footnote).foregroundStyle(TetherColors.textSecondary)
+        Image(systemName: "person.crop.circle.badge.exclamationmark").font(.chat(.caption)).foregroundStyle(TetherColors.warning)
+        Text(ChatSignInCopy.message(host: host, agent: agent)).font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           .textSelection(.enabled)
       }
       if let retry {
@@ -245,7 +245,7 @@ struct SignedOutRow: View {
           Button(action: action) {
             HStack(spacing: 6) {
               if retry == .checking { ProgressView().controlSize(.mini) }
-              Text(retry == .checking ? "Checking" : "Try again").font(.subheadline.weight(.semibold))
+              Text(retry == .checking ? "Checking" : "Try again").font(.chat(.subheadline).weight(.semibold))
             }
             .padding(.horizontal, 14).frame(minHeight: 34)
             .foregroundStyle(TetherColors.accent)
@@ -256,7 +256,7 @@ struct SignedOutRow: View {
           .disabled(retry == .checking)
           .accessibilityIdentifier("chatSignInRetry")
           if retry == .stillSignedOut {
-            Text("Still signed out").font(.caption).foregroundStyle(TetherColors.textFaint)
+            Text("Still signed out").font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
           }
         }
         .padding(.leading, 20)
@@ -280,7 +280,7 @@ struct UserMessageRow: View {
     VStack(alignment: .trailing, spacing: 3) {
       bubble
       if queued {
-        Label("Queued", systemImage: "clock").font(.caption2).foregroundStyle(TetherColors.textFaint)
+        Label("Queued", systemImage: "clock").font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
           .padding(.trailing, 4)
       }
     }
@@ -295,7 +295,7 @@ struct UserMessageRow: View {
         ChatImageChips(refs: images)
       } else if imageCount > 0 {
         Label(ChatComposerRule.imageLabel(imageCount), systemImage: "photo")
-          .font(.caption).foregroundStyle(TetherColors.textSecondary)
+          .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
       if !text.isEmpty {
         ChatSelectableText(text, branch: branch)
@@ -337,9 +337,9 @@ struct ThoughtRow: View {
     VStack(alignment: .leading, spacing: 6) {
       Button(action: toggle) {
         HStack(spacing: 6) {
-          Image(systemName: "brain").font(.caption)
-          Text("Thinking").font(.footnote)
-          Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
+          Image(systemName: "brain").font(.chat(.caption))
+          Text("Thinking").font(.chat(.footnote))
+          Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.chat(.caption2).weight(.semibold))
         }
         .foregroundStyle(TetherColors.textFaint)
         .contentShape(Rectangle())
@@ -414,10 +414,10 @@ struct ToolRowLayout<Trailing: View>: View {
 
   var body: some View {
     HStack(spacing: 10) {
-      Image(systemName: symbol).font(.footnote).foregroundStyle(tint)
+      Image(systemName: symbol).font(.chat(.footnote)).foregroundStyle(tint)
         .frame(width: 24)
         .accessibilityHidden(true)
-      Text(title).font(.footnote).foregroundStyle(titleTint)
+      Text(title).font(.chat(.footnote)).foregroundStyle(titleTint)
         .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: .infinity, alignment: .leading)
       trailing
@@ -435,9 +435,9 @@ struct ToolStatusGlyph: View {
     if active {
       ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
     } else if status == .failed {
-      Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.danger)
+      Image(systemName: "xmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.danger)
     } else {
-      Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(TetherColors.success)
+      Image(systemName: "checkmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.success)
     }
   }
 }
@@ -449,6 +449,8 @@ struct ToolCallRow: View {
   /// Replaces the expansion: a Workflow row the host knows opens its run instead.
   var open: (() -> Void)?
   let toggle: () -> Void
+  /// An image result shows the picture alone until asked for the tool's text.
+  @State private var showsText = false
 
   private var expandable: Bool {
     open != nil || call.diff != nil || !call.images.isEmpty || ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput)
@@ -479,7 +481,7 @@ struct ToolCallRow: View {
             if file.added > 0 { Text("+\(file.added)").foregroundStyle(TetherColors.success) }
             if file.removed > 0 { Text("\u{2212}\(file.removed)").foregroundStyle(TetherColors.danger) }
           }
-          .font(.caption2.monospacedDigit())
+          .font(.chat(.caption2).monospacedDigit())
         }
         if call.isBackgroundRunning {
           Text("background").font(.caption2.monospaced()).foregroundStyle(TetherColors.accent)
@@ -489,7 +491,7 @@ struct ToolCallRow: View {
         statusGlyph.frame(width: 14)
         if expandable {
           Image(systemName: expanded && open == nil ? "chevron.down" : "chevron.right")
-            .font(.caption2.weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+            .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
         }
       }
     }
@@ -522,7 +524,19 @@ struct ToolCallRow: View {
       } else {
         VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(call.images.enumerated()), id: \.offset) { _, ref in ChatImageView(ref: ref) }
-          if ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput) {
+          let hasText = ChatToolDetail.hasContent(text: call.text, rawOutput: call.rawOutput)
+          if hasText, !call.images.isEmpty {
+            Button { showsText.toggle() } label: {
+              HStack(spacing: 4) {
+                Text(showsText ? "Hide details" : "Details")
+                Image(systemName: showsText ? "chevron.up" : "chevron.down").font(.caption2.weight(.semibold))
+              }
+              .font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+          }
+          if hasText, call.images.isEmpty || showsText {
             ChatMarkdownView(blocks: ChatToolDetail.blocks(text: call.text, rawOutput: call.rawOutput), reading: false,
               selectable: !call.isRunning && !call.isBackgroundRunning)
           }
@@ -556,14 +570,14 @@ struct PlanRow: View {
         withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { open.toggle() }
       } label: {
         HStack(spacing: 6) {
-          Image(systemName: "checklist").font(.caption)
-          Text("Plan · \(done) of \(entries.count)").font(.footnote.weight(.medium))
+          Image(systemName: "checklist").font(.chat(.caption))
+          Text("Plan · \(done) of \(entries.count)").font(.chat(.footnote).weight(.medium))
           if !open, let current {
-            Text(current.content).font(.footnote).lineLimit(1)
+            Text(current.content).font(.chat(.footnote)).lineLimit(1)
               .foregroundStyle(TetherColors.textFaint)
           }
           Spacer(minLength: 6)
-          Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
+          Image(systemName: open ? "chevron.down" : "chevron.right").font(.chat(.caption2).weight(.semibold))
         }
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.vertical, 5)
@@ -578,7 +592,7 @@ struct PlanRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 9) {
               glyph(entry.status).frame(width: 16)
               Text(entry.content)
-                .font(entry.status == "in_progress" ? .footnote.weight(.semibold) : .footnote)
+                .font(entry.status == "in_progress" ? .chat(.footnote).weight(.semibold) : .chat(.footnote))
                 .foregroundStyle(
                   entry.status == "completed" ? TetherColors.textSecondary : TetherColors.textPrimary)
             }
@@ -611,8 +625,8 @@ struct QuietRow: View {
 
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
-      Image(systemName: symbol).font(.caption).foregroundStyle(tint)
-      Text(text).font(.footnote).foregroundStyle(tint == TetherColors.danger ? tint : TetherColors.textSecondary)
+      Image(systemName: symbol).font(.chat(.caption)).foregroundStyle(tint)
+      Text(text).font(.chat(.footnote)).foregroundStyle(tint == TetherColors.danger ? tint : TetherColors.textSecondary)
         .textSelection(.enabled)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -647,19 +661,19 @@ struct FailedMessageRow: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       if !message.text.isEmpty {
-        Text(message.text).font(.callout).foregroundStyle(TetherColors.textSecondary)
+        Text(message.text).font(.chat(.callout)).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       if message.imagesNotKept {
         Label("Images not kept", systemImage: "photo")
-          .font(.caption).foregroundStyle(TetherColors.textFaint)
+          .font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
       }
       HStack(spacing: 14) {
         Label("Not sent", systemImage: "exclamationmark.circle.fill")
-          .font(.caption.weight(.semibold)).foregroundStyle(TetherColors.danger)
+          .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.danger)
         Spacer()
-        Button("Discard", role: .destructive, action: discard).font(.caption.weight(.semibold))
-        Button("Retry", action: retry).font(.caption.weight(.semibold)).disabled(!canRetry || !message.canRetry)
+        Button("Discard", role: .destructive, action: discard).font(.chat(.caption).weight(.semibold))
+        Button("Retry", action: retry).font(.chat(.caption).weight(.semibold)).disabled(!canRetry || !message.canRetry)
       }
     }
     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -695,7 +709,7 @@ struct WorkingIndicator: View {
     let lead = max(0, min(mid, sweep - 0.25))
     let trail = max(mid, min(1, sweep + 0.25))
     return Text(activity ?? "Working…")
-      .font(.footnote.weight(.medium))
+      .font(.chat(.footnote).weight(.medium))
       .lineLimit(1).truncationMode(.middle)
       .foregroundStyle(
         LinearGradient(

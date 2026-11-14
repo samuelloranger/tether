@@ -37,7 +37,7 @@ struct MacSessionStrip: View {
 
   private var addButton: some View {
     Button { tabs.beginNewSession() } label: {
-      Image(systemName: "plus").font(.footnote.weight(.semibold))
+      Image(systemName: "plus").font(.app(.footnote).weight(.semibold))
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.horizontal, 10).padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -89,7 +89,7 @@ private struct MacSessionTab: View {
         if attention {
           Circle().fill(TetherColors.warning).frame(width: 7, height: 7).accessibilityHidden(true)
         }
-        Text(name).font(.footnote.weight(.semibold)).lineLimit(1)
+        Text(name).font(.app(.footnote).weight(.semibold)).lineLimit(1)
           .foregroundStyle(selected ? TetherColors.textPrimary : TetherColors.textSecondary)
         if let directory {
           Text(directory).font(.caption2.monospaced()).lineLimit(1)
