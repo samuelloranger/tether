@@ -218,7 +218,7 @@ struct ChatImageViewer: View {
 
   var body: some View {
     ZStack {
-      Color.black.opacity(1 - dragProgress * 0.7).ignoresSafeArea()
+      Color.black.opacity(Double(1 - dragProgress * 0.7)).ignoresSafeArea()
       TabView(selection: $current) {
         ForEach(refs) { ref in
           ChatImagePage(ref: ref, library: library, onDrag: { dragProgress = $0 }, onDismiss: { dismiss() })
