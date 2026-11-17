@@ -77,7 +77,7 @@ pub struct JsonHostKeys {
 
 impl JsonHostKeys {
     pub fn new(dir: DataDir) -> io::Result<Self> {
-        let pins = dir.load(HOSTKEYS_FILE)?;
+        let pins = dir.load_strict(HOSTKEYS_FILE)?;
         Ok(Self {
             dir,
             pins: Mutex::new(pins),
@@ -100,7 +100,7 @@ impl HostKeyStore for JsonHostKeys {
             .write(true)
             .open(self.dir.root().join(format!("{HOSTKEYS_FILE}.lock")))?;
         lock.lock()?;
-        let mut disk: BTreeMap<String, String> = self.dir.load(HOSTKEYS_FILE)?;
+        let mut disk: BTreeMap<String, String> = self.dir.load_strict(HOSTKEYS_FILE)?;
         let k = key(host, port);
         match disk.get(&k) {
             Some(existing) if existing != fingerprint => {
@@ -252,5 +252,25 @@ mod tests {
         };
         assert_ne!(err.kind(), io::ErrorKind::NotFound);
         assert!(path.is_dir());
+    }
+
+    #[test]
+    fn corrupt_hostkeys_fail_closed_and_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(HOSTKEYS_FILE);
+        std::fs::write(&path, b"{ not json").unwrap();
+        let Err(err) = JsonHostKeys::new(DataDir::new(dir.path())) else {
+            panic!("corrupt hostkeys loaded as an empty pin set");
+        };
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("corrupt"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{ not json");
+
+        // A file corrupted after startup must not let a new key be pinned either.
+        std::fs::remove_file(&path).unwrap();
+        let store = JsonHostKeys::new(DataDir::new(dir.path())).unwrap();
+        std::fs::write(&path, b"garbage").unwrap();
+        assert!(store.pin("devbox", 22, "aa:bb").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"garbage");
     }
 }

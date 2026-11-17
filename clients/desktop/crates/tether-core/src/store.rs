@@ -34,12 +34,8 @@ impl DataDir {
     /// returned and the original stays where a save would overwrite it.
     pub fn load<T: DeserializeOwned + Default>(&self, file: &str) -> io::Result<T> {
         let path = self.root.join(file);
-        let bytes = match read_retry(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(T::default()),
-            Err(e) => {
-                return Err(io::Error::new(e.kind(), format!("{file}: {e}")));
-            }
+        let Some(bytes) = self.read_existing(file)? else {
+            return Ok(T::default());
         };
         match serde_json::from_slice(&bytes) {
             Ok(value) => Ok(value),
@@ -53,6 +49,32 @@ impl DataDir {
                 })?;
                 Ok(T::default())
             }
+        }
+    }
+
+    /// Like `load`, but for a file whose loss is a security downgrade: one that does not parse
+    /// is an `InvalidData` error and is left in place, never replaced by an empty value.
+    pub fn load_strict<T: DeserializeOwned + Default>(&self, file: &str) -> io::Result<T> {
+        let Some(bytes) = self.read_existing(file)? else {
+            return Ok(T::default());
+        };
+        serde_json::from_slice(&bytes).map_err(|parse| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{file} is corrupt ({parse}); refusing to continue without it. \
+                     Fix or remove {} to proceed",
+                    self.root.join(file).display()
+                ),
+            )
+        })
+    }
+
+    fn read_existing(&self, file: &str) -> io::Result<Option<Vec<u8>>> {
+        match read_retry(&self.root.join(file)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io::Error::new(e.kind(), format!("{file}: {e}"))),
         }
     }
 

@@ -323,11 +323,15 @@ public final class SSHTerminalController {
         if pendingNoSession {
           hasSession = false
         } else {
-          hasSession = true
           let command = launchCommands.removeValue(forKey: attach)
-          pipeline.outbound.yield(
-            .input(ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach, command: command), key: sessionKey))
-          lastAttachWrite = .now
+          if let line = ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach, command: command) {
+            hasSession = true
+            pipeline.outbound.yield(.input(line, key: sessionKey))
+            lastAttachWrite = .now
+          } else {
+            hasSession = false
+            status = .failed("Invalid session name: \(attach.debugDescription)")
+          }
         }
         schedulePushRegister()
         Task { await refreshSessions() }
@@ -524,6 +528,7 @@ public final class SSHTerminalController {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
     guard name != attach || !hasSession else { return }
+    guard isValidZmxSessionName(name) else { return }
     guard await mayAttach(name) else { return }
     picked = true
     let wasAttached = hasSession
@@ -591,6 +596,7 @@ public final class SSHTerminalController {
       pendingNoSession = true
     }
     mayCreate.remove(name)
+    guard isValidZmxSessionName(name) else { return }
     _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
     await refreshSessions()
   }
@@ -1154,6 +1160,7 @@ public final class SSHTerminalController {
   /// zmx runs an alt-screen session, so the local buffer only holds the current screen;
   /// `zmx history` is the real transcript.
   public func historyText() async -> String {
+    guard isValidZmxSessionName(attach) else { return await pipeline.historyText() }
     if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach)) | tail -n \(Self.historyLines)"),
       !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return out

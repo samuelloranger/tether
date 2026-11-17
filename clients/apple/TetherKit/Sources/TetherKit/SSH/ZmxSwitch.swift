@@ -31,14 +31,15 @@ enum ZmxSwitch {
   }
 
   /// `command` (already quoted for a shell) runs instead of a login shell when the session is new.
-  static func attachCommand(zmx: String, name: String, command: String? = nil) -> String {
-    "\(zmx) attach \(shellQuote(name))\(command.map { " " + $0 } ?? "")\n"
+  static func attachCommand(zmx: String, name: String, command: String? = nil) -> String? {
+    guard isValidZmxSessionName(name) else { return nil }
+    return "\(zmx) attach \(shellQuote(name))\(command.map { " " + $0 } ?? "")\n"
   }
 
   /// The PTY writes the switch performs, in order. More than one element means
   /// they must reach the host as separate writes, `settleNanoseconds` apart.
   static func writes(typing: Typing, zmx: String, name: String, command: String? = nil) -> [String] {
-    let attach = attachCommand(zmx: zmx, name: name, command: command)
+    guard let attach = attachCommand(zmx: zmx, name: name, command: command) else { return [] }
     switch typing {
     case .attachInPlace:
       return [attach]

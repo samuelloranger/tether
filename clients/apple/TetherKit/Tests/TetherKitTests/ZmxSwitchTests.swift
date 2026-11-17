@@ -53,3 +53,20 @@ final class ZmxSwitchTests: XCTestCase {
     XCTAssertEqual(writes, ["\(zmx) attach 'my project'\"'\"'; rm -rf /'\n"])
   }
 }
+
+final class ZmxSessionNameTests: XCTestCase {
+  func test_ordinary_names_are_valid() {
+    for name in ["work", "my session", "a-b", "dév"] { XCTAssertTrue(isValidZmxSessionName(name), name) }
+  }
+
+  func test_empty_flag_like_and_control_names_are_refused() {
+    for name in ["", "   ", "-h", " --force", "a\nrm -rf ~", "a\n", "a\u{1B}b", "a\u{7F}"] {
+      XCTAssertFalse(isValidZmxSessionName(name), name.debugDescription)
+    }
+  }
+
+  func test_an_invalid_name_types_nothing() {
+    XCTAssertNil(ZmxSwitch.attachCommand(zmx: "zmx", name: "a\nid"))
+    XCTAssertEqual(ZmxSwitch.writes(typing: .detachThenAttach, zmx: "zmx", name: "-x"), [])
+  }
+}
