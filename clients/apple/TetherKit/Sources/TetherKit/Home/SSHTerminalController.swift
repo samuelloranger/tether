@@ -323,11 +323,14 @@ public final class SSHTerminalController {
         if pendingNoSession {
           hasSession = false
         } else {
-          hasSession = true
           let command = launchCommands.removeValue(forKey: attach)
-          pipeline.outbound.yield(
-            .input(ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach, command: command), key: sessionKey))
-          lastAttachWrite = .now
+          if let line = ZmxSwitch.attachCommand(zmx: Self.zmx, name: attach, command: command) {
+            hasSession = true
+            pipeline.outbound.yield(.input(line, key: sessionKey))
+            lastAttachWrite = .now
+          } else {
+            hasSession = false
+          }
         }
         schedulePushRegister()
         Task { await refreshSessions() }
@@ -524,6 +527,7 @@ public final class SSHTerminalController {
     // Skip only when it's the same session we're already on. When there is no
     // session yet (empty-state host), attach even if the name equals `attach`.
     guard name != attach || !hasSession else { return }
+    guard isValidZmxSessionName(name) else { return }
     guard await mayAttach(name) else { return }
     picked = true
     let wasAttached = hasSession

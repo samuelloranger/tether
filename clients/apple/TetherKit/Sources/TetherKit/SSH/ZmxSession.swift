@@ -6,6 +6,15 @@ public func shellQuote(_ value: String) -> String {
   "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
 }
 
+/// The attach line is typed into a shell, so a control character (a newline above all) would end
+/// the command line early and a leading `-` would be read as a flag. Mirrors `valid_session_name`
+/// in tether-core; the control-character check also covers surrounding whitespace.
+public func isValidZmxSessionName(_ name: String) -> Bool {
+  let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+  return !trimmed.isEmpty && !trimmed.hasPrefix("-")
+    && !name.unicodeScalars.contains { $0.properties.generalCategory == .control }
+}
+
 public struct ZmxSession: Equatable, Identifiable, Sendable {
   public var name: String
   public var pid: Int

@@ -161,7 +161,7 @@ public final class MacSessionTabs {
   func commitNewSession() {
     let name = (draftName ?? "").trimmingCharacters(in: .whitespaces)
     draftName = nil
-    guard !name.isEmpty else { return }
+    guard isValidZmxSessionName(name) else { return }
     if state.names.contains(name) {
       select(name)
       return
@@ -176,6 +176,7 @@ public final class MacSessionTabs {
 
   /// A new tab whose session runs `command` (already shell-quoted) in place of a login shell.
   func open(_ name: String, running command: String) {
+    guard isValidZmxSessionName(name) else { return }
     guard !state.names.contains(name) else { return select(name) }
     teardown(state.open(name))
     let controller = make(name, true, nil)
