@@ -51,7 +51,6 @@ struct QuestionCard: View {
       VStack(alignment: .leading, spacing: 1) {
         Text("QUESTION").font(.chat(.caption2).weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
         Text(question.message).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-          .lineLimit(4)
           .fixedSize(horizontal: false, vertical: true)
       }
       Spacer(minLength: 0)
@@ -123,16 +122,14 @@ struct QuestionCard: View {
           .foregroundStyle(picked ? TetherColors.accent : TetherColors.textFaint)
           .frame(width: 22)
           .accessibilityHidden(true)
-        let stacked = dynamicTypeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 1)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-        layout {
+        VStack(alignment: .leading, spacing: 1) {
           Text(choice.title).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
-            .lineLimit(stacked ? 4 : 2)
             .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
           if showsDescription(choice) {
             Text(choice.description).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
-              .lineLimit(stacked ? 3 : 1)
               .multilineTextAlignment(.leading)
+              .fixedSize(horizontal: false, vertical: true)
           }
         }
         Spacer(minLength: 0)

@@ -108,7 +108,7 @@ enum ChatFixture {
       "type": "string", "title": "Test runner",
       "oneOf": [
         choice("vitest", "Fast, Vite-native, watch mode"),
-        choice("jest", "The long-standing default"),
+        choice("jest", "The long-standing default, with the widest plugin ecosystem and snapshot support built in"),
         choice("bun", "Built in, no extra dependency"),
       ],
     ],
