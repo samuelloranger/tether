@@ -39,7 +39,7 @@ public struct ZmxSession: Equatable, Identifiable, Sendable {
         guard let eq = trimmed.firstIndex(of: "=") else { continue }
         fields[String(trimmed[..<eq])] = String(trimmed[trimmed.index(after: eq)...])
       }
-      guard let name = fields["name"], !name.isEmpty else { return nil }
+      guard let name = fields["name"], isValidZmxSessionName(name) else { return nil }
       return ZmxSession(
         name: name,
         pid: Int(fields["pid"] ?? "") ?? 0,

@@ -330,6 +330,7 @@ public final class SSHTerminalController {
             lastAttachWrite = .now
           } else {
             hasSession = false
+            status = .failed("Invalid session name: \(attach.debugDescription)")
           }
         }
         schedulePushRegister()
@@ -595,6 +596,7 @@ public final class SSHTerminalController {
       pendingNoSession = true
     }
     mayCreate.remove(name)
+    guard isValidZmxSessionName(name) else { return }
     _ = try? await control.exec("\(Self.zmx) kill \(shellQuote(name)) --force")
     await refreshSessions()
   }
@@ -1158,6 +1160,7 @@ public final class SSHTerminalController {
   /// zmx runs an alt-screen session, so the local buffer only holds the current screen;
   /// `zmx history` is the real transcript.
   public func historyText() async -> String {
+    guard isValidZmxSessionName(attach) else { return await pipeline.historyText() }
     if let out = try? await control.exec("\(Self.zmx) history \(shellQuote(attach)) | tail -n \(Self.historyLines)"),
       !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return out

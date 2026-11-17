@@ -3,6 +3,11 @@ import XCTest
 @testable import TetherKit
 
 final class ZmxSessionListTests: XCTestCase {
+  func test_sessions_with_unsafe_names_are_dropped() {
+    let out = "name=-h\tpid=1\nname=ok\tpid=2\nname=\u{1B}x\tpid=3"
+    XCTAssertEqual(ZmxSession.parse(out).map(\.name), ["ok"])
+  }
+
   func test_parses_tab_separated_key_value_rows() {
     let out = """
         name=App terminal ssh\tpid=2167034\tclients=0\tcreated=1789875110\tcwd=file://homelab/home/samuelloranger
