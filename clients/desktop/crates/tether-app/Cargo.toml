@@ -44,7 +44,7 @@ windows = { version = "0.62.2", features = [
 ] }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
-velopack = "1.2.161"
+velopack = "1.3.39-g8d2844f"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
