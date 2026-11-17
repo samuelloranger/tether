@@ -358,8 +358,7 @@ final class ACPClientTests: XCTestCase {
     XCTAssertTrue(got)
     XCTAssertEqual(snapshots.saveCount, 0)
     await client.setSnapshotIdentity(9)
-    await client.saveSnapshot()
-    XCTAssertEqual(snapshots.saveCount, 1)
+    XCTAssertEqual(snapshots.saveCount, 1, "an identity learned after the log was read saves at once")
 
     await stream.close()
     let lost = await waitUntil(client) { $0.connection == .lost }

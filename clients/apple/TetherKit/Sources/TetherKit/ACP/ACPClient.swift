@@ -338,8 +338,12 @@ actor ACPClient {
     publish()
   }
 
-  /// Snapshots are only written once the host session's identity is known.
-  func setSnapshotIdentity(_ identity: Int) { snapshotIdentity = identity }
+  /// Snapshots are only written once the host session's identity is known. It can arrive after
+  /// the whole log was read, when no further bytes would trigger a save, so save at once.
+  func setSnapshotIdentity(_ identity: Int) {
+    snapshotIdentity = identity
+    saveSnapshot()
+  }
 
   /// Writes the resume snapshot now. A state that lost its connection or failed is never saved:
   /// it holds events the log does not.
