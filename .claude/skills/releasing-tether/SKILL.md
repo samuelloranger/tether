@@ -75,6 +75,7 @@ Pull requests: #A, #B, #C
 - **The notes are public.** Describe the code and the general failure mode, never a particular instance: no hostnames, IPs, usernames, library contents, counts or dates from a real setup.
 - **A patch release can be a single section.** v5.5.1 is only `### Fixed` with one item.
 - **Reference releases:** read the latest one (`gh release view`) before writing; releases before 6.0.0 were removed when the release lanes merged.
+- **Mirror the finished notes into `CHANGELOG.md`.** New versions go at the top as `## [X.Y.Z](release link) — YYYY-MM-DD` (the release's publish date), keeping the notes verbatim but without the Downloads section. Push that to `main` as its own commit after the release is out.
 
 ## Quick Reference
 
