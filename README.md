@@ -7,10 +7,10 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/samuelloranger/tether" alt="License: GPL-3.0" /></a>
   <a href="https://github.com/samuelloranger/tether/actions/workflows/ci.yml"><img src="https://github.com/samuelloranger/tether/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform: iOS | Windows | Linux" />
+  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Mac%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform: iOS | Mac | Windows | Linux" />
 </p>
 
-A native terminal for your own machines, on iOS, Windows and Linux, plus a Claude Code chat client on iPhone. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone or PC. Tether is a pure client: **no server to run, nothing exposed but SSH.**
+A native terminal for your own machines, on iOS, Mac, Windows and Linux, plus a Claude Code chat client on iPhone. Tether connects over **SSH** to [`zmx`](#the-host-side) — a persistent session manager on the host — attaches a session, and renders the live shell. Because zmx owns the sessions on the host, they keep running when you close the app, lose signal, or reboot the phone or PC. Tether is a pure client: **no server to run, nothing exposed but SSH.**
 
 > **v5 rewrite.** Earlier Tether ran a Bun server with a custom Noise transport plus desktop and web clients. v5 drops all of it for native apps over SSH: iOS, and a desktop client for Windows and Linux. The only host-side piece is `tether`, a tiny tool for push.
 
@@ -37,9 +37,13 @@ The iOS app on synthetic data (a made-up host and project).
 | <img src="docs/screenshots/07-chat-controls.png" width="240" alt="Chat controls"> | <img src="docs/screenshots/08-chat-subagent.png" width="240" alt="Subagent expanded"> | <img src="docs/screenshots/09-chat-continue.png" width="240" alt="Continue picker"> |
 | Mode, model and effort | A subagent's work, nested | Continue an earlier chat |
 
-## Install (iOS)
+## Install (iPhone, iPad and Mac)
 
-The app is built from source and installed to your device (there is no public distribution). You need a Mac with Xcode 26 or later.
+The public TestFlight link needs no invitation:
+
+**https://testflight.apple.com/join/j7rPkfhq**
+
+To build from source instead, you need a Mac with Xcode 26 or later.
 
 ```bash
 xcodebuild build \
@@ -55,12 +59,12 @@ See [`clients/apple/README.md`](clients/apple/README.md) for signing and on-devi
 
 ## Install (desktop: Windows and Linux)
 
-One app for both systems, built from one codebase and released together: take the file for your OS from the [latest release](https://github.com/samuelloranger/tether/releases/latest). One window, one tab per zmx session. On top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), SSH agent auth, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette.
+One app for both systems, built from one codebase and released together: take the file for your OS from the [latest release](https://github.com/samuelloranger/tether/releases/latest) — [CHANGELOG](CHANGELOG.md) has what changed in each version. One window, one tab per zmx session. On top of what the iOS app does it adds find in scrollback, `~/.ssh/config` import, ProxyJump ("Connect through"), SSH agent auth, a git panel with pull requests, a markdown viewer, inline images (kitty, iTerm2), session history and a snippet palette.
 
 | | Windows | Linux |
 |---|---|---|
 | Download | `Tether-<version>-x64-Setup.exe` (per user, no admin), or `Tether-<version>-x64-portable.zip` (no install, no updates) | `Tether-<version>-x86_64.AppImage` |
-| Run | Start menu after install; neither file is code-signed yet, so SmartScreen may warn on first launch | `chmod +x` the file, then run it |
+| Run | Start menu after install; SmartScreen may warn on first launch — the files are unsigned (see [Security](#security)) | `chmod +x` the file, then run it |
 | Updates | Self-updates from the `windows-feed` release | Self-updates from the `linux-feed` release, in place: it downloads a newer AppImage in the background and swaps the file on the next launch or from **Settings → About → Restart**. Keep the file somewhere you can write to; downloads go to a private folder under `~/.cache/tether/updates` |
 | Requires | Windows 10 22H2 or Windows 11, x64 | x86_64, glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 or later), X11 or Wayland |
 | Saved keys and passwords | DPAPI-protected files | A Secret Service keyring (GNOME Keyring, KWallet) that is running; nothing is written in plain text |
@@ -115,6 +119,8 @@ Architecture, data flow, and conventions: [`CLAUDE.md`](CLAUDE.md).
 ## Security
 
 Transport is SSH — there is no shared password and no setup flow that skips host-key verification. Keys live in the iOS Keychain (DPAPI-protected storage on Windows, the Secret Service keyring on Linux) and reach the SSH library in memory only. A host-key mismatch fails loudly. The push relay only ever routes ciphertext it cannot read. Keep hosts reachable over your LAN, a tunnel, or plain SSH as you already do.
+
+The desktop files are not code-signed, and that is a decision rather than a gap. A Windows signing certificate is a recurring cost that on its own does not clear SmartScreen's first-launch warning — reputation has to build on the certificate first — and the Apple certificate that signs the iPhone and Mac builds cannot sign Windows or Linux binaries. What every release does publish is a `SHA256SUMS.txt` covering each file, and the app only ever updates itself over HTTPS from this repository's feeds. If a certificate becomes worth it, the release workflow signs the same files and nothing else changes.
 
 ## Migration
 
