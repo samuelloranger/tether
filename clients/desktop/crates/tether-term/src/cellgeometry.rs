@@ -9,8 +9,9 @@
 //! antialiasing ramp follow Alacritty's builtin font (Apache-2.0,
 //! alacritty/src/renderer/text/builtin_font.rs); the per-codepoint arm
 //! weights match the iOS client's TerminalBoxDrawing so both clients draw the
-//! same lines. Left to the font: shades U+2591–2593 and the diagonal sextants
-//! and octants U+1FB3C–U+1FB7F, U+1FB90–U+1FBFF.
+//! same lines. Left to the font: shades U+2591–2593 and the rest of the
+//! legacy-computing block beyond the sextants and partial blocks handled here
+//! (U+1FB3C–U+1FB7F, U+1FB80–U+1FB81, U+1FB8C–U+1FBFF).
 
 use crate::raster::RgbaImage;
 
@@ -545,15 +546,22 @@ fn blocks(cell: &mut Cell, cp: u32) {
     }
 }
 
-/// Braille U+2800–28FF: a 2×4 grid of dots. Dots 1–4 run down the left
-/// column (bits 0–3), dots 5–8 down the right (bits 4–7).
+/// Braille U+2800–28FF: a 2×4 grid of dots. Dots 1–3 run down the left
+/// column, dots 4–6 down the right, dot 7 sits bottom-left and dot 8
+/// bottom-right; codepoint bit n−1 is dot n.
 fn braille(cell: &mut Cell, cp: u32) {
     let bits = (cp - 0x2800) as u8;
     let (wf, hf) = (cell.wf(), cell.hf());
     let (rx, ry) = ((wf / 2.0 * 0.35).max(1.0), (hf / 4.0 * 0.35).max(1.0));
     for row in 0..4u32 {
         for col in 0..2u32 {
-            if bits & (1 << (row + 4 * col)) == 0 {
+            let bit = match (col, row) {
+                (0, 3) => 6,       // dot 7
+                (1, 3) => 7,       // dot 8
+                (1, _) => row + 3, // dots 4–6
+                _ => row,          // dots 1–3
+            };
+            if bits & (1 << bit) == 0 {
                 continue;
             }
             let x = wf * (col as f32 * 0.5 + 0.25);
@@ -827,7 +835,9 @@ fn powerline(cell: &mut Cell, cp: u32) {
         // Half-ellipse caps bulging out of the segment, solid or outlined.
         0xe0b4..=0xe0b7 => {
             let right = cp == 0xe0b4 || cp == 0xe0b5;
-            let (base, a) = if right { (0.0, wf) } else { (wf, wf) };
+            // The solid branch only squares `a`, so the left cap takes −w to
+            // keep its outline inside the cell: base − w·cos spans [0, w].
+            let (base, a) = if right { (0.0, wf) } else { (wf, -wf) };
             let b = hf / 2.0;
             if cp.is_multiple_of(2) {
                 for ix in 0..cell.w {
@@ -840,7 +850,10 @@ fn powerline(cell: &mut Cell, cp: u32) {
                 for i in 0..=steps {
                     let t = -std::f32::consts::FRAC_PI_2
                         + std::f32::consts::PI * i as f32 / steps as f32;
-                    let (px, py) = (base + a * t.cos(), cy + b * t.sin());
+                    // Both endpoints stay a half stroke inside the cell, so the
+                    // outline's ends draw the same amount top and bottom.
+                    let py = (cy + b * t.sin()).clamp(light / 2.0, hf - light / 2.0);
+                    let px = base + a * t.cos();
                     cell.rect(
                         px - light / 2.0,
                         py - light / 2.0,
@@ -1133,7 +1146,9 @@ mod tests {
 
     #[test]
     fn braille_dots_fill_only_their_own_sub_cell() {
-        let g = grid("⠁⣿");
+        // ⠁ dot 1, ⣿ all dots, ⠈ dot 4 (top of the right column), ⡀ dot 7
+        // (bottom of the left column).
+        let g = grid("⠁⣿⠈⡀");
         let probe = |col: u32, rrow: u32, ccol: u32| {
             let (x, y) = (g.x(col as usize), g.y(0));
             let (cw, ch) = (g.cw(), g.ch());
@@ -1152,6 +1167,16 @@ mod tests {
                     probe(0, row, col),
                     row == 0 && col == 0,
                     "⠁ must only light dot 1 (row {row}, col {col})"
+                );
+                assert_eq!(
+                    probe(2, row, col),
+                    row == 0 && col == 1,
+                    "⠈ must only light dot 4 (row {row}, col {col})"
+                );
+                assert_eq!(
+                    probe(3, row, col),
+                    row == 3 && col == 0,
+                    "⡀ must only light dot 7 (row {row}, col {col})"
                 );
             }
         }
@@ -1251,5 +1276,31 @@ mod tests {
         // The left cap mirrors it.
         assert!(g.fg(g.x(1) + cw - 1, 1) && g.fg(g.x(1) + cw - 1, ch - 2));
         assert!(!g.has_ink(g.x(1), g.y(0), g.x(1) + 1, g.y(0) + 1));
+    }
+
+    #[test]
+    fn outlined_powerline_caps_bulge_outward() {
+        // E0B5 bulges into the right half at mid height, E0B7 mirrors it into
+        // the left half; with a thin stroke the apex pixel itself truncates,
+        // so the probe is the half the curve lives in.
+        let g = grid("\u{e0b5}\u{e0b7}");
+        let (cw, ch) = (g.cw(), g.ch());
+        let (lo, hi) = (ch / 2 - 5, ch / 2 + 5);
+        assert!(
+            g.has_ink(g.x(0) + cw / 2, lo, g.x(0) + cw, hi),
+            "E0B5 ink lives in the right half"
+        );
+        assert!(
+            !g.has_ink(g.x(0), lo, g.x(0) + cw / 2, hi),
+            "E0B5 left half is empty at mid height"
+        );
+        assert!(
+            g.has_ink(g.x(1), lo, g.x(1) + cw / 2, hi),
+            "E0B7 ink lives in the left half"
+        );
+        assert!(
+            !g.has_ink(g.x(1) + cw / 2, lo, g.x(1) + cw, hi),
+            "E0B7 right half is empty at mid height"
+        );
     }
 }
