@@ -2,6 +2,22 @@
 
 One version ships every platform at once: iPhone, iPad and Mac through [TestFlight](https://testflight.apple.com/join/j7rPkfhq), Windows and Linux as installers on the [latest release](https://github.com/samuelloranger/tether/releases/latest). Each version's notes below are the same text as its GitHub release, without the per-release download instructions.
 
+## [6.7.1](https://github.com/samuelloranger/tether/releases/tag/v6.7.1) — 2026-11-19
+
+### Fixed
+- **An agent's question shows all of its text (iPhone, iPad and Mac).** A long question was cut off after four lines, each choice after two and its description after one, with no way to read the rest. The card now wraps to whatever the question and its choices need, and every choice sits with its description.
+
+- **Desktop line art joins at cell edges, whatever the font.** Box-drawing characters, braille, Powerline separators and legacy-computing sextants are drawn against the cell itself instead of shaped from the font, so TUI borders no longer show seams between cells and Powerline prompt segments no longer stripe between rows.
+
+### Under the hood
+- Hosts need no update for this release.
+- The README now lists Mac among the platforms, carries a CHANGELOG.md that mirrors each release's notes, and links TestFlight as the way in for iPhone, iPad and Mac. The desktop files staying unsigned is written down as a decision in the Security section, with what stands in its place.
+- Desktop: the box-drawing stroke widths and the legacy-computing mappings follow Alacritty's builtin font (Apache-2.0); the per-character arm weights match the iOS client, so both apps draw the same junctions.
+
+Pull requests: #365, #366
+
+**Full Changelog**: https://github.com/samuelloranger/tether/compare/v6.7.0...v6.7.1
+
 ## [6.7.0](https://github.com/samuelloranger/tether/releases/tag/v6.7.0) — 2026-11-17
 
 ### Security
