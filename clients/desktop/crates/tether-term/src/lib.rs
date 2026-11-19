@@ -1,3 +1,4 @@
+mod cellgeometry;
 mod colr;
 mod compose;
 #[cfg(windows)]
