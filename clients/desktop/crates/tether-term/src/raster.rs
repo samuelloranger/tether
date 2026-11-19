@@ -38,7 +38,7 @@ impl RgbaImage {
         self.pixels[i..i + 4].try_into().unwrap()
     }
 
-    fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, rgb: u32) {
+    pub(crate) fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, rgb: u32) {
         let (x0, y0) = (x.max(0), y.max(0));
         let (x1, y1) = (
             (x + w).min(self.width as i32),
@@ -50,6 +50,20 @@ impl RgbaImage {
                 let i = ((yy as u32 * self.width + xx as u32) * 4) as usize;
                 self.pixels[i..i + 4].copy_from_slice(&px);
             }
+        }
+    }
+
+    /// Blends one pixel toward `rgb`; used by the antialiased cell geometry.
+    pub(crate) fn blend_pixel(&mut self, x: i32, y: i32, rgb: u32, alpha: u8) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
+        let i = ((y as u32 * self.width + x as u32) * 4) as usize;
+        let a = alpha as u32;
+        for (shift, slot) in [(16, 0), (8, 1), (0, 2)] {
+            let src = (rgb >> shift) & 0xff;
+            let dst = self.pixels[i + slot] as u32;
+            self.pixels[i + slot] = ((src * a + dst * (255 - a)) / 255) as u8;
         }
     }
 
@@ -77,58 +91,6 @@ impl RgbaImage {
             }
         }
     }
-
-    /// Draw block elements against the actual cell bounds. Font glyphs leave seams
-    /// because their ink bounds and the terminal cell advance do not coincide.
-    fn draw_block(&mut self, ch: char, x: i32, y: i32, w: i32, h: i32, rgb: u32) -> bool {
-        let cp = ch as u32;
-        if !is_cell_block(ch) {
-            return false;
-        }
-        let mut rect = |left: i32, top: i32, right: i32, bottom: i32| {
-            self.fill_rect(x + left, y + top, right - left, bottom - top, rgb);
-        };
-        match cp {
-            0x2580 => rect(0, 0, w, h / 2),
-            0x2581..=0x2588 => rect(0, h * (0x2588 - cp) as i32 / 8, w, h),
-            0x2589..=0x258f => rect(0, 0, w * (0x2590 - cp) as i32 / 8, h),
-            0x2590 => rect(w / 2, 0, w, h),
-            0x2594 => rect(0, 0, w, (h / 8).max(1)),
-            0x2595 => rect(w * 7 / 8, 0, w, h),
-            _ => {
-                let bits = match cp {
-                    0x2596 => 0b0010,
-                    0x2597 => 0b0001,
-                    0x2598 => 0b1000,
-                    0x2599 => 0b1011,
-                    0x259a => 0b1001,
-                    0x259b => 0b1110,
-                    0x259c => 0b1101,
-                    0x259d => 0b0100,
-                    0x259e => 0b0110,
-                    0x259f => 0b0111,
-                    _ => unreachable!(),
-                };
-                if bits & 0b1000 != 0 {
-                    rect(0, 0, w / 2, h / 2);
-                }
-                if bits & 0b0100 != 0 {
-                    rect(w / 2, 0, w, h / 2);
-                }
-                if bits & 0b0010 != 0 {
-                    rect(0, h / 2, w / 2, h);
-                }
-                if bits & 0b0001 != 0 {
-                    rect(w / 2, h / 2, w, h);
-                }
-            }
-        }
-        true
-    }
-}
-
-fn is_cell_block(ch: char) -> bool {
-    (0x2580..=0x259f).contains(&(ch as u32)) && !(0x2591..=0x2593).contains(&(ch as u32))
 }
 
 pub struct RenderStyle<'a> {
@@ -254,8 +216,10 @@ impl Rasterizer {
                 }
                 if emoji_cells.get(col).copied().unwrap_or(false) {
                     // The grapheme is drawn once at its first cell below.
-                } else if !cell.spacer && img.draw_block(cell.ch, cell_x(col), y, cw, chh, fg) {
-                    // Blocks bypass font shaping in both rendering modes.
+                } else if !cell.spacer
+                    && crate::cellgeometry::draw(&mut img, cell.ch, cell_x(col), y, cw, chh, fg)
+                {
+                    // Cell geometry bypasses font shaping in both rendering modes.
                 } else if !ligatures && !cell.spacer && cell.ch != ' ' {
                     self.draw_char(
                         &mut img,
@@ -511,7 +475,7 @@ impl Rasterizer {
                 !emoji_cells.get(col).copied().unwrap_or(false)
                     && !c.spacer
                     && !c.wide
-                    && !is_cell_block(c.ch)
+                    && !crate::cellgeometry::draws(c.ch)
                     && matches!(
                         self.lookup(style.font, c.bold, c.ch).0,
                         FaceSlot::Primary { .. }
@@ -525,7 +489,7 @@ impl Rasterizer {
                 if !emoji_cells.get(col).copied().unwrap_or(false)
                     && !cell.spacer
                     && cell.ch != ' '
-                    && !is_cell_block(cell.ch)
+                    && !crate::cellgeometry::draws(cell.ch)
                 {
                     let fg = self.cell_fg(snap, style, row, col);
                     self.draw_char(
