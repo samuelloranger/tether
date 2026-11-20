@@ -15,6 +15,7 @@ use tether_core::acp::host::{self, ChatSummary};
 use tether_core::acp::images::ImageAttachment;
 use tether_core::acp::message::{AcpId, ConfigOption};
 use tether_core::acp::options::{OptionsCache, OptionsDraft, StartOptions};
+use tether_core::acp::versions::{Kind, ManagedState};
 use tether_core::acp::workflows;
 use tether_core::connect::ConnectError;
 
@@ -29,7 +30,7 @@ mod session;
 pub mod view;
 
 pub use mcp::McpLibrary;
-pub use newchat::NewChat;
+pub use newchat::{NewChat, NoticeRow};
 use session::Session;
 pub use view::{ChatScreen, Pixels};
 
@@ -75,8 +76,23 @@ pub enum ExecTag {
     },
     /// The host check the New chat dialog runs as it opens, to dim the agents the host can't run.
     AgentProbe,
+    /// The host's agent versions, read as the New chat dialog opens and after an update.
+    Versions {
+        request: u64,
+    },
     /// The words a running turn shows (see `acp::verbs`).
     Verbs,
+}
+
+impl ExecTag {
+    /// The longest the command may take, when the default is too short.
+    pub fn deadline(&self) -> Option<Duration> {
+        match self {
+            Self::NewChat { step, .. } => step.deadline(),
+            Self::Versions { .. } => newchat::Step::Versions.deadline(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,6 +296,12 @@ pub enum ChatMsg {
         value: String,
     },
     NewChatReset,
+    /// Update on the New chat dialog's notice: the one thing that starts an adapter update.
+    NewChatUpdate(Kind),
+    /// Not now on that notice.
+    NewChatDismissUpdate(Kind),
+    /// Copy on a notice for an update the user runs themselves.
+    NewChatCopy(String),
     NewChatContinue(String),
     NewChatRetry,
     /// The trash on a saved conversation of the Continue list: asks first.
@@ -357,6 +379,10 @@ pub struct Out {
     pub options_seen: Vec<(String, Vec<ConfigOption>)>,
     /// The agent a chat was just started with: the next dialog opens on it.
     pub picked_agent: Option<String>,
+    /// Whether the host manages agent versions, when that answer changed.
+    pub managed_support: Option<bool>,
+    /// An update notice dismissed: `(kind, agent key, version)`.
+    pub update_dismissed: Option<(Kind, String, String)>,
 }
 
 /// Chats kept connected while another chat or the terminal is in front. Each one holds an ACP
@@ -379,6 +405,7 @@ pub struct Chats {
     organization_error: String,
     defaults: ChatDefaults,
     options_cache: OptionsCache,
+    managed: ManagedState,
     /// The host as the options cache and the chat files name it (`host:port`).
     scope: String,
     last_agent: String,
@@ -438,6 +465,15 @@ impl Chats {
         self.last_agent = last_agent.to_string();
     }
 
+    pub fn set_managed(&mut self, state: ManagedState) {
+        self.managed = state;
+    }
+
+    /// The host manages agent versions: Claude and Codex chats spawn `tether acp agent …`.
+    pub fn managed_host(&self) -> bool {
+        self.managed.supported(&self.scope) == Some(true)
+    }
+
     pub fn remember(&mut self, agent: &str, id: &str, value: &str) {
         self.defaults.remember(agent, id, value);
     }
@@ -489,6 +525,7 @@ impl Chats {
             organization_error: String::new(),
             defaults: ChatDefaults::default(),
             options_cache: OptionsCache::default(),
+            managed: ManagedState::default(),
             scope: host.to_string(),
             last_agent: String::new(),
             host: host.to_string(),
@@ -862,7 +899,7 @@ impl Chats {
             log_bytes: 0,
             cwd: cwd.clone(),
             created,
-            spawn: agent.spawn.to_string(),
+            spawn: agent.spawn_for(self.managed_host()).to_string(),
             turn: host::HostTurn::Idle,
             host_title: None,
             has_status: false,
@@ -1048,7 +1085,15 @@ impl Chats {
         let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
         let mut nc = NewChat::open(mode, folder, agent, self.draft_for(agent));
         nc.saved_servers = self.mcp.as_ref().map(McpLibrary::list).unwrap_or_default();
+        nc.set_managed(&self.scope, self.managed.clone());
         self.new_chat = Some(nc);
+        #[cfg(debug_assertions)]
+        if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
+            && let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_UPDATE")
+            && let Some(nc) = self.new_chat.as_mut()
+        {
+            nc.preview_update(&kind);
+        }
         #[cfg(debug_assertions)]
         if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
             && let Some(state) = crate::app::dev_env("TETHER_DEV_CHAT_FOLDER_STATE")
@@ -1066,6 +1111,9 @@ impl Chats {
             return;
         }
         out.jobs.push(newchat::probe_job());
+        if let Some(nc) = self.new_chat.as_mut() {
+            out.jobs.push(nc.versions_job());
+        }
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
             out.jobs.push(job);
         }
@@ -1172,6 +1220,20 @@ impl Chats {
                     nc.options.pick(&id, &value);
                 }
             }
+            ChatMsg::NewChatUpdate(kind) => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|n| n.start_update(kind)) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatDismissUpdate(kind) => {
+                if let Some((kind, agent, version)) =
+                    self.new_chat.as_mut().and_then(|n| n.dismiss_update(kind))
+                {
+                    self.managed.dismiss(&self.scope, kind, &agent, &version);
+                    out.update_dismissed = Some((kind, agent, version));
+                }
+            }
+            ChatMsg::NewChatCopy(text) => out.clipboard = Some(text),
             ChatMsg::NewChatReset => {
                 if let Some(nc) = self.new_chat.as_mut() {
                     nc.options.reset();
@@ -1243,6 +1305,20 @@ impl Chats {
                 }
             }
             ChatMsg::ExecDone {
+                tag: ExecTag::Versions { request },
+                result,
+            } => {
+                let Some(nc) = self.new_chat.as_mut() else {
+                    return;
+                };
+                if let newchat::Next::Support(supported) =
+                    nc.on_exec(request, newchat::Step::Versions, result, &self.host)
+                {
+                    self.managed.set_supported(&self.scope, supported);
+                    out.managed_support = Some(supported);
+                }
+            }
+            ChatMsg::ExecDone {
                 tag: ExecTag::AgentProbe,
                 result,
             } => {
@@ -1260,6 +1336,23 @@ impl Chats {
                 match nc.on_exec(request, step, result, &self.host) {
                     newchat::Next::Nothing => {}
                     newchat::Next::Job(job) => out.jobs.push(job),
+                    newchat::Next::Support(supported) => {
+                        self.managed.set_supported(&self.scope, supported);
+                        out.managed_support = Some(supported);
+                    }
+                    newchat::Next::Options(options) => {
+                        // chat_out stores it in the model's own cache and saves it.
+                        let agent = nc.agent;
+                        let mut cache = self.options_cache.clone();
+                        if cache.store(&self.scope, agent.key, &options) {
+                            out.options_seen.push((agent.key.to_string(), options));
+                        }
+                        nc.options.refresh(
+                            agent,
+                            &self.defaults,
+                            cache.get(&self.scope, agent.key),
+                        );
+                    }
                     newchat::Next::Open {
                         cwd,
                         load,
@@ -1633,6 +1726,7 @@ impl Chats {
             connected: self.connected,
             defaults: &self.defaults,
             mcp: self.mcp.as_ref(),
+            managed: self.managed.supported(&self.scope) == Some(true),
         }
     }
 
@@ -1652,6 +1746,7 @@ impl Chats {
                 connected: self.connected,
                 defaults: &self.defaults,
                 mcp: self.mcp.as_ref(),
+                managed: self.managed_host(),
             };
             f(&mut s, &mut ctx)
         };

@@ -525,7 +525,10 @@ impl<R: Remote, U: UiPort> Driver<R, U> {
             ChatJob::Exec { tag, command } => {
                 let remote = self.remote.clone();
                 tokio::spawn(async move {
-                    let result = remote.exec(&command).await;
+                    let result = match tag.deadline() {
+                        Some(within) => remote.exec_within(&command, within).await,
+                        None => remote.exec(&command).await,
+                    };
                     send(Msg::Chat(ChatMsg::ExecDone { tag, result }));
                 });
             }

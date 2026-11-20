@@ -91,6 +91,9 @@ export struct ChatSideVm { section: string, project-key: string, collapsed: bool
 export struct QuotaWindowVm { window: string, short-window: string, used: float, value: string, detail-value: string, reset: string, }
 export struct PlanUsageVm { provider: string, agent: int, windows: [QuotaWindowVm], freshness: string, stale: bool, }
 
+// One line under the New chat agent picker: kind 0 adapter / 1 CLI; tone 0 plain, 1 done, 2 failed.
+export struct NcNoticeVm { kind: int, text: string, tone: int, busy: bool, update: bool, dismiss: bool, copy: string, }
+
 export struct NcChoiceVm {
     value: string,
     name: string,
@@ -386,6 +389,8 @@ export global ChatVm {
     in property <bool> nc-continuing;
     in property <int> nc-agent;
     in property <[bool]> nc-unavailable;     // per agent: the host can't run it, so it is dimmed
+    in property <bool> nc-update-unsupported;   // the host's tether is too old to manage agent versions
+    in property <[NcNoticeVm]> nc-notices;
     in property <string> nc-summary;
     in property <string> nc-note;
     in property <bool> nc-is-reset;
@@ -475,6 +480,9 @@ export global ChatVm {
     callback nc-continue(string);
     callback nc-retry();
     callback nc-agent-picked(int);
+    callback nc-update(int);
+    callback nc-dismiss-update(int);
+    callback nc-copy(string);
     callback nc-pick(string, string);
     callback nc-reset();
 }
@@ -2859,6 +2867,47 @@ export component NewChatDialog inherits Rectangle {
                     unavailable: ChatVm.nc-unavailable;
                     picked(i) => { ChatVm.nc-agent-picked(i); }
                 }
+                for n in ChatVm.nc-notices: HorizontalLayout {
+                    spacing: 10px;
+                    Wrapped {
+                        horizontal-stretch: 1;
+                        text: n.text;
+                        font-size: 11.5px;
+                        ink: n.tone == 1 ? Tokens.success : n.tone == 2 ? Tokens.warning : Tokens.text-secondary;
+                    }
+                    if n.busy: VerticalLayout { alignment: start; Text { text: "Updating\u{2026}"; font-size: 11.5px; font-weight: 600; color: Tokens.text-secondary; } }
+                    if n.dismiss: VerticalLayout {
+                        alignment: start;
+                        Pressable {
+                            width: later-text.preferred-width + 8px;
+                            height: 16px;
+                            hover-fill: false;
+                            clicked => { ChatVm.nc-dismiss-update(n.kind); }
+                            later-text := Text { x: 4px; text: "Not now"; font-size: 11.5px; font-weight: 600; color: Tokens.text-faint; vertical-alignment: center; }
+                        }
+                    }
+                    if n.update && !n.busy: VerticalLayout {
+                        alignment: start;
+                        Pressable {
+                            width: update-text.preferred-width + 8px;
+                            height: 16px;
+                            hover-fill: false;
+                            clicked => { ChatVm.nc-update(n.kind); }
+                            update-text := Text { x: 4px; text: "Update"; font-size: 11.5px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                        }
+                    }
+                    if n.copy != "": VerticalLayout {
+                        alignment: start;
+                        Pressable {
+                            width: copy-text.preferred-width + 8px;
+                            height: 16px;
+                            hover-fill: false;
+                            clicked => { ChatVm.nc-copy(n.copy); }
+                            copy-text := Text { x: 4px; text: "Copy"; font-size: 11.5px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                        }
+                    }
+                }
+                if ChatVm.nc-update-unsupported: Wrapped { text: "Update tether on this host to manage agent versions."; font-size: 11.5px; ink: Tokens.text-faint; }
             }
             VerticalLayout {
                 spacing: 5px;

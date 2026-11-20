@@ -26,6 +26,7 @@ pub mod session_setup;
 pub mod slash;
 pub mod tooldetail;
 pub mod verbs;
+pub mod versions;
 pub mod workflows;
 
 #[cfg(test)]
