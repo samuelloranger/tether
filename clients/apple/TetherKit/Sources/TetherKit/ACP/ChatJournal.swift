@@ -83,6 +83,13 @@ struct ChatJournal: Codable, Equatable, Sendable {
   /// Set when the chat continues an earlier conversation: the agent is asked to `session/load` this id
   /// instead of `session/new`, and a redial before the load answered must ask for the same one.
   var loadedSessionId: String?
+  /// A branch that asks the agent to `session/fork` this conversation; the seed above is the fallback.
+  var fork: ChatForkSource?
+  var capabilities: ACPAgentCapabilities?
+  /// Sent as `additionalDirectories` whenever a session is created, loaded, forked or resumed.
+  var extraDirectories: [String]?
+  /// Names of the host's saved MCP servers; resolved at each session start so no header lands here.
+  var mcpServerNames: [String]?
   /// Persisted so a resumed client never reuses an id the agent already answered.
   var nextRequestId = 1
   var entries: [Entry] = []

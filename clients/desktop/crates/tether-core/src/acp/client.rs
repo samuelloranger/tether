@@ -17,6 +17,7 @@ use super::lines::LineError;
 use super::message::{AcpId, AcpResult, Inbound, sorted};
 use super::question::{QuestionAction, QuestionValue};
 use super::reducer::{ChatEvent, ChatState, LinkState, Turn};
+use super::session_setup::{McpServer, Setup};
 
 fn agent_error_text(code: i64, message: &str) -> String {
     if message.is_empty() {
@@ -41,6 +42,8 @@ pub enum RequestKind {
     Initialize,
     NewSession,
     LoadSession,
+    ForkSession,
+    ResumeSession,
     Prompt,
     /// `_session/steering`: `injected` in the result, or `promptRequired` when no turn was running.
     Steer,
@@ -100,6 +103,10 @@ pub struct ChatClient {
     /// Advertise the ACP subagent RFD in `initialize`. Codex uses it when the client asks; Claude
     /// keeps its `_meta.claudeCode` path, so this stays off unless the chat's agent needs it.
     subagents: bool,
+    /// The saved servers the chat chose, resolved by the caller (the secrets live outside the journal).
+    servers: Vec<McpServer>,
+    /// The holder was brought back for an ended chat: the agent resumes the session instead of opening one.
+    reviving: bool,
 }
 
 fn encode(message: Value) -> Vec<u8> {
@@ -130,7 +137,45 @@ impl ChatClient {
             journal_changed: false,
             joining: false,
             subagents: false,
+            servers: Vec::new(),
+            reviving: false,
         }
+    }
+
+    pub fn with_servers(mut self, servers: Vec<McpServer>) -> Self {
+        self.servers = servers;
+        self
+    }
+
+    pub fn with_revive(mut self, reviving: bool) -> Self {
+        self.reviving = reviving;
+        self
+    }
+
+    pub fn reviving(&self) -> bool {
+        self.reviving
+    }
+
+    /// The chat chose servers the agent can't take; the caller says so once.
+    pub fn servers_dropped(&self) -> bool {
+        self.setup("").drops_servers()
+    }
+
+    fn setup<'a>(&'a self, cwd: &'a str) -> Setup<'a> {
+        Setup {
+            cwd,
+            additional_directories: &self.journal.additional_directories,
+            servers: &self.servers,
+            caps: self.journal.capabilities.unwrap_or_default(),
+        }
+    }
+
+    fn setup_params(&self, cwd: &str, session_id: Option<&str>) -> serde_json::Map<String, Value> {
+        let mut params = self.setup(cwd).params();
+        if let Some(id) = session_id {
+            params.insert("sessionId".into(), json!(id));
+        }
+        params
     }
 
     /// Codex's native subagents need the client to advertise the draft ACP subagent RFD.
@@ -157,9 +202,10 @@ impl ChatClient {
         self.journal.session_id.as_deref()
     }
 
-    /// True until a session exists: a client with one skips the handshake entirely.
+    /// True until a session exists: a client with one skips the handshake entirely, except one
+    /// reviving an ended chat, which must still resume its session.
     pub fn needs_handshake(&self) -> bool {
-        self.journal.session_id.is_none()
+        self.journal.session_id.is_none() || self.reviving
     }
 
     /// The conversation to ask `session/load` for after `initialize`, when the chat continues
@@ -267,10 +313,55 @@ impl ChatClient {
     }
 
     pub fn new_session(&mut self, cwd: &str) -> Outbound {
+        let params = Value::Object(self.setup_params(cwd, None));
+        self.request("session/new", params, RequestKind::NewSession, None, false)
+    }
+
+    /// What follows `initialize`: resume for a revived chat, load for a continued one, a native
+    /// fork when the branch has a source and the agent can fork, else a new session.
+    pub fn open_session(&mut self, cwd: &str, load: Option<&str>) -> Outbound {
+        let caps = self.journal.capabilities.unwrap_or_default();
+        match (&self.journal.session_id, load, &self.journal.fork_source) {
+            (Some(id), _, _) if self.reviving => {
+                let id = id.clone();
+                self.resume_session(&id, cwd)
+            }
+            (_, Some(id), _) => self.load_session(id, cwd),
+            (_, None, Some(_)) if caps.fork => self.fork_session(cwd),
+            _ => self.new_session(cwd),
+        }
+    }
+
+    /// `session/fork` of the branch's source, cut after the fork message when it has one.
+    pub fn fork_session(&mut self, cwd: &str) -> Outbound {
+        let source = self.journal.fork_source.clone();
+        let mut params = self.setup_params(cwd, source.as_ref().map(|s| s.session_id.as_str()));
+        if let Some(meta) = source.and_then(|s| s.meta()) {
+            params.insert("_meta".into(), meta);
+        }
+        // Silent: a refused fork must not show as an error row, the text copy takes over.
         self.request(
-            "session/new",
-            json!({"cwd": cwd, "mcpServers": []}),
-            RequestKind::NewSession,
+            "session/fork",
+            Value::Object(params),
+            RequestKind::ForkSession,
+            None,
+            true,
+        )
+    }
+
+    /// A refused or unsupported fork: the branch goes on as a new session with its text seed.
+    pub fn drop_fork_source(&mut self) {
+        self.journal.fork_source = None;
+        self.save();
+    }
+
+    /// Brings an agent process back onto a stored session without replaying it.
+    pub fn resume_session(&mut self, id: &str, cwd: &str) -> Outbound {
+        let params = Value::Object(self.setup_params(cwd, Some(id)));
+        self.request(
+            "session/resume",
+            params,
+            RequestKind::ResumeSession,
             None,
             false,
         )
@@ -281,9 +372,10 @@ impl ChatClient {
     pub fn load_session(&mut self, id: &str, cwd: &str) -> Outbound {
         self.journal.loaded_session_id = Some(id.to_string());
         self.save();
+        let params = Value::Object(self.setup_params(cwd, Some(id)));
         self.request(
             "session/load",
-            json!({"sessionId": id, "cwd": cwd, "mcpServers": []}),
+            params,
             RequestKind::LoadSession,
             Some(id.to_string()),
             false,
@@ -868,6 +960,20 @@ impl ChatClient {
                 let id = result.session_id.clone().ok_or(ClientError::NoSession)?;
                 self.journal.session_id = Some(id);
                 self.save();
+            }
+            RequestKind::ForkSession => {
+                let id = result.session_id.clone().ok_or(ClientError::NoSession)?;
+                self.journal.session_id = Some(id);
+                self.save();
+            }
+            RequestKind::Initialize => {
+                if let Some(caps) = result.capabilities {
+                    self.journal.capabilities = Some(caps);
+                    self.save();
+                }
+            }
+            RequestKind::ResumeSession => {
+                self.reviving = false;
             }
             RequestKind::LoadSession => {
                 let loaded = result.session_id.clone().or(pending.load_id.clone());
@@ -1929,5 +2035,142 @@ mod tests {
                 .any(|i| matches!(i.kind, ItemKind::Question(_)))
         );
         assert!(c.state().pending_questions().is_empty());
+    }
+
+    // Session setup: capabilities, fork, resume, extra folders, MCP servers
+
+    use super::super::session_setup::{AgentCaps, ForkSource, McpHeader};
+
+    const ALL_CAPS: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"additionalDirectories":{},"close":{},"delete":{},"fork":{},"list":{},"resume":{}},"mcpCapabilities":{"http":true,"sse":true}}}}"#;
+    const NO_CAPS: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}"#;
+
+    fn initialized(mut c: ChatClient, answer: &str) -> ChatClient {
+        c.initialize();
+        let done = c.feed(format!("{answer}\n").as_bytes());
+        assert_eq!(done[0].kind, RequestKind::Initialize);
+        c
+    }
+
+    fn branch_journal(message_id: Option<&str>) -> Journal {
+        Journal {
+            fork_source: Some(ForkSource {
+                session_id: "src-1".into(),
+                message_id: message_id.map(String::from),
+            }),
+            additional_directories: vec!["/extra".into()],
+            mcp_servers: vec!["docs".into()],
+            ..Journal::default()
+        }
+    }
+
+    fn docs() -> Vec<McpServer> {
+        vec![McpServer {
+            name: "docs".into(),
+            url: "https://x.test/mcp".into(),
+            headers: vec![McpHeader {
+                name: "Authorization".into(),
+                value: "Bearer t".into(),
+            }],
+        }]
+    }
+
+    #[test]
+    fn initialize_persists_the_advertised_capabilities_in_the_journal() {
+        let mut c = initialized(client(Journal::default()), ALL_CAPS);
+        assert!(c.take_journal_changed());
+        let caps = c.journal().capabilities.unwrap();
+        assert!(
+            caps.fork && caps.resume && caps.delete && caps.additional_directories && caps.mcp_http
+        );
+        let c = initialized(client(Journal::default()), NO_CAPS);
+        assert_eq!(c.journal().capabilities, Some(AgentCaps::default()));
+    }
+
+    #[test]
+    fn a_fork_sends_the_source_session_the_fork_point_and_the_chats_folders_and_servers() {
+        let mut c = initialized(
+            client(branch_journal(Some("msg-9"))).with_servers(docs()),
+            ALL_CAPS,
+        );
+        let out = c.open_session("/work", None);
+        let v = parse(&out.line);
+        assert_eq!(method(&v), "session/fork");
+        assert_eq!(v["params"]["sessionId"], json!("src-1"));
+        assert_eq!(v["params"]["cwd"], json!("/work"));
+        assert_eq!(v["params"]["additionalDirectories"], json!(["/extra"]));
+        assert_eq!(v["params"]["mcpServers"][0]["name"], json!("docs"));
+        assert_eq!(
+            v["params"]["_meta"],
+            json!({"jetbrains": {"air": {"fork": {"version": 1, "messageId": "msg-9"}}}})
+        );
+        let done = c.feed(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"sessionId\":\"forked-1\",\"modes\":{}}}\n");
+        assert_eq!(done[0].kind, RequestKind::ForkSession);
+        assert_eq!(c.session_id(), Some("forked-1"));
+    }
+
+    #[test]
+    fn a_fork_without_a_message_id_carries_no_meta() {
+        let mut c = initialized(client(branch_journal(None)), ALL_CAPS);
+        let v = parse(&c.open_session("/work", None).line);
+        assert_eq!(method(&v), "session/fork");
+        assert!(v["params"].get("_meta").is_none());
+    }
+
+    #[test]
+    fn an_agent_that_cannot_fork_gets_a_new_session_and_a_refused_fork_falls_back_to_one() {
+        let mut c = initialized(client(branch_journal(Some("m"))), NO_CAPS);
+        assert_eq!(
+            method(&parse(&c.open_session("/work", None).line)),
+            "session/new"
+        );
+
+        let mut c = initialized(client(branch_journal(Some("m"))), ALL_CAPS);
+        c.open_session("/work", None);
+        let done = c.feed(
+            b"{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32603,\"message\":\"nope\"}}\n",
+        );
+        assert_eq!(done[0].kind, RequestKind::ForkSession);
+        assert!(done[0].outcome.is_err());
+        c.drop_fork_source();
+        let v = parse(&c.new_session("/work").line);
+        assert_eq!(method(&v), "session/new");
+        assert!(c.journal().fork_source.is_none());
+    }
+
+    #[test]
+    fn folders_and_servers_are_left_out_when_the_agent_did_not_advertise_them() {
+        let mut c = initialized(client(branch_journal(None)).with_servers(docs()), NO_CAPS);
+        let v = parse(&c.new_session("/work").line);
+        assert_eq!(v["params"], json!({"cwd": "/work", "mcpServers": []}));
+        assert!(c.servers_dropped());
+        let mut c = initialized(client(branch_journal(None)).with_servers(docs()), ALL_CAPS);
+        let v = parse(&c.new_session("/work").line);
+        assert_eq!(v["params"]["additionalDirectories"], json!(["/extra"]));
+        assert!(!c.servers_dropped());
+        let v = parse(&c.load_session("old", "/work").line);
+        assert_eq!(v["params"]["additionalDirectories"], json!(["/extra"]));
+        assert_eq!(v["params"]["sessionId"], json!("old"));
+    }
+
+    #[test]
+    fn a_revived_chat_resumes_its_session_without_a_replay() {
+        let journal = Journal {
+            session_id: Some("sess-1".into()),
+            additional_directories: vec!["/extra".into()],
+            ..Journal::default()
+        };
+        let c = client(journal).with_revive(true);
+        assert!(c.needs_handshake());
+        let mut c = initialized(c, ALL_CAPS);
+        let v = parse(&c.open_session("/work", None).line);
+        assert_eq!(method(&v), "session/resume");
+        assert_eq!(
+            v["params"],
+            json!({"sessionId": "sess-1", "cwd": "/work", "mcpServers": [], "additionalDirectories": ["/extra"]})
+        );
+        let done = c.feed(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"modes\":{}}}\n");
+        assert_eq!(done[0].kind, RequestKind::ResumeSession);
+        assert_eq!(c.session_id(), Some("sess-1"));
+        assert!(!c.reviving() && !c.needs_handshake());
     }
 }

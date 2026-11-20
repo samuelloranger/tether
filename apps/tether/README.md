@@ -125,9 +125,11 @@ tests share `clients/apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-cards.js
     tether acp attach chat1 --spawn 'npx -y @agentclientprotocol/claude-agent-acp' --cwd ~/src/app
     tether acp attach chat1 --from 4096   # resume from a byte offset of the agent's output log
     tether acp attach chat1 --client a1b2c3   # name this client so the others see what it sends
+    tether acp attach chat1 --spawn '…' --cwd ~/src/app --revive   # restart an ended chat's agent on its log
     tether acp ls                         # name, running|ended, log bytes, cwd, created, command
     tether acp status [chat1 ...]         # one JSON object per session (see below)
     tether acp sessions ~/src/app --limit 20   # the agent's saved conversations for a folder
+    tether acp sessions ~/src/app --delete <id>   # delete one of them (the agent's session/delete)
     tether acp workflows --session <id> --json   # background Workflow runs of a Claude Code session
     tether acp kill chat1                 # stop the agent and remove the session
 
@@ -270,6 +272,10 @@ The agent command is `--agent-cmd`, else `TETHER_ACP_AGENT_CMD`, else the pinned
 `npx -y @agentclientprotocol/claude-agent-acp@0.95.0`. A failure or a 15 s timeout prints
 the reason on stderr and exits 1.
 
+With `--delete <sessionId>` it sends `session/delete` instead of listing and prints
+`{"deleted":"<id>"}`. An agent whose `initialize` lacks `sessionCapabilities.delete` is
+refused before anything is sent. The Claude adapter removes the conversation's transcript.
+
 `acp workflows --session <sessionId> [--json]` reports the background Workflow runs of a Claude
 Code session, which ACP itself never says anything about after launch. It reads Claude Code's own
 files (`$CLAUDE_CONFIG_DIR`, default `~/.claude`): the session transcript (the newest
@@ -310,6 +316,9 @@ the daemon ends idle agents and old sessions are pruned.
   agent output. Default 12 h; `TETHER_ACP_IDLE` takes a Go duration (`30m`), `0` disables.
 - **Log cap.** If `out.log` passes `TETHER_ACP_LOG_MAX` bytes (default 268435456, 256 MiB; `0`
   disables) the daemon ends the agent. The log is never truncated, so offsets stay valid.
+- **Revive.** `attach --spawn CMD --revive` on an ended session starts a new daemon and agent
+  on the same log (offsets continue); the client then sends `session/resume`. A session ended
+  by the log cap is refused, a missing one exits 3, a running one just attaches.
 - **Ended sessions** stay replayable (`attach` drains the log, `ls` shows `ended`). `meta.json`
   records `ended` (unix time) and `endedReason`: `idle`, `log-limit`, `exited` (the agent quit
   on its own) or `killed` (the agent died from a signal that was not the daemon's).

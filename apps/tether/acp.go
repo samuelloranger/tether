@@ -147,7 +147,7 @@ func runACP(args []string) error {
 
 func acpAttach(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: acp attach <name> [--spawn CMD] [--cwd DIR] [--from N] [--linger D] [--client ID]")
+		return fmt.Errorf("usage: acp attach <name> [--spawn CMD] [--cwd DIR] [--from N] [--linger D] [--client ID] [--revive]")
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("acp attach", flag.ContinueOnError)
@@ -156,6 +156,7 @@ func acpAttach(args []string) error {
 	from := fs.Int64("from", 0, "byte offset in out.log to resume from")
 	linger := fs.Duration("linger", 0, "after stdin EOF, keep following output until idle this long")
 	client := fs.String("client", "", "names this client in the log so the other attached clients see what it sends")
+	revive := fs.Bool("revive", false, "with --spawn, restart the agent of an ended session and keep its log")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -174,14 +175,20 @@ func acpAttach(args []string) error {
 	if err != nil && !errors.Is(err, errNoSession) {
 		return err
 	}
-	if m != nil && m.State == "ended" {
+	if *revive && m == nil {
+		return errNoSession
+	}
+	if m != nil && m.State == "ended" && (!*revive || *spawn == "") {
 		return replayEnded(name, *from, os.Stdout, os.Stderr)
 	}
 	if m == nil || !metaRunning(m) {
 		if *spawn == "" {
 			return errNoSession
 		}
-		if m, err = spawnACPDaemon(name, *spawn, *cwd); err != nil {
+		if *revive && m.EndedReason == "log-limit" {
+			return fmt.Errorf("this chat's log is full; start a new chat")
+		}
+		if m, err = spawnACPDaemon(name, *spawn, *cwd, *revive); err != nil {
 			return err
 		}
 	}
@@ -272,10 +279,14 @@ func attachConn(sock string, from int64, linger time.Duration, name, client stri
 	return errReplaced
 }
 
-func spawnACPDaemon(name, spawn, cwd string) (*acpMeta, error) {
+// spawnACPDaemon starts a fresh session; with keepLog it restarts an ended one on its old log,
+// so clients keep their offsets and the transcript continues.
+func spawnACPDaemon(name, spawn, cwd string, keepLog bool) (*acpMeta, error) {
 	dir := acpDir(name)
-	if err := os.RemoveAll(dir); err != nil {
-		return nil, err
+	if !keepLog {
+		if err := os.RemoveAll(dir); err != nil {
+			return nil, err
+		}
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -472,7 +483,12 @@ func acpDaemon(name string) error {
 	}
 	cmd.Stdout = pw
 
+	var size int64
+	if st, err := logf.Stat(); err == nil {
+		size = st.Size()
+	}
 	s := &acpDaemonState{
+		size:   size,
 		notify: make(chan struct{}), live: map[*acpClient]struct{}{}, stdin: stdin, log: logf, errf: errf,
 		tr: loadACPTracker(name), meta: m, activity: time.Now(), copilot: isCopilotSpawn(m.Spawn),
 		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },

@@ -234,3 +234,20 @@ read l; case "$l" in *c1*) echo '{"jsonrpc":"2.0","id":3,"result":{"sessions":[{
 		t.Fatalf("%q %v", b.String(), err)
 	}
 }
+
+func TestACPSessionsDelete(t *testing.T) {
+	acpEnv(t)
+	deleteAgent := `read l; echo '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"sessionCapabilities":{"delete":{}}}}}'
+read l
+case "$l" in *'"method":"session/delete"'*'"sessionId":"abc"'*) echo '{"jsonrpc":"2.0","id":2,"result":{}}';; *) echo '{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"wrong request"}}';; esac
+sleep 30`
+	out, errb, code := runAcp(t, "sessions", "/proj", "--delete", "abc", "--agent-cmd", fakeAgent(t, deleteAgent))
+	if code != 0 || strings.TrimSpace(out) != `{"deleted":"abc"}` {
+		t.Fatalf("exit %d out %q err %q", code, out, errb)
+	}
+	noDelete := `read l; echo '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{}}}'; sleep 30`
+	_, errb, code = runAcp(t, "sessions", "/proj", "--delete", "abc", "--agent-cmd", fakeAgent(t, noDelete))
+	if code == 0 || !strings.Contains(errb, "can't delete") {
+		t.Fatalf("unsupported: exit %d %q", code, errb)
+	}
+}

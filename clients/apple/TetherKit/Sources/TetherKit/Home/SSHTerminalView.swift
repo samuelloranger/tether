@@ -294,6 +294,8 @@ public struct SSHTerminalView: View {
             return nil
           }
         },
+        onDeleteSession: { _, session, agent in await controller.deleteSavedSession(session, agent: agent) },
+        mcpStore: controller.mcpServerStore,
         onCancel: { showNewChat = false }
       )
     }

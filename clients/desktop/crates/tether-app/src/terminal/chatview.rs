@@ -13,9 +13,9 @@ use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
     AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
     ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
-    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
-    PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm, SavedSessionVm,
-    WfAgentVm, WfPhaseVm,
+    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, NcServerVm,
+    PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm,
+    SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 
 thread_local! {
@@ -796,6 +796,22 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_nc_busy(nc.busy);
             vm.set_nc_error(nc.error.as_str().into());
             vm.set_nc_continuing(nc.continuing);
+            vm.set_nc_delete_open(nc.delete_open);
+            vm.set_nc_extra_dirs(model(
+                nc.extra_dirs.iter().map(|d| d.as_str().into()).collect(),
+            ));
+            vm.set_nc_servers(model(
+                nc.servers
+                    .iter()
+                    .map(|s| NcServerVm {
+                        name: s.name.as_str().into(),
+                        url: s.url.as_str().into(),
+                        on: s.on,
+                    })
+                    .collect(),
+            ));
+            vm.set_nc_adding_server(nc.adding_server);
+            vm.set_nc_server_error(nc.server_error.as_str().into());
             let (listing, error, sessions) = match &nc.listing {
                 ListingView::Loading => (0, String::new(), Vec::new()),
                 ListingView::Failed(m) => (1, m.clone(), Vec::new()),
@@ -812,6 +828,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                         when: v.when.as_str().into(),
                         recent: v.recent,
                         busy: v.busy,
+                        deleting: v.deleting,
                     })
                     .collect(),
             ));
@@ -918,6 +935,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     let c = &s.composer;
     vm.set_composer_shown(c.shown);
     vm.set_banner(c.banner.as_str().into());
+    vm.set_can_resume(c.can_resume);
     vm.set_banner_icon(c.banner_icon.map_or(15, |i| i as i32));
     vm.set_placeholder(c.placeholder.as_str().into());
     vm.set_dimmed(c.dimmed);
@@ -1239,6 +1257,7 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_sign_in_retry(|| send(ChatMsg::SignInRetry));
     vm.on_dismiss_notice(|| send(ChatMsg::DismissNotice));
     vm.on_reconnect(|| send(ChatMsg::Reconnect));
+    vm.on_resume(|| send(ChatMsg::Resume));
     vm.on_draft_edited(|text, cursor| {
         send(ChatMsg::DraftEdited {
             text: text.into(),
@@ -1318,6 +1337,25 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_nc_folder_edited(|f| send(ChatMsg::NewChatFolder(f.into())));
     vm.on_nc_continue(|id| send(ChatMsg::NewChatContinue(id.into())));
     vm.on_nc_retry(|| send(ChatMsg::NewChatRetry));
+    vm.on_nc_delete(|id| send(ChatMsg::NewChatDelete(id.into())));
+    vm.on_nc_delete_confirm(|| send(ChatMsg::NewChatDeleteConfirm));
+    vm.on_nc_delete_cancel(|| send(ChatMsg::NewChatDeleteCancel));
+    vm.on_nc_add_folder(|text| send(ChatMsg::NewChatAddFolder(text.into())));
+    vm.on_nc_remove_folder(|i| {
+        send(ChatMsg::NewChatRemoveFolder(
+            usize::try_from(i).unwrap_or(0),
+        ))
+    });
+    vm.on_nc_toggle_server(|name| send(ChatMsg::NewChatToggleServer(name.into())));
+    vm.on_nc_server_form(|open| send(ChatMsg::NewChatServerForm(open)));
+    vm.on_nc_save_server(|name, url, headers| {
+        send(ChatMsg::NewChatSaveServer {
+            name: name.into(),
+            url: url.into(),
+            headers: headers.into(),
+        });
+    });
+    vm.on_nc_delete_server(|name| send(ChatMsg::NewChatDeleteServer(name.into())));
     vm.on_nc_agent_picked(|i| {
         if let Some(agent) = usize::try_from(i)
             .ok()

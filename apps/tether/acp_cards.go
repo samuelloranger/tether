@@ -23,7 +23,7 @@ func withChatCards(line []byte, spawn string) []byte {
 	}
 	var method string
 	_ = json.Unmarshal(msg["method"], &method)
-	if method != "session/new" && method != "session/load" && method != "session/resume" {
+	if method != "session/new" && method != "session/load" && method != "session/resume" && method != "session/fork" {
 		return line
 	}
 	var params map[string]any

@@ -278,3 +278,47 @@ func TestACPSpawnOfMissingProgramReportsPlainly(t *testing.T) {
 		t.Fatalf("stderr %q", errb.String())
 	}
 }
+
+func TestACPReviveRestartsEndedAgentOnItsLog(t *testing.T) {
+	acpEnv(t)
+	t.Setenv("TETHER_ACP_IDLE", idleWindow)
+	cleanupSession(t, "r1")
+	cwd := t.TempDir()
+	p := startAttach(t, "r1", "--spawn", echoAgent, "--cwd", cwd)
+	fmt.Fprintln(p.stdin, "hello")
+	if l := p.readLine(t); l != "echo:hello\n" {
+		t.Fatalf("got %q", l)
+	}
+	_ = p.stdin.Close()
+	p.exitCode(t)
+	waitEnded(t, "r1", "idle")
+
+	re := startAttach(t, "r1", "--spawn", echoAgent, "--cwd", cwd, "--revive", "--from", "11")
+	fmt.Fprintln(re.stdin, "again")
+	if l := re.readLine(t); l != "echo:again\n" {
+		t.Fatalf("revived %q", l)
+	}
+	if s, _ := metaState("r1"); s != "running" {
+		t.Fatalf("state %q", s)
+	}
+	all := startAttach(t, "r1")
+	if a, b := all.readLine(t), all.readLine(t); a+b != "echo:hello\necho:again\n" {
+		t.Fatalf("log %q", a+b)
+	}
+}
+
+func TestACPReviveRefusesMissingAndFullChats(t *testing.T) {
+	acpEnv(t)
+	if _, _, code := runAcp(t, "attach", "gone", "--spawn", echoAgent, "--revive"); code != 3 {
+		t.Fatalf("missing: exit %d", code)
+	}
+	t.Setenv("TETHER_ACP_LOG_MAX", "200")
+	cleanupSession(t, "r2")
+	p := startAttach(t, "r2", "--spawn", "echo "+strings.Repeat("a", 300)+"; sleep 60", "--cwd", t.TempDir())
+	p.readAll(t)
+	p.exitCode(t)
+	waitEnded(t, "r2", "log-limit")
+	if _, errb, code := runAcp(t, "attach", "r2", "--spawn", echoAgent, "--revive"); code == 0 || !strings.Contains(errb, "log is full") {
+		t.Fatalf("full: exit %d %q", code, errb)
+	}
+}

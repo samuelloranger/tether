@@ -14,13 +14,15 @@ enum ACPHostCommand {
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
   /// a lost holder never starts a fresh agent under a journal that names the old session.
   /// `client` names this client to a holder that takes several, so the others see what it sends.
+  /// `revive` restarts the agent of an ended chat on its old log; the client then resumes the session.
   static func attach(
     name: String, cwd: String, spawn: Bool, from offset: Int = 0, client: String? = nil,
-    spawnCommand: String = ACPHostCommand.spawnCommand
+    spawnCommand: String = ACPHostCommand.spawnCommand, revive: Bool = false
   ) -> String {
     var command = "\(prefix) attach \(shellQuote(name)) --from \(offset)"
     if let client { command += " --client \(shellQuote(client))" }
     if spawn { command += " --spawn \(shellQuote(spawnCommand)) --cwd \(shellQuote(cwd))" }
+    if spawn, revive { command += " --revive" }
     return command
   }
 
@@ -37,6 +39,12 @@ enum ACPHostCommand {
   static func sessions(cwd: String, limit: Int, agent: ChatAgentProfile = ChatAgents.claude) -> String {
     let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.spawn))"
     return "\(prefix) sessions \(shellQuote(cwd)) --limit \(limit)\(agentFlag) 2>&1"
+  }
+
+  /// Deletes a saved conversation through the agent's `session/delete`; prints `{"deleted":id}`.
+  static func deleteSession(cwd: String, sessionId: String, agent: ChatAgentProfile = ChatAgents.claude) -> String {
+    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.spawn))"
+    return "\(prefix) sessions \(shellQuote(cwd)) --delete \(shellQuote(sessionId))\(agentFlag) 2>&1"
   }
 
   static func kill(name: String) -> String { "\(prefix) kill \(shellQuote(name))" }
@@ -148,6 +156,9 @@ struct ChatRoute: Hashable, Identifiable {
   var customTitle: String?
   /// This device starts the chat (a new one or a Continue), so it records the agent; an existing or joined chat leaves that to the host.
   var startedHere = false
+  /// The New chat sheet's extra folders (absolute) and picked MCP server names.
+  var extraDirectories: [String] = []
+  var mcpServerNames: [String] = []
   var agentToRecord: ChatAgentProfile? { startedHere ? ChatAgents.profile(forKey: agentKey) : nil }
   var id: String { name }
 

@@ -49,6 +49,7 @@ actor ACPClient {
   /// Advertise the ACP subagent RFD in `initialize`. Codex uses it when the client asks; Claude
   /// keeps its `_meta.claudeCode` path, so this stays off unless the chat's agent needs it.
   private let subagents: Bool
+  private let mcpServers: [ChatMCPServer]
   private var snapshotIdentity: Int?
   private let snapshotInterval: Duration
   private var lastSnapshot: ContinuousClock.Instant?
@@ -63,8 +64,9 @@ actor ACPClient {
   init(
     stream: any TerminalByteStream, store: any ChatJournalStore = InMemoryChatJournalStore(),
     resume: ChatSnapshot? = nil, snapshots: (any ChatSnapshotStore)? = nil, snapshotInterval: Duration = .seconds(3),
-    images: ChatImageStore? = nil, subagents: Bool = false
+    images: ChatImageStore? = nil, subagents: Bool = false, mcpServers: [ChatMCPServer] = []
   ) {
+    self.mcpServers = mcpServers
     self.images = images
     self.subagents = subagents
     self.stream = stream
@@ -102,19 +104,27 @@ actor ACPClient {
 
   private func removeSubscriber(_ id: UUID) { subscribers[id] = nil }
 
-  /// Starts reading. With a persisted session id the handshake is skipped entirely; otherwise
-  /// runs `initialize` and `session/new`, or `session/load` when continuing an earlier conversation.
-  /// Returns true when this call created or loaded the session, false when one was already persisted.
+  /// Starts reading. With a persisted session id the handshake is skipped entirely, unless `resuming`
+  /// an ended chat whose agent the host just restarted: then `session/resume` reattaches it without a
+  /// replay. Otherwise runs `initialize` and `session/new`, `session/fork` for a branch, or
+  /// `session/load` when continuing an earlier conversation.
+  /// Returns true when this call created or loaded the session; a fork keeps the source's options.
   @discardableResult
-  func start(cwd: String, loadSessionId: String? = nil) async throws -> Bool {
+  func start(cwd: String, loadSessionId: String? = nil, resuming: Bool = false) async throws -> Bool {
     startReading()
+    if resuming, let id = journal.sessionId {
+      _ = try await initialize()
+      _ = try await request("session/resume", sessionParams(cwd: cwd, ["sessionId": id]))
+      return false
+    }
     guard journal.sessionId == nil else { return false }
-    _ = try await initialize()
+    let capabilities = try await initialize().capabilities
     if let id = loadSessionId ?? journal.loadedSessionId {
       _ = try await loadSession(id, cwd: cwd)
-    } else {
-      _ = try await newSession(cwd: cwd)
+      return true
     }
+    if let fork = journal.fork, capabilities?.fork == true, (try? await forkSession(fork, cwd: cwd)) != nil { return false }
+    _ = try await newSession(cwd: cwd)
     return true
   }
 
@@ -141,17 +151,45 @@ actor ACPClient {
     // The draft ACP subagent RFD needs both sides: without this codex-acp keeps a subagent to an
     // ordinary tool call and never streams the child session.
     if subagents { capabilities["subagents"] = [String: Any]() }
-    return try await request(
+    let result = try await request(
       "initialize",
       [
         "protocolVersion": 1,
         "clientCapabilities": capabilities,
       ])
+    if let found = result.capabilities, found != journal.capabilities {
+      journal.capabilities = found
+      store.save(journal)
+    }
+    return result
+  }
+
+  var capabilities: ACPAgentCapabilities? { journal.capabilities }
+
+  /// MCP servers and extra folders go only to an agent that said it takes them.
+  private func sessionParams(cwd: String, _ extra: [String: Any] = [:]) -> [String: Any] {
+    let capabilities = journal.capabilities ?? ACPAgentCapabilities()
+    var params: [String: Any] = ["cwd": cwd, "mcpServers": capabilities.mcpHttp ? mcpServers.map(\.json) : []]
+    if capabilities.additionalDirectories, let extra = journal.extraDirectories, !extra.isEmpty {
+      params["additionalDirectories"] = extra
+    }
+    return params.merging(extra) { $1 }
+  }
+
+  /// The copy seed is dropped only once the agent answered: a refused fork falls back to it.
+  @discardableResult
+  func forkSession(_ fork: ChatForkSource, cwd: String) async throws -> String {
+    let result = try await request("session/fork", sessionParams(cwd: cwd, fork.params), silent: true)
+    guard let id = result.sessionId else { throw ACPClientError.noSession }
+    journal.sessionId = id
+    journal.branchSeed = nil
+    store.save(journal)
+    return id
   }
 
   @discardableResult
   func newSession(cwd: String) async throws -> String {
-    let result = try await request("session/new", ["cwd": cwd, "mcpServers": [Any]()])
+    let result = try await request("session/new", sessionParams(cwd: cwd))
     guard let id = result.sessionId else { throw ACPClientError.noSession }
     journal.sessionId = id
     store.save(journal)
@@ -166,7 +204,7 @@ actor ACPClient {
     store.save(journal)
     builder.apply(.loadRequested)
     publish()
-    let result = try await request("session/load", ["sessionId": id, "cwd": cwd, "mcpServers": [Any]()])
+    let result = try await request("session/load", sessionParams(cwd: cwd, ["sessionId": id]))
     let loaded = result.sessionId ?? id
     journal.sessionId = loaded
     store.save(journal)

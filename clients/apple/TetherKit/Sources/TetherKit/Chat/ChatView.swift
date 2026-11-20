@@ -104,10 +104,13 @@ struct ChatView: View {
       if seedAttachments { attachments.seedPlaceholders() }
       #endif
       #if DEBUG
-      if ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] == "branch" {
+      if let fixture = ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"], fixture.hasPrefix("branch"), fixture != "branch-child" {
         try? await Task.sleep(nanoseconds: 1_200_000_000)
-        if let item = model.state.items.first(where: { if case .user = $0.kind { return true }; return false }) {
-          branching = ChatBranching.point(items: model.state.items, at: item.id, inherited: model.branch?.earlier ?? "")
+        let isUser: (ChatItem) -> Bool = { if case .user = $0.kind { return true }; return false }
+        if let item = fixture == "branch-fork" ? model.state.items.last(where: isUser) : model.state.items.first(where: isUser) {
+          branching = ChatBranching.point(
+            items: model.state.items, at: item.id, inherited: model.branch?.earlier ?? "", sessionId: model.agentSessionId,
+            canFork: model.canFork)
         }
       }
       #endif
@@ -244,7 +247,9 @@ struct ChatView: View {
             signInRetry: model.needsSignIn && item.id == model.state.items.last?.id ? model.signInRetry : nil,
             retrySignIn: { model.retrySignIn() },
             branch: onBranch == nil ? nil : {
-              branching = ChatBranching.point(items: model.state.items, at: item.id, queued: Set(model.state.queuedItemIds), inherited: model.branch?.earlier ?? "")
+              branching = ChatBranching.point(
+                items: model.state.items, at: item.id, queued: Set(model.state.queuedItemIds),
+                inherited: model.branch?.earlier ?? "", sessionId: model.agentSessionId, canFork: model.canFork)
             }
           )
           .equatable()
@@ -740,10 +745,24 @@ struct ChatView: View {
           .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
           .frame(maxWidth: .infinity).padding(.vertical, 6)
       } else if model.hasEnded {
-        Label("This chat has ended. You can still read it.", systemImage: "moon.zzz")
-          .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
-          .frame(maxWidth: .infinity).padding(.vertical, 6)
-          .accessibilityIdentifier("chatEnded")
+        HStack(spacing: 10) {
+          Label(model.canResume ? "This chat has ended." : "This chat has ended. You can still read it.", systemImage: "moon.zzz")
+            .font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
+          if model.canResume {
+            Button { Task { await model.resume() } } label: {
+              Text("Resume").font(.chat(.footnote).weight(.semibold))
+                .padding(.horizontal, 12).frame(minHeight: 30)
+                .foregroundStyle(TetherColors.onAccent)
+                .background(TetherColors.accent, in: Capsule())
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(TetherPressStyle())
+            .accessibilityHint("Restarts the agent on the host and picks the conversation back up")
+            .accessibilityIdentifier("chatResume")
+          }
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 2)
+        .accessibilityIdentifier("chatEnded")
       } else if !(questionTyping && pendingQuestion != nil) {
         composer
       }

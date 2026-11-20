@@ -60,4 +60,4 @@ Long-press a text prompt and choose **Branch & edit…** to create a separate co
 
 The drawer footer shows Claude and Codex account usage on the selected host: 5-hour and weekly percent used, reset time, and freshness. Missing windows show a dash. Readings are account-wide, not this chat's token count. The app asks at most once a minute while the drawer is visible and connected; unavailable hosts retain the last reading with its age. Update the host's `tether` tool to use organization and plan-usage commands.
 
-Additional DEBUG screenshot fixtures: `TETHER_DEBUG_DRAWER=projects-open|projects-archive|projects-unavailable`, and `TETHER_DEBUG_CHAT_FIXTURE=branch|branch-child`.
+Additional DEBUG screenshot fixtures: `TETHER_DEBUG_DRAWER=projects-open|projects-archive|projects-unavailable`, and `TETHER_DEBUG_CHAT_FIXTURE=branch|branch-child|branch-fork|ended|new-chat-access|continue-delete|mcp-add`.
