@@ -391,7 +391,7 @@ enum ACPDecoder {
     return (value as? JSON)?["message"] as? String
   }
 
-  private static func configOptions(_ raw: [JSON]) -> [ACPConfigOption] {
+  static func configOptions(_ raw: [[String: Any]]) -> [ACPConfigOption] {
     raw.compactMap { option in
       guard (option["type"] as? String ?? "select") == "select",
         let id = option["id"] as? String, let current = option["currentValue"] as? String

@@ -36,14 +36,16 @@ enum ACPHostCommand {
 
   /// Earlier conversations in `cwd`, newest first, as JSON lines. Runs the adapter briefly on the host.
   /// Claude's adapter is the host tool's default, so only another agent names its spawn command.
-  static func sessions(cwd: String, limit: Int, agent: ChatAgentProfile = ChatAgents.claude) -> String {
-    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.spawn))"
+  static func sessions(cwd: String, limit: Int, agent: ChatAgentProfile = ChatAgents.claude, managed: Bool = false) -> String {
+    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.command(managed: managed)))"
     return "\(prefix) sessions \(shellQuote(cwd)) --limit \(limit)\(agentFlag) 2>&1"
   }
 
   /// Deletes a saved conversation through the agent's `session/delete`; prints `{"deleted":id}`.
-  static func deleteSession(cwd: String, sessionId: String, agent: ChatAgentProfile = ChatAgents.claude) -> String {
-    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.spawn))"
+  static func deleteSession(
+    cwd: String, sessionId: String, agent: ChatAgentProfile = ChatAgents.claude, managed: Bool = false
+  ) -> String {
+    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.command(managed: managed)))"
     return "\(prefix) sessions \(shellQuote(cwd)) --delete \(shellQuote(sessionId))\(agentFlag) 2>&1"
   }
 

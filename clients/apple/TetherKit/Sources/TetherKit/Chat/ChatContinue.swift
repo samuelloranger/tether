@@ -97,7 +97,7 @@ enum ChatContinueLoader {
   /// Resolves `~`, lists the folder's conversations and gives up after `deadline`. Never throws:
   /// the sheet shows the reason with a Retry.
   static func load(
-    folderText: String, agent: ChatAgentProfile = ChatAgents.claude,
+    folderText: String, agent: ChatAgentProfile = ChatAgents.claude, managed: Bool = false,
     deadline: TimeInterval = ChatContinueLoader.deadline,
     exec: @escaping @Sendable (String) async throws -> String
   ) async -> Result {
@@ -111,7 +111,7 @@ enum ChatContinueLoader {
           home = found.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let cwd = ACPCwd.expand(folderText, home: home)
-        let output = try await exec(ACPHostCommand.sessions(cwd: cwd, limit: limit, agent: agent))
+        let output = try await exec(ACPHostCommand.sessions(cwd: cwd, limit: limit, agent: agent, managed: managed))
         let listing = ACPSavedSessionListing.parse(output)
         if let failure = listing.failure { return .failed(failure) }
         return .loaded(listing.sessions)

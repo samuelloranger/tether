@@ -296,6 +296,10 @@ public struct SSHTerminalView: View {
         },
         onDeleteSession: { _, session, agent in await controller.deleteSavedSession(session, agent: agent) },
         mcpStore: controller.mcpServerStore,
+        loadVersions: { await controller.agentVersions() },
+        onUpdateAgent: { await controller.updateAgent($0) },
+        liveOptions: { await controller.liveOptions(folderText: $0, agent: $1) },
+        managedStore: controller.managedAgents,
         onCancel: { showNewChat = false }
       )
     }
