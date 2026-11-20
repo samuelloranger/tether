@@ -132,6 +132,11 @@ tests share `clients/apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-cards.js
     tether acp sessions ~/src/app --delete <id>   # delete one of them (the agent's session/delete)
     tether acp workflows --session <id> --json   # background Workflow runs of a Claude Code session
     tether acp kill chat1                 # stop the agent and remove the session
+    tether acp agent claude|codex         # run the host-managed adapter (a chat's spawn command)
+    tether acp options ~/src/app [--agent-cmd CMD]   # the options a new session starts with (live model list)
+    tether acp versions [--refresh]       # adapters and the host's agent CLIs vs latest, one JSON line each
+    tether acp update codex [--version V] [--rollback]   # install, check, switch; never automatic
+    tether acp update claude --cli        # run the host CLI's own updater (claude update, opencode upgrade, …)
 
 The first `attach --spawn` starts a detached daemon that owns the agent and appends
 everything it prints to `acp/<name>/out.log`; an `attach` replays that log from `--from`
@@ -406,3 +411,32 @@ incompatibly; the app refuses a host whose protocol is lower than it requires.
    that point at `tether-notify` / `tether-notify-hook` are replaced in place.
 3. `~/.local/bin/tether-notify` and `tether-notify-hook` are no longer used and can be deleted.
 4. State stays in `~/.tether-notify` (and `TETHER_NOTIFY_HOME`), so registered phones carry over.
+
+### Host-managed agents
+
+`tether acp agent <claude|codex>` runs the ACP adapter the host installed with `acp update`, with
+that install's `node_modules/.bin` first on `PATH` (so codex-acp runs the Codex it was installed
+with). An agent never updated runs the adapter version the apps pinned before, through
+`npx -y <package>@<version>`, exactly as those apps spawned it. A holder records the version it
+started in `meta.json` (`agentVersion`, also in `acp status`); a running chat keeps it for life.
+The daemon and `acp sessions` run a `tether acp agent` spawn line through this binary's own path,
+since a login shell may reset `PATH`.
+
+Nothing updates on its own. `acp versions` prints one JSON line per adapter (`"kind":"adapter"`):
+the version new chats run, whether it is host-managed, the engine it bundles (`Claude Code …`,
+`Codex …`) and the latest version listed in the official ACP Registry
+(`cdn.agentclientprotocol.com/registry/v1/latest/registry.json`). Then one line per agent CLI the
+user installed on the host (`"kind":"cli"`: claude, codex, opencode, copilot), with its `--version`,
+the latest on npm, and `command`: the CLI's own updater (`claude update`, `codex update`,
+`opencode upgrade`, `copilot update`) with `runnable` true, or, for a CLI without one, the command
+the user runs (`npm install -g …`, `brew upgrade …`, by how it was installed). Each source is asked
+at most once an hour (`--refresh` asks now); a failed read keeps the last answer, sets `error` and
+also waits out the hour. `acp update <agent> --cli` runs a runnable updater and prints
+`{"agent","kind":"cli","from","to"}`.
+
+`acp update <agent>` takes a lock, runs `npm install` of the Registry's version (or `--version`)
+into a temporary prefix, starts it and waits for an `initialize` answer, and only then moves it to
+`acp-agents/<agent>/<version>` and points `current` at it; the version it replaces becomes
+`previous` (`--rollback` swaps back, offline). Older versions are removed unless a running process
+still uses them. State lives in
+`acp-agents/` under the tether state directory.
