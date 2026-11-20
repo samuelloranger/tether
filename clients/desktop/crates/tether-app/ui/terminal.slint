@@ -385,7 +385,6 @@ component Sidebar inherits Rectangle {
                     }
                     if row.section == "": ChatSidebarRow { tab: row.tab; picked => { root.picked(); } }
                 }
-                if !ChatVm.archived: SidebarAction { icon: @image-url("icons/history.svg"); text: "Archived chats · " + ChatVm.archived-count; clicked => { ChatVm.show-archived(true); } }
                 if ChatVm.tabs.length == 0: Text {
                     x: 8px;
                     height: 26px;
@@ -397,6 +396,7 @@ component Sidebar inherits Rectangle {
             }
         }
         if ChatVm.plan-usage.length > 0: ChatPlanUsage { }
+        if !ChatVm.archived: SidebarAction { icon: @image-url("icons/history.svg"); text: "Archived chats · " + ChatVm.archived-count; clicked => { ChatVm.show-archived(true); } }
         Rectangle { height: 1px; background: Tokens.border; }
         Rectangle { height: 4px; }
         SidebarAction { icon: @image-url("icons/back.svg"); text: "Hosts"; clicked => { TerminalVm.back(); } }

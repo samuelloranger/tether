@@ -650,11 +650,6 @@ public struct SSHTerminalView: View {
               .accessibilityValue(collapsedProjects.contains(group.path) ? "collapsed" : "expanded")
               if !collapsedProjects.contains(group.path) { ForEach(group.rows) { chatRow($0) } }
             }
-            Button { showingArchive = true } label: {
-              HStack { Label("Archived chats", systemImage: "archivebox"); Spacer(); Text("\(archived.count)") }
-                .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
-            }
-            .accessibilityIdentifier("drawerArchive")
           }
         }
         .padding(.horizontal, 12).padding(.bottom, 12)
@@ -672,6 +667,14 @@ public struct SSHTerminalView: View {
         ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title) {
           Task { await controller.refreshPlanUsage() }
         }
+      }
+      if !showingArchive {
+        Button { showingArchive = true } label: {
+          HStack { Label("Archived chats", systemImage: "archivebox"); Spacer(); Text("\(archived.count)") }
+            .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
+        }
+        .padding(.horizontal, 12)
+        .accessibilityIdentifier("drawerArchive")
       }
     }
     .frame(maxHeight: .infinity, alignment: .top)
