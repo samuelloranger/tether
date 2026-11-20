@@ -394,6 +394,9 @@ impl NewChat {
         let done = kind == "done";
         self.managed_state
             .set_supported(&self.scope, kind != "unsupported");
+        if kind == "unsupported" {
+            return;
+        }
         self.versions = Some(Versions {
             supported: Some(true),
             agents: vec![
