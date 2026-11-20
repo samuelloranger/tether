@@ -20,6 +20,7 @@ use tether_core::connect::ConnectError;
 
 #[cfg(debug_assertions)]
 mod devsample;
+mod mcp;
 mod newchat;
 mod organization;
 mod rows;
@@ -27,6 +28,7 @@ mod screen;
 mod session;
 pub mod view;
 
+pub use mcp::McpLibrary;
 pub use newchat::NewChat;
 use session::Session;
 pub use view::{ChatScreen, Pixels};
@@ -209,6 +211,8 @@ pub enum ChatMsg {
     SignInRetry,
     DismissNotice,
     Reconnect,
+    /// Resume on an ended chat.
+    Resume,
     DraftEdited {
         text: String,
         cursor_byte: usize,
@@ -278,6 +282,22 @@ pub enum ChatMsg {
     NewChatReset,
     NewChatContinue(String),
     NewChatRetry,
+    /// The trash on a saved conversation of the Continue list: asks first.
+    NewChatDelete(String),
+    NewChatDeleteConfirm,
+    NewChatDeleteCancel,
+    /// The extra-folder row's text, added to the chat's folders.
+    NewChatAddFolder(String),
+    NewChatRemoveFolder(usize),
+    NewChatToggleServer(String),
+    /// Opens or closes the Add server form.
+    NewChatServerForm(bool),
+    NewChatSaveServer {
+        name: String,
+        url: String,
+        headers: String,
+    },
+    NewChatDeleteServer(String),
     /// Esc with the chat in front: the topmost overlay closes.
     Escape,
     // From the driver.
@@ -345,6 +365,7 @@ pub const LIVE_CHATS: usize = 4;
 
 pub struct Chats {
     files: Option<ChatFiles>,
+    mcp: Option<McpLibrary>,
     actions: Option<String>,
     rename: Option<String>,
     branch_dialog: Option<organization::BranchDialog>,
@@ -403,6 +424,10 @@ pub struct Chats {
 }
 
 impl Chats {
+    pub fn set_mcp(&mut self, library: McpLibrary) {
+        self.mcp = Some(library);
+    }
+
     pub fn set_defaults(&mut self, defaults: ChatDefaults) {
         self.defaults = defaults;
     }
@@ -450,6 +475,7 @@ impl Chats {
     pub fn new(files: Option<ChatFiles>, host: &str) -> Self {
         Self {
             files,
+            mcp: None,
             actions: None,
             rename: None,
             branch_dialog: None,
@@ -812,6 +838,7 @@ impl Chats {
         multi: bool,
         agent: &'static AgentProfile,
         start: StartOptions,
+        setup: tether_core::acp::journal::Journal,
         now: Duration,
         out: &mut Out,
     ) {
@@ -819,6 +846,12 @@ impl Chats {
             && let Err(e) = files.set_agent(&name, agent.key)
         {
             tracing::warn!("chat agent not saved: {e}");
+        }
+        if setup != tether_core::acp::journal::Journal::default()
+            && let Some(files) = &self.files
+            && let Err(e) = files.save_journal(&name, &setup)
+        {
+            tracing::warn!("chat setup not saved: {e}");
         }
         self.last_agent = agent.key.to_string();
         out.picked_agent = Some(agent.key.to_string());
@@ -887,6 +920,9 @@ impl Chats {
             }
         }
         sample.dev_state(state, now);
+        if crate::app::dev_env("TETHER_DEV_CHAT_ENDED").is_some() {
+            sample.dev_ended();
+        }
         if let Some(kind) = &workflow {
             let wall = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1010,13 +1046,24 @@ impl Chats {
     pub fn open_new_chat(&mut self, mode: u8, folder: String, now: Duration, out: &mut Out) {
         self.dirty = true;
         let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
-        self.new_chat = Some(NewChat::open(mode, folder, agent, self.draft_for(agent)));
+        let mut nc = NewChat::open(mode, folder, agent, self.draft_for(agent));
+        nc.saved_servers = self.mcp.as_ref().map(McpLibrary::list).unwrap_or_default();
+        self.new_chat = Some(nc);
         #[cfg(debug_assertions)]
         if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
             && let Some(state) = crate::app::dev_env("TETHER_DEV_CHAT_FOLDER_STATE")
             && let Some(nc) = self.new_chat.as_mut()
         {
             nc.preview_folder(&state);
+        }
+        #[cfg(debug_assertions)]
+        if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
+            && let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_NC")
+            && let Some(nc) = self.new_chat.as_mut()
+        {
+            nc.preview_folder("ready");
+            nc.preview_setup(&kind);
+            return;
         }
         out.jobs.push(newchat::probe_job());
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
@@ -1145,6 +1192,51 @@ impl Chats {
                     out.jobs.push(job);
                 }
             }
+            ChatMsg::NewChatDelete(id) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.ask_delete(id);
+                }
+            }
+            ChatMsg::NewChatDeleteCancel => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.cancel_delete();
+                }
+            }
+            ChatMsg::NewChatDeleteConfirm => {
+                if let Some(job) = self.new_chat.as_mut().and_then(NewChat::confirm_delete) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatAddFolder(text) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.add_folder(&text);
+                }
+            }
+            ChatMsg::NewChatRemoveFolder(i) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.remove_folder(i);
+                }
+            }
+            ChatMsg::NewChatToggleServer(name) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.toggle_server(&name);
+                }
+            }
+            ChatMsg::NewChatServerForm(open) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.set_adding_server(open);
+                }
+            }
+            ChatMsg::NewChatSaveServer { name, url, headers } => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.save_server(&name, &url, &headers, self.mcp.as_ref());
+                }
+            }
+            ChatMsg::NewChatDeleteServer(name) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.delete_server(&name, self.mcp.as_ref());
+                }
+            }
             ChatMsg::NewChatContinue(id) => {
                 if let Some(job) = self.new_chat.as_mut().and_then(|n| n.start(Some(id))) {
                     out.jobs.push(job);
@@ -1174,10 +1266,17 @@ impl Chats {
                         multi,
                         agent,
                         start,
+                        dirs,
+                        mcp,
                     } => {
                         self.new_chat = None;
                         let name = host::new_chat_name();
-                        self.open_route(name, cwd, load, multi, agent, start, now, out);
+                        let setup = tether_core::acp::journal::Journal {
+                            additional_directories: dirs,
+                            mcp_servers: mcp,
+                            ..Default::default()
+                        };
+                        self.open_route(name, cwd, load, multi, agent, start, setup, now, out);
                     }
                 }
             }
@@ -1468,6 +1567,11 @@ impl Chats {
         if self.delete_prompt.take().is_some() {
             return;
         }
+        if let Some(nc) = self.new_chat.as_mut()
+            && (nc.delete_asked.take().is_some() || std::mem::take(&mut nc.adding_server))
+        {
+            return;
+        }
         if self.new_chat.take().is_some() {
             return;
         }
@@ -1528,6 +1632,7 @@ impl Chats {
             files: self.files.as_ref(),
             connected: self.connected,
             defaults: &self.defaults,
+            mcp: self.mcp.as_ref(),
         }
     }
 
@@ -1546,6 +1651,7 @@ impl Chats {
                 files: self.files.as_ref(),
                 connected: self.connected,
                 defaults: &self.defaults,
+                mcp: self.mcp.as_ref(),
             };
             f(&mut s, &mut ctx)
         };

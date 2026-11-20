@@ -109,6 +109,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         platform: platform(),
         send: sink.clone(),
     };
+    let mcp = crate::terminal::model::chat::McpLibrary::new(secrets.clone(), &chat_scope);
     let transport = tether_ssh::RusshTransport::new(rt.clone());
     let remote = Arc::new(SshRemote::new(
         transport,
@@ -141,6 +142,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         chats_root,
         &chat_scope,
     ));
+    model.set_chat_mcp(mcp);
     model.set_chat_defaults(chat_defaults);
     model.set_chat_options(chat_options, &chat_scope, &chat_agent);
     model.set_sidebar_closed(app.state.borrow().prefs.sidebar_closed);

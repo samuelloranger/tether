@@ -14,6 +14,8 @@ pub struct BranchDialog {
     pub cwd: String,
     pub agent: &'static tether_core::acp::agent::AgentProfile,
     pub multi: bool,
+    /// What the new chat's journal starts with: the fork point and the source chat's folders and servers.
+    pub setup: tether_core::acp::journal::Journal,
 }
 
 impl Chats {
@@ -169,6 +171,7 @@ impl Chats {
                                 dialog.multi,
                                 dialog.agent,
                                 StartOptions::Stored,
+                                Default::default(),
                                 now,
                                 out,
                             );
@@ -228,11 +231,28 @@ impl Chats {
                     method: "copy".into(),
                 };
                 let inherited = s.branch.as_ref().map_or("", |b| b.context.as_str());
+                let mut setup = self
+                    .files
+                    .as_ref()
+                    .map(|f| f.journal(&s.name))
+                    .unwrap_or_default();
+                setup.fork_source = organization::fork_source_before(
+                    &s.state().items,
+                    id,
+                    setup.session_id.as_deref(),
+                );
+                let setup = tether_core::acp::journal::Journal {
+                    fork_source: setup.fork_source,
+                    additional_directories: setup.additional_directories,
+                    mcp_servers: setup.mcp_servers,
+                    ..Default::default()
+                };
                 match organization::branch_before(&s.state().items, id, parent, inherited) {
                     Ok(branch) => {
                         self.branch_dialog = Some(BranchDialog {
                             title: format!("{title} · alternative"),
                             branch,
+                            setup,
                             cwd: s.cwd.clone(),
                             agent: s.agent().unwrap_or(&tether_core::acp::agent::CLAUDE),
                             multi: self
@@ -273,6 +293,11 @@ impl Chats {
                 };
                 if files.save_branch(&name, &dialog.branch).is_err() {
                     self.organization_error = "Couldn't save the branch draft.".into();
+                    self.branch_dialog = Some(dialog);
+                    return true;
+                }
+                if files.save_journal(&name, &dialog.setup).is_err() {
+                    self.organization_error = "Couldn't save the branch.".into();
                     self.branch_dialog = Some(dialog);
                     return true;
                 }

@@ -249,6 +249,8 @@ pub enum PaletteKind {
 pub struct ComposerView {
     pub shown: bool,
     pub banner: String,
+    /// An ended chat of this device's own whose agent can resume its session.
+    pub can_resume: bool,
     pub banner_icon: Option<Icon>,
     pub placeholder: String,
     pub dimmed: bool,
@@ -372,6 +374,7 @@ pub struct SavedView {
     pub when: String,
     pub recent: bool,
     pub busy: bool,
+    pub deleting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -426,6 +429,19 @@ pub struct NewChatView {
     pub error: String,
     pub listing: ListingView,
     pub continuing: bool,
+    /// A saved conversation waits for the user to confirm its deletion.
+    pub delete_open: bool,
+    pub extra_dirs: Vec<String>,
+    pub servers: Vec<ServerView>,
+    pub adding_server: bool,
+    pub server_error: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerView {
+    pub name: String,
+    pub url: String,
+    pub on: bool,
 }
 
 /// A background command still running, as the strip above the composer lists it.

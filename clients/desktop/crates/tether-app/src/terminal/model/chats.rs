@@ -17,6 +17,10 @@ impl TerminalModel {
         self.chats = Chats::new(Some(files), &self.machine.host);
     }
 
+    pub fn set_chat_mcp(&mut self, library: super::chat::McpLibrary) {
+        self.chats.set_mcp(library);
+    }
+
     pub fn set_chat_defaults(&mut self, defaults: ChatDefaults) {
         self.chats.set_defaults(defaults);
     }
