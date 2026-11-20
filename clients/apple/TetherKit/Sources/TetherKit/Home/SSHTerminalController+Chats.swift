@@ -34,7 +34,8 @@ extension SSHTerminalController {
     let parent = ChatParent(name: source.chatName, title: source.title)
     var journal = UserDefaultsChatJournalStore(name: route.name).load()
     journal.branch = ChatBranch(parent: parent, title: title, earlier: point.earlier)
-    journal.branchSeed = ChatBranching.seed(point.earlier)
+    journal.fork = point.fork
+    journal.branchSeed = point.copyable ? ChatBranching.seed(point.earlier) : nil
     journal.branchDraft = prompt
     UserDefaultsChatJournalStore(name: route.name).save(journal)
     if let failure = await organizeChat(route.name, patch: [
@@ -110,7 +111,30 @@ extension SSHTerminalController {
     let result = await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed) {
       try await self.control.exec($0)
     }
-    return result
+    return await withAccess(result, request)
+  }
+
+  /// The sheet's extra folders, resolved like the main one, and its MCP server picks.
+  private func withAccess(_ result: ChatStart, _ request: NewChatRequest) async -> ChatStart {
+    guard case var .ready(route) = result else { return result }
+    guard let folders = await ChatRoute.extraDirectories(request.extraFolders, exec: { try await self.control.exec($0) }) else {
+      return .failed("Couldn't read the host's home folder.")
+    }
+    route.extraDirectories = folders
+    route.mcpServerNames = request.mcpServerNames
+    return .ready(route)
+  }
+
+  var mcpServerStore: ChatMCPServerStore { ChatMCPServerStore(config: config) }
+
+  /// Nil once the host confirmed the delete, else what to show.
+  func deleteSavedSession(_ session: ACPSavedSession, agent: ChatAgentProfile) async -> String? {
+    let control = control
+    let command = ACPHostCommand.deleteSession(cwd: session.cwd.isEmpty ? "." : session.cwd, sessionId: session.sessionId, agent: agent)
+    guard let output = try? await ChatContinueLoader.withDeadline(30, { try await control.exec(command) }) else {
+      return "The host didn't answer. Try again."
+    }
+    return ACPHostCommand.deleteFailure(output)
   }
 
   /// Agent key → why this host can't run it; a host that could not be checked dims nothing.
@@ -127,10 +151,11 @@ extension SSHTerminalController {
   func continueChat(
     session: ACPSavedSession, folderText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)
   ) async -> ChatStart {
-    await ChatRoute.startContinuing(
+    let result = await ChatRoute.startContinuing(
       session: session, cwdText: folderText, host: config.host, agent: request.agent, picks: request.picks,
       changed: request.changed
     ) { try await self.control.exec($0) }
+    return await withAccess(result, request)
   }
 
   /// What the New chat sheet's Options row offers for an agent on this host.

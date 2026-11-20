@@ -161,6 +161,8 @@ struct ACPResult: Equatable, Sendable {
   var sessionId: String?
   var stopReason: String?
   var configOptions: [ACPConfigOption]?
+  /// Only on `initialize`'s answer.
+  var capabilities: ACPAgentCapabilities?
   /// `_session/steering`'s answer: `injected`, or `promptRequired` when no turn was running.
   /// codex-acp starts a turn itself instead (`startedNewTurn`).
   var steerOutcome: String?
@@ -289,6 +291,7 @@ enum ACPDecoder {
       sessionId: result["sessionId"] as? String,
       stopReason: result["stopReason"] as? String,
       configOptions: (result["configOptions"] as? [JSON]).map(configOptions),
+      capabilities: capabilities.map(ACPAgentCapabilities.init(agentCapabilities:)),
       steerOutcome: result["outcome"] as? String)
   }
 

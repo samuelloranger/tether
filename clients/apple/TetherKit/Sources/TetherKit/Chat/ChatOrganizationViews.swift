@@ -26,10 +26,17 @@ struct ChatBranchSheet: View {
           TextEditor(text: $prompt).frame(minHeight: 120).accessibilityIdentifier("chatBranchPrompt")
         }
         Section("Carry over context") {
-          Label("Copy earlier messages", systemImage: "doc.on.doc")
-          Text("Starts a new agent session with earlier conversation text. This creates a fresh agent session, not a native session fork. Files stay as they are.")
-            .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+          if point.fork != nil {
+            Label("Fork the agent's conversation", systemImage: "arrow.triangle.branch")
+            Text("The new chat continues the agent's own session up to this point, with its tool results and context. Files stay as they are.")
+              .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+          } else {
+            Label("Copy earlier messages", systemImage: "doc.on.doc")
+            Text("Starts a new agent session with the earlier conversation as text. Files stay as they are.")
+              .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+          }
         }
+        .accessibilityIdentifier(point.fork != nil ? "chatBranchFork" : "chatBranchCopy")
         if let error = point.failure ?? failure { Text(error).foregroundStyle(TetherColors.warning) }
       }
       .scrollContentBackground(.hidden).background(TetherColors.background)

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=workflows` a background Workflow still running (`=workflows-sheet` with its sheet open, `=workflows-ended` the sheet of one that was killed), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=workflows` a background Workflow still running (`=workflows-sheet` with its sheet open, `=workflows-ended` the sheet of one that was killed), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open, `=branch-fork` the branch sheet forking at the last prompt, `=ended` an ended chat that can resume, `=new-chat-access` the New chat sheet with extra folders and MCP servers, `=continue-delete` the delete confirmation of an earlier conversation, `=mcp-add` the Add MCP server form.
 enum ChatFixture {
   @MainActor
   static func cardModel(_ kind: String) -> ChatSessionModel {
@@ -907,6 +907,67 @@ enum ChatFixture {
     return journal
   }
 
+  /// The finished turn, then the host says the agent ended (idle): the bar offers Resume.
+  @MainActor
+  static func endedModel() -> ChatSessionModel {
+    let log = log(pendingPermission: false)
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false,
+      store: InMemoryChatJournalStore(journal(pendingPermission: false)),
+      inspect: {
+        ACPChatSummary(name: "fixture", isRunning: false, logBytes: log.count, cwd: "/work/project", created: Date(), spawn: ChatAgents.claude.spawn)
+      }
+    ) { _, _ in EndingLogStream(log: log) }
+  }
+
+  /// The finished turn and a second prompt with its reply, so a branch at the second prompt can fork.
+  @MainActor
+  static func twoTurnModel() -> ChatSessionModel {
+    let first = log(pendingPermission: false)
+    let second = [
+      message(id: "msg_2", "Two tests cover it: one for a 503 that recovers, one for a 404 that fails at once."),
+      json(["jsonrpc": "2.0", "id": 4, "result": ["stopReason": "end_turn"]]),
+    ]
+    var journal = journal(pendingPermission: false)
+    journal.entries.append(.init(kind: .prompt, offset: first.count, text: "Which tests cover the retry?", requestId: .int(4)))
+    journal.nextRequestId = 5
+    let log = first + Data((second.joined(separator: "\n") + "\n").utf8)
+    return ChatSessionModel(
+      chatName: "fixture", cwd: "/work/project", readOnly: false, store: InMemoryChatJournalStore(journal)
+    ) { _, _ in FixtureByteStream(log: log) }
+  }
+
+  final class FixtureSecrets: SSHSecretStore {
+    private var values: [String: String] = [:]
+    func setSecret(_ value: String?, forKey key: String) { values[key] = value }
+    func secret(forKey key: String) -> String? { values[key] }
+  }
+
+  @MainActor
+  static func newChatSheet(_ mode: String) -> some View {
+    let store = ChatMCPServerStore(scope: "fixture", secrets: FixtureSecrets())
+    store.servers = [
+      ChatMCPServer(name: "linear", url: "https://mcp.linear.app/mcp", headers: [.init(name: "Authorization", value: "Bearer x")]),
+      ChatMCPServer(name: "grafana", url: "http://192.0.2.10:8000/mcp"),
+    ]
+    let now = Date()
+    return NewChatSheet(
+      initialFolder: "~/src/api-server", hostName: "devbox", initialMode: mode == "continue-delete" ? .resume : .new,
+      checkFolder: { path, _ in ChatFolder(status: "ready", path: path.replacingOccurrences(of: "~", with: "/home/dev")) },
+      onStart: { _, _ in nil },
+      loadSessions: { _, _ in
+        .loaded([
+          ACPSavedSession(sessionId: "s1", title: "Add retries to fetchJSON", updatedAt: now.addingTimeInterval(-7200), cwd: "/home/dev/src/api-server"),
+          ACPSavedSession(sessionId: "s2", title: "Migrate the cache to Redis", updatedAt: now.addingTimeInterval(-86400 * 3), cwd: "/home/dev/src/api-server"),
+        ])
+      },
+      onContinue: { _, _, _ in nil },
+      onDeleteSession: { _, _, _ in nil },
+      mcpStore: store, initiallyOpenAccess: mode == "new-chat-access",
+      initialExtraFolders: ["~/src/shared-types"], initialMCPPicks: ["linear"],
+      onCancel: {})
+  }
+
   @MainActor
   static func model(pendingPermission: Bool) -> ChatSessionModel {
     let log = log(pendingPermission: pendingPermission)
@@ -915,6 +976,25 @@ enum ChatFixture {
       store: InMemoryChatJournalStore(journal(pendingPermission: pendingPermission))
     ) { _, _ in FixtureByteStream(log: log) }
   }
+}
+
+/// Hands over its log once, then ends like the holder of an agent that is gone.
+final class EndingLogStream: TerminalByteStream, @unchecked Sendable {
+  private let lock = NSLock()
+  private var log: Data?
+
+  init(log: Data) { self.log = log }
+
+  func read() async throws -> Data? {
+    lock.lock()
+    defer { lock.unlock() }
+    let next = log
+    log = nil
+    return next
+  }
+
+  func write(_ bytes: Data) async throws {}
+  func close() async {}
 }
 
 /// Hands over its log once, then stays open and silent like a quiet host.
@@ -1156,6 +1236,8 @@ public struct ChatFixtureRoot: View {
       initial = ChatSessionModel(chatName: "fixture-branch", cwd: "/work/api-server", readOnly: false,
         store: InMemoryChatJournalStore(journal)) { _, _ in FixtureByteStream(log: Data()) }
     case "codex": initial = ChatFixture.codexModel()
+    case "branch-fork": initial = ChatFixture.twoTurnModel()
+    case "ended": initial = ChatFixture.endedModel()
     case "tasks", "tasks-open", "tasks-drawer": initial = ChatFixture.tasksModel()
     case "workflows", "workflows-sheet": initial = ChatFixture.workflowsModel()
     case "workflows-ended": initial = ChatFixture.workflowsModel(ended: true)
@@ -1188,6 +1270,10 @@ public struct ChatFixtureRoot: View {
     }
       .tint(TetherColors.accent)
       .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
+      .sheet(isPresented: .constant(["new-chat-access", "continue-delete"].contains(mode))) { ChatFixture.newChatSheet(mode) }
+      .sheet(isPresented: .constant(mode == "mcp-add")) {
+        ChatMCPServerForm(existing: []) { _ in }
+      }
       .fullScreenCover(item: $viewing) { ChatImageViewer(ref: $0, library: model.imageLibrary) }
       .task {
         guard mode == "image-viewer" else { return }
