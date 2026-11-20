@@ -108,7 +108,7 @@ actor ACPClient {
   /// an ended chat whose agent the host just restarted: then `session/resume` reattaches it without a
   /// replay. Otherwise runs `initialize` and `session/new`, `session/fork` for a branch, or
   /// `session/load` when continuing an earlier conversation.
-  /// Returns true when this call created, forked or loaded the session.
+  /// Returns true when this call created or loaded the session; a fork keeps the source's options.
   @discardableResult
   func start(cwd: String, loadSessionId: String? = nil, resuming: Bool = false) async throws -> Bool {
     startReading()
@@ -123,7 +123,7 @@ actor ACPClient {
       _ = try await loadSession(id, cwd: cwd)
       return true
     }
-    if let fork = journal.fork, capabilities?.fork == true, (try? await forkSession(fork, cwd: cwd)) != nil { return true }
+    if let fork = journal.fork, capabilities?.fork == true, (try? await forkSession(fork, cwd: cwd)) != nil { return false }
     _ = try await newSession(cwd: cwd)
     return true
   }
