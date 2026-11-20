@@ -359,11 +359,25 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                             when: host::continue_relative(s.updated_at, unix_now()),
                             recent: host::is_recent(s.updated_at, unix_now()),
                             busy: nc.continuing.as_deref() == Some(s.session_id.as_str()),
+                            deleting: nc.deleting.as_deref() == Some(s.session_id.as_str()),
                         })
                         .collect(),
                 ),
             },
             continuing: nc.continuing.is_some(),
+            delete_open: nc.delete_asked.is_some(),
+            extra_dirs: nc.extra_dirs.clone(),
+            servers: nc
+                .saved_servers
+                .iter()
+                .map(|s| ServerView {
+                    name: s.name.clone(),
+                    url: s.url.clone(),
+                    on: nc.chosen_servers.contains(&s.name),
+                })
+                .collect(),
+            adding_server: nc.adding_server,
+            server_error: nc.server_error.clone().unwrap_or_default(),
         });
     }
     let Some(name) = chats.active.clone() else {
@@ -750,6 +764,7 @@ fn composer(s: &Session, screen: &mut ChatScreen) {
         c.banner_icon = Some(Icon::Eye);
     } else if s.has_ended() {
         c.banner = "This chat has ended. You can still read it.".into();
+        c.can_resume = s.can_resume();
         c.banner_icon = Some(Icon::Moon);
     }
     c.shown = true;

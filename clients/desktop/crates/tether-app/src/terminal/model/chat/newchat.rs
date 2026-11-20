@@ -9,9 +9,10 @@ use tether_core::acp::agent::{self, AgentProfile};
 use tether_core::acp::folders::{self, Folder};
 use tether_core::acp::host::{self, SavedSession};
 use tether_core::acp::options::{OptionsDraft, StartOptions};
+use tether_core::acp::session_setup::{self, McpServer};
 use tether_core::connect::ConnectError;
 
-use super::{ChatJob, ExecTag};
+use super::{ChatJob, ExecTag, McpLibrary};
 
 const LIST_LIMIT: usize = 20;
 const RELOAD_AFTER: Duration = Duration::from_millis(500);
@@ -28,6 +29,7 @@ pub enum Step {
     CreateChild,
     CreateFolder,
     Validate,
+    DeleteSession,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +49,10 @@ pub enum Next {
         multi: bool,
         agent: &'static AgentProfile,
         start: StartOptions,
+        /// Extra folders, absolute on the host.
+        dirs: Vec<String>,
+        /// Names of the saved MCP servers to attach.
+        mcp: Vec<String>,
     },
 }
 
@@ -71,6 +77,18 @@ pub struct NewChat {
     pub error: Option<String>,
     pub listing: Listing,
     pub continuing: Option<String>,
+    /// A saved conversation the user asked to delete, until they confirm or cancel.
+    pub delete_asked: Option<String>,
+    /// Extra folders as typed (`~` allowed), expanded when the chat starts.
+    pub extra_dirs: Vec<String>,
+    pub saved_servers: Vec<McpServer>,
+    /// Names of the saved servers switched on for this chat.
+    pub chosen_servers: Vec<String>,
+    /// The Add server form is open.
+    pub adding_server: bool,
+    pub server_error: Option<String>,
+    /// The conversation whose deletion is running on the host.
+    pub deleting: Option<String>,
     pub agent: &'static AgentProfile,
     pub options: OptionsDraft,
     request: u64,
@@ -135,6 +153,13 @@ impl NewChat {
             error: None,
             listing: Listing::Loading,
             continuing: None,
+            delete_asked: None,
+            extra_dirs: Vec::new(),
+            saved_servers: Vec::new(),
+            chosen_servers: Vec::new(),
+            adding_server: false,
+            server_error: None,
+            deleting: None,
             agent,
             options,
             request: generation,
@@ -163,6 +188,53 @@ impl NewChat {
                 .collect(),
         });
         self.browse_info = self.folder_info.clone();
+    }
+
+    /// Debug builds: `extras` and `form` show an extra folder and a saved server switched on (`form`
+    /// also opens the Add server form), `continue` the saved conversations, `continue-delete` with the
+    /// delete confirmation open.
+    #[cfg(debug_assertions)]
+    pub fn preview_setup(&mut self, kind: &str) {
+        let server = |name: &str, url: &str| McpServer {
+            name: name.into(),
+            url: url.into(),
+            headers: Vec::new(),
+        };
+        self.saved_servers = vec![
+            server("docs", "https://mcp.example.com/docs"),
+            server("tracker", "https://mcp.example.com/tracker"),
+        ];
+        match kind {
+            "extras" | "form" => {
+                self.extra_dirs =
+                    vec!["~/shared/design-system".into(), "/srv/data/fixtures".into()];
+                self.chosen_servers = vec!["docs".into()];
+                self.adding_server = kind == "form";
+            }
+            _ => {
+                self.mode = 1;
+                let saved = |id: &str, title: &str, ago: i64| SavedSession {
+                    session_id: id.into(),
+                    title: title.into(),
+                    updated_at: Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64)
+                            - ago,
+                    ),
+                    cwd: "/home/dev/projects/api-server".into(),
+                };
+                let list = vec![
+                    saved("a", "Fix the pagination bug in the orders endpoint", 7200),
+                    saved("b", "Move the job queue to a worker pool", 86_400 * 2),
+                    saved("c", "Review the migration plan", 86_400 * 9),
+                ];
+                self.listing = Listing::Loaded(list);
+                if kind == "continue-delete" {
+                    self.delete_asked = Some("b".into());
+                }
+            }
+        }
     }
 
     pub fn display_path(&self, path: &str) -> String {
@@ -425,6 +497,146 @@ impl NewChat {
         )
     }
 
+    /// `~` and absolute paths only; a duplicate is ignored. False says nothing was added.
+    pub fn add_folder(&mut self, text: &str) -> bool {
+        let path = text.trim();
+        if path.is_empty() {
+            return false;
+        }
+        if !(path.starts_with('/') || path == "~" || path.starts_with("~/")) {
+            self.error = Some("An extra folder is an absolute path, or starts with ~.".into());
+            return false;
+        }
+        self.error = None;
+        if !self.extra_dirs.iter().any(|d| d == path) {
+            self.extra_dirs.push(path.to_string());
+        }
+        true
+    }
+
+    pub fn remove_folder(&mut self, index: usize) {
+        if index < self.extra_dirs.len() {
+            self.extra_dirs.remove(index);
+        }
+    }
+
+    fn expanded_dirs(&self) -> Vec<String> {
+        let home = self.home.as_deref().unwrap_or("");
+        self.extra_dirs
+            .iter()
+            .map(|d| host::expand_cwd(d, home))
+            .collect()
+    }
+
+    fn extras_need_home(&self) -> bool {
+        self.home.is_none() && self.extra_dirs.iter().any(|d| host::needs_home(d))
+    }
+
+    pub fn toggle_server(&mut self, name: &str) {
+        if let Some(i) = self.chosen_servers.iter().position(|n| n == name) {
+            self.chosen_servers.remove(i);
+        } else if self.saved_servers.iter().any(|s| s.name == name) {
+            self.chosen_servers.push(name.to_string());
+        }
+    }
+
+    pub fn set_adding_server(&mut self, adding: bool) {
+        self.adding_server = adding;
+        self.server_error = None;
+    }
+
+    /// Saves a new server to the machine's list (the secret store) and leaves it switched off.
+    pub fn save_server(
+        &mut self,
+        name: &str,
+        url: &str,
+        headers: &str,
+        library: Option<&McpLibrary>,
+    ) -> bool {
+        let result = (|| {
+            let headers = session_setup::parse_header_lines(headers)?;
+            let server = McpServer {
+                name: name.trim().to_string(),
+                url: url.trim().to_string(),
+                headers,
+            };
+            server.validate(&self.saved_servers).map_err(String::from)?;
+            let library = library.ok_or("Secret storage is unavailable.")?;
+            let mut list = self.saved_servers.clone();
+            list.push(server);
+            library.save(&list)?;
+            Ok(list)
+        })();
+        match result {
+            Ok(list) => {
+                self.saved_servers = list;
+                self.adding_server = false;
+                self.server_error = None;
+                true
+            }
+            Err(message) => {
+                self.server_error = Some(message);
+                false
+            }
+        }
+    }
+
+    pub fn delete_server(&mut self, name: &str, library: Option<&McpLibrary>) {
+        let list: Vec<McpServer> = self
+            .saved_servers
+            .iter()
+            .filter(|s| s.name != name)
+            .cloned()
+            .collect();
+        match library.map(|l| l.save(&list)) {
+            Some(Ok(())) => {
+                self.saved_servers = list;
+                self.chosen_servers.retain(|n| n != name);
+            }
+            Some(Err(message)) => self.server_error = Some(message),
+            None => self.server_error = Some("Secret storage is unavailable.".into()),
+        }
+    }
+
+    pub fn ask_delete(&mut self, id: String) {
+        if self.continuing.is_none() && self.deleting.is_none() && self.saved(&id).is_some() {
+            self.delete_asked = Some(id);
+            self.error = None;
+        }
+    }
+
+    pub fn cancel_delete(&mut self) {
+        self.delete_asked = None;
+    }
+
+    fn saved(&self, id: &str) -> Option<&SavedSession> {
+        match &self.listing {
+            Listing::Loaded(list) => list.iter().find(|s| s.session_id == id),
+            _ => None,
+        }
+    }
+
+    /// Runs the delete on the host; the row goes once the host confirms it.
+    pub fn confirm_delete(&mut self) -> Option<ChatJob> {
+        let id = self.delete_asked.take()?;
+        if self.deleting.is_some() {
+            return None;
+        }
+        let cwd = self
+            .saved(&id)
+            .map(|s| s.cwd.clone())
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| host::expand_cwd(&self.folder, self.home.as_deref().unwrap_or("")));
+        let command = format!(
+            "{} || true",
+            host::delete_session_command(&cwd, &id, self.agent)
+        );
+        self.deleting = Some(id);
+        self.error = None;
+        self.request = next_request();
+        Some(exec(self.request, Step::DeleteSession, command))
+    }
+
     pub fn browse(&mut self, _now: Duration) -> Option<ChatJob> {
         if self.busy || self.continuing.is_some() || self.creating || self.folder_loading {
             return None;
@@ -474,7 +686,12 @@ impl NewChat {
 
     /// `load` continues that earlier conversation instead of starting one.
     pub fn start(&mut self, load: Option<String>) -> Option<ChatJob> {
-        if self.busy || self.creating || self.continuing.is_some() || self.browsing {
+        if self.busy
+            || self.creating
+            || self.continuing.is_some()
+            || self.browsing
+            || self.deleting.is_some()
+        {
             return None;
         }
         self.folder_request = next_request();
@@ -493,6 +710,8 @@ impl NewChat {
             multi: self.multi,
             agent: self.agent,
             start: self.options.start_options(),
+            dirs: self.expanded_dirs(),
+            mcp: self.chosen_servers.clone(),
         }
     }
 
@@ -527,7 +746,11 @@ impl NewChat {
         host_name: &str,
     ) -> Next {
         match step {
-            Step::Check | Step::Home | Step::Validate if request != self.request => Next::Nothing,
+            Step::Check | Step::Home | Step::Validate | Step::DeleteSession
+                if request != self.request =>
+            {
+                Next::Nothing
+            }
             Step::ListHome | Step::Sessions if request != self.list_request => Next::Nothing,
             Step::Folder | Step::FolderHome | Step::CreateFolder
                 if request != self.folder_request =>
@@ -599,13 +822,16 @@ impl NewChat {
                     return self.stop(message);
                 }
                 self.multi = result.as_ref().is_ok_and(|o| host::host_multi_client(o));
-                if host::needs_home(&self.folder) {
+                if host::needs_home(&self.folder) || self.extras_need_home() {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
                 }
                 self.validate(&host::expand_cwd(&self.folder, ""))
             }
             Step::Home => match result {
                 Ok(home) if home.trim().starts_with('/') => {
+                    if self.home.is_none() {
+                        self.home = Some(home.trim().trim_end_matches('/').to_string());
+                    }
                     self.validate(&host::expand_cwd(&self.folder, home.trim()))
                 }
                 _ => self.stop("Couldn't read the host's home folder.".into()),
@@ -623,6 +849,24 @@ impl NewChat {
                     Next::Nothing
                 }
             },
+            Step::DeleteSession => {
+                let Some(id) = self.deleting.take() else {
+                    return Next::Nothing;
+                };
+                let outcome = match result {
+                    Ok(output) => host::parse_delete_session(&output, &id),
+                    Err(e) => Err(exec_failure(&e)),
+                };
+                match outcome {
+                    Ok(()) => {
+                        if let Listing::Loaded(list) = &mut self.listing {
+                            list.retain(|s| s.session_id != id);
+                        }
+                    }
+                    Err(message) => self.error = Some(message),
+                }
+                Next::Nothing
+            }
             Step::Sessions => {
                 self.listing = match result {
                     Ok(output) => {
@@ -705,6 +949,137 @@ mod tests {
         let (_, step) = exec_of(nc.tick(Duration::ZERO));
         assert_eq!(step, Step::Folder);
         assert!(nc.error.is_some());
+    }
+
+    fn saved(id: &str) -> SavedSession {
+        SavedSession {
+            session_id: id.into(),
+            title: id.into(),
+            updated_at: None,
+            cwd: "/projects/api".into(),
+        }
+    }
+
+    #[test]
+    fn deleting_a_saved_conversation_asks_first_then_runs_the_host_command_and_drops_the_row() {
+        let mut nc = dialog("/projects/api");
+        nc.listing = Listing::Loaded(vec![saved("a"), saved("b")]);
+        nc.ask_delete("missing".into());
+        assert!(nc.delete_asked.is_none());
+        nc.ask_delete("a".into());
+        nc.cancel_delete();
+        assert!(nc.confirm_delete().is_none());
+        nc.ask_delete("a".into());
+        let job = nc.confirm_delete().unwrap();
+        let ChatJob::Exec { command, .. } = &job else {
+            panic!()
+        };
+        assert!(
+            command.contains("sessions '/projects/api' --delete 'a'")
+                || command.contains("sessions /projects/api --delete a"),
+            "{command}"
+        );
+        assert_eq!(nc.deleting.as_deref(), Some("a"));
+        reply(&mut nc, job, "{\"deleted\":\"a\"}\n");
+        let Listing::Loaded(list) = &nc.listing else {
+            panic!()
+        };
+        assert_eq!(list.len(), 1);
+        assert!(nc.deleting.is_none() && nc.error.is_none());
+    }
+
+    #[test]
+    fn extra_folders_are_absolute_or_tilde_deduplicated_and_expanded_with_the_home() {
+        let mut nc = dialog("/projects/api");
+        assert!(!nc.add_folder("  "));
+        assert!(!nc.add_folder("relative/dir"));
+        assert!(nc.error.is_some());
+        assert!(nc.add_folder("~/shared"));
+        assert!(nc.add_folder("/data/lib"));
+        assert!(nc.add_folder("/data/lib"));
+        assert_eq!(nc.extra_dirs, ["~/shared", "/data/lib"]);
+        assert_eq!(nc.expanded_dirs(), ["/home/dev/shared", "/data/lib"]);
+        nc.remove_folder(0);
+        assert_eq!(nc.extra_dirs, ["/data/lib"]);
+        let Next::Open { dirs, .. } = nc.open_next("/projects/api".into()) else {
+            panic!()
+        };
+        assert_eq!(dirs, ["/data/lib"]);
+    }
+
+    #[test]
+    fn a_tilde_folder_makes_the_start_ask_for_the_home_first() {
+        let mut nc = dialog("/projects/api");
+        nc.home = None;
+        nc.add_folder("~/shared");
+        let check = nc.start(None).unwrap();
+        let Next::Job(home) = reply(&mut nc, check, "") else {
+            panic!("home read")
+        };
+        let ChatJob::Exec { command, .. } = &home else {
+            panic!()
+        };
+        assert_eq!(command, host::HOME);
+        let Next::Job(validate) = reply(&mut nc, home, "/home/dev\n") else {
+            panic!()
+        };
+        let Next::Open { dirs, .. } = reply(
+            &mut nc,
+            validate,
+            "__TETHER_FOLDER__\0ready\0/projects/api\0",
+        ) else {
+            panic!()
+        };
+        assert_eq!(dirs, ["/home/dev/shared"]);
+    }
+
+    fn server_form(nc: &mut NewChat, name: &str, url: &str, library: &McpLibrary) -> bool {
+        nc.save_server(name, url, "Authorization: Bearer t", Some(library))
+    }
+
+    #[test]
+    fn saved_servers_validate_persist_toggle_and_delete() {
+        let library = McpLibrary::new(
+            std::sync::Arc::new(tether_core::secrets::MemorySecretStore::default()),
+            "devbox:22",
+        );
+        let mut nc = dialog("/projects/api");
+        nc.set_adding_server(true);
+        assert!(!server_form(&mut nc, "", "https://x.test", &library));
+        assert!(nc.server_error.is_some() && nc.adding_server);
+        assert!(!server_form(&mut nc, "docs", "ftp://x", &library));
+        assert!(server_form(&mut nc, "docs", "https://x.test/mcp", &library));
+        assert!(!nc.adding_server && nc.chosen_servers.is_empty());
+        assert!(!server_form(&mut nc, "docs", "https://y.test", &library));
+        assert_eq!(library.list().len(), 1);
+        nc.toggle_server("docs");
+        nc.toggle_server("nope");
+        assert_eq!(nc.chosen_servers, ["docs"]);
+        let Next::Open { mcp, .. } = nc.open_next("/p".into()) else {
+            panic!()
+        };
+        assert_eq!(mcp, ["docs"]);
+        nc.delete_server("docs", Some(&library));
+        assert!(nc.saved_servers.is_empty() && nc.chosen_servers.is_empty());
+        assert!(library.list().is_empty());
+    }
+
+    #[test]
+    fn a_failed_delete_keeps_the_row_and_says_why() {
+        let mut nc = dialog("/projects/api");
+        nc.listing = Listing::Loaded(vec![saved("a")]);
+        nc.ask_delete("a".into());
+        let job = nc.confirm_delete().unwrap();
+        reply(
+            &mut nc,
+            job,
+            "tether: unknown acp command\nusage: tether acp ...",
+        );
+        assert_eq!(
+            nc.error.as_deref(),
+            Some("Update tether on the host to delete conversations.")
+        );
+        assert!(matches!(&nc.listing, Listing::Loaded(l) if l.len() == 1));
     }
 
     #[test]

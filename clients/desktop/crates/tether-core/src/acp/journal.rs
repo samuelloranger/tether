@@ -9,6 +9,7 @@ use super::lines::{LineError, LineSplitter};
 use super::message::{AcpId, Inbound, decode};
 use super::question::{QuestionAction, QuestionValue};
 use super::reducer::{ChatEvent, ChatState, LinkState, reduce};
+use super::session_setup::{AgentCaps, ForkSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -146,6 +147,18 @@ pub struct Journal {
     /// lines echoed back in the log are skipped since the entries above already hold them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    /// What the agent advertised in its last `initialize`; read without a live agent, e.g. to offer Resume.
+    #[serde(default)]
+    pub capabilities: Option<AgentCaps>,
+    /// A branch continues this conversation natively when the agent can fork.
+    #[serde(default)]
+    pub fork_source: Option<ForkSource>,
+    /// Extra folders the agent may work in, absolute.
+    #[serde(default)]
+    pub additional_directories: Vec<String>,
+    /// Names of the saved MCP servers this chat uses; the saved list holds the rest.
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
 }
 
 fn first_request_id() -> i64 {
@@ -160,6 +173,10 @@ impl Default for Journal {
             next_request_id: 1,
             entries: Vec::new(),
             client_id: None,
+            capabilities: None,
+            fork_source: None,
+            additional_directories: Vec::new(),
+            mcp_servers: Vec::new(),
         }
     }
 }
@@ -714,6 +731,16 @@ mod tests {
             QuestionValue::Text("green".into()),
         )])));
         journal.loaded_session_id = Some("x".into());
+        journal.capabilities = Some(AgentCaps {
+            resume: true,
+            ..AgentCaps::default()
+        });
+        journal.fork_source = Some(ForkSource {
+            session_id: "src".into(),
+            message_id: Some("m".into()),
+        });
+        journal.additional_directories = vec!["/a".into()];
+        journal.mcp_servers = vec!["docs".into()];
         let back: Journal =
             serde_json::from_str(&serde_json::to_string(&journal).unwrap()).unwrap();
         assert_eq!(back, journal);

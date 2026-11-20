@@ -280,6 +280,8 @@ pub struct AcpResult {
     /// `_session/steering`'s answer: `injected`, or `promptRequired` when no turn was running.
     /// codex-acp starts a turn itself instead (`startedNewTurn`).
     pub steer_outcome: Option<String>,
+    /// What an `initialize` answer says the agent supports; `None` for any other answer.
+    pub capabilities: Option<super::session_setup::AgentCaps>,
 }
 
 impl AcpResult {
@@ -466,6 +468,7 @@ fn decode_result(result: &Json) -> AcpResult {
         config_options: objects(result.get("configOptions")).map(|o| config_options(&o)),
         session_established: result.contains_key("modes") || result.contains_key("sessionId"),
         steer_outcome: string(result.get("outcome")),
+        capabilities: capabilities.map(super::session_setup::AgentCaps::from_agent_capabilities),
     }
 }
 

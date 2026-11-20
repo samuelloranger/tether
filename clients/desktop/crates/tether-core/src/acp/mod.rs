@@ -22,6 +22,7 @@ pub mod options;
 pub mod organization;
 pub mod question;
 pub mod reducer;
+pub mod session_setup;
 pub mod slash;
 pub mod tooldetail;
 pub mod verbs;

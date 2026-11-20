@@ -2992,3 +2992,316 @@ fn the_folder_field_shows_what_was_typed_not_an_abbreviation() {
     h.msg(ChatMsg::NewChatFolder("/home/sam/e".into()));
     assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam/e");
 }
+
+const FORK_CAPS: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"fork":{},"resume":{},"delete":{}},"mcpCapabilities":{"http":true}}}}"#;
+
+impl Harness {
+    /// A chat whose agent advertised fork and resume, through session/new as `s1`.
+    fn capable_chat(&mut self) -> (String, u64) {
+        let name = self.new_chat();
+        let (_, generation, _) = self.open_stream();
+        self.feed(&name, generation, FORK_CAPS);
+        self.writes();
+        self.feed(
+            &name,
+            generation,
+            r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}"#,
+        );
+        self.settle();
+        (name, generation)
+    }
+
+    fn ask(
+        &mut self,
+        name: &str,
+        generation: u64,
+        id: i64,
+        text: &str,
+        reply: &str,
+        message: &str,
+    ) {
+        self.msg(ChatMsg::DraftEdited {
+            text: text.into(),
+            cursor_byte: text.len(),
+        });
+        self.msg(ChatMsg::Send);
+        self.writes();
+        self.feed(
+            name,
+            generation,
+            &serde_json::json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
+                "sessionUpdate":"agent_message_chunk","messageId":message,"content":{"type":"text","text":reply}}}})
+            .to_string(),
+        );
+        self.feed(
+            name,
+            generation,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn"}})
+                .to_string(),
+        );
+    }
+
+    /// Branches the chat in front before its last prompt and opens the branch's stream.
+    fn branch_last(&mut self, last_user_id: i64) -> (String, u64) {
+        self.msg(ChatMsg::Branch(format!("item:{last_user_id}")));
+        self.msg(ChatMsg::BranchCreate {
+            title: "Alternative".into(),
+            prompt: "Take another route".into(),
+        });
+        self.exec(|t| matches!(t, ExecTag::Organize { .. }), "{}");
+        let name = self.chats.active().unwrap().to_string();
+        let (_, generation, _) = self.open_stream();
+        (name, generation)
+    }
+}
+
+#[test]
+fn a_branch_forks_the_source_session_at_the_last_assistant_message_and_drops_the_text_seed() {
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.ask(
+        &name,
+        generation,
+        3,
+        "first question",
+        "first answer",
+        "m-1",
+    );
+    h.ask(
+        &name,
+        generation,
+        4,
+        "second question",
+        "second answer",
+        "m-2",
+    );
+    let last_user = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .filter(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .map(|i| i.id)
+        .next_back()
+        .unwrap();
+    let (branch, generation) = h.branch_last(last_user);
+    assert_ne!(branch, name);
+    let journal = h.files.journal(&branch);
+    assert_eq!(journal.fork_source.as_ref().unwrap().session_id, "s1");
+    assert_eq!(
+        journal.fork_source.as_ref().unwrap().message_id.as_deref(),
+        Some("m-1")
+    );
+    assert!(!h.files.branch(&branch).unwrap().context.is_empty());
+    h.feed(&branch, generation, FORK_CAPS);
+    let writes = h.writes();
+    let fork: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    assert_eq!(fork["method"], "session/fork");
+    assert_eq!(fork["params"]["sessionId"], "s1");
+    assert_eq!(
+        fork["params"]["_meta"]["jetbrains"]["air"]["fork"]["messageId"],
+        "m-1"
+    );
+    h.feed(
+        &branch,
+        generation,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":"forked","modes":{}}})
+            .to_string(),
+    );
+    assert_eq!(
+        h.files.journal(&branch).session_id.as_deref(),
+        Some("forked")
+    );
+    assert!(h.files.branch(&branch).unwrap().context.is_empty());
+}
+
+#[test]
+fn a_refused_fork_shows_no_error_and_falls_back_to_a_new_session_with_the_seed() {
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.ask(
+        &name,
+        generation,
+        3,
+        "first question",
+        "first answer",
+        "m-1",
+    );
+    h.ask(
+        &name,
+        generation,
+        4,
+        "second question",
+        "second answer",
+        "m-2",
+    );
+    let last_user = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .filter(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .map(|i| i.id)
+        .next_back()
+        .unwrap();
+    let (branch, generation) = h.branch_last(last_user);
+    h.feed(&branch, generation, FORK_CAPS);
+    h.writes();
+    h.feed(
+        &branch,
+        generation,
+        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"cannot fork"}}"#,
+    );
+    let writes = h.writes();
+    assert!(
+        writes[0].contains("\"method\":\"session/new\""),
+        "{writes:?}"
+    );
+    h.feed(
+        &branch,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"sessionId":"fresh","modes":{}}}"#,
+    );
+    h.settle();
+    let s = h.screen();
+    assert_eq!(s.notice, "");
+    assert!(
+        s.rows
+            .iter()
+            .all(|r| !format!("{:?}", r.body).contains("cannot fork"))
+    );
+    assert!(h.files.journal(&branch).fork_source.is_none());
+    assert!(!h.files.branch(&branch).unwrap().context.is_empty());
+}
+
+#[test]
+fn an_ended_chat_offers_resume_only_when_the_agent_advertised_it_and_revives_the_same_chat() {
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation,
+    });
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Loss,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\tended\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    let s = h.screen();
+    assert_eq!(s.header.phase_word, "Ended");
+    assert!(s.composer.can_resume);
+    h.msg(ChatMsg::Resume);
+    let jobs = h.take();
+    let (_, new_generation, command) = h.dial_of(&jobs).expect("a dial");
+    assert!(
+        command.contains(&format!("attach {name} "))
+            || command.contains(&format!("attach '{name}'")),
+        "{command}"
+    );
+    assert!(
+        command.contains("--spawn") && command.ends_with("--revive"),
+        "{command}"
+    );
+    h.jobs = jobs;
+    h.msg(ChatMsg::Dialed {
+        name: name.clone(),
+        generation: new_generation,
+        result: Ok(()),
+    });
+    h.exec(|t| matches!(t, ExecTag::Answers { .. }), "{}");
+    let writes = h.writes();
+    let init: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    assert_eq!(init["method"], "initialize");
+    h.feed(
+        &name,
+        new_generation,
+        &FORK_CAPS.replace("\"id\":1", &format!("\"id\":{}", init["id"])),
+    );
+    let writes = h.writes();
+    let resume: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    assert_eq!(resume["method"], "session/resume");
+    assert_eq!(resume["params"]["sessionId"], "s1");
+    assert_eq!(resume["params"]["cwd"], "/home/sam/proj");
+    h.feed(
+        &name,
+        new_generation,
+        &serde_json::json!({"jsonrpc":"2.0","id":resume["id"],"result":{"modes":{}}}).to_string(),
+    );
+    h.settle();
+    let s = h.screen();
+    assert_eq!(s.notice, "");
+    assert!(!s.composer.can_resume);
+    assert_eq!(s.header.phase, 2);
+}
+
+#[test]
+fn resume_is_not_offered_without_the_capability_and_a_failed_revive_says_so() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation,
+    });
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Loss,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\tended\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    assert!(!h.screen().composer.can_resume);
+
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation,
+    });
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Loss,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\tended\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    h.msg(ChatMsg::Resume);
+    let jobs = h.take();
+    let (_, new_generation, _) = h.dial_of(&jobs).unwrap();
+    h.jobs = jobs;
+    h.msg(ChatMsg::Dialed {
+        name: name.clone(),
+        generation: new_generation,
+        result: Ok(()),
+    });
+    h.exec(|t| matches!(t, ExecTag::Answers { .. }), "{}");
+    h.writes();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation: new_generation,
+    });
+    assert_eq!(
+        h.screen().notice,
+        "Couldn't resume this chat. Update tether on the host, or start a new chat."
+    );
+}
