@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,33 +26,73 @@ type managedAgent struct {
 	Package string
 	Default string
 	Bin     string
+	// RegistryID names the adapter in the official ACP Registry, the source of "latest".
+	RegistryID string
 	// The engine the adapter bundles, read from its installed package.json.
 	EngineName, EnginePackage, EngineField string
 }
 
 var managedAgents = []managedAgent{
-	{Key: "claude", Package: "@agentclientprotocol/claude-agent-acp", Default: "0.95.0", Bin: "claude-agent-acp",
+	{Key: "claude", Package: "@agentclientprotocol/claude-agent-acp", Default: "0.95.0", Bin: "claude-agent-acp", RegistryID: "claude-acp",
 		EngineName: "Claude Code", EnginePackage: "@anthropic-ai/claude-agent-sdk", EngineField: "claudeCodeVersion"},
-	{Key: "codex", Package: "@agentclientprotocol/codex-acp", Default: "2.3.0", Bin: "codex-acp",
+	{Key: "codex", Package: "@agentclientprotocol/codex-acp", Default: "2.3.0", Bin: "codex-acp", RegistryID: "codex-acp",
 		EngineName: "Codex", EnginePackage: "@openai/codex", EngineField: "version"},
 }
 
 const managedSpawnPrefix = "tether acp agent "
 
+const acpRegistryURL = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"
+
 var (
-	acpLatestTTL     = 24 * time.Hour
-	acpNpmTimeout    = 5 * time.Minute
-	acpSmokeTimeout  = 90 * time.Second
-	npmLatestVersion = func(pkg string) (string, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, "npm", "view", pkg, "version").Output()
-		if err != nil {
-			return "", fmt.Errorf("npm view %s: %w", pkg, err)
+	acpLatestTTL    = time.Hour
+	acpNpmTimeout   = 5 * time.Minute
+	acpSmokeTimeout = 90 * time.Second
+	acpCLITimeout   = 10 * time.Minute
+	// latestRelease answers "registry:<id>" from the ACP Registry and "npm:<package>" from npm.
+	latestRelease = func(source string) (string, error) {
+		kind, name, _ := strings.Cut(source, ":")
+		client := &http.Client{Timeout: 20 * time.Second}
+		switch kind {
+		case "registry":
+			var reg struct {
+				Agents []struct {
+					ID      string `json:"id"`
+					Version string `json:"version"`
+				} `json:"agents"`
+			}
+			if err := getJSON(client, acpRegistryURL, &reg); err != nil {
+				return "", err
+			}
+			for _, a := range reg.Agents {
+				if a.ID == name {
+					return a.Version, nil
+				}
+			}
+			return "", fmt.Errorf("%s is not in the ACP Registry", name)
+		case "npm":
+			var pkg struct {
+				Version string `json:"version"`
+			}
+			if err := getJSON(client, "https://registry.npmjs.org/"+strings.Replace(name, "/", "%2f", 1)+"/latest", &pkg); err != nil {
+				return "", err
+			}
+			return pkg.Version, nil
 		}
-		return strings.TrimSpace(string(out)), nil
+		return "", fmt.Errorf("unknown release source %q", source)
 	}
 )
+
+func getJSON(client *http.Client, url string, into any) error {
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s answered %s", url, resp.Status)
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(into)
+}
 
 var npmInstall = func(prefix, spec string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), acpNpmTimeout)
@@ -160,18 +202,23 @@ func agentKeys() string {
 }
 
 type agentVersion struct {
+	// Kind is "adapter" (the ACP adapter chats run) or "cli" (the user's own agent CLI on the host).
+	Kind    string `json:"kind"`
 	Agent   string `json:"agent"`
-	Package string `json:"package"`
+	Package string `json:"package,omitempty"`
 	// Version runs new chats; Managed is false while it is still the apps' old pinned default.
 	Version  string `json:"version"`
 	Managed  bool   `json:"managed"`
 	Engine   string `json:"engine,omitempty"`
 	Previous string `json:"previous,omitempty"`
 	Latest   string `json:"latest,omitempty"`
-	// CheckedAt is when Latest was read from npm (unix); Error says why it could not be.
+	// CheckedAt is when Latest was read (unix); Error says why it could not be.
 	CheckedAt       int64  `json:"checkedAt,omitempty"`
 	UpdateAvailable bool   `json:"updateAvailable"`
 	Error           string `json:"error,omitempty"`
+	// Command updates a CLI; Runnable says `acp update <agent> --cli` can run it, else the user does.
+	Command  string `json:"command,omitempty"`
+	Runnable bool   `json:"runnable,omitempty"`
 }
 
 type latestEntry struct {
@@ -189,24 +236,26 @@ func readLatest() map[string]latestEntry {
 	return out
 }
 
-// latestFor reads npm at most once per acpLatestTTL unless refresh; a failed read keeps the last answer.
-func latestFor(a managedAgent, cache map[string]latestEntry, refresh bool, now time.Time) (latestEntry, error) {
-	entry, ok := cache[a.Package]
+// latestFor asks a source at most once per acpLatestTTL unless refresh; a failed read keeps the
+// last answer and waits out the TTL too, so an offline host isn't asked on every check.
+func latestFor(source string, cache map[string]latestEntry, refresh bool, now time.Time) (latestEntry, error) {
+	entry, ok := cache[source]
 	if ok && !refresh && now.Sub(time.Unix(entry.CheckedAt, 0)) < acpLatestTTL {
 		return entry, nil
 	}
-	v, err := npmLatestVersion(a.Package)
+	v, err := latestRelease(source)
 	if err != nil {
+		cache[source] = latestEntry{Version: entry.Version, CheckedAt: now.Unix()}
 		return entry, err
 	}
 	entry = latestEntry{Version: v, CheckedAt: now.Unix()}
-	cache[a.Package] = entry
+	cache[source] = entry
 	return entry, nil
 }
 
 func acpVersions(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("acp versions", flag.ContinueOnError)
-	refresh := fs.Bool("refresh", false, "ask npm now instead of using the day-old answer")
+	refresh := fs.Bool("refresh", false, "ask now instead of using the answer from the last hour")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -217,15 +266,31 @@ func acpVersions(args []string, w io.Writer) error {
 	now := time.Now()
 	enc := json.NewEncoder(w)
 	for _, a := range managedAgents {
-		line := agentVersion{Agent: a.Key, Package: a.Package, Version: a.running(), Managed: a.installed() != "",
+		line := agentVersion{Kind: "adapter", Agent: a.Key, Package: a.Package, Version: a.running(), Managed: a.installed() != "",
 			Previous: a.readPointer("previous")}
 		line.Engine = a.engineVersion(line.Version, line.Managed)
-		entry, err := latestFor(a, cache, *refresh, now)
+		entry, err := latestFor("registry:"+a.RegistryID, cache, *refresh, now)
 		if err != nil {
 			line.Error = clip(err.Error(), 200)
 		}
 		line.Latest, line.CheckedAt = entry.Version, entry.CheckedAt
 		line.UpdateAvailable = line.Latest != "" && versionLess(line.Version, line.Latest)
+		_ = enc.Encode(line)
+	}
+	for _, c := range hostCLIs {
+		found, ok := findHostCLI(c)
+		if !ok {
+			continue
+		}
+		line := agentVersion{Kind: "cli", Agent: c.Agent, Version: found.version}
+		line.Package = c.pkg(found.version)
+		line.Command, line.Runnable = c.plan(found)
+		entry, err := latestFor("npm:"+line.Package, cache, *refresh, now)
+		if err != nil {
+			line.Error = clip(err.Error(), 200)
+		}
+		line.Latest, line.CheckedAt = entry.Version, entry.CheckedAt
+		line.UpdateAvailable = line.Version != "" && line.Latest != "" && versionLess(line.Version, line.Latest)
 		_ = enc.Encode(line)
 	}
 	return writePrivateJSON(latestPath(), cache)
@@ -302,7 +367,10 @@ func versionParts(v string) []int {
 
 func acpUpdate(args []string, w io.Writer) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: acp update <%s> [--version V] [--rollback]", agentKeys())
+		return fmt.Errorf("usage: acp update <%s> [--version V] [--rollback] | acp update <agent> --cli", agentKeys())
+	}
+	if slices.Contains(args[1:], "--cli") {
+		return updateHostCLI(args[0], w)
 	}
 	a, ok := lookupManagedAgent(args[0])
 	if !ok {
@@ -341,7 +409,7 @@ func acpUpdate(args []string, w io.Writer) error {
 	}
 	version := *want
 	if version == "" {
-		if version, err = npmLatestVersion(a.Package); err != nil {
+		if version, err = latestRelease("registry:" + a.RegistryID); err != nil {
 			return err
 		}
 	}

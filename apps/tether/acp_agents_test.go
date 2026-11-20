@@ -75,18 +75,27 @@ func TestACPAgentRunsTheInstalledAdapterWithItsBinFirstOnPath(t *testing.T) {
 	}
 }
 
-func TestACPVersionsReportsAndCachesNpmForADay(t *testing.T) {
+func TestACPVersionsReportsAdaptersAndCLIsAndCachesForAnHour(t *testing.T) {
 	acpEnv(t)
 	calls := 0
-	old := npmLatestVersion
-	npmLatestVersion = func(pkg string) (string, error) {
+	oldLatest, oldFind := latestRelease, findHostCLI
+	defer func() { latestRelease, findHostCLI = oldLatest, oldFind }()
+	latestRelease = func(source string) (string, error) {
 		calls++
-		if strings.Contains(pkg, "codex") {
-			return "", fmt.Errorf("offline")
+		switch source {
+		case "registry:claude-acp":
+			return "0.109.0", nil
+		case "npm:@anthropic-ai/claude-code":
+			return "2.1.329", nil
 		}
-		return "0.109.0", nil
+		return "", fmt.Errorf("offline")
 	}
-	defer func() { npmLatestVersion = old }()
+	findHostCLI = func(c hostCLI) (foundCLI, bool) {
+		if c.Agent != "claude" {
+			return foundCLI{}, false
+		}
+		return foundCLI{program: "/x/claude", realPath: "/x/claude", version: "2.1.327"}, true
+	}
 	read := func(args ...string) map[string]agentVersion {
 		var b bytes.Buffer
 		if err := acpVersions(args, &b); err != nil {
@@ -98,48 +107,93 @@ func TestACPVersionsReportsAndCachesNpmForADay(t *testing.T) {
 			if err := json.Unmarshal([]byte(l), &v); err != nil {
 				t.Fatal(err)
 			}
-			out[v.Agent] = v
+			out[v.Kind+":"+v.Agent] = v
 		}
 		return out
 	}
 	got := read()
-	claude, codex := got["claude"], got["codex"]
-	if claude.Version != "0.95.0" || claude.Managed || claude.Latest != "0.109.0" || !claude.UpdateAvailable || claude.CheckedAt == 0 {
-		t.Fatalf("claude %+v", claude)
+	adapter, codex, cli := got["adapter:claude"], got["adapter:codex"], got["cli:claude"]
+	if adapter.Version != "0.95.0" || adapter.Managed || adapter.Latest != "0.109.0" || !adapter.UpdateAvailable || adapter.CheckedAt == 0 {
+		t.Fatalf("adapter %+v", adapter)
 	}
 	if codex.Version != "2.3.0" || codex.UpdateAvailable || !strings.Contains(codex.Error, "offline") {
 		t.Fatalf("codex %+v", codex)
 	}
+	if cli.Version != "2.1.327" || cli.Latest != "2.1.329" || !cli.UpdateAvailable || cli.Command != "claude update" || !cli.Runnable {
+		t.Fatalf("cli %+v", cli)
+	}
+	if _, ok := got["cli:codex"]; ok {
+		t.Fatal("a CLI that isn't installed was listed")
+	}
 	read()
 	if calls != 3 {
-		t.Fatalf("npm asked %d times, want 3 (claude cached, codex retried)", calls)
+		t.Fatalf("asked %d times, want 3: answers and failures both wait out the hour", calls)
 	}
 	read("--refresh")
-	if calls != 5 {
+	if calls != 6 {
 		t.Fatalf("refresh asked %d times", calls)
 	}
 	cache := readLatest()
-	entry := cache["@agentclientprotocol/claude-agent-acp"]
-	entry.CheckedAt = time.Now().Add(-25 * time.Hour).Unix()
-	cache["@agentclientprotocol/claude-agent-acp"] = entry
+	entry := cache["registry:claude-acp"]
+	entry.CheckedAt = time.Now().Add(-2 * time.Hour).Unix()
+	cache["registry:claude-acp"] = entry
 	_ = writePrivateJSON(latestPath(), cache)
 	read()
 	if calls != 7 {
-		t.Fatalf("a day-old answer was not refreshed: %d", calls)
+		t.Fatalf("an hour-old answer was not refreshed: %d", calls)
+	}
+}
+
+func TestHostCLIUpdatePlans(t *testing.T) {
+	codex, _ := lookupHostCLI("codex")
+	if cmd, ok := codex.plan(foundCLI{version: "0.171.0"}); cmd != "codex update" || !ok {
+		t.Fatalf("new codex %q %v", cmd, ok)
+	}
+	if cmd, ok := codex.plan(foundCLI{version: "0.120.0", realPath: "/usr/lib/node_modules/@openai/codex/bin/codex.js"}); ok || cmd != "npm install -g @openai/codex@latest" {
+		t.Fatalf("old npm codex %q %v", cmd, ok)
+	}
+	if cmd, _ := codex.plan(foundCLI{version: "0.120.0", realPath: "/opt/homebrew/Cellar/codex/0.120.0/bin/codex"}); cmd != "brew upgrade codex" {
+		t.Fatalf("old brew codex %q", cmd)
+	}
+	opencode, _ := lookupHostCLI("opencode")
+	if opencode.pkg("1.4.0") != "opencode-ai" || opencode.pkg("2.2.5") != "@opencode/cli" {
+		t.Fatal("opencode package by major")
+	}
+}
+
+func TestACPUpdateCLIRunsTheCLIsOwnUpdater(t *testing.T) {
+	acpEnv(t)
+	bin := t.TempDir()
+	state := filepath.Join(bin, "version")
+	_ = os.WriteFile(state, []byte("2.2.5"), 0o600)
+	script := "#!/bin/sh\nif [ \"$1\" = upgrade ]; then echo 2.3.2 > " + state + "; echo upgraded; exit 0; fi\necho \"opencode v$(cat " + state + ")\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "opencode"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	var b bytes.Buffer
+	if err := acpUpdate([]string{"opencode", "--cli"}, &b); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(b.String()) != `{"agent":"opencode","from":"2.2.5","kind":"cli","to":"2.3.2"}` {
+		t.Fatalf("out %q", b.String())
+	}
+	if err := acpUpdate([]string{"copilot", "--cli"}, &b); err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("missing CLI: %v", err)
 	}
 }
 
 func TestACPUpdateInstallsChecksSwitchesAndRollsBack(t *testing.T) {
 	acpEnv(t)
 	t.Setenv("PATH", "/usr/bin:/bin")
-	oldInstall, oldLatest := npmInstall, npmLatestVersion
-	defer func() { npmInstall, npmLatestVersion = oldInstall, oldLatest }()
+	oldInstall, oldLatest := npmInstall, latestRelease
+	defer func() { npmInstall, latestRelease = oldInstall, oldLatest }()
 	body := initAnswer
 	npmInstall = func(prefix, spec string) ([]byte, error) {
 		installFake(t, prefix, "claude-agent-acp", body)
 		return nil, nil
 	}
-	npmLatestVersion = func(string) (string, error) { return "1.0.0", nil }
+	latestRelease = func(string) (string, error) { return "1.0.0", nil }
 	a, _ := lookupManagedAgent("claude")
 	update := func(args ...string) (map[string]string, error) {
 		var b bytes.Buffer
