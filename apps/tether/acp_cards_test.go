@@ -12,7 +12,7 @@ import (
 )
 
 func TestChatCardsRegistrationPreservesServersAndIsIdempotent(t *testing.T) {
-	for _, method := range []string{"session/new", "session/load", "session/resume"} {
+	for _, method := range []string{"session/new", "session/load", "session/resume", "session/fork"} {
 		line := []byte(`{"jsonrpc":"2.0","id":"phone-2","method":"` + method + `","params":{"cwd":"/work","sessionId":"s","mcpServers":[{"name":"existing","command":"tool"}]}}`)
 		out := withChatCards(line, "claude-agent-acp")
 		var msg struct {
