@@ -53,6 +53,8 @@ type acpMeta struct {
 	Tasks int    `json:"tasks,omitempty"`
 	// MultiClient is set by a daemon that lets several clients attach and echoes named ones.
 	MultiClient bool `json:"multiClient,omitempty"`
+	// AgentVersion is the adapter version a `tether acp agent` spawn started with; it holds for the chat's life.
+	AgentVersion string `json:"agentVersion,omitempty"`
 }
 
 func acpDir(name string) string { return filepath.Join(home(), "acp", name) }
@@ -107,7 +109,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill|agent|versions|update")
 	}
 	switch args[0] {
 	case "attach":
@@ -136,6 +138,12 @@ func runACP(args []string) error {
 		return acpOrganize(args[1:], os.Stdout)
 	case "usage":
 		return acpUsage(args[1:], os.Stdout)
+	case "agent":
+		return runACPAgent(args[1:])
+	case "versions":
+		return acpVersions(args[1:], os.Stdout)
+	case "update":
+		return acpUpdate(args[1:], os.Stdout)
 	case "kill":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: acp kill <name>")
@@ -468,7 +476,7 @@ func acpDaemon(name string) error {
 		return err
 	}
 
-	cmd := exec.Command(acpShell(), "-lc", m.Spawn)
+	cmd := exec.Command(acpShell(), "-lc", withSelf(m.Spawn))
 	cmd.Dir = m.Cwd
 	cmd.Env = acpAgentEnv(os.Environ(), name)
 	cmd.Stderr = errf
@@ -497,6 +505,9 @@ func acpDaemon(name string) error {
 	pw.Close()
 	m.Pid = os.Getpid()
 	m.MultiClient = true
+	if a, ok := lookupManagedAgent(managedSpawnKey(m.Spawn)); ok {
+		m.AgentVersion = a.running()
+	}
 	if startErr == nil {
 		m.AgentPid = cmd.Process.Pid
 		s.agentPid = m.AgentPid

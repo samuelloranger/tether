@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// defaultACPAgentCmd is the adapter `acp sessions` spawns; the app pins the same version for chats.
-const defaultACPAgentCmd = "npx -y @agentclientprotocol/claude-agent-acp@0.95.0"
+// defaultACPAgentCmd is the agent `acp sessions` spawns: Claude, at the version its chats run.
+const defaultACPAgentCmd = "tether acp agent claude"
 
 var acpSessionsTimeout = 15 * time.Second
 
@@ -35,6 +35,8 @@ type acpStatusLine struct {
 	Tasks int `json:"tasks,omitempty"`
 	// Spawn is the command that started the agent, so a client can tell which agent a chat runs.
 	Spawn string `json:"spawn,omitempty"`
+	// AgentVersion is the adapter version of a host-managed agent (`tether acp agent`).
+	AgentVersion string `json:"agentVersion,omitempty"`
 	// MultiClient: the session's holder lets several clients attach at once (absent from older ones).
 	MultiClient       bool       `json:"multiClient,omitempty"`
 	Pinned            bool       `json:"pinned,omitempty"`
@@ -50,7 +52,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient, Spawn: m.Spawn}
+	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient, Spawn: m.Spawn, AgentVersion: m.AgentVersion}
 	organization, err := readACPOrganization(name)
 	if err != nil {
 		// Ancillary metadata must never hide a healthy agent or its pending approval.
@@ -181,7 +183,7 @@ type agentCall func(id int, method string, params any) (json.RawMessage, error)
 // withAgent runs the agent just long enough for fn's requests, after an initialize whose result
 // fn gets; doing names the work in the error of an agent that exits early.
 func withAgent(cmdline, cwd, doing string, timeout time.Duration, fn func(init json.RawMessage, call agentCall) error) error {
-	cmd := exec.Command(acpShell(), "-lc", cmdline)
+	cmd := exec.Command(acpShell(), "-lc", withSelf(cmdline))
 	if st, err := os.Stat(cwd); err == nil && st.IsDir() {
 		cmd.Dir = cwd
 	}
