@@ -298,7 +298,10 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             .map_or_else(|| name.clone(), |t| t.title.clone());
     }
     if let Some(nc) = &chats.new_chat {
+        let notice = nc.notice();
         screen.new_chat = Some(NewChatView {
+            update_unsupported: notice.unsupported,
+            notices: notice.rows,
             host: chats.host.clone(),
             browse_path: nc.display_path(&nc.browse_folder),
             crumbs: nc.crumbs(),

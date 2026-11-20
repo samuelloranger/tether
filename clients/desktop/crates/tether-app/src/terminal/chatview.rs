@@ -13,10 +13,11 @@ use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
     AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
     ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
-    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, NcServerVm,
+    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, NcNoticeVm, NcServerVm,
     PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm,
     SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
+use tether_core::acp::versions::Kind;
 
 thread_local! {
     static VIEWER_PATH: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
@@ -737,6 +738,21 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             }
             vm.set_nc_agent(i32::from(nc.agent));
             vm.set_nc_unavailable(model(nc.unavailable.clone()));
+            vm.set_nc_update_unsupported(nc.update_unsupported);
+            vm.set_nc_notices(model(
+                nc.notices
+                    .iter()
+                    .map(|n| NcNoticeVm {
+                        kind: n.kind.index(),
+                        text: n.text.as_str().into(),
+                        tone: i32::from(n.tone),
+                        busy: n.busy,
+                        update: n.update,
+                        dismiss: n.dismiss,
+                        copy: n.copy.as_str().into(),
+                    })
+                    .collect(),
+            ));
             vm.set_nc_summary(nc.summary.as_str().into());
             vm.set_nc_note(nc.note.as_str().into());
             vm.set_nc_is_reset(nc.reset);
@@ -1371,6 +1387,9 @@ pub fn wire(ui: &crate::AppWindow) {
         })
     });
     vm.on_nc_reset(|| send(ChatMsg::NewChatReset));
+    vm.on_nc_update(|kind| send(ChatMsg::NewChatUpdate(Kind::from_index(kind))));
+    vm.on_nc_dismiss_update(|kind| send(ChatMsg::NewChatDismissUpdate(Kind::from_index(kind))));
+    vm.on_nc_copy(|text| send(ChatMsg::NewChatCopy(text.into())));
 }
 
 /// A machine opens with no chat shown: whatever the last one left goes.

@@ -72,6 +72,14 @@ pub trait Remote: Send + Sync + 'static {
     /// One command on the control connection; a non-zero exit is an error and loses stdout, so
     /// callers that need the output of a failing command wrap it (`tether_core::git::wrap`).
     fn exec(&self, command: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
+    /// `exec` with its own deadline.
+    fn exec_within(
+        &self,
+        command: &str,
+        _within: std::time::Duration,
+    ) -> impl Future<Output = Result<String, ConnectError>> + Send {
+        self.exec(command)
+    }
     fn attach(
         &self,
         name: &str,
@@ -211,6 +219,14 @@ where
 
     async fn exec(&self, command: &str) -> Result<String, ConnectError> {
         self.control().await?.exec(command).await
+    }
+
+    async fn exec_within(
+        &self,
+        command: &str,
+        within: std::time::Duration,
+    ) -> Result<String, ConnectError> {
+        self.control().await?.exec_within(command, within).await
     }
 
     async fn attach(

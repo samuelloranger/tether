@@ -128,6 +128,8 @@ pub struct Preferences {
     pub chat_agent: String,
     /// The options each agent offered in its last session, per host.
     pub chat_options: OptionsCache,
+    /// Per host: whether it manages agent versions, and the update notices dismissed.
+    pub chat_managed: crate::acp::versions::ManagedState,
     /// The window's sidebar was closed with its toggle; open by default.
     pub sidebar_closed: bool,
 }
@@ -376,6 +378,7 @@ mod tests {
             chat_defaults: ChatDefaults::default(),
             chat_agent: String::new(),
             chat_options: OptionsCache::default(),
+            chat_managed: Default::default(),
             sidebar_closed: false,
         };
         p.save(&data).unwrap();
@@ -469,6 +472,7 @@ mod tests {
             chat_defaults: ChatDefaults::default(),
             chat_agent: String::new(),
             chat_options: OptionsCache::default(),
+            chat_managed: Default::default(),
             sidebar_closed: false,
         };
         assert_eq!(p, expected);
