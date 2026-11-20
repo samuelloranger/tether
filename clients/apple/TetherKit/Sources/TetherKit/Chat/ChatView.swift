@@ -501,7 +501,8 @@ struct ChatView: View {
 
   private var header: some View {
     HStack(spacing: 10) {
-      backButton
+      // Above the title so the status line's hit slop never takes a tap meant for the drawer button.
+      backButton.zIndex(1)
       titleBlock.frame(maxWidth: .infinity, alignment: .leading)
       HStack(spacing: 12) {
         connectionBadge
@@ -526,8 +527,8 @@ struct ChatView: View {
           }
         }
         .frame(width: 24, height: 44, alignment: .leading)
-        // Narrow so the title sits close; the tap area keeps a full 44pt.
-        .contentShape(Rectangle().inset(by: -10))
+        // Narrow so the title sits close; the tap area reaches the screen edge and past the glyph.
+        .contentShape(Rectangle().inset(by: -12))
     }
     .accessibilityLabel(onSessions == nil ? "Chats" : sessionsNeedYou ? "Open session list, a session needs you" : "Open session list")
     .accessibilityIdentifier(onSessions == nil ? "chatBack" : "chatSessions")
