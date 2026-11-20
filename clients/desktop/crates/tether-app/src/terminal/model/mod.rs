@@ -317,6 +317,13 @@ pub enum UiEffect {
         agent: String,
         options: Vec<tether_core::acp::message::ConfigOption>,
     },
+    /// What this device remembers about a host's agent versions: that it manages them, or an
+    /// update notice dismissed (`kind`, `agent`, `version`).
+    ChatManaged {
+        scope: String,
+        supported: Option<bool>,
+        dismissed: Option<(tether_core::acp::versions::Kind, String, String)>,
+    },
     /// The agent the last chat was started with.
     RememberChatAgent(String),
     Sidebar(tether_core::sidebar::Shown),

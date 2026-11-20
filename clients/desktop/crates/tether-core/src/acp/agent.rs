@@ -9,6 +9,9 @@ pub struct AgentProfile {
     pub label: &'static str,
     /// The command the holder spawns (`attach --spawn`).
     pub spawn: &'static str,
+    /// What a host that manages this agent's version spawns instead of `spawn`; empty for an
+    /// agent the host does not manage.
+    managed: &'static str,
     /// Found in the spawn command of a chat started with another version of the same agent.
     marker: &'static str,
     /// The option ids a new chat starts with the user's last choice for, in the order they are
@@ -26,6 +29,7 @@ pub const CLAUDE: AgentProfile = AgentProfile {
     key: "claude",
     label: "Claude",
     spawn: "npx -y @agentclientprotocol/claude-agent-acp@0.95.0",
+    managed: "tether acp agent claude",
     marker: "claude-agent-acp",
     remembered: ["model", "effort", "mode"],
     sign_in_command: "claude",
@@ -36,6 +40,7 @@ pub const CODEX: AgentProfile = AgentProfile {
     key: "codex",
     label: "Codex",
     spawn: "npx -y @agentclientprotocol/codex-acp@2.3.0",
+    managed: "tether acp agent codex",
     marker: "codex-acp",
     remembered: ["model", "reasoning_effort", "mode"],
     sign_in_command: "codex login",
@@ -46,6 +51,7 @@ pub const OPENCODE: AgentProfile = AgentProfile {
     key: "opencode",
     label: "opencode",
     spawn: "PATH=\"$HOME/.opencode/bin:$PATH\" opencode acp",
+    managed: "",
     marker: "opencode acp",
     remembered: ["model", "effort", "mode"],
     sign_in_command: "opencode auth login",
@@ -58,6 +64,7 @@ pub const COPILOT: AgentProfile = AgentProfile {
     key: "copilot",
     label: "Copilot",
     spawn: "copilot --acp",
+    managed: "",
     marker: "copilot --acp",
     remembered: ["model", "reasoning_effort", "mode"],
     sign_in_command: "copilot login",
@@ -70,11 +77,36 @@ pub const ANTIGRAVITY: AgentProfile = AgentProfile {
     key: "antigravity",
     label: "Antigravity",
     spawn: "npx -y @simonepri/refined-antigravity-acp@1.6.3 --yes",
+    managed: "",
     marker: "refined-antigravity-acp",
     remembered: ["model", "effort", "mode"],
     sign_in_command: "agy",
     needs_node: true,
 };
+
+impl AgentProfile {
+    /// The command a chat of this agent spawns: the host's managed one when it manages versions,
+    /// else the version this build pins.
+    pub fn spawn_for(&self, managed_host: bool) -> &'static str {
+        if managed_host && !self.managed.is_empty() {
+            self.managed
+        } else {
+            self.spawn
+        }
+    }
+
+    /// A host can manage this agent's adapter version (`tether acp update`).
+    pub fn host_managed(&self) -> bool {
+        !self.managed.is_empty()
+    }
+
+    /// The holder's spawn line names the managed command, possibly through the binary's full path.
+    fn spawns_managed(&self, spawn: &str) -> bool {
+        self.managed
+            .strip_prefix("tether ")
+            .is_some_and(|tail| spawn.contains(tail))
+    }
+}
 
 /// In the order the New chat picker lists them.
 pub const ALL: [&AgentProfile; 5] = [&CLAUDE, &CODEX, &OPENCODE, &COPILOT, &ANTIGRAVITY];
@@ -100,6 +132,7 @@ pub fn for_spawn(spawn: &str) -> Option<&'static AgentProfile> {
     }
     ALL.into_iter()
         .find(|p| p.spawn == spawn)
+        .or_else(|| ALL.into_iter().find(|p| p.spawns_managed(spawn)))
         .or_else(|| ALL.into_iter().find(|p| spawn.contains(p.marker)))
 }
 
@@ -175,6 +208,27 @@ mod tests {
             host::host_problems_for("node=missing", &ANTIGRAVITY)
                 .contains(&host::HostProblem::NodeMissing)
         );
+    }
+
+    #[test]
+    fn a_managed_spawn_resolves_to_its_agent() {
+        assert_eq!(for_spawn("tether acp agent claude"), Some(&CLAUDE));
+        assert_eq!(
+            for_spawn("/home/u/.local/bin/tether acp agent codex"),
+            Some(&CODEX)
+        );
+        assert_eq!(resolve(None, "tether acp agent codex"), Some(&CODEX));
+        assert_eq!(for_spawn(CODEX.spawn), Some(&CODEX));
+        assert!(!is_retired(None, "tether acp agent claude"));
+    }
+
+    #[test]
+    fn spawn_follows_the_hosts_support_and_leaves_other_agents_alone() {
+        assert_eq!(CLAUDE.spawn_for(true), "tether acp agent claude");
+        assert_eq!(CODEX.spawn_for(true), "tether acp agent codex");
+        assert_eq!(CLAUDE.spawn_for(false), CLAUDE.spawn);
+        assert_eq!(OPENCODE.spawn_for(true), OPENCODE.spawn);
+        assert_eq!(ANTIGRAVITY.spawn_for(true), ANTIGRAVITY.spawn);
     }
 
     #[test]

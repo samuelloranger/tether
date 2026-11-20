@@ -667,6 +667,11 @@ fn content_block_text(block: &Json) -> Option<String> {
     string(block.get("text"))
 }
 
+/// The `configOptions` of a `session/new` answer, or of `tether acp options`' one line.
+pub fn parse_config_options(result: &Json) -> Option<Vec<ConfigOption>> {
+    objects(result.get("configOptions")).map(|o| config_options(&o))
+}
+
 fn config_options(raw: &[&Json]) -> Vec<ConfigOption> {
     raw.iter()
         .filter_map(|option| {

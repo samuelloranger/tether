@@ -127,10 +127,47 @@ extension SSHTerminalController {
 
   var mcpServerStore: ChatMCPServerStore { ChatMCPServerStore(config: config) }
 
+  var managedAgents: ChatManagedAgentsStore { ChatManagedAgentsStore(config: config) }
+
+  /// Off the serial `control` queue: these run the agent or npm on the host for seconds to minutes.
+  private func hostRun(_ command: String, deadline: TimeInterval) async -> String? {
+    await ACPHostExec.run(command: command, config: config, store: hostKeyStore, deadline: deadline)
+  }
+
+  /// Also records whether this host manages agents, which picks the spawn command of later chats.
+  func agentVersions() async -> ACPAgentVersions.Result? {
+    guard let output = await hostRun(ACPHostCommand.versions, deadline: 60), let result = ACPAgentVersions.parse(output)
+    else { return nil }
+    managedAgents.record(result)
+    return result
+  }
+
+  /// Runs only on the user's tap. Nil once the host switched versions, else why it didn't.
+  func updateAgent(_ version: ACPAgentVersion) async -> String? {
+    guard let output = await hostRun(ACPHostCommand.update(version), deadline: 660) else {
+      return "The host didn't finish the update in time."
+    }
+    return ACPHostCommand.updateFailure(output)
+  }
+
+  /// The options a new chat in this folder would start with, read from the agent now; kept as the
+  /// cached list. Nil on a host without managed agents or when the agent didn't answer.
+  func liveOptions(folderText: String, agent: ChatAgentProfile) async -> [ACPConfigOption]? {
+    guard managedAgents.supported,
+      let cwd = await ChatRoute.extraDirectories([folderText], exec: { try await self.control.exec($0) })?.first,
+      let output = await hostRun(ACPHostCommand.options(cwd: cwd, agent: agent, managed: true), deadline: 60),
+      let options = ACPHostCommand.parseOptions(output), !options.isEmpty
+    else { return nil }
+    ChatOptionsCache(config: config).save(options, agent: agent)
+    return options
+  }
+
   /// Nil once the host confirmed the delete, else what to show.
   func deleteSavedSession(_ session: ACPSavedSession, agent: ChatAgentProfile) async -> String? {
     let control = control
-    let command = ACPHostCommand.deleteSession(cwd: session.cwd.isEmpty ? "." : session.cwd, sessionId: session.sessionId, agent: agent)
+    let command = ACPHostCommand.deleteSession(
+      cwd: session.cwd.isEmpty ? "." : session.cwd, sessionId: session.sessionId, agent: agent,
+      managed: ChatManagedAgentsStore(config: config).supported)
     guard let output = try? await ChatContinueLoader.withDeadline(30, { try await control.exec(command) }) else {
       return "The host didn't answer. Try again."
     }
@@ -145,7 +182,8 @@ extension SSHTerminalController {
 
   func savedSessions(folderText: String, agent: ChatAgentProfile = ChatAgents.claude) async -> ChatContinueLoader.Result {
     let control = control
-    return await ChatContinueLoader.load(folderText: folderText, agent: agent) { try await control.exec($0) }
+    let managed = ChatManagedAgentsStore(config: config).supported
+    return await ChatContinueLoader.load(folderText: folderText, agent: agent, managed: managed) { try await control.exec($0) }
   }
 
   func continueChat(

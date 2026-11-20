@@ -220,7 +220,8 @@ final class ChatSessionModel {
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
         command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from, client: clientId,
-          spawnCommand: agent?.spawn ?? ACPHostCommand.spawnCommand, revive: spawn && store.load().sessionId != nil))
+          spawnCommand: agent?.command(managed: ChatManagedAgentsStore(config: config).supported) ?? ACPHostCommand.spawnCommand,
+          revive: spawn && store.load().sessionId != nil))
     }
   }
 

@@ -36,6 +36,8 @@ pub struct Ctx<'a> {
     pub connected: bool,
     pub defaults: &'a ChatDefaults,
     pub mcp: Option<&'a super::mcp::McpLibrary>,
+    /// The host manages agent versions, so a new chat spawns `tether acp agent …`.
+    pub managed: bool,
 }
 
 const SNAPSHOT_EVERY: Duration = Duration::from_secs(3);
@@ -489,6 +491,7 @@ impl Session {
             &self.name,
             &self.cwd,
             spawn.then(|| self.agent.unwrap_or(&CLAUDE)),
+            ctx.managed,
             offset,
             self.client_id.as_deref(),
             self.reviving,

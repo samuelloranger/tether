@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A recorded-shape agent turn replayed over a fake stream, so the chat screen can be driven
 /// without a host: `TETHER_DEBUG_CHAT_FIXTURE=1` shows the finished turn, `=permission` stops at
-/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=workflows` a background Workflow still running (`=workflows-sheet` with its sheet open, `=workflows-ended` the sheet of one that was killed), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open, `=branch-fork` the branch sheet forking at the last prompt, `=ended` an ended chat that can resume, `=new-chat-access` the New chat sheet with extra folders and MCP servers, `=continue-delete` the delete confirmation of an earlier conversation, `=mcp-add` the Add MCP server form.
+/// the question, `=stream` drips a long reply over several seconds, `=send` types a draft and sends it into a long transcript (agent silent for `TETHER_DEBUG_REPLY_AFTER` seconds, default 8, then a long reply), `=subagents` and `=subagents-open` show a foreground and a background subagent, `=list` shows the chat list, `=question`, `=question-multi`, `=question-other` and `=question-answered` show an agent question (single choice, two questions with a multi-select and Other, Other open with the keyboard, and the resolved row), `=plan` shows a plan approval with five options, `=plan-more` with the disclosure open, `=plan-sheet` with the full plan sheet, `=queue`, `=clear` and `=signedout` show a queued message, a cleared context and the sign-in row, `=controls`, `=controls-sheet`, `=slash` and `=attach` show the options, commands and image paths, `=mention` and `=mention-all` the `@file` palette for a typed word and a bare `@`, `=codex` a Codex chat, `=tasks` two background commands with notices and a compaction (`=tasks-drawer` the drawer tags), `=workflows` a background Workflow still running (`=workflows-sheet` with its sheet open, `=workflows-ended` the sheet of one that was killed), `=images` a Read of a large image, an inline agent image and two attached thumbnails, `=image-viewer` the full-screen viewer open, `=branch-fork` the branch sheet forking at the last prompt, `=ended` an ended chat that can resume, `=new-chat-access` the New chat sheet with extra folders and MCP servers, `=continue-delete` the delete confirmation of an earlier conversation, `=mcp-add` the Add MCP server form, `=agent-update` the New chat sheet offering an adapter update, `=agent-host-old` the same on a host whose tether predates managed agents.
 enum ChatFixture {
   @MainActor
   static func cardModel(_ kind: String) -> ChatSessionModel {
@@ -965,6 +965,16 @@ enum ChatFixture {
       onDeleteSession: { _, _, _ in nil },
       mcpStore: store, initiallyOpenAccess: mode == "new-chat-access",
       initialExtraFolders: ["~/src/shared-types"], initialMCPPicks: ["linear"],
+      loadVersions: mode.hasPrefix("agent-") ? { mode == "agent-host-old" ? .unsupported : .supported([
+        "adapter:claude": ACPAgentVersion(
+          agent: "claude", version: "0.95.0", managed: false, engine: "Claude Code 2.1.309", previous: "", latest: "0.109.0",
+          updateAvailable: true, error: ""),
+        "cli:claude": ACPAgentVersion(
+          kind: .cli, agent: "claude", version: "2.1.327", managed: false, engine: "", previous: "", latest: "2.1.329",
+          updateAvailable: true, error: "", command: "claude update", runnable: true),
+      ]) } : nil,
+      onUpdateAgent: { _ in nil },
+      managedStore: ChatManagedAgentsStore(scope: "fixture-\(UUID().uuidString)"),
       onCancel: {})
   }
 
@@ -1270,7 +1280,7 @@ public struct ChatFixtureRoot: View {
     }
       .tint(TetherColors.accent)
       .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
-      .sheet(isPresented: .constant(["new-chat-access", "continue-delete"].contains(mode))) { ChatFixture.newChatSheet(mode) }
+      .sheet(isPresented: .constant(["new-chat-access", "continue-delete", "agent-update", "agent-host-old"].contains(mode))) { ChatFixture.newChatSheet(mode) }
       .sheet(isPresented: .constant(mode == "mcp-add")) {
         ChatMCPServerForm(existing: []) { _ in }
       }

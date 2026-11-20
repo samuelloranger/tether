@@ -103,6 +103,13 @@ struct NewChatSheet: View {
   var initiallyOpenAccess = false
   var initialExtraFolders: [String] = []
   var initialMCPPicks: Set<String> = []
+  /// The host's agent versions; nil leaves the update notice out.
+  var loadVersions: (() async -> ACPAgentVersions.Result?)?
+  /// Updates an agent's adapter on the host; a message is why it failed.
+  var onUpdateAgent: ((ACPAgentVersion) async -> String?)?
+  /// The options a new session in the folder starts with, read from the agent now.
+  var liveOptions: ((String, ChatAgentProfile) async -> [ACPConfigOption]?)?
+  var managedStore: ChatManagedAgentsStore?
   let onCancel: () -> Void
 
   @State private var mode: Mode = .new
@@ -129,6 +136,12 @@ struct NewChatSheet: View {
   @State private var addingServer = false
   @State private var deleting: ACPSavedSession?
   @State private var deletingNow = false
+  @State private var versions: ACPAgentVersions.Result?
+  @State private var updating: String?
+  @State private var updateMessage: String?
+  @State private var dismissedUpdates: Set<String> = []
+  @State private var freshOptions: [String: [ACPConfigOption]] = [:]
+  @State private var optionReads = 0
   @FocusState private var focused: Bool
 
   enum Listing: Equatable {
@@ -141,7 +154,7 @@ struct NewChatSheet: View {
   /// The last failure, else why the picked agent can't run here; derived so a mode change keeps it.
   private var shownFailure: String? { failure ?? unavailable[agent.key] }
   private var stored: [String: String] { storedDefaults(agent) }
-  private var cached: [ACPConfigOption] { cachedOptions(agent) }
+  private var cached: [ACPConfigOption] { freshOptions[agent.key] ?? cachedOptions(agent) }
   private var optionRows: [ChatNewOptions.Row] {
     ChatNewOptions.rows(agent: agent, stored: stored, cached: cached, changes: changes, reset: reset)
   }
@@ -172,6 +185,7 @@ struct NewChatSheet: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           agentPicker
+          agentNotice
           VStack(alignment: .leading, spacing: 6) {
             ChatFolderPicker(folder: $folder, folderInfo: $folderInfo, checkingFolder: $checkingFolder,
               creatingFolder: $creatingFolder, browsing: $browsing, focused: $focused,
@@ -212,6 +226,13 @@ struct NewChatSheet: View {
     }
     .task(id: "\(mode.rawValue)|\(agent.key)|\(folder)|\(reloads)") { await reload() }
     .task { unavailable = await checkAgents() }
+    .task {
+      let knewManaged = managedStore?.supported == true
+      versions = await loadVersions?()
+      // The first read of options ran before this host was known to manage agents.
+      if case .supported? = versions, !knewManaged { optionReads += 1 }
+    }
+    .task(id: "\(agent.key)|\(folderInfo?.ready == true ? folder : "")|\(optionReads)") { await readLiveOptions() }
     .onChange(of: folder) { _, _ in
       folderInfo = nil
       checkingFolder = true
@@ -259,6 +280,8 @@ struct NewChatSheet: View {
     if shownFailure != nil { height += 68 }
     if optionsOpen { height += optionRows.isEmpty ? 64 : CGFloat(optionRows.count) * 44 + 44 }
     height += 56
+    height += CGFloat(pendingUpdates.count) * 48
+    if updateMessage != nil || (versions == .unsupported && agent.isHostManaged) { height += 40 }
     if accessOpen { height += CGFloat(extraFolders.count + servers.count) * 44 + 44 * 3 + 12 }
     return height
   }
@@ -302,6 +325,94 @@ struct NewChatSheet: View {
     }
   }
 
+  // MARK: Agent version
+
+  /// The selected agent's adapter and CLI updates the user hasn't put off.
+  private var pendingUpdates: [ACPAgentVersion] {
+    guard case let .supported(all)? = versions else { return [] }
+    return [ACPAgentVersion.Kind.adapter, .cli].compactMap { kind in
+      guard let version = all["\(kind.rawValue):\(agent.key)"], version.updateAvailable,
+        !dismissedUpdates.contains(version.key + "@" + version.latest), managedStore?.isDismissed(version) != true
+      else { return nil }
+      return version
+    }
+  }
+
+  @ViewBuilder private var agentNotice: some View {
+    if !pendingUpdates.isEmpty || updateMessage != nil {
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(pendingUpdates, id: \.key) { updateRow($0) }
+        if let updateMessage {
+          Text(updateMessage).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true).padding(.vertical, 4)
+            .accessibilityIdentifier("sshNewChatUpdateResult")
+        }
+      }
+      .accessibilityIdentifier("sshNewChatUpdateNotice")
+    } else if versions == .unsupported, agent.isHostManaged {
+      Text("Update tether on this host to manage agent versions.").font(.chat(.caption))
+        .foregroundStyle(TetherColors.textFaint)
+        .accessibilityIdentifier("sshNewChatHostTooOld")
+    }
+  }
+
+  private func updateRow(_ version: ACPAgentVersion) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(version.notice(label: agent.label)).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+          .fixedSize(horizontal: false, vertical: true)
+        Spacer(minLength: 4)
+        if updating == version.key {
+          ProgressView().controlSize(.small).tint(TetherColors.textFaint)
+        } else {
+          Button("Not now") {
+            managedStore?.dismiss(version)
+            dismissedUpdates.insert(version.key + "@" + version.latest)
+          }
+          .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
+          .accessibilityIdentifier("sshNewChatUpdateLater_\(version.key)")
+          if version.kind == .adapter || version.runnable {
+            Button("Update") { update(version) }
+              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+              .disabled(updating != nil)
+              .accessibilityIdentifier("sshNewChatUpdate_\(version.key)")
+          } else {
+            Button("Copy") { UIPasteboard.general.string = version.command }
+              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+              .accessibilityHint("Copies the command that updates it on the host")
+          }
+        }
+      }
+      if version.kind == .cli, !version.runnable {
+        Text(version.command).font(.chat(.caption2).monospaced()).foregroundStyle(TetherColors.textFaint)
+          .lineLimit(1).truncationMode(.middle)
+      }
+    }
+  }
+
+  private func update(_ version: ACPAgentVersion) {
+    guard let onUpdateAgent, updating == nil else { return }
+    updating = version.key
+    Task {
+      defer { updating = nil }
+      let failure = await onUpdateAgent(version)
+      versions = await loadVersions?() ?? versions
+      let name = version.kind == .cli ? (ACPAgentVersion.cliNames[version.agent] ?? "The CLI") : "\(agent.label) adapter"
+      updateMessage = failure ?? "\(name) updated to \(version.latest). New chats use it."
+      if failure == nil { optionReads += 1 }
+    }
+  }
+
+  /// Shows the cached list meanwhile; an answer for a folder or agent no longer picked is dropped.
+  private func readLiveOptions() async {
+    guard let liveOptions, folderInfo?.ready == true else { return }
+    try? await Task.sleep(nanoseconds: 600_000_000)
+    let wanted = (folder, agent)
+    guard !Task.isCancelled, let options = await liveOptions(wanted.0, wanted.1) else { return }
+    guard !Task.isCancelled, folder == wanted.0, agent == wanted.1 else { return }
+    freshOptions[wanted.1.key] = options
+  }
+
   private func pick(_ option: ChatAgentProfile) {
     guard option != agent else { return }
     if let reason = unavailable[option.key] {
@@ -309,6 +420,7 @@ struct NewChatSheet: View {
       return
     }
     agent = option
+    updateMessage = nil
     changes = [:]
     reset = false
     failure = nil

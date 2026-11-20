@@ -187,6 +187,10 @@ impl Connection for RusshConnection {
     }
 
     async fn exec(&self, command: &str) -> Result<String, ConnectError> {
+        self.exec_within(command, Duration::from_secs(15)).await
+    }
+
+    async fn exec_within(&self, command: &str, within: Duration) -> Result<String, ConnectError> {
         let run = async {
             let mut channel = {
                 let handle = self.handle.read().await;
@@ -218,7 +222,7 @@ impl Connection for RusshConnection {
                 )),
             }
         };
-        match tokio::time::timeout(Duration::from_secs(15), run).await {
+        match tokio::time::timeout(within, run).await {
             Ok(result) => result,
             Err(_) => Err(ConnectError::Timeout),
         }
