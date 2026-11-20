@@ -109,7 +109,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill|agent|versions|update")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill|agent|options|versions|update")
 	}
 	switch args[0] {
 	case "attach":
@@ -140,6 +140,8 @@ func runACP(args []string) error {
 		return acpUsage(args[1:], os.Stdout)
 	case "agent":
 		return runACPAgent(args[1:])
+	case "options":
+		return acpOptions(args[1:], os.Stdout)
 	case "versions":
 		return acpVersions(args[1:], os.Stdout)
 	case "update":

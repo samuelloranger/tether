@@ -282,6 +282,45 @@ func listAgentSessions(cmdline, cwd string, timeout time.Duration) ([]acpSavedSe
 	return out, err
 }
 
+var acpOptionsTimeout = 45 * time.Second
+
+// acpOptions prints the options a new session in cwd starts with, as `{"configOptions":[…]}`. The
+// session is never prompted, so neither Claude Code nor Codex keeps a trace of it.
+func acpOptions(args []string, w io.Writer) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: acp options <cwd> [--agent-cmd CMD]")
+	}
+	cwd := args[0]
+	fs := flag.NewFlagSet("acp options", flag.ContinueOnError)
+	agentCmd := fs.String("agent-cmd", "", "agent command (default $TETHER_ACP_AGENT_CMD, else Claude)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	cmdline := *agentCmd
+	if cmdline == "" {
+		cmdline = os.Getenv("TETHER_ACP_AGENT_CMD")
+	}
+	if cmdline == "" {
+		cmdline = defaultACPAgentCmd
+	}
+	return withAgent(cmdline, cwd, "starting a session", acpOptionsTimeout, func(_ json.RawMessage, call agentCall) error {
+		raw, err := call(2, "session/new", map[string]any{"cwd": cwd, "mcpServers": []any{}})
+		if err != nil {
+			return err
+		}
+		var res struct {
+			ConfigOptions json.RawMessage `json:"configOptions"`
+		}
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("agent sent an unreadable session: %w", err)
+		}
+		if len(res.ConfigOptions) == 0 || string(res.ConfigOptions) == "null" {
+			res.ConfigOptions = json.RawMessage("[]")
+		}
+		return json.NewEncoder(w).Encode(res)
+	})
+}
+
 // deleteAgentSession removes a saved conversation; the agent must advertise session/delete.
 func deleteAgentSession(cmdline, cwd, sessionID string, timeout time.Duration) error {
 	return withAgent(cmdline, cwd, "deleting the session", timeout, func(init json.RawMessage, call agentCall) error {

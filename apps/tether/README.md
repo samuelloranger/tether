@@ -133,6 +133,7 @@ tests share `clients/apple/TetherKit/Tests/TetherKitTests/Fixtures/chat-cards.js
     tether acp workflows --session <id> --json   # background Workflow runs of a Claude Code session
     tether acp kill chat1                 # stop the agent and remove the session
     tether acp agent claude|codex         # run the host-managed adapter (a chat's spawn command)
+    tether acp options ~/src/app [--agent-cmd CMD]   # the options a new session starts with (live model list)
     tether acp versions [--refresh]       # installed vs latest adapter, one JSON line per agent
     tether acp update codex [--version V] [--rollback]   # install, check, switch; never automatic
 
