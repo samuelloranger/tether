@@ -144,6 +144,17 @@ pub fn queued(s: &Session) -> (Vec<String>, Vec<String>) {
     (lines, keys)
 }
 
+/// A strip row is one line tall: a multi-line command keeps its first line, marked as cut.
+fn strip_title(title: &str) -> String {
+    let mut lines = title.lines().map(str::trim).filter(|l| !l.is_empty());
+    let first = lines.next().unwrap_or_default();
+    if lines.next().is_some() {
+        format!("{first} …")
+    } else {
+        first.to_string()
+    }
+}
+
 /// The background commands still running, each with the key of the row that opens it.
 pub fn tasks(s: &Session) -> Vec<TaskView> {
     let mut out = Vec::new();
@@ -155,13 +166,13 @@ pub fn tasks(s: &Session) -> Vec<TaskView> {
         if call.is_background_running() {
             out.push(TaskView {
                 key: key.clone(),
-                title: call.title.clone(),
+                title: strip_title(&call.title),
             });
         }
         for child in call.children.iter().filter(|c| c.is_background_running()) {
             out.push(TaskView {
                 key: format!("child:{key}:{}", child.id),
-                title: child.title.clone(),
+                title: strip_title(&child.title),
             });
         }
     }
@@ -632,6 +643,15 @@ fn subagent(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn strip_titles_keep_one_line() {
+        assert_eq!(super::strip_title("bun run dev"), "bun run dev");
+        assert_eq!(
+            super::strip_title("\nheads=(a b)\n  for i in 1 2; do\n done"),
+            "heads=(a b) …"
+        );
+    }
+
     use super::two_lines;
 
     #[test]
