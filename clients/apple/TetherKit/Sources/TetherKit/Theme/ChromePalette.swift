@@ -22,11 +22,11 @@ public struct ChromePalette: Hashable, Sendable {
   public var onDanger: UInt32
   public var well: UInt32
 
-  /// Aurora dark, Tether's own look.
+  /// Tether's own dark look: neutral greys, the accent kept for controls.
   public static let tether = ChromePalette(
-    background: 0x08080E, surface: 0x12121D, surfaceHover: 0x161624, raised: 0x191926,
-    input: 0x0B0B13, border: 0x232333, text: 0xEDEEF6, textSecondary: 0x9797AC,
-    textFaint: 0x8B8BA3, placeholder: 0x5C5C73, accent: 0x7C8CF8, onAccent: 0x08080E,
+    background: 0x000000, surface: 0x141414, surfaceHover: 0x1A1A1A, raised: 0x202020,
+    input: 0x0A0A0A, border: 0x2A2A2A, text: 0xF2F2F2, textSecondary: 0xABABAB,
+    textFaint: 0x8D8D8D, placeholder: 0x5E5E5E, accent: 0x7C8CF8, onAccent: 0x000000,
     success: 0x6EE7A8, warning: 0xF2B34C, danger: 0xFF7050, onDanger: 0x1A0A07, well: 0x1E1E2E
   )
 
