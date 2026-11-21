@@ -485,6 +485,7 @@ impl TerminalModel {
             chats: chat::Chats::new(None, ""),
         };
         m.chats = chat::Chats::new(None, &host);
+        m.chats.label = m.machine.name.clone();
         (m, vec![Effect::Open])
     }
 

@@ -11,11 +11,11 @@ use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
-    AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
-    ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
-    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, NcNoticeVm, NcServerVm,
-    PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm,
-    SavedSessionVm, WfAgentVm, WfPhaseVm,
+    AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatReceiptLineVm, ChatRowVm,
+    ChatSideVm, ChatTabVm, ChatTaskVm, ChatVm, ChatWorkflowVm, ChipVm, CtlChoiceVm, CtlCommandVm,
+    CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm,
+    NcNoticeVm, NcServerVm, PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm,
+    QueuedVm, QuotaWindowVm, SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 use tether_core::acp::versions::Kind;
 
@@ -177,12 +177,11 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
     let mut vm = ChatEntryVm {
         key: e.key.as_str().into(),
         depth: i32::from(e.depth),
-        first: e.first,
+        rail: i32::from(e.rail),
         ..Default::default()
     };
     match &e.body {
         EntryBody::Tool {
-            icon,
             title,
             subtitle,
             state,
@@ -194,7 +193,6 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
         } => {
             vm.kind = 0;
             vm.background = *background;
-            vm.icon = *icon as i32;
             vm.title = title.as_str().into();
             vm.subtitle = subtitle.as_str().into();
             vm.state = tool_state(*state);
@@ -203,15 +201,21 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
             vm.expandable = *expandable;
             vm.open = *open;
         }
-        EntryBody::Resolved { allowed, title } => {
+        EntryBody::Resolved { title } => {
             vm.kind = 1;
-            vm.icon = if *allowed {
-                Icon::Allowed as i32
-            } else {
-                Icon::Refused as i32
-            };
-            vm.state = if *allowed { 1 } else { 3 };
             vm.title = title.as_str().into();
+        }
+        EntryBody::Fold {
+            summary,
+            failed,
+            open,
+        } => {
+            vm.kind = 8;
+            vm.title = summary.as_str().into();
+            vm.removed = *failed as i32;
+            vm.state = if *failed > 0 { 2 } else { 1 };
+            vm.open = *open;
+            vm.expandable = true;
         }
         EntryBody::Markdown { items, selectable } => {
             vm.kind = 2;
@@ -405,6 +409,29 @@ fn row_vm(r: &Row) -> ChatRowVm {
         RowBody::Tools(entries) => {
             vm.kind = 4;
             vm.entries = model(entries.iter().map(entry_vm).collect());
+        }
+        RowBody::Receipt(r) => {
+            vm.kind = 18;
+            let line = |text: &str, added: usize, removed: usize, failed: bool| ChatReceiptLineVm {
+                text: text.into(),
+                added: added as i32,
+                removed: removed as i32,
+                failed,
+            };
+            vm.receipt_changed = model(
+                r.changed
+                    .iter()
+                    .map(|(path, added, removed)| line(path, *added, *removed, false))
+                    .collect(),
+            );
+            vm.receipt_ran = model(
+                r.ran
+                    .iter()
+                    .map(|(title, failed)| line(title, 0, 0, *failed))
+                    .collect(),
+            );
+            vm.changed_more = r.changed_more as i32;
+            vm.ran_more = r.ran_more as i32;
         }
         RowBody::Plan {
             summary,
@@ -674,6 +701,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_archived_count(s.archived_count as i32);
     vm.set_organization_error(s.organization_error.as_str().into());
     let (name, title, pinned, archived) = s.actions.clone().unwrap_or_default();
+    vm.set_actions_active(s.tabs.iter().any(|t| t.active && t.name == name));
     vm.set_actions_name(name.into());
     vm.set_actions_title(title.into());
     vm.set_actions_pinned(pinned);
@@ -856,6 +884,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     }
     if !s.active {
         vm.set_ctl_open(false);
+        vm.set_bypass_confirm(false);
         vm.set_review_open(false);
         vm.set_wf_open(false);
         vm.set_viewer_open(false);
@@ -870,13 +899,8 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_phase_word(h.phase_word.as_str().into());
     vm.set_agent(i32::from(h.agent));
     vm.set_agent_label(h.agent_label.as_str().into());
-    vm.set_has_status(!h.model.is_empty() || !h.mode.is_empty());
-    vm.set_model_name(h.model.as_str().into());
-    vm.set_mode_name(h.mode.as_str().into());
-    vm.set_mode_tint(i32::from(h.mode_tint));
-    vm.set_stats(h.stats.as_str().into());
-    vm.set_context(h.context.unwrap_or(-1.0));
-    vm.set_context_text(h.context_text.as_str().into());
+    vm.set_place(h.place.as_str().into());
+    vm.set_activity(i32::from(h.activity));
     vm.set_follow_seq(s.follow_seq as i32);
     vm.set_focus_seq(s.focus_seq as i32);
     vm.set_notice(s.notice.as_str().into());
@@ -970,6 +994,34 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             })
             .collect(),
     ));
+    vm.set_chips(model(
+        c.chips
+            .iter()
+            .map(|chip| ChipVm {
+                id: chip.id.as_str().into(),
+                name: chip.name.as_str().into(),
+                label: chip.label.as_str().into(),
+                pending: chip.pending,
+                risky: chip.risky,
+                failure: chip.failure.as_str().into(),
+                choices: model(
+                    chip.choices
+                        .iter()
+                        .map(|c| CtlChoiceVm {
+                            value: c.value.as_str().into(),
+                            name: c.name.as_str().into(),
+                            description: c.description.as_str().into(),
+                            selected: c.selected,
+                            pending: c.pending,
+                        })
+                        .collect(),
+                ),
+            })
+            .collect(),
+    ));
+    vm.set_chips_enabled(c.chips_enabled);
+    vm.set_context_used(c.context.as_str().into());
+    vm.set_context_detail(c.context_detail.as_str().into());
     vm.set_attach_error(c.attach_error.as_str().into());
     match &c.palette {
         Some((kind, rows)) => {
@@ -1011,7 +1063,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
         Some(p) => {
             vm.set_perm_shown(true);
             vm.set_perm_plan(p.plan);
-            vm.set_perm_icon(p.icon as i32);
+            vm.set_perm_key(p.key.as_str().into());
             vm.set_perm_title(p.title.as_str().into());
             vm.set_perm_position(p.position.as_str().into());
             vm.set_perm_path(p.path.as_str().into());
@@ -1022,6 +1074,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_perm_text(p.text.as_str().into());
             vm.set_perm_primary(option(&p.primary));
             vm.set_perm_reject(option(&p.reject));
+            vm.set_perm_always(option(&p.always));
             vm.set_perm_more(model(
                 p.more
                     .iter()
@@ -1066,9 +1119,10 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_ctl_read_only(ctl.read_only);
             vm.set_ctl_enabled(ctl.enabled);
             vm.set_ctl_cost(ctl.cost.as_str().into());
+            vm.set_context(ctl.context.unwrap_or(-1.0));
+            vm.set_context_text(ctl.context_text.as_str().into());
             vm.set_ctl_model_id(ctl.model_id.as_str().into());
             vm.set_ctl_commands_enabled(ctl.commands_enabled);
-            vm.set_bypass_confirm(ctl.bypass_confirm);
             vm.set_ctl_options(model(
                 ctl.options
                     .iter()
@@ -1102,11 +1156,9 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                     .collect(),
             ));
         }
-        None => {
-            vm.set_ctl_open(false);
-            vm.set_bypass_confirm(false);
-        }
+        None => vm.set_ctl_open(false),
     }
+    vm.set_bypass_confirm(s.bypass_confirm);
 
     match &s.review {
         Some(r) => {

@@ -411,6 +411,8 @@ pub struct Chats {
     last_agent: String,
     /// The host as messages name it.
     host: String,
+    /// The machine's own name, for the header's "folder on host".
+    pub(super) label: String,
     listed: Vec<ChatSummary>,
     /// Chats started here that the host has not listed yet.
     provisional: Vec<ChatSummary>,
@@ -428,6 +430,7 @@ pub struct Chats {
     delete_prompt: Option<String>,
     controls_open: bool,
     bypass: Option<(String, String)>,
+    diff_counts: tether_core::acp::turns::DiffCounts,
     review: bool,
     /// The Workflow call whose run the sheet shows.
     workflow_open: Option<String>,
@@ -529,6 +532,7 @@ impl Chats {
             scope: host.to_string(),
             last_agent: String::new(),
             host: host.to_string(),
+            label: host.to_string(),
             listed: Vec::new(),
             provisional: Vec::new(),
             status_supported: true,
@@ -543,6 +547,7 @@ impl Chats {
             delete_prompt: None,
             controls_open: false,
             bypass: None,
+            diff_counts: Default::default(),
             review: false,
             workflow_open: None,
             workflow_redrawn: Duration::ZERO,
@@ -828,6 +833,8 @@ impl Chats {
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
+        // A bypass confirmation belongs to the chat it was raised in.
+        self.bypass = None;
         self.follow_seq += 1;
         self.focus_seq += 1;
         self.draft_seq += 1;
@@ -938,6 +945,9 @@ impl Chats {
         // and `TETHER_DEV_CHAT_WORKFLOW_OPEN` opens its sheet.
         let workflow = crate::app::dev_env("TETHER_DEV_CHAT_WORKFLOW");
         let mut state = devsample::state(workflow.is_some());
+        if let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_ASK") {
+            devsample::ask(&mut state, &kind);
+        }
         if let Some(files) = &self.files {
             for item in &mut state.items {
                 if let tether_core::acp::reducer::ItemKind::Card(card) = &mut item.kind {
@@ -1128,6 +1138,8 @@ impl Chats {
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
+        // A bypass confirmation belongs to the chat it was raised in.
+        self.bypass = None;
         self.viewer = None;
         self.dirty = true;
     }

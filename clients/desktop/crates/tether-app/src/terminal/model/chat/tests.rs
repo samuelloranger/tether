@@ -516,7 +516,7 @@ fn a_permission_waits_in_its_card_and_approve_answers_it() {
     );
     let s = h.screen();
     let card = s.permission.expect("a permission card");
-    assert_eq!(card.path, "README.md");
+    assert_eq!(card.path, "", "the title already names the file");
     assert_eq!((card.added, card.removed), (1, 1));
     assert_eq!(card.primary.as_ref().unwrap().0, "allow");
     assert_eq!(card.reject.as_ref().unwrap().0, "reject");
@@ -3304,4 +3304,157 @@ fn resume_is_not_offered_without_the_capability_and_a_failed_revive_says_so() {
         h.screen().notice,
         "Couldn't resume this chat. Update tether on the host, or start a new chat."
     );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn a_finished_turn_folds_its_steps_and_ends_with_a_receipt() {
+    use super::view::EntryBody;
+    let mut h = Harness::new();
+    h.chats.dev_sample("claude", t(h.now));
+    let s = h.screen();
+
+    let tools: Vec<&Vec<super::view::Entry>> = s
+        .rows
+        .iter()
+        .filter_map(|r| match &r.body {
+            RowBody::Tools(entries) => Some(entries),
+            _ => None,
+        })
+        .collect();
+    let EntryBody::Fold {
+        summary,
+        failed,
+        open,
+    } = &tools[0][0].body
+    else {
+        panic!("the ended turn's steps fold")
+    };
+    assert_eq!(
+        summary,
+        "Read 2 files, searched once, edited 1 file, ran 1 command"
+    );
+    assert_eq!((*failed, *open), (0, false));
+    assert_eq!(tools[0].len(), 1, "folded: the summary row only");
+    assert!(
+        !tools[1]
+            .iter()
+            .any(|e| matches!(e.body, EntryBody::Fold { .. })),
+        "commands running in the background keep their rows"
+    );
+
+    let receipts: Vec<&super::view::ReceiptView> = s
+        .rows
+        .iter()
+        .filter_map(|r| match &r.body {
+            RowBody::Receipt(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        receipts[0].changed,
+        [("src/queue/retry.ts".to_string(), 3, 2)]
+    );
+    assert_eq!(
+        receipts[0].ran,
+        [("bun test packages/queue".to_string(), false)]
+    );
+
+    assert!(s.header.place.starts_with("app on "), "{}", s.header.place);
+    assert_eq!(s.header.activity, 0);
+    let chips: Vec<_> = s
+        .composer
+        .chips
+        .iter()
+        .map(|c| (c.id.as_str(), c.label.as_str()))
+        .collect();
+    assert_eq!(chips, [("model", "Opus"), ("mode", "Ask")]);
+    assert_eq!(s.composer.context, "41k");
+    assert_eq!(s.composer.placeholder, "Message Claude");
+
+    // Opening a row inside the folded run opens the run.
+    let fold = tools[0][0].key.clone();
+    let id: i64 = fold.strip_prefix("fold:").unwrap().parse().unwrap();
+    h.msg(ChatMsg::OpenTool(format!("item:{}", id + 1)));
+    let s = h.screen();
+    let opened = s.rows.iter().find_map(|r| match &r.body {
+        RowBody::Tools(entries) if entries[0].key == fold => Some(entries),
+        _ => None,
+    });
+    let opened = opened.unwrap();
+    assert!(matches!(opened[0].body, EntryBody::Fold { open: true, .. }));
+    assert!(opened.len() > 5);
+    assert_eq!(
+        opened.iter().map(|e| e.rail).collect::<Vec<_>>()[..3],
+        [2, 1, 1],
+        "the rail starts at the summary's dot and runs through the rows"
+    );
+    h.msg(ChatMsg::Toggle(fold));
+    let s = h.screen();
+    assert!(s.rows.iter().any(|r| matches!(
+        &r.body,
+        RowBody::Tools(entries) if entries.len() == 1 && matches!(entries[0].body, EntryBody::Fold { open: false, .. })
+    )));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn the_permission_card_turns_its_one_broader_allow_into_a_switch() {
+    let mut h = Harness::new();
+    h.chats.dev_sample("claude", t(h.now));
+    let mut state = devsample::state(false);
+    devsample::ask(&mut state, "permission");
+    h.chats
+        .sessions
+        .get_mut("sample")
+        .unwrap()
+        .dev_state(state, t(h.now));
+    let s = h.screen();
+    let p = s.permission.expect("a permission waits");
+    assert_eq!(p.always.map(|a| a.0), Some("always".to_string()));
+    assert_eq!(p.primary.map(|a| a.0), Some("allow".to_string()));
+    assert!(p.more.is_empty());
+    assert!(!p.collapsed);
+    assert_eq!(p.path, "", "the title already names the file");
+    assert_eq!(s.header.activity, 2);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn bypass_from_a_chip_asks_before_it_changes_anything() {
+    let mut h = Harness::new();
+    h.chats.dev_sample("claude", t(h.now));
+    assert!(!h.screen().bypass_confirm);
+    h.msg(ChatMsg::ControlsChoose {
+        id: "mode".into(),
+        value: "bypassPermissions".into(),
+    });
+    let s = h.screen();
+    assert!(s.bypass_confirm);
+    assert!(s.controls.is_none(), "the panel need not be open");
+    h.msg(ChatMsg::BypassCancelled);
+    assert!(!h.screen().bypass_confirm);
+    h.msg(ChatMsg::ControlsChoose {
+        id: "mode".into(),
+        value: "bypassPermissions".into(),
+    });
+    h.run(|c, now, out| c.leave_active(now, out));
+    assert!(
+        !h.screen().bypass_confirm,
+        "leaving the chat drops its confirmation"
+    );
+}
+
+#[test]
+fn a_permission_title_that_does_not_name_the_file_gets_its_path_under_it() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":"p1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"toolCallId":"t1","title":"Update the readme","kind":"edit","content":[{"type":"diff","path":"/home/sam/proj/README.md","oldText":"a\n","newText":"b\n"}]},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#,
+    );
+    let card = h.screen().permission.expect("a permission card");
+    assert_eq!(card.path, "README.md");
+    assert!(card.always.is_none());
 }

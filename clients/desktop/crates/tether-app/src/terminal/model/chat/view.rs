@@ -59,7 +59,6 @@ pub enum DiffKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryBody {
     Tool {
-        icon: Icon,
         title: String,
         subtitle: String,
         state: ToolState,
@@ -71,8 +70,13 @@ pub enum EntryBody {
         background: bool,
     },
     Resolved {
-        allowed: bool,
         title: String,
+    },
+    /// The summary row of a finished turn's run of steps; the steps follow it while it is open.
+    Fold {
+        summary: String,
+        failed: usize,
+        open: bool,
     },
     Markdown {
         items: Vec<MdItem>,
@@ -101,26 +105,14 @@ pub enum EntryBody {
 pub struct Entry {
     pub key: String,
     pub depth: u8,
-    pub first: bool,
+    /// The timeline rail at this row: 0 none, 1 through the whole row, 2 from the dot down
+    /// (the first dot), 3 from the top to the dot (the last one).
+    pub rail: u8,
     pub body: EntryBody,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-    Read = 0,
-    Edit = 1,
-    Delete = 2,
-    Move = 3,
-    Search = 4,
-    Execute = 5,
-    Think = 6,
-    Fetch = 7,
-    SwitchMode = 8,
-    Other = 9,
-    Subagent = 10,
-    Image = 11,
-    Allowed = 12,
-    Refused = 13,
     Moon = 20,
     Eye = 21,
 }
@@ -150,6 +142,8 @@ pub enum RowBody {
         selectable: bool,
     },
     Tools(Vec<Entry>),
+    /// What a finished turn changed and ran.
+    Receipt(ReceiptView),
     Plan {
         summary: String,
         current: String,
@@ -195,6 +189,19 @@ pub enum RowBody {
     },
 }
 
+/// Receipt lines are cut at `RECEIPT_SHOWN`; the rest is a count.
+pub const RECEIPT_SHOWN: usize = 6;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReceiptView {
+    /// (path, added, removed)
+    pub changed: Vec<(String, usize, usize)>,
+    pub changed_more: usize,
+    /// (command, failed)
+    pub ran: Vec<(String, bool)>,
+    pub ran_more: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub key: String,
@@ -221,13 +228,10 @@ pub struct HeaderView {
     /// 0 connecting, 1 catching up, 2 live, 3 lost, 4 ended.
     pub phase: u8,
     pub phase_word: String,
-    pub model: String,
-    pub mode: String,
-    /// 0 secondary, 1 accent, 2 success, 3 danger.
-    pub mode_tint: u8,
-    pub stats: String,
-    pub context: Option<f32>,
-    pub context_text: String,
+    /// "<folder name> on <host label>".
+    pub place: String,
+    /// While the link is live: 0 idle, 1 working, 2 needs you.
+    pub activity: u8,
     /// The agent's name for a chat that is not Claude's; empty for Claude.
     pub agent_label: String,
     pub agent: i8,
@@ -259,9 +263,27 @@ pub struct ComposerView {
     pub stopping: bool,
     pub action_enabled: bool,
     pub action_label: String,
+    /// The model and mode settings that get a chip of their own.
+    pub chips: Vec<ChipView>,
+    pub chips_enabled: bool,
+    /// Context used, as a compact count; empty when the agent has not said.
+    pub context: String,
+    pub context_detail: String,
     pub attachments: Vec<AttachmentView>,
     pub attach_error: String,
     pub palette: Option<(PaletteKind, Vec<(String, String)>)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChipView {
+    pub id: String,
+    pub name: String,
+    pub label: String,
+    pub choices: Vec<ChoiceRowView>,
+    pub pending: bool,
+    /// The last change failed, or the mode skips every permission.
+    pub risky: bool,
+    pub failure: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -275,9 +297,11 @@ pub struct DiffLine {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PermissionView {
     pub plan: bool,
-    pub icon: Icon,
+    /// The request's id: what the card's switch state belongs to.
+    pub key: String,
     pub title: String,
     pub position: String,
+    /// The file's path, when the title does not already name it.
     pub path: String,
     pub added: usize,
     pub removed: usize,
@@ -287,6 +311,8 @@ pub struct PermissionView {
     /// (option id, label)
     pub primary: Option<(String, String)>,
     pub reject: Option<(String, String)>,
+    /// The broader allow the card offers as a switch that widens the primary button.
+    pub always: Option<(String, String)>,
     pub more: Vec<(String, String)>,
     pub collapsed: bool,
     pub enabled: bool,
@@ -351,11 +377,13 @@ pub struct ControlsView {
     pub options: Vec<OptionView>,
     pub enabled: bool,
     pub cost: String,
+    /// How much of the context window is used, and the words for it.
+    pub context: Option<f32>,
+    pub context_text: String,
     pub model_id: String,
     /// (title, detail, text sent)
     pub commands: Vec<(String, String, String)>,
     pub commands_enabled: bool,
-    pub bypass_confirm: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -535,6 +563,8 @@ pub struct ChatScreen {
     pub permission: Option<PermissionView>,
     pub question: Option<QuestionView>,
     pub controls: Option<ControlsView>,
+    /// Bypass was picked and waits for the user's confirmation (from the controls or a chip).
+    pub bypass_confirm: bool,
     pub review: Option<ReviewView>,
     /// The picture the viewer shows; `None` inside means the file is gone.
     pub viewer: Option<Option<Picture>>,
