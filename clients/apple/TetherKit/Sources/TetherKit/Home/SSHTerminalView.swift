@@ -1359,9 +1359,9 @@ public struct SSHTerminalView: View {
           .buttonStyle(TetherPressStyle())
           .accessibilityIdentifier("sshEmptyStateNew")
         }
-        .padding(24).frame(maxWidth: 300)
+        .padding(.horizontal, 20).padding(.vertical, 28).frame(maxWidth: 460)
         .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 22))
-        .padding(.vertical, 24)
+        .padding(.horizontal, 16).padding(.vertical, 24)
         .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
     }
