@@ -345,9 +345,10 @@ extension ChatPermissionOptions {
   }
 
   /// The one broader allow ("allow all edits this session") the card offers as a switch, when the
-  /// primary button is the one-off allow it widens.
-  static func alwaysAllow(_ layout: Layout) -> ACPPermissionOption? {
-    guard let primary = layout.primary, primary.kind == "allow_once" else { return nil }
+  /// primary button is the one-off allow it widens. Never on a mode switch: its broader allows are
+  /// modes, bypass among them, and stay explicit buttons.
+  static func alwaysAllow(_ layout: Layout, kind: ACPToolKind) -> ACPPermissionOption? {
+    guard kind != .switchMode, let primary = layout.primary, primary.kind == "allow_once" else { return nil }
     let always = layout.more.filter { $0.kind == "allow_always" }
     return always.count == 1 ? always[0] : nil
   }

@@ -231,7 +231,7 @@ struct ChatView: View {
     let finished = ChatTurns.finishedThrough(items, working: working)
     let cwd = model.cwd
     let counts = diffCounts
-    let receipts = ChatTurns.receipts(items, working: working, cwd: cwd, count: { counts.count($0, cwd: cwd) })
+    let receipts = ChatTurns.receipts(items, working: working, cwd: cwd, count: { counts.count($0, $1, cwd: cwd) })
     return VStack(alignment: .leading, spacing: 12) {
       if let branch = model.branch {
         VStack(alignment: .leading, spacing: 6) {
@@ -716,6 +716,8 @@ struct ChatView: View {
           enabled: model.canInteract,
           approve: { model.approve(permission, option: $0) },
           review: { reviewing = permission }, startOpen: debugOpenMore)
+          // A new request is a new card: the allow-always switch never carries over to it.
+          .id(permission.requestId)
           .transition(.move(edge: .bottom).combined(with: .opacity))
         if model.answerFailures.contains(permission.requestId) {
           Text("Couldn't send your answer. Choose again to retry.")
@@ -1201,7 +1203,7 @@ struct PermissionCard: View {
   /// Reject and the primary allow share one row; the rest are links, or behind "More options" past three.
   private var actions: some View {
     let full = ChatPermissionOptions.layout(permission.options)
-    let always = ChatPermissionOptions.alwaysAllow(full)
+    let always = ChatPermissionOptions.alwaysAllow(full, kind: permission.kind)
     var layout = full
     layout.more.removeAll { $0.optionId == always?.optionId }
     layout.collapsed = full.collapsed && layout.more.count > 1
@@ -1270,7 +1272,8 @@ struct PermissionCard: View {
 
   private func actionButton(_ option: ACPPermissionOption, rejectId: String?) -> some View {
     let deny = option.optionId == rejectId
-    let always = deny || !allowAlways ? nil : ChatPermissionOptions.alwaysAllow(ChatPermissionOptions.layout(permission.options))
+    let always = deny || !allowAlways ? nil
+      : ChatPermissionOptions.alwaysAllow(ChatPermissionOptions.layout(permission.options), kind: permission.kind)
     return Button { approve(always ?? option) } label: {
       Text(option.name)
         .font(.chat(.subheadline).weight(.semibold))
@@ -1285,6 +1288,7 @@ struct PermissionCard: View {
     .disabled(!enabled)
     .opacity(enabled ? 1 : 0.5)
     .accessibilityLabel(option.name)
+    .accessibilityValue(always?.name ?? "")
   }
 }
 

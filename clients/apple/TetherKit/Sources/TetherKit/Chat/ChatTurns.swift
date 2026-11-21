@@ -29,11 +29,13 @@ enum ChatTurns {
   }
 
   typealias DiffCount = (path: String, added: Int, removed: Int)
+  /// The call's id and its diff.
+  typealias Counter = (String, ACPDiff) -> DiffCount
 
   /// One receipt per finished turn that changed a file or ran a command, keyed by its last item id.
   /// `count` lets the view cache line counts: the transcript redraws on every streamed chunk.
   static func receipts(
-    _ items: [ChatItem], working: Bool, cwd: String, count: ((ACPDiff) -> DiffCount)? = nil
+    _ items: [ChatItem], working: Bool, cwd: String, count: Counter? = nil
   ) -> [Int: ChatTurnReceipt] {
     let through = finishedThrough(items, working: working)
     var out: [Int: ChatTurnReceipt] = [:]
@@ -45,8 +47,8 @@ enum ChatTurns {
     return out
   }
 
-  static func receipt(_ calls: [ChatToolCall], cwd: String, count: ((ACPDiff) -> DiffCount)? = nil) -> ChatTurnReceipt {
-    let count = count ?? { diff in
+  static func receipt(_ calls: [ChatToolCall], cwd: String, count: Counter? = nil) -> ChatTurnReceipt {
+    let count = count ?? { _, diff in
       let file = ACPDiffAdapter.file(for: diff, relativeTo: cwd)
       return (file.path, file.added, file.removed)
     }
@@ -54,7 +56,7 @@ enum ChatTurns {
     // A subagent's commands are its own working; the files it changed are the turn's result.
     for call in calls.flatMap({ [$0] + $0.children }) where call.status != .failed {
       guard let diff = call.diff else { continue }
-      let file = count(diff)
+      let file = count(call.id, diff)
       if let index = receipt.changed.firstIndex(where: { $0.path == file.path }) {
         receipt.changed[index].added += file.added
         receipt.changed[index].removed += file.removed
@@ -114,16 +116,17 @@ enum ChatTurns {
 }
 
 
-/// Line counts per diff, kept by a chat view so a redraw never diffs the same edit twice.
+/// Line counts per tool call, kept by a chat view so a redraw never diffs the same edit twice.
+/// The stored diff only guards against an update to the call; comparing it is cheap when unchanged.
 @MainActor
 final class ChatDiffCounts {
-  private var counts: [ACPDiff: ChatTurns.DiffCount] = [:]
+  private var counts: [String: (diff: ACPDiff, count: ChatTurns.DiffCount)] = [:]
 
-  func count(_ diff: ACPDiff, cwd: String) -> ChatTurns.DiffCount {
-    if let known = counts[diff] { return known }
+  func count(_ id: String, _ diff: ACPDiff, cwd: String) -> ChatTurns.DiffCount {
+    if let known = counts[id], known.diff == diff { return known.count }
     let file = ACPDiffAdapter.file(for: diff, relativeTo: cwd)
     let value = (file.path, file.added, file.removed)
-    counts[diff] = value
+    counts[id] = (diff, value)
     return value
   }
 }
