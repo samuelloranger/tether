@@ -2,6 +2,32 @@
 
 One version ships every platform at once: iPhone, iPad and Mac through [TestFlight](https://testflight.apple.com/join/j7rPkfhq), Windows and Linux as installers on the [latest release](https://github.com/samuelloranger/tether/releases/latest). Each version's notes below are the same text as its GitHub release, without the per-release download instructions.
 
+## [6.7.2](https://github.com/samuelloranger/tether/releases/tag/v6.7.2) — 2026-11-21
+
+### New
+- **Chats can branch, resume, delete, reach extra folders and use MCP servers.** Each appears only when the agent supports it. Branch forks the agent's own session at the chosen message and keeps its tool results and context; an ended chat offers Resume, which restarts the agent on the same conversation without replaying it; the Continue list can delete a saved conversation; the New chat sheet can add extra folders and pick HTTP MCP servers saved per host, with their header values kept in the platform's secret store.
+- **The host can manage the agents your chats run, and tells you about updates.** On a host whose `tether` manages agents, the New chat sheet shows when a newer Claude or Codex adapter, or a newer agent CLI, is available, with **Not now** and **Update**. Nothing updates on its own. A CLI without its own updater shows the command to copy instead. The model list in the sheet is read live from the agent once the folder is ready.
+
+### Changed
+- **A quieter look across the app (iPhone, iPad, Mac, Windows and Linux).** The Tether dark palette is neutral grey on true black instead of navy, and colour is kept for what needs attention: toggles and selection keep the accent, and states such as Needs you, Working and Done are told apart by brightness and words instead of hue.
+- **Chat steps read as a timeline.** Each tool call is one line on a thin rail instead of a bordered box; a finished turn folds its steps into one summary row ("Read 2 files, edited 1 file, ran 1 command") that opens on tap, and ends with a receipt of the files it changed (with added and removed lines) and the commands it ran.
+- **The chat header and composer are simpler.** The header shows the title, the folder and host, and the chat's state in words. Model and mode move into chips in the composer, next to the context used; Bypass still asks for confirmation.
+- **Permission and question cards are calmer.** When an ask offers both a one-off and a broader allow, the broader one becomes a switch beside the main button.
+- **Push notifications say who, what and why.** A chat's notification is titled with the chat's name, or its project folder when it has none, instead of an internal id, and shows the project as the subtitle instead of repeating the name. A command's permission ask leads with the command's own description, a finished turn shows what the agent last said instead of `end_turn`, and agent replies keep underscores and accents intact. Needs the updated host tool (see Under the hood).
+
+### Fixed
+- On iPhone and iPad, a tap near the chat header's drawer button no longer opens the session controls instead of the drawer.
+- Archived chats moved below the plan usage in the drawer, out of the list where they were easy to tap by mistake.
+- On desktop, a background command spanning several lines no longer spills over the transcript from the running-tasks strip.
+
+### Under the hood
+- Hosts need the updated `tether` (`bash install.sh`) for Resume, delete, the managed agents and update notices, and the clearer push notifications; re-run `scripts/install-agent-hooks.sh` to refresh the agent hook wrapper. With an older host, chats keep running the pinned adapters through `npx`, the New chat sheet asks for a host update, and pushes keep their old wording.
+- Edge builds now go to TestFlight only when something that ships in the iPhone, iPad or Mac app changed; test, docs and desktop-only merges no longer produce a build.
+
+Pull requests: #367, #368, #369, #370, #371, #372, #373, #374, #375, #376, #377, #378
+
+**Full Changelog**: https://github.com/samuelloranger/tether/compare/v6.7.1...v6.7.2
+
 ## [6.7.1](https://github.com/samuelloranger/tether/releases/tag/v6.7.1) — 2026-11-19
 
 ### Fixed
