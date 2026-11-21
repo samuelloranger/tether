@@ -7,11 +7,23 @@ function oneLine(text: string): string {
   return flat.length > BODY_LIMIT ? `${flat.slice(0, BODY_LIMIT - 1)}…` : flat
 }
 
+const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+
+// mcp__server__tool → "server: tool".
+function toolLabel(tool: string): string {
+  const m = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(tool)
+  return m ? `${m[1]}: ${m[2]}` : tool
+}
+
 export function summarize(tool: string, input: unknown): string {
   const fields = (input ?? {}) as Record<string, unknown>
-  const arg = [fields.command, fields.file_path, fields.notebook_path, fields.url]
-    .find((v): v is string => typeof v === 'string' && v !== '')
-  return oneLine(arg ? `Allow ${tool}: ${arg}?` : `Allow ${tool}?`)
+  const description = [fields.description, fields.command_description].find(text)
+  if ((tool === 'Bash' || tool === 'PowerShell') && description) {
+    return oneLine(text(fields.command) ? `Run: ${description} · $ ${fields.command}` : `Run: ${description}?`)
+  }
+  const arg = [fields.command, fields.file_path, fields.notebook_path, fields.url].find(text)
+  const name = toolLabel(tool)
+  return oneLine(arg ? `Allow ${name}: ${arg}?` : `Allow ${name}?`)
 }
 
 // `wait` prints one JSON line; anything else (a release, a crash) keeps the dialog.

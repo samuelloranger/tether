@@ -136,7 +136,7 @@ func (s *acpDaemonState) settleAfterIdle(idle *copilotIdle) {
 			if s.settleHeldPrompt(idle.session, key) {
 				s.syncStream()
 				s.whenDetached(func() bool { return true }, func() {
-					s.pushAsync(s.donePush("end_turn"), "acp-done-"+threadKey(hostLabel(), s.tr.name))
+					s.pushAsync(s.donePush("end_turn", s.tr.takeReply()), "acp-done-"+threadKey(hostLabel(), s.tr.name))
 				})
 			}
 		}

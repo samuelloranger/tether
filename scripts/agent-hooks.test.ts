@@ -93,6 +93,7 @@ test('claude failure is recorded as done with an error body', () => {
   const env = install();
   hook(env, 'claude', 'failed', { cwd: '/src/proj' });
   expect(calls(env.log)[0]).toContain('--state done');
+  expect(calls(env.log)[0]).toContain('--title proj · stopped');
   expect(calls(env.log)[0]).toContain('--body Stopped with an error');
 });
 
@@ -321,6 +322,22 @@ test('claude done keeps a multi-line last reply whole', () => {
   ]);
   hook(env, 'claude', 'done', { cwd: '/src/proj', transcript_path: transcript });
   expect(calls(env.log)[0]).toContain('--body Done here. Two files changed.');
+});
+
+test('a done reply loses its markdown but keeps underscores and #s in words', () => {
+  const env = install();
+  const transcript = path.join(env.home, 't.jsonl');
+  const text = '## Summary\n\nAll **tests** pass in `my_pkg` (see [PR #12](https://x.test/12)). a -> b';
+  writeTranscript(transcript, [{ type: 'assistant', message: { content: [{ type: 'text', text }] } }]);
+  hook(env, 'claude', 'done', { cwd: '/src/proj', transcript_path: transcript });
+  expect(calls(env.log)[0]).toContain('--body Summary All tests pass in my_pkg (see PR #12). a -> b --link');
+});
+
+test('a waiting command is passed as typed, and long bodies are left for tether to clip', () => {
+  const env = install();
+  const command = `echo **/*.go > out_${'x'.repeat(300)}.txt`;
+  hook(env, 'codex', 'waiting', { cwd: '/src/proj', tool_name: 'shell', tool_input: { command } });
+  expect(calls(env.log)[0]).toContain(`--body ${command} --link`);
 });
 
 test('installer wires gemini beside foreign hooks and settings, once', () => {

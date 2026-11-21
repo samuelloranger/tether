@@ -41,11 +41,13 @@ type acpOption struct {
 }
 
 type acpRequest struct {
-	ID       json.RawMessage `json:"id"`
-	Title    string          `json:"title"`
-	Kind     string          `json:"kind,omitempty"`
-	Options  []acpOption     `json:"options"`
-	Notified bool            `json:"notified"`
+	ID    json.RawMessage `json:"id"`
+	Title string          `json:"title"`
+	Kind  string          `json:"kind,omitempty"`
+	// Description is a command's own summary (rawInput.description), for the push.
+	Description string      `json:"description,omitempty"`
+	Options     []acpOption `json:"options"`
+	Notified    bool        `json:"notified"`
 	// Elicitation requests (elicitation/create): the form's message, the first property's name, its
 	// choices (in Options, kind "choice") and whether the form is just that one question.
 	Elicitation bool   `json:"elicitation,omitempty"`
@@ -79,6 +81,10 @@ type acpTracker struct {
 	answers map[string]string
 	// done holds requests a client answered, so a second client's answer is not sent too.
 	done map[string]bool
+	// reply is the agent's latest top-level prose of the turn, for the done push; a tool call
+	// marks it stale so the next text starts a new one. Not persisted.
+	reply      string
+	replyStale bool
 }
 
 func loadACPTracker(name string) *acpTracker {
@@ -150,6 +156,7 @@ type acpEvent struct {
 	key        string
 	turnEnded  bool
 	stopReason string
+	reply      string
 	idle       *copilotIdle
 }
 
@@ -176,13 +183,24 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 		}
 		var p struct {
 			ToolCall struct {
-				Title string `json:"title"`
-				Kind  string `json:"kind"`
+				Title    string `json:"title"`
+				Kind     string `json:"kind"`
+				RawInput struct {
+					Description        any `json:"description"`
+					CommandDescription any `json:"command_description"`
+				} `json:"rawInput"`
 			} `json:"toolCall"`
 			Options []acpOption `json:"options"`
 		}
 		_ = json.Unmarshal(m.Params, &p)
 		req := &acpRequest{ID: json.RawMessage(key), Title: p.ToolCall.Title, Kind: p.ToolCall.Kind, Options: p.Options}
+		// Untyped: rawInput is the tool's own input, and a non-string must not drop the request.
+		for _, d := range []any{p.ToolCall.RawInput.Description, p.ToolCall.RawInput.CommandDescription} {
+			if v, ok := d.(string); ok && strings.TrimSpace(v) != "" {
+				req.Description = strings.Join(strings.Fields(v), " ")
+				break
+			}
+		}
 		t.st.Requests[key] = req
 		t.saveLocked()
 		return acpEvent{permission: req, key: key}
@@ -206,6 +224,7 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 			// A loaded conversation's background tasks died with the agent that ran them.
 			t.st.Loads = slices.Delete(t.st.Loads, i, i+1)
 			t.st.Terminals, t.st.Tasks, t.st.Autonomous = nil, nil, false
+			t.reply, t.replyStale = "", false
 			t.saveLocked()
 			return acpEvent{}
 		}
@@ -223,7 +242,7 @@ func (t *acpTracker) agentLine(line []byte) acpEvent {
 			if r.StopReason == "" && len(m.Error) > 0 {
 				r.StopReason = "error"
 			}
-			return acpEvent{turnEnded: true, stopReason: r.StopReason}
+			return acpEvent{turnEnded: true, stopReason: r.StopReason, reply: t.takeReplyLocked()}
 		}
 	}
 	return acpEvent{}
@@ -234,12 +253,15 @@ type acpUpdateLine struct {
 	Title      *string         `json:"title"`
 	ToolCallID string          `json:"toolCallId"`
 	Cost       json.RawMessage `json:"cost"`
+	Content    json.RawMessage `json:"content"`
 	Meta       struct {
 		TerminalInfo json.RawMessage `json:"terminal_info"`
 		TerminalExit json.RawMessage `json:"terminal_exit"`
 		ClaudeCode   struct {
 			// Raw: an MCP tool's response is an array, which a struct would refuse with the whole line.
 			ToolResponse json.RawMessage `json:"toolResponse"`
+			// Set on a subagent's own output.
+			ParentToolUseID string `json:"parentToolUseId"`
 		} `json:"claudeCode"`
 	} `json:"_meta"`
 }
@@ -274,6 +296,14 @@ func (t *acpTracker) updateLocked(u acpUpdateLine) acpEvent {
 		}
 	}
 	idle := len(t.st.Prompts) == 0 && len(t.st.Loads) == 0
+	if u.Meta.ClaudeCode.ParentToolUseID == "" {
+		switch u.Kind {
+		case "agent_message_chunk":
+			t.noteReplyLocked(u.Content, idle && !t.st.Autonomous)
+		case "tool_call":
+			t.replyStale = true
+		}
+	}
 	var ev acpEvent
 	switch {
 	case idle && !t.st.Autonomous && (u.Kind == "agent_message_chunk" || u.Kind == "agent_thought_chunk" || u.Kind == "tool_call"):
@@ -282,12 +312,45 @@ func (t *acpTracker) updateLocked(u acpUpdateLine) acpEvent {
 	case idle && t.st.Autonomous && u.Kind == "usage_update" && len(u.Cost) > 0 && string(u.Cost) != "null":
 		t.st.Autonomous = false
 		changed = true
-		ev = acpEvent{turnEnded: true, stopReason: "end_turn"}
+		ev = acpEvent{turnEnded: true, stopReason: "end_turn", reply: t.takeReplyLocked()}
 	}
 	if changed {
 		t.saveLocked()
 	}
 	return ev
+}
+
+// acpReplyLimit bounds the kept reply; the push shows far less.
+const acpReplyLimit = 2000
+
+// noteReplyLocked adds a text chunk to the turn's reply. fresh starts a new one: a turn the
+// agent starts by itself has no prompt to clear the last turn's.
+func (t *acpTracker) noteReplyLocked(content json.RawMessage, fresh bool) {
+	var c struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &c) != nil || c.Type != "text" || c.Text == "" {
+		return
+	}
+	if fresh || t.replyStale {
+		t.reply, t.replyStale = "", false
+	}
+	if len(t.reply) < acpReplyLimit {
+		t.reply += c.Text
+	}
+}
+
+func (t *acpTracker) takeReply() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.takeReplyLocked()
+}
+
+func (t *acpTracker) takeReplyLocked() string {
+	r := t.reply
+	t.reply, t.replyStale = "", false
+	return r
 }
 
 // parseElicitation keeps the message and, when the form's first property is a single-select string
@@ -384,6 +447,7 @@ func (t *acpTracker) clientLine(line []byte) (forward, echo bool) {
 	case m.Method == "session/prompt":
 		t.st.Prompts = append(t.st.Prompts, key)
 		t.st.Autonomous = false
+		t.reply, t.replyStale = "", false
 		t.saveLocked()
 		return true, true
 	case m.Method == "_session/steering":
@@ -433,13 +497,42 @@ func (t *acpTracker) snapshot() (string, string, int) {
 	return t.st.Title, "idle", len(t.st.Tasks)
 }
 
-func (t *acpTracker) chatName() string {
+func (t *acpTracker) agentTitle() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.st.Title != "" {
-		return t.st.Title
+	return t.st.Title
+}
+
+// pushLabels names the chat the way the drawer does: the user's title, else the agent's, else
+// the project folder; never the holder's generated name. project is the subtitle, empty when
+// the chat label already is the project.
+func (s *acpDaemonState) pushLabels() (chat, project string) {
+	if s.meta != nil {
+		s.metaMu.Lock()
+		cwd := s.meta.Cwd
+		s.metaMu.Unlock()
+		if cwd != "" {
+			if base := filepath.Base(acpProjectRoot(cwd)); base != "/" && base != "." {
+				project = base
+			}
+		}
 	}
-	return t.name
+	if o, err := readACPOrganization(s.tr.name); err == nil {
+		chat = strings.TrimSpace(o.Title)
+	}
+	if chat == "" {
+		chat = strings.TrimSpace(s.tr.agentTitle())
+	}
+	if chat == "" {
+		chat, project = project, ""
+	}
+	if chat == "" {
+		chat = "Chat"
+	}
+	if project == chat {
+		project = ""
+	}
+	return clip(chat, 60), project
 }
 
 // answer runs write for an outstanding request and, if it succeeds, records the answer and clears it.
@@ -535,7 +628,7 @@ func (s *acpDaemonState) scanAgent(chunk []byte) {
 			})
 		case ev.turnEnded && !continued:
 			s.whenDetached(func() bool { return true }, func() {
-				s.pushAsync(s.donePush(ev.stopReason), "acp-done-"+threadKey(hostLabel(), s.tr.name))
+				s.pushAsync(s.donePush(ev.stopReason, ev.reply), "acp-done-"+threadKey(hostLabel(), s.tr.name))
 			})
 		case ev.idle != nil:
 			s.settleAfterIdle(ev.idle)
@@ -575,15 +668,15 @@ func clip(v string, n int) string {
 }
 
 func (s *acpDaemonState) elicitationPush(req *acpRequest) PushContent {
-	chat := s.tr.chatName()
-	body := clip(req.Message, 200)
-	if body == "" {
+	chat, project := s.pushLabels()
+	body := req.Message
+	if strings.TrimSpace(body) == "" {
 		body = "Needs your input"
 	}
 	c := PushContent{
-		Title: clip(chat, 60) + " · needs you", Body: body, Link: s.link(),
+		Title: chat + " · needs you", Body: body, Link: s.link(),
 		Category: acpPermissionCategory, State: "waiting", Version: s.collapseSuffix(string(req.ID)),
-		Session: chat, Level: levelUrgent, ACPSession: s.tr.name, RequestID: string(req.ID), Elicitation: true,
+		Session: project, Thread: s.tr.name, Level: levelUrgent, ACPSession: s.tr.name, RequestID: string(req.ID), Elicitation: true,
 	}
 	if req.Simple && len(req.Options) >= 2 && len(req.Options) <= maxPushOptions {
 		for _, o := range req.Options {
@@ -599,22 +692,11 @@ func (s *acpDaemonState) permissionPush(req *acpRequest) PushContent {
 	if req.Elicitation {
 		return s.elicitationPush(req)
 	}
-	chat := s.tr.chatName()
-	what := req.Title
-	if what == "" {
-		what = req.Kind
-	}
-	if what == "" {
-		what = "a tool"
-	}
-	body := "Allow: " + clip(what, 120) + "?"
-	if req.Kind == "switch_mode" {
-		body = "Approve the plan?"
-	}
+	chat, project := s.pushLabels()
 	c := PushContent{
-		Title: clip(chat, 60) + " · needs you", Body: body, Link: s.link(),
+		Title: chat + " · needs you", Body: permissionBody(req), Link: s.link(),
 		Category: acpPermissionCategory, State: "waiting", Version: s.collapseSuffix(string(req.ID)),
-		Session: chat, Level: levelUrgent, ACPSession: s.tr.name, RequestID: string(req.ID),
+		Session: project, Thread: s.tr.name, Level: levelUrgent, ACPSession: s.tr.name, RequestID: string(req.ID),
 	}
 	opts := pickPushOptions(req.Options)
 	if len(opts) >= 2 {
@@ -661,14 +743,65 @@ func pickPushOptions(opts []acpOption) []acpOption {
 	return out
 }
 
-func (s *acpDaemonState) donePush(stop string) PushContent {
-	chat := s.tr.chatName()
+// permissionBody says what the agent wants to do. A command's title is the raw command, so
+// its description leads when the agent gave one.
+func permissionBody(req *acpRequest) string {
+	if req.Kind == "switch_mode" {
+		return "Approve the plan?"
+	}
+	what := strings.TrimSpace(toolLabel(req.Title))
+	if req.Kind == "execute" {
+		cmd := strings.Join(strings.Fields(what), " ")
+		switch {
+		case req.Description != "" && cmd != "":
+			return "Run: " + clip(req.Description, 100) + "\n$ " + clip(cmd, 70)
+		case req.Description != "":
+			return "Run: " + clip(req.Description, 100) + "?"
+		case cmd != "":
+			return "Run: " + clip(cmd, 120) + "?"
+		}
+	}
+	if what == "" {
+		what = req.Kind
+	}
+	if what == "" {
+		what = "a tool"
+	}
+	return "Allow: " + clip(what, 120) + "?"
+}
+
+// stopNote says why a turn ended early, for a stop reason other than end_turn.
+func stopNote(stop string) string {
+	switch stop {
+	case "max_tokens":
+		return "Stopped at the output token limit"
+	case "max_turn_requests":
+		return "Stopped at the turn's request limit"
+	case "refusal":
+		return "The agent refused to continue"
+	case "cancelled":
+		return "Cancelled"
+	case "error":
+		return "Stopped with an error"
+	}
+	return "Stopped (" + stop + ")"
+}
+
+func (s *acpDaemonState) donePush(stop, reply string) PushContent {
+	chat, project := s.pushLabels()
 	if stop == "" {
 		stop = "unknown"
 	}
+	title, body := chat+" · done", plainLine(reply)
+	if body == "" {
+		body = "Finished"
+	}
+	if stop != "end_turn" {
+		title, body = chat+" · stopped", stopNote(stop)
+	}
 	return PushContent{
-		Title: clip(chat, 60), Body: "Finished · " + stop, Link: s.link(), Category: acpDoneCategory,
-		Session: chat, Level: levelQuiet, ACPSession: s.tr.name, StopReason: stop,
+		Title: title, Body: body, Link: s.link(), Category: acpDoneCategory,
+		Session: project, Thread: s.tr.name, Level: levelQuiet, ACPSession: s.tr.name, StopReason: stop,
 	}
 }
 
