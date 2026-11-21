@@ -3862,7 +3862,7 @@ export component ChatPlanUsage inherits VerticalLayout {
         spacing: 2px;
         Rectangle { height: 1px; background: Tokens.border; }
         HorizontalLayout { spacing: 4px;
-            Text { text: "Subscriptions · used"; color: Tokens.text-faint; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+            Text { text: "Plan usage"; color: Tokens.text-secondary; font-size: 12px; font-weight: 550; horizontal-stretch: 1; vertical-alignment: center; }
             IconButton { icon: @image-url("icons/refresh.svg"); size: 24px; tooltip: "Refresh account usage (once per minute)"; clicked => { ChatVm.refresh-usage(); } }
         }
         for provider in ChatVm.plan-usage: SubscriptionQuotaRow { usage: provider; }
