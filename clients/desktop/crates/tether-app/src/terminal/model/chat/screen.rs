@@ -494,7 +494,8 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         };
         screen.permission = Some(PermissionView {
             plan,
-            key: p.request_id.describe(),
+            // Request ids are per agent process: two chats can both have `int(1)` waiting.
+            key: format!("{}:{}", s.name, p.request_id.describe()),
             title: p.title.clone(),
             position: if total > 1 {
                 format!("1 of {total}")
