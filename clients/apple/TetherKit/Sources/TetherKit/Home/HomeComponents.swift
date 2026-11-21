@@ -60,15 +60,14 @@ struct MachineCardView: View {
       Button(action: onOpen) {
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 10) {
-            Circle().fill(TetherColors.heatCool).frame(width: 11, height: 11).opacity(0.6)
+            Circle().fill(TetherColors.textFaint).frame(width: 8, height: 8).opacity(0.6)
             Text(profile.name).font(.app(.headline))
               .foregroundStyle(TetherColors.textPrimary)
             Spacer()
-            Text("saved").font(.app(.caption2).weight(.semibold).monospaced())
+            Text("saved").font(.app(.caption2).weight(.medium))
               .padding(.horizontal, 8).padding(.vertical, 3)
-              .foregroundStyle(TetherColors.textFaint)
-              .background(TetherColors.textPrimary.opacity(0.04), in: Capsule())
-              .overlay(Capsule().strokeBorder(TetherColors.border))
+              .foregroundStyle(TetherColors.textSecondary)
+              .background(TetherColors.surfaceRaised, in: Capsule())
           }
           detailLayout {
             Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
@@ -96,8 +95,8 @@ struct MachineCardView: View {
               .font(.app(.caption).weight(.semibold))
               .padding(.horizontal, 12)
               .frame(height: 28)
-              .background(TetherColors.accent.opacity(0.12), in: Capsule())
-              .foregroundStyle(TetherColors.accent)
+              .background(TetherColors.surfaceRaised, in: Capsule())
+              .foregroundStyle(TetherColors.textPrimary)
               .hitSlop(vertical: 8, horizontal: 4)
           }
           .buttonStyle(TetherPressStyle())
@@ -110,7 +109,7 @@ struct MachineCardView: View {
             Text("Open").font(.app(.subheadline).weight(.semibold))
             Image(systemName: "chevron.right").font(.app(.caption2).weight(.semibold))
           }
-          .foregroundStyle(TetherColors.accent)
+          .foregroundStyle(TetherColors.textPrimary)
           .frame(height: 28)
           .hitSlop(vertical: 8, horizontal: 8)
         }
@@ -145,23 +144,23 @@ struct KeyCardView: View {
           Text(record.name).font(.app(.subheadline).weight(.semibold))
             .foregroundStyle(TetherColors.textPrimary)
           Text(record.origin.rawValue)
-            .font(.app(.caption2).weight(.bold).monospaced())
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .foregroundStyle(TetherColors.accent)
-            .background(TetherColors.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .font(.app(.caption2).weight(.medium))
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .foregroundStyle(TetherColors.textSecondary)
+            .background(TetherColors.surfaceRaised, in: Capsule())
         }
         Text("\(record.algorithm) · \(shortDate(record.createdAt))")
           .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
         Text(shortFingerprint)
           .font(.caption2.monospaced()).foregroundStyle(TetherColors.textSecondary)
           .lineLimit(1).truncationMode(.middle)
-        Text(usedBy.isEmpty ? "not used yet" : "used by \(usedBy.joined(separator: ", "))")
-          .font(.caption2.monospaced()).foregroundStyle(TetherColors.textFaint)
+        Text(usedBy.isEmpty ? "Not used yet" : "Used by \(usedBy.joined(separator: ", "))")
+          .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
         Button {
           UIPasteboard.general.string = record.publicKey
         } label: {
           Text("Copy public key").font(.app(.caption).weight(.semibold))
-            .foregroundStyle(TetherColors.accent)
+            .foregroundStyle(TetherColors.textPrimary)
         }
         .padding(.top, 3)
         .buttonStyle(TetherPressStyle())
@@ -230,7 +229,6 @@ extension View {
 
   func tetherCard(cornerRadius: CGFloat = 16) -> some View {
     background(TetherColors.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
-      .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(TetherColors.border))
   }
 
   /// The floating capsule used for transient outcomes at the bottom of a screen.
@@ -282,7 +280,7 @@ private struct CopyConfirmation: ViewModifier {
         if isPresented {
           Label("Copied", systemImage: "checkmark.circle.fill")
             .font(.app(.caption).weight(.semibold))
-            .tetherPill(border: TetherColors.accent.opacity(0.5))
+            .tetherPill()
             .padding(.bottom, 24)
             .transition(TetherMotion.screenTransition(reduceMotion: reduceMotion))
         }
@@ -312,7 +310,7 @@ private struct HoverHighlight: ViewModifier {
     content
       .overlay {
         RoundedRectangle(cornerRadius: cornerRadius)
-          .strokeBorder(TetherColors.accent.opacity(hovering ? 0.55 : 0))
+          .strokeBorder(TetherColors.textFaint.opacity(hovering ? 0.6 : 0))
           .allowsHitTesting(false)
       }
       .onHover { hovering = $0 }

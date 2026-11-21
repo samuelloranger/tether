@@ -38,7 +38,6 @@ public struct HomeView: View {
   public var body: some View {
     ZStack(alignment: .top) {
       TetherColors.background.ignoresSafeArea()
-      auroraGlow
       VStack(spacing: 0) {
         header
         tabs
@@ -91,25 +90,13 @@ public struct HomeView: View {
     return actions
   }
 
-  private var auroraGlow: some View {
-    RadialGradient(
-      colors: [TetherColors.accent.opacity(0.28), TetherColors.success.opacity(0.14), .clear],
-      center: .top, startRadius: 4, endRadius: 240
-    )
-    .frame(height: 220)
-    .blur(radius: 18)
-    .offset(y: -40)
-    .allowsHitTesting(false)
-    .ignoresSafeArea()
-  }
-
   private var header: some View {
     HStack(alignment: .bottom) {
       VStack(alignment: .leading, spacing: 3) {
         Text("Home").font(.app(.largeTitle).weight(.bold)).foregroundStyle(TetherColors.textPrimary)
         Text(summary)
-          .font(.caption2.monospaced())
-          .foregroundStyle(TetherColors.textFaint)
+          .font(.app(.caption))
+          .foregroundStyle(TetherColors.textSecondary)
       }
       Spacer()
       if let onClose {
@@ -124,8 +111,7 @@ public struct HomeView: View {
         Button { showSettings = true } label: {
           Image(systemName: "gearshape").font(.app(.title3).weight(.medium))
             .frame(width: addButtonSize, height: addButtonSize)
-            .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
+            .background(TetherColors.surfaceRaised, in: Circle())
         }
         .foregroundStyle(TetherColors.textSecondary)
         .buttonStyle(TetherPressStyle())
@@ -136,10 +122,9 @@ public struct HomeView: View {
       Button { showAdd = true } label: {
         Image(systemName: "plus").font(.app(.title3).weight(.medium))
           .frame(width: addButtonSize, height: addButtonSize)
-          .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 9))
-          .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(TetherColors.border))
+          .background(TetherColors.surfaceRaised, in: Circle())
       }
-      .foregroundStyle(TetherColors.accent)
+      .foregroundStyle(TetherColors.textPrimary)
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("homeAddServer")
       .accessibilityLabel("Add a machine")
@@ -207,7 +192,7 @@ public struct HomeView: View {
       Spacer()
       Image(systemName: "point.3.connected.trianglepath.dotted")
         .font(.system(.largeTitle, design: .default, weight: .light))
-        .foregroundStyle(TetherColors.accent)
+        .foregroundStyle(TetherColors.textFaint)
       Text("No machines tethered yet").font(.app(.title3).weight(.semibold))
         .foregroundStyle(TetherColors.textPrimary)
       Text("Add a server to open a shell that stays alive between visits.")
@@ -216,8 +201,8 @@ public struct HomeView: View {
       Button { showAdd = true } label: {
         Text("Add a server").font(.app(.subheadline).weight(.semibold))
           .padding(.horizontal, 20).padding(.vertical, 11)
-          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 12))
-          .foregroundStyle(TetherColors.onAccent)
+          .background(TetherColors.textPrimary, in: Capsule())
+          .foregroundStyle(TetherColors.background)
       }
       .padding(.top, 6)
       .buttonStyle(TetherPressStyle())
@@ -308,9 +293,8 @@ public struct HomeView: View {
           .lineLimit(2).minimumScaleFactor(0.75).multilineTextAlignment(.center)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 12)
-      .background(prime ? TetherColors.accent : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(prime ? .clear : TetherColors.border))
-      .foregroundStyle(prime ? TetherColors.onAccent : TetherColors.textPrimary)
+      .background(prime ? TetherColors.textPrimary : TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+      .foregroundStyle(prime ? TetherColors.background : TetherColors.textPrimary)
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("homeKey_\(label)")

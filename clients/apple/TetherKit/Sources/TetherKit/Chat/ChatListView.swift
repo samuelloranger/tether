@@ -76,15 +76,15 @@ struct ChatListView: View {
       Button(action: start) {
         Group {
           if starting {
-            ProgressView().tint(TetherColors.onAccent)
+            ProgressView().tint(TetherColors.background)
           } else {
             Text("Start chat").font(.chat(.subheadline).weight(.semibold))
           }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 36)
-        .foregroundStyle(TetherColors.onAccent)
-        .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+        .foregroundStyle(TetherColors.background)
+        .background(TetherColors.textPrimary, in: Capsule())
         .padding(.vertical, 4)
         .contentShape(Rectangle())
       }
@@ -109,7 +109,7 @@ struct ChatListView: View {
   @ViewBuilder private var content: some View {
     switch model.load {
     case .loading where model.chats.isEmpty:
-      HStack { Spacer(); ProgressView().tint(TetherColors.accent); Spacer() }.themedRow()
+      HStack { Spacer(); ProgressView().tint(TetherColors.textFaint); Spacer() }.themedRow()
     case let .failed(message):
       VStack(alignment: .leading, spacing: 8) {
         Label("Couldn't list chats", systemImage: "exclamationmark.triangle")

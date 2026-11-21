@@ -15,19 +15,22 @@ struct AgentStatusTag: View {
     }
   }
 
+  /// Brightness, not hue: "needs you" reads strongest, "done" quietest.
   private var color: Color {
     switch status.state {
-    case .working: return TetherColors.accent
-    case .waiting: return TetherColors.warning
+    case .working: return TetherColors.textSecondary
+    case .waiting: return TetherColors.textPrimary
     case .done: return TetherColors.textFaint
     }
   }
 
   var body: some View {
     HStack(spacing: 4) {
-      Circle().fill(color).frame(width: 6, height: 6)
-        .opacity(status.state == .working && pulsing ? 0.35 : 1)
-      Text(Self.label(for: status, now: now)).font(.caption2.monospaced())
+      if status.state != .done {
+        Circle().fill(TetherColors.textPrimary).frame(width: 6, height: 6)
+          .opacity(status.state == .working && pulsing ? 0.35 : 1)
+      }
+      Text(Self.label(for: status, now: now)).font(.app(.caption).weight(status.state == .waiting ? .semibold : .regular))
     }
     .foregroundStyle(color)
     .onAppear {
