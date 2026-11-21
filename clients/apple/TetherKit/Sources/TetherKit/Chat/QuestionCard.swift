@@ -25,10 +25,8 @@ struct QuestionCard: View {
       if !fields.isEmpty { fieldList }
       actions
     }
-    .padding(14)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 18))
-    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(TetherColors.accent.opacity(0.45)))
-    .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+    .padding(16)
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 22))
     .accessibilityElement(children: .contain)
     .onChange(of: focused) { _, now in typing(now != nil) }
     .task {
@@ -45,17 +43,12 @@ struct QuestionCard: View {
   }
 
   private var header: some View {
-    HStack(alignment: .top, spacing: 8) {
-      Image(systemName: "questionmark.bubble").foregroundStyle(TetherColors.accent)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 1) {
-        Text("QUESTION").font(.chat(.caption2).weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
-        Text(question.message).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(question.message).font(.chat(.body).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 0)
       if let position {
-        Text(position).font(.chat(.caption2).weight(.semibold).monospaced()).foregroundStyle(TetherColors.textFaint)
+        Text(position).font(.chat(.caption2).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
       }
     }
     .accessibilityElement(children: .combine)
@@ -89,20 +82,35 @@ struct QuestionCard: View {
     VStack(alignment: .leading, spacing: 6) {
       if fields.count > 1 || field.required {
         Text(field.title + (field.required ? " *" : ""))
-          .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+          .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+          .padding(.leading, 2)
           .accessibilityLabel(field.required ? "\(field.title), required" : field.title)
           .accessibilityAddTraits(.isHeader)
       }
       switch field.kind {
       case .single, .multi:
-        ForEach(field.choices, id: \.value) { choice in optionRow(field, choice) }
-        if let custom = field.custom { otherRow(custom) }
+        VStack(spacing: 0) {
+          ForEach(Array(field.choices.enumerated()), id: \.element.value) { index, choice in
+            if index > 0 { rule }
+            optionRow(field, choice)
+          }
+          if let custom = field.custom {
+            if !field.choices.isEmpty { rule }
+            otherRow(custom)
+          }
+        }
+        .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
       case .text:
         textInput(name: field.name, placeholder: field.description.isEmpty ? field.title : field.description)
       case .boolean:
         booleanRow(field)
       }
     }
+  }
+
+  private var rule: some View {
+    Rectangle().fill(TetherColors.border).frame(height: 0.5).padding(.leading, 46)
   }
 
   private func showsDescription(_ choice: ChatQuestionChoice) -> Bool {
@@ -118,8 +126,8 @@ struct QuestionCard: View {
       if tapSubmits { respond(.accept, draft.content(fields)) }
     } label: {
       HStack(spacing: 10) {
-        Image(systemName: symbol).font(.system(size: 17))
-          .foregroundStyle(picked ? TetherColors.accent : TetherColors.textFaint)
+        Image(systemName: symbol).font(.system(size: 18))
+          .foregroundStyle(picked ? TetherColors.textPrimary : TetherColors.textFaint)
           .frame(width: 22)
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 1) {
@@ -134,13 +142,9 @@ struct QuestionCard: View {
         }
         Spacer(minLength: 0)
       }
-      .padding(.horizontal, 10).padding(.vertical, 6)
-      .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-      .background(picked ? TetherColors.accent.opacity(0.10) : TetherColors.background.opacity(0.5),
-        in: RoundedRectangle(cornerRadius: 10))
-      .overlay(RoundedRectangle(cornerRadius: 10)
-        .strokeBorder(picked ? TetherColors.accent.opacity(0.55) : TetherColors.border))
-      .contentShape(RoundedRectangle(cornerRadius: 10))
+      .padding(.horizontal, 12).padding(.vertical, 7)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .disabled(!enabled)
@@ -165,9 +169,9 @@ struct QuestionCard: View {
           Text("Other\u{2026}").font(.chat(.subheadline)).foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
       }
       .buttonStyle(TetherPressStyle())
       .disabled(!enabled)
@@ -191,7 +195,7 @@ struct QuestionCard: View {
     .padding(.horizontal, 12).padding(.vertical, 8)
     .frame(minHeight: 36)
     .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(focused == name ? TetherColors.accent.opacity(0.55) : TetherColors.border))
+    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(focused == name ? TetherColors.textFaint : TetherColors.border))
     .disabled(!enabled)
     .id("input-" + name)
     .accessibilityLabel(placeholder)
@@ -213,10 +217,10 @@ struct QuestionCard: View {
       ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
     return layout {
       Button { respond(.decline, [:]) } label: {
-        Text("Decline").font(.chat(.subheadline).weight(.medium))
-          .frame(maxWidth: .infinity, minHeight: 34).padding(.horizontal, 10)
-          .foregroundStyle(TetherColors.danger)
-          .background(TetherColors.danger.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+        Text("Decline").font(.chat(.subheadline).weight(.semibold))
+          .frame(maxWidth: .infinity, minHeight: 36).padding(.horizontal, 10)
+          .foregroundStyle(TetherColors.textPrimary)
+          .background(TetherColors.surfaceRaised, in: Capsule())
           .hitSlop(vertical: 5)
       }
       .buttonStyle(TetherPressStyle())
@@ -229,9 +233,9 @@ struct QuestionCard: View {
           respond(.accept, draft.content(fields))
         } label: {
           Text("Submit").font(.chat(.subheadline).weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: 34).padding(.horizontal, 10)
-            .foregroundStyle(TetherColors.onAccent)
-            .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+            .frame(maxWidth: .infinity, minHeight: 36).padding(.horizontal, 10)
+            .foregroundStyle(TetherColors.background)
+            .background(TetherColors.textPrimary, in: Capsule())
             .hitSlop(vertical: 5)
         }
         .buttonStyle(TetherPressStyle())

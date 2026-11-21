@@ -61,10 +61,7 @@ struct SubagentRow: View {
 
   private var header: some View {
     HStack(spacing: 10) {
-      Image(systemName: "arrow.triangle.branch").font(.chat(.footnote))
-        .foregroundStyle(failed ? TetherColors.danger : TetherColors.textFaint)
-        .frame(width: 24)
-        .accessibilityHidden(true)
+      ToolDotView(dot: ToolDot(call: call))
       VStack(alignment: .leading, spacing: 1) {
         Text(call.subagentTitle).font(.chat(.footnote))
           .foregroundStyle(failed ? TetherColors.danger : TetherColors.textSecondary)
@@ -74,14 +71,14 @@ struct SubagentRow: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      ToolStatusGlyph(status: call.status, active: call.isActive).frame(width: 14)
+      ToolStatusGlyph(status: call.status, active: call.isActive)
       if expandable {
         Image(systemName: expanded ? "chevron.down" : "chevron.right")
-          .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+          .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint.opacity(0.7))
       }
     }
-    .padding(.horizontal, 12).padding(.vertical, 6)
-    .frame(minHeight: 36)
+    .padding(.trailing, 2).padding(.vertical, 6)
+    .frame(minHeight: ToolRowMetrics.rowHeight)
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Subagent \(call.subagentTitle), \(subtitle), \(call.isActive ? "running" : failed ? "failed" : "done")")
@@ -92,14 +89,11 @@ struct SubagentRow: View {
     VStack(alignment: .leading, spacing: 8) {
       if !call.children.isEmpty {
         VStack(spacing: 0) {
-          ForEach(Array(call.children.enumerated()), id: \.element.id) { index, child in
-            if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+          ForEach(call.children, id: \.id) { child in
             ToolCallRow(call: child, cwd: cwd, expanded: openChildren.contains(child.id) != !child.images.isEmpty, toggle: { toggleChild(child.id) })
           }
         }
-        .padding(.leading, 10)
-        .overlay(alignment: .leading) { Rectangle().fill(TetherColors.border).frame(width: 2) }
-        .padding(.leading, 22)
+        .padding(.leading, ToolRowMetrics.dotColumn + 10)
       }
       if let brief { briefView(brief) }
       if let report { reportView(report) }
@@ -131,7 +125,7 @@ struct SubagentRow: View {
           .background(TetherColors.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
       }
     }
-    .padding(.leading, 34).padding(.trailing, 8)
+    .padding(.leading, ToolRowMetrics.dotColumn + 10).padding(.trailing, 4)
   }
 
   private func reportView(_ text: String) -> some View {
@@ -142,6 +136,6 @@ struct SubagentRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(TetherColors.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
-    .padding(.leading, 34).padding(.trailing, 8)
+    .padding(.leading, ToolRowMetrics.dotColumn + 10).padding(.trailing, 4)
   }
 }
