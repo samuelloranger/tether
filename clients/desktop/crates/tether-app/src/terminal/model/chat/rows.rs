@@ -18,10 +18,7 @@ use tether_core::acp::turns::{self, DiffCounts};
 use tether_core::acp::verbs;
 
 use super::session::{Session, SignIn};
-use super::view::{
-    DiffKind, Entry, EntryBody, Picture, Pixels, RECEIPT_SHOWN, ReceiptView, Row, RowBody,
-    TaskView, ToolState,
-};
+use super::view::{DiffKind, Entry, EntryBody, Picture, Pixels, Row, RowBody, TaskView, ToolState};
 
 pub struct RowCtx<'a> {
     pub host: &'a str,
@@ -209,7 +206,6 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
         .iter()
         .map(|i| i.id)
         .collect();
-    let receipts = turns::receipts(&shown, working, &s.cwd, ctx.diffs);
     for block in &blocks[range] {
         match block {
             Block::Item(item) => item_rows(s, item, last_item, ctx, &mut rows),
@@ -223,12 +219,6 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
                     body: RowBody::Tools(tool_entries(s, items, fold, ctx)),
                 });
             }
-        }
-        if let Some(receipt) = receipts.get(&block.last_id()) {
-            rows.push(Row {
-                key: format!("receipt:{}", block.last_id()),
-                body: RowBody::Receipt(receipt_view(receipt)),
-            });
         }
     }
     for failed in s.outbox.failed() {
@@ -478,25 +468,6 @@ pub fn fold_key_of(s: &Session, key: &str) -> Option<String> {
             Block::Tools(items) if items.iter().any(|i| i.id == id) => Some(fold_key(&items)),
             _ => None,
         })
-}
-
-fn receipt_view(r: &turns::Receipt) -> ReceiptView {
-    ReceiptView {
-        changed: r
-            .changed
-            .iter()
-            .take(RECEIPT_SHOWN)
-            .map(|c| (c.path.clone(), c.added, c.removed))
-            .collect(),
-        changed_more: r.changed.len().saturating_sub(RECEIPT_SHOWN),
-        ran: r
-            .ran
-            .iter()
-            .take(RECEIPT_SHOWN)
-            .map(|c| (c.title.clone(), c.failed))
-            .collect(),
-        ran_more: r.ran.len().saturating_sub(RECEIPT_SHOWN),
-    }
 }
 
 /// Dots are the rows that carry one; the rail runs from the first to the last of them.

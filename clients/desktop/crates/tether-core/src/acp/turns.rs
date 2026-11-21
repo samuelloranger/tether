@@ -1,39 +1,14 @@
 //! A turn runs from one of the user's messages to the next; everything before the first is a
-//! turn too. This is where the finished ones are told apart, and where the end of one gets its
-//! receipt (the files it changed, the commands it ran) and its folded steps get their sentence.
+//! turn too. This is where the finished ones are told apart and their folded steps get their
+//! sentence.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 
 use super::diff;
-use super::message::{AcpDiff, ToolKind, ToolStatus};
-use super::reducer::{Item, ItemKind, ToolCall, WRITING_COMMAND};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Change {
-    pub path: String,
-    pub added: usize,
-    pub removed: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Command {
-    pub title: String,
-    pub failed: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Receipt {
-    pub changed: Vec<Change>,
-    pub ran: Vec<Command>,
-}
-
-impl Receipt {
-    pub fn is_empty(&self) -> bool {
-        self.changed.is_empty() && self.ran.is_empty()
-    }
-}
+use super::message::{AcpDiff, ToolKind};
+use super::reducer::{Item, ItemKind, ToolCall};
 
 /// How many items, from the start, belong to turns that are over: all of them, or all but the
 /// running turn. Items are counted by position, since a queued message that started sits after
@@ -51,7 +26,7 @@ pub fn finished_through(items: &[Item], working: bool) -> Option<i64> {
     n.checked_sub(1).map(|i| items[i].id)
 }
 
-/// A diff's file as a receipt line: the path relative to the chat's folder and its line counts.
+/// A diff's file: the path relative to the chat's folder and its line counts.
 pub type DiffCount = (String, usize, usize);
 
 /// Line counts per diff, kept by the view so a redraw never diffs the same edit twice: the
@@ -77,69 +52,6 @@ impl DiffCounts {
         self.0.insert(key, value.clone());
         value
     }
-}
-
-/// One receipt per finished turn that changed a file or ran a command, keyed by the turn's last
-/// item id.
-pub fn receipts(
-    items: &[Item],
-    working: bool,
-    cwd: &str,
-    counts: &mut DiffCounts,
-) -> BTreeMap<i64, Receipt> {
-    let finished = &items[..finished_len(items, working)];
-    let mut out = BTreeMap::new();
-    let mut start = 0;
-    for end in 1..=finished.len() {
-        if end == finished.len() || (is_user(&finished[end]) && end > start) {
-            let turn = &finished[start..end];
-            let calls: Vec<&ToolCall> = turn.iter().filter_map(call).collect();
-            let r = receipt(&calls, |d| counts.count(d, cwd));
-            if !r.is_empty() {
-                out.insert(turn[turn.len() - 1].id, r);
-            }
-            start = end;
-        }
-    }
-    out
-}
-
-pub fn receipt(calls: &[&ToolCall], mut count: impl FnMut(&AcpDiff) -> DiffCount) -> Receipt {
-    let mut receipt = Receipt::default();
-    // A subagent's commands are its own working; the files it changed are the turn's result.
-    for call in calls
-        .iter()
-        .flat_map(|c| std::iter::once(*c).chain(c.children.iter()))
-        .filter(|c| c.status != ToolStatus::Failed)
-    {
-        let Some(diff) = &call.diff else { continue };
-        let (path, added, removed) = count(diff);
-        match receipt.changed.iter_mut().find(|c| c.path == path) {
-            Some(known) => {
-                known.added += added;
-                known.removed += removed;
-            }
-            None => receipt.changed.push(Change {
-                path,
-                added,
-                removed,
-            }),
-        }
-    }
-    for call in calls
-        .iter()
-        .filter(|c| c.kind == ToolKind::Execute && c.subagent.is_none())
-    {
-        let title = call.display_title();
-        if title == WRITING_COMMAND {
-            continue;
-        }
-        receipt.ran.push(Command {
-            title: title.to_string(),
-            failed: call.status == ToolStatus::Failed,
-        });
-    }
-    receipt
 }
 
 /// A folded run of steps in one line: "Read 2 files, edited 1 file, ran 1 command".
@@ -206,16 +118,9 @@ fn is_user(item: &Item) -> bool {
     matches!(item.kind, ItemKind::User { .. })
 }
 
-fn call(item: &Item) -> Option<&ToolCall> {
-    match &item.kind {
-        ItemKind::Tool(call) => Some(call),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::message::ToolFields;
+    use super::super::message::{ToolFields, ToolStatus};
     use super::*;
 
     fn user(id: i64) -> Item {
@@ -255,13 +160,6 @@ mod tests {
         call(id, kind, "step", ToolStatus::Completed, None)
     }
 
-    fn tool(id: i64, call: ToolCall) -> Item {
-        Item {
-            id,
-            kind: ItemKind::Tool(call),
-        }
-    }
-
     fn edit(path: &str, old: Option<&str>, new: &str) -> Option<AcpDiff> {
         Some(AcpDiff {
             path: path.into(),
@@ -277,153 +175,6 @@ mod tests {
         assert_eq!(finished_through(&items, true), Some(1));
         assert_eq!(finished_through(&[user(0), text(1)], true), None);
         assert_eq!(finished_through(&[], false), None);
-    }
-
-    #[test]
-    fn a_receipt_sums_the_edits_of_one_file_and_lists_commands_in_order() {
-        let items = [
-            user(0),
-            tool(
-                1,
-                call(
-                    "a",
-                    ToolKind::Edit,
-                    "Edit",
-                    ToolStatus::Completed,
-                    edit("/w/p/src/a.ts", Some("x\n"), "y\nz\n"),
-                ),
-            ),
-            tool(
-                2,
-                call(
-                    "b",
-                    ToolKind::Execute,
-                    "bun test",
-                    ToolStatus::Completed,
-                    None,
-                ),
-            ),
-            tool(
-                3,
-                call(
-                    "c",
-                    ToolKind::Edit,
-                    "Edit",
-                    ToolStatus::Completed,
-                    edit("/w/p/src/a.ts", Some("z\n"), "q\n"),
-                ),
-            ),
-            tool(
-                4,
-                call(
-                    "d",
-                    ToolKind::Execute,
-                    "bun run lint",
-                    ToolStatus::Failed,
-                    None,
-                ),
-            ),
-            text(5),
-        ];
-        let got = receipts(&items, false, "/w/p", &mut DiffCounts::default());
-        assert_eq!(got.keys().copied().collect::<Vec<_>>(), [5]);
-        let r = &got[&5];
-        assert_eq!(
-            r.changed,
-            [Change {
-                path: "src/a.ts".into(),
-                added: 3,
-                removed: 2
-            }]
-        );
-        assert_eq!(
-            r.ran,
-            [
-                Command {
-                    title: "bun test".into(),
-                    failed: false
-                },
-                Command {
-                    title: "bun run lint".into(),
-                    failed: true
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn a_failed_edit_changed_nothing_and_a_turn_that_only_read_has_no_receipt() {
-        let items = [
-            user(0),
-            tool(
-                1,
-                call(
-                    "a",
-                    ToolKind::Edit,
-                    "Edit",
-                    ToolStatus::Failed,
-                    edit("/w/a", Some("x"), "y"),
-                ),
-            ),
-            tool(2, done("b", ToolKind::Read)),
-            text(3),
-        ];
-        assert!(receipts(&items, false, "/w", &mut DiffCounts::default()).is_empty());
-    }
-
-    #[test]
-    fn the_running_turn_gets_no_receipt_until_it_ends() {
-        let items = [
-            user(0),
-            tool(
-                1,
-                call("a", ToolKind::Execute, "make", ToolStatus::Completed, None),
-            ),
-            text(2),
-            user(3),
-            tool(
-                4,
-                call(
-                    "b",
-                    ToolKind::Execute,
-                    "make check",
-                    ToolStatus::Completed,
-                    None,
-                ),
-            ),
-        ];
-        let got = receipts(&items, true, "/w", &mut DiffCounts::default());
-        assert_eq!(got.keys().copied().collect::<Vec<_>>(), [2]);
-        assert_eq!(got[&2].ran[0].title, "make");
-    }
-
-    #[test]
-    fn a_command_still_being_written_is_not_listed() {
-        let writing = call(
-            "w",
-            ToolKind::Execute,
-            "Terminal",
-            ToolStatus::Pending,
-            None,
-        );
-        let r = receipt(&[&writing], |_| unreachable!());
-        assert!(r.ran.is_empty());
-    }
-
-    #[test]
-    fn a_subagents_edits_count_but_its_launch_is_not_a_command() {
-        let mut launch = call("l", ToolKind::Execute, "Agent", ToolStatus::Completed, None);
-        launch.subagent = Some(Default::default());
-        launch.children.push(call(
-            "c",
-            ToolKind::Edit,
-            "Edit",
-            ToolStatus::Completed,
-            edit("/w/a", None, "x\n"),
-        ));
-        let r = receipt(&[&launch], |d| (d.path.clone(), 1, 0));
-        assert_eq!(r.changed.len(), 1);
-        assert!(r.ran.is_empty());
     }
 
     #[test]

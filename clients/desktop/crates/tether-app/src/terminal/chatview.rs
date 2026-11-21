@@ -11,11 +11,11 @@ use crate::terminal::model::Msg;
 use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
-    AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatReceiptLineVm, ChatRowVm,
-    ChatSideVm, ChatTabVm, ChatTaskVm, ChatVm, ChatWorkflowVm, ChipVm, CtlChoiceVm, CtlCommandVm,
-    CtlOptionVm, DiffLineVm, MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm,
-    NcNoticeVm, NcServerVm, PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm,
-    QueuedVm, QuotaWindowVm, SavedSessionVm, WfAgentVm, WfPhaseVm,
+    AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
+    ChatTaskVm, ChatVm, ChatWorkflowVm, ChipVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
+    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, NcNoticeVm, NcServerVm,
+    PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm,
+    SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
 use tether_core::acp::versions::Kind;
 
@@ -409,29 +409,6 @@ fn row_vm(r: &Row) -> ChatRowVm {
         RowBody::Tools(entries) => {
             vm.kind = 4;
             vm.entries = model(entries.iter().map(entry_vm).collect());
-        }
-        RowBody::Receipt(r) => {
-            vm.kind = 18;
-            let line = |text: &str, added: usize, removed: usize, failed: bool| ChatReceiptLineVm {
-                text: text.into(),
-                added: added as i32,
-                removed: removed as i32,
-                failed,
-            };
-            vm.receipt_changed = model(
-                r.changed
-                    .iter()
-                    .map(|(path, added, removed)| line(path, *added, *removed, false))
-                    .collect(),
-            );
-            vm.receipt_ran = model(
-                r.ran
-                    .iter()
-                    .map(|(title, failed)| line(title, 0, 0, *failed))
-                    .collect(),
-            );
-            vm.changed_more = r.changed_more as i32;
-            vm.ran_more = r.ran_more as i32;
         }
         RowBody::Plan {
             summary,

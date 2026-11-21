@@ -44,8 +44,7 @@ export struct ChatEntryVm {
 // kind: 0 user, 1 assistant markdown block, 2 assistant images, 3 thinking, 4 tool group, 5 plan,
 // 6 notice, 7 error, 8 divider, 9 signed out, 10 answered question, 11 not sent, 12 working,
 // 13 earlier messages, 14 empty state, 15 agent notice (state = severity), 16 compaction
-// (state: 0 compacting, 1 done, 2 failed, 3 cancelled; flag = has a summary; open = summary shown),
-// 18 turn receipt.
+// (state: 0 compacting, 1 done, 2 failed, 3 cancelled; flag = has a summary; open = summary shown).
 export struct ChatCardEntryVm {
     id: string,
     key: string,
@@ -53,13 +52,6 @@ export struct ChatCardEntryVm {
     detail: string,
     meta: string,
     open: bool,
-}
-
-export struct ChatReceiptLineVm {
-    text: string,
-    added: int,
-    removed: int,
-    failed: bool,
 }
 
 export struct ChatRowVm {
@@ -83,10 +75,6 @@ export struct ChatRowVm {
     links: [MdLinkVm],
     images: [ChatImageVm],
     entries: [ChatEntryVm],
-    receipt-changed: [ChatReceiptLineVm],
-    receipt-ran: [ChatReceiptLineVm],
-    changed-more: int,
-    ran-more: int,
 }
 
 // state: -1 nothing to say, 0 working, 1 needs you, 2 idle, 3 running, 4 ended, 5 idle with background commands.
@@ -1336,50 +1324,6 @@ component Row inherits VerticalLayout {
             }
             for e in root.r.entries: Entry { e: e; }
             if root.r.open: Rectangle { height: 6px; }
-        }
-    }
-    // The end of a finished turn: what it changed and ran.
-    if root.r.kind == 18: Rectangle {
-        background: Tokens.surface;
-        border-radius: 14px;
-        height: receipt.preferred-height;
-        receipt := VerticalLayout {
-            padding-left: 14px;
-            padding-right: 14px;
-            if root.r.receipt-changed.length > 0: HorizontalLayout {
-                padding-top: 10px;
-                padding-bottom: 10px;
-                spacing: 10px;
-                Text { width: 64px; text: "Changed"; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: top; }
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 4px;
-                    for line in root.r.receipt-changed: HorizontalLayout {
-                        spacing: 8px;
-                        Text { horizontal-stretch: 1; text: line.text; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text; overflow: elide; }
-                        if line.added > 0: Text { text: "+" + line.added; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.success; }
-                        if line.removed > 0: Text { text: "\u{2212}" + line.removed; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.danger; }
-                    }
-                    if root.r.changed-more > 0: Text { text: root.r.changed-more + " more"; font-size: 11.5px; color: Tokens.text-faint; }
-                }
-            }
-            if root.r.receipt-changed.length > 0 && root.r.receipt-ran.length > 0: Rectangle { height: 1px; background: Tokens.border; }
-            if root.r.receipt-ran.length > 0: HorizontalLayout {
-                padding-top: 10px;
-                padding-bottom: 10px;
-                spacing: 10px;
-                Text { width: 64px; text: "Ran"; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: top; }
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 4px;
-                    for line in root.r.receipt-ran: HorizontalLayout {
-                        spacing: 8px;
-                        Text { horizontal-stretch: 1; text: line.text; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text; overflow: elide; }
-                        if line.failed: Text { text: "failed"; font-size: 11.5px; color: Tokens.danger; }
-                    }
-                    if root.r.ran-more > 0: Text { text: root.r.ran-more + " more"; font-size: 11.5px; color: Tokens.text-faint; }
-                }
-            }
         }
     }
     if root.r.kind == 6: QuietRow { icon: 15; text: root.r.text; }

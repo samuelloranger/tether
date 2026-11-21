@@ -3308,7 +3308,7 @@ fn resume_is_not_offered_without_the_capability_and_a_failed_revive_says_so() {
 
 #[cfg(debug_assertions)]
 #[test]
-fn a_finished_turn_folds_its_steps_and_ends_with_a_receipt() {
+fn a_finished_turn_folds_its_steps() {
     use super::view::EntryBody;
     let mut h = Harness::new();
     h.chats.dev_sample("claude", t(h.now));
@@ -3341,23 +3341,6 @@ fn a_finished_turn_folds_its_steps_and_ends_with_a_receipt() {
             .iter()
             .any(|e| matches!(e.body, EntryBody::Fold { .. })),
         "commands running in the background keep their rows"
-    );
-
-    let receipts: Vec<&super::view::ReceiptView> = s
-        .rows
-        .iter()
-        .filter_map(|r| match &r.body {
-            RowBody::Receipt(r) => Some(r),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        receipts[0].changed,
-        [("src/queue/retry.ts".to_string(), 3, 2)]
-    );
-    assert_eq!(
-        receipts[0].ran,
-        [("bun test packages/queue".to_string(), false)]
     );
 
     assert!(s.header.place.starts_with("app on "), "{}", s.header.place);

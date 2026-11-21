@@ -169,8 +169,7 @@ fn tool(state: &mut ChatState, id: &str, kind: &str, title: &str, content: serde
     update(state, &done.to_string());
 }
 
-/// An earlier turn that has ended: reads, a search, an edit and a command, so the steps fold
-/// and a receipt closes the turn.
+/// An earlier turn that has ended: reads, a search, an edit and a command, so the steps fold.
 fn finished_turn(state: &mut ChatState) {
     reduce(
         state,
