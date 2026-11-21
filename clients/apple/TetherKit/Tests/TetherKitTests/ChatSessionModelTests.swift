@@ -289,7 +289,7 @@ final class ChatSessionModelTests: XCTestCase {
     XCTAssertTrue(started)
     // The turn can start before the delivered prompt leaves the recovery store.
     let delivered = await eventually { !recovery.load().contains { $0.text == "running" } }
-    XCTAssertTrue(delivered)
+    XCTAssertTrue(delivered, "the delivered prompt stayed in the recovery store")
     let image = ChatImageAttachment(mimeType: "image/png", data: "AAAA")
     XCTAssertTrue(model.send(text: "edit me", images: [image]))
     XCTAssertTrue(model.send("last"))
