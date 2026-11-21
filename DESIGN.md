@@ -10,17 +10,17 @@ Aurora chrome around a live PTY: a periwinkle glow over a near-black base, night
 
 **The terminal theme colours everything.** The chosen terminal colour scheme sets the whole chrome palette, and whether the app is light or dark; there is no separate appearance setting. Tokens live in `TetherColors` (`clients/apple`) and `Tokens` (`clients/desktop`), both reading a `ChromePalette`.
 
-**Tether** (the default) and **Tether Light** are the hand-set Aurora palettes: near-black neutrals plus one periwinkle accent, with light values darkened so state words stay legible on white.
+**Tether** (the default) and **Tether Light** are the hand-set palettes: Tether is true black with neutral greys, Tether Light a cool off-white; both keep one periwinkle accent for controls, with light values darkened so state words stay legible on white.
 
 | Role | Tether | Tether Light |
 |---|---|---|
-| Background | `#08080E` | `#F1F1F6` |
-| Surface | `#12121D` | `#FFFFFF` |
-| Raised / selected | `#191926` | `#E9E9F2` |
-| Border | `#232333` | `#DCDCE6` |
-| Text | `#EDEEF6` | `#14141B` |
-| Secondary text | `#9797AC` | `#5C5C6C` |
-| Faint text | `#8B8BA3` | `#8A8A9C` |
+| Background | `#000000` | `#F1F1F6` |
+| Surface | `#141414` | `#FFFFFF` |
+| Raised / selected | `#202020` | `#E9E9F2` |
+| Border | `#2A2A2A` | `#DCDCE6` |
+| Text | `#F2F2F2` | `#14141B` |
+| Secondary text | `#ABABAB` | `#5C5C6C` |
+| Faint text | `#8D8D8D` | `#8A8A9C` |
 | Accent (primary) | `#7C8CF8` | `#4353D0` |
 | Terminal well | `#1E1E2E` | `#FBFBFD` |
 
