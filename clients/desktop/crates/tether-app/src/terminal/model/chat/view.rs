@@ -142,8 +142,6 @@ pub enum RowBody {
         selectable: bool,
     },
     Tools(Vec<Entry>),
-    /// What a finished turn changed and ran.
-    Receipt(ReceiptView),
     Plan {
         summary: String,
         current: String,
@@ -187,19 +185,6 @@ pub enum RowBody {
         message: String,
         folder: String,
     },
-}
-
-/// Receipt lines are cut at `RECEIPT_SHOWN`; the rest is a count.
-pub const RECEIPT_SHOWN: usize = 6;
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ReceiptView {
-    /// (path, added, removed)
-    pub changed: Vec<(String, usize, usize)>,
-    pub changed_more: usize,
-    /// (command, failed)
-    pub ran: Vec<(String, bool)>,
-    pub ran_more: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

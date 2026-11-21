@@ -66,7 +66,6 @@ struct ChatView: View {
   @State private var caretRequest: Int?
   /// Finished turns' step runs the reader opened; folded by default.
   @State private var openSteps: Set<Int> = []
-  @State private var diffCounts = ChatDiffCounts()
   @State private var confirmingBypass: String?
 
   private let bottomID = "chat-bottom"
@@ -229,9 +228,6 @@ struct ChatView: View {
     let range = ChatTranscriptWindow.range(lastIDs: lastIDs, start: windowStart)
     let working = model.state.turn == .working
     let finished = ChatTurns.finishedThrough(items, working: working)
-    let cwd = model.cwd
-    let counts = diffCounts
-    let receipts = ChatTurns.receipts(items, working: working, cwd: cwd, count: { counts.count($0, $1, cwd: cwd) })
     return VStack(alignment: .leading, spacing: 12) {
       if let branch = model.branch {
         VStack(alignment: .leading, spacing: 6) {
@@ -286,7 +282,6 @@ struct ChatView: View {
           )
           .equatable()
         }
-        if let receipt = receipts[block.lastID] { ChatTurnReceiptView(receipt: receipt) }
       }
       ForEach(model.outbox.failed) { message in
         FailedMessageRow(
