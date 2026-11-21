@@ -20,7 +20,7 @@ struct AgentStatusTag: View {
     switch status.state {
     case .working: return TetherColors.textSecondary
     case .waiting: return TetherColors.textPrimary
-    case .done: return TetherColors.textFaint
+    case .done: return TetherColors.textSecondary
     }
   }
 

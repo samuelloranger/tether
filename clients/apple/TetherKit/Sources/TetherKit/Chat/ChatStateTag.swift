@@ -5,7 +5,7 @@ extension DrawerChatState {
     switch self {
     case .working, .tasks, .running: TetherColors.textSecondary
     case .waiting: TetherColors.textPrimary
-    case .idle, .ended: TetherColors.textFaint
+    case .idle, .ended: TetherColors.textSecondary
     }
   }
 }

@@ -759,7 +759,7 @@ public struct SSHTerminalView: View {
   /// trailing. The kill control stays visible: keyboard and VoiceOver users never need the context menu,
   /// and a full-swipe kill would destroy work without a prompt.
   private func drawerRow<Main: View>(
-    selected: Bool, needsYou: Bool, ended: Bool = false,
+    selected: Bool,
     killID: String, killLabel: String, killSymbol: String = "xmark", onKill: @escaping () -> Void,
     @ViewBuilder main: () -> Main
   ) -> some View {
@@ -777,7 +777,7 @@ public struct SSHTerminalView: View {
       .accessibilityHint("Asks to confirm first")
     }
     .padding(.horizontal, 12).padding(.vertical, 8)
-    .modifier(DrawerRowChrome(selected: selected, needsYou: needsYou, ended: ended))
+    .modifier(DrawerRowChrome(selected: selected))
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: selected)
   }
 
@@ -789,7 +789,7 @@ public struct SSHTerminalView: View {
     let shownFolder = showsDetail ? folder : nil
     let hasStatus = agent != nil || isCurrent
     return drawerRow(
-      selected: isSelected, needsYou: agent?.state == .waiting,
+      selected: isSelected,
       killID: "zmxKill_\(session.name)", killLabel: "Kill session \(session.name)",
       onKill: { pendingKill = session.name }
     ) {
@@ -878,7 +878,7 @@ public struct SSHTerminalView: View {
     let ended = row.state == .ended
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return drawerRow(
-      selected: isSelected, needsYou: row.state == .waiting, ended: ended,
+      selected: isSelected,
       killID: "chatActions_\(row.name)", killLabel: "Actions for \(row.title)", killSymbol: "ellipsis",
       onKill: { chatActions = row }
     ) {
@@ -1371,8 +1371,6 @@ public struct SSHTerminalView: View {
 /// A drawer row's fill: only the open row is marked.
 private struct DrawerRowChrome: ViewModifier {
   let selected: Bool
-  let needsYou: Bool
-  let ended: Bool
 
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 12)

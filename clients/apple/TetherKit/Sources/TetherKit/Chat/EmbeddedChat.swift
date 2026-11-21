@@ -172,7 +172,7 @@ struct NewChatSheet: View {
           .foregroundStyle(TetherColors.textPrimary)
           .accessibilityAddTraits(.isHeader)
         Spacer()
-        Button("Cancel", action: onCancel).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
+        Button("Cancel", action: onCancel).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           .frame(minHeight: 44).buttonStyle(TetherPressStyle())
           .disabled(starting || creatingFolder || continuing != nil)
       }
@@ -519,11 +519,11 @@ struct NewChatSheet: View {
         if resetNow {
           if !stored.isEmpty {
             Text("·").foregroundStyle(TetherColors.textFaint)
-            Button("Undo") { reset = false }.foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
+            Button("Undo") { reset = false }.fontWeight(.semibold).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
           }
         } else {
           Text("·").foregroundStyle(TetherColors.textFaint)
-          Button("Reset") { changes = [:]; reset = true }.foregroundStyle(TetherColors.textPrimary)
+          Button("Reset") { changes = [:]; reset = true }.fontWeight(.semibold).foregroundStyle(TetherColors.textPrimary)
             .frame(minHeight: 44).accessibilityIdentifier("sshNewChatOptionsReset")
         }
         Spacer(minLength: 0)
