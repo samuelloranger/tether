@@ -136,7 +136,7 @@ struct AgentNoticeRow: View {
 
   private var tint: Color {
     switch notice.severity {
-    case .info: TetherColors.accent
+    case .info: TetherColors.textFaint
     case .warning: TetherColors.warning
     case .error: TetherColors.danger
     case nil: TetherColors.textFaint
