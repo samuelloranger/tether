@@ -152,9 +152,10 @@ jobs:
                     return 0
                   fi
                   # Listed first: grep -q would stop reading early, and under pipefail the
-                  # diff's SIGPIPE would read as "unchanged". $3 drops paths that match $2 but
-                  # don't go into the build (tests, docs, source art).
-                  files="$(git diff --name-only "$base" "$REF")"
+                  # diff's SIGPIPE would read as "unchanged". --no-renames keeps a moved file's
+                  # old path, so app code moved into an excluded folder still counts. $3 drops
+                  # paths that match $2 but don't go into the build (tests, docs, source art).
+                  files="$(git diff --name-only --no-renames "$base" "$REF")"
                   if [ -n "${3:-}" ]; then
                     files="$(grep -vE "$3" <<< "$files" || true)"
                   fi
