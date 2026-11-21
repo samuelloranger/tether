@@ -3434,6 +3434,15 @@ fn bypass_from_a_chip_asks_before_it_changes_anything() {
     assert!(s.controls.is_none(), "the panel need not be open");
     h.msg(ChatMsg::BypassCancelled);
     assert!(!h.screen().bypass_confirm);
+    h.msg(ChatMsg::ControlsChoose {
+        id: "mode".into(),
+        value: "bypassPermissions".into(),
+    });
+    h.run(|c, now, out| c.leave_active(now, out));
+    assert!(
+        !h.screen().bypass_confirm,
+        "leaving the chat drops its confirmation"
+    );
 }
 
 #[test]

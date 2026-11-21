@@ -833,6 +833,8 @@ impl Chats {
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
+        // A bypass confirmation belongs to the chat it was raised in.
+        self.bypass = None;
         self.follow_seq += 1;
         self.focus_seq += 1;
         self.draft_seq += 1;
@@ -1136,6 +1138,8 @@ impl Chats {
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
+        // A bypass confirmation belongs to the chat it was raised in.
+        self.bypass = None;
         self.viewer = None;
         self.dirty = true;
     }
