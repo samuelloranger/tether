@@ -131,7 +131,7 @@ export global GitVm {
 global GitStyle {
     // 0 neutral, 1 good, 2 bad, 3 warn, 4 accent.
     pure public function tone(t: int) -> color {
-        t == 1 ? Tokens.success : t == 2 ? Tokens.danger : t == 3 ? Tokens.warning : t == 4 ? Tokens.accent : Tokens.text-secondary
+        t == 1 ? Tokens.success : t == 2 ? Tokens.danger : t == 3 ? Tokens.warning : t == 4 ? Tokens.text : Tokens.text-secondary
     }
 }
 
@@ -145,7 +145,7 @@ component SmallButton inherits Rectangle {
     border-radius: 8px;
     border-width: primary ? 0px : 1px;
     border-color: Tokens.border;
-    background: !enabled ? Tokens.raised : primary ? (touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent) : (touch.has-hover ? Tokens.surface-hover : transparent);
+    background: !enabled ? Tokens.raised : primary ? (touch.has-hover ? Tokens.text.with-alpha(0.88) : Tokens.text) : (touch.has-hover ? Tokens.surface-hover : transparent);
     animate background { duration: Motion.fast; easing: ease-out; }
     touch := TouchArea {
         enabled: root.enabled;
@@ -160,7 +160,7 @@ component SmallButton inherits Rectangle {
         font-weight: 650;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: !root.enabled ? Tokens.text-faint : root.primary ? Tokens.on-accent : Tokens.text;
+        color: !root.enabled ? Tokens.text-faint : root.primary ? Tokens.background : Tokens.text;
     }
 }
 
@@ -236,7 +236,7 @@ component GitRowItem inherits Rectangle {
 component DiffLine inherits Rectangle {
     in property <DiffLineVm> line;
     height: max(20px, body.preferred-height + 4px);
-    background: line.kind == 0 ? Tokens.raised : line.kind == 1 ? Tokens.accent.with-alpha(0.10) : line.kind == 2 ? Tokens.success.with-alpha(0.13) : line.kind == 3 ? Tokens.danger.with-alpha(0.13) : transparent;
+    background: line.kind == 0 ? Tokens.raised : line.kind == 1 ? Tokens.text-faint.with-alpha(0.10) : line.kind == 2 ? Tokens.success.with-alpha(0.13) : line.kind == 3 ? Tokens.danger.with-alpha(0.13) : transparent;
     HorizontalLayout {
         padding-top: 2px;
         padding-bottom: 2px;
@@ -277,7 +277,7 @@ component DiffLine inherits Rectangle {
             font-family: Tokens.mono-font;
             font-size: 12px;
             font-weight: line.kind == 0 ? 700 : 400;
-            color: line.kind == 1 ? Tokens.accent : line.kind == 5 ? Tokens.text-secondary : Tokens.text;
+            color: line.kind == 1 ? Tokens.text-secondary : line.kind == 5 ? Tokens.text-secondary : Tokens.text;
         }
         if line.stat != "": Text {
             width: 90px;
@@ -552,7 +552,7 @@ component MdBlock inherits VerticalLayout {
     }
     if item.kind == 5: HorizontalLayout {
         spacing: 10px;
-        Rectangle { width: 3px; background: Tokens.accent.with-alpha(0.6); border-radius: 2px; }
+        Rectangle { width: 3px; background: Tokens.text-faint.with-alpha(0.6); border-radius: 2px; }
         Text { text: item.text; wrap: word-wrap; font-size: 14px; color: Tokens.text-secondary; }
     }
     if item.kind == 0: Text {
@@ -579,7 +579,7 @@ component MdBlock inherits VerticalLayout {
             height: 22px;
             width: min(380px, link-label.preferred-width + 16px);
             border-radius: 11px;
-            background: link-touch.has-hover ? Tokens.accent.with-alpha(0.2) : Tokens.accent.with-alpha(0.1);
+            background: link-touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
             animate background { duration: Motion.fast; easing: ease-out; }
             link-label := Text {
                 x: 8px;
@@ -588,7 +588,7 @@ component MdBlock inherits VerticalLayout {
                 overflow: elide;
                 font-size: 11.5px;
                 vertical-alignment: center;
-                color: Tokens.accent;
+                color: Tokens.text;
             }
             link-touch := TouchArea { mouse-cursor: pointer; clicked => { GitVm.open-link(link.url); } }
         }

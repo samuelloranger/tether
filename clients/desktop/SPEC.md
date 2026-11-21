@@ -57,9 +57,9 @@ Tabs: Machines, Keys. The selected tab is a raised segment.
 
 A card per machine, in insertion order:
 
-- A periwinkle lamp, the name, and a `saved` capsule.
+- A faint lamp, the name, and a `saved` capsule (raised fill, secondary text, no outline). Cards are a surface fill with no outline or glow; Home has no gradient.
 - `user@host:port · <key name, "agent", or "password">` in mono.
-- `Open` in the accent, with a chevron.
+- `Open` in the text colour, semibold, with a chevron; the **Chat** capsule is a raised fill with text-colour label.
 
 Click or Enter opens the machine. Right-click, or the keyboard menu key, offers **Edit** and **Remove**. Remove confirms:
 
@@ -131,7 +131,7 @@ A card per key:
 - `used by devbox`, or `not used yet`.
 - **Copy public key**.
 
-The bottom bar is three actions: **Generate** (accent), **Import**, **Paste**.
+The bottom bar is three actions: **Generate** (a text-colour pill with a background-colour label), **Import**, **Paste**.
 
 Right-click a card, or press Delete on a focused card, to confirm:
 
@@ -204,10 +204,10 @@ The window is a sidebar on the left and, beside it, one header over the active t
 
 **Sidebar** (248 px, the surface colour, a hairline on its right edge), top to bottom:
 
-- The host block: a lamp, the machine name, and under it the status word in the lamp colour. The word is always present; the lamp is not the only signal. On the right, the sidebar toggle.
+- The host block: a lamp, the machine name, and under it the status word in secondary text. The word is always present; the lamp is not the only signal, and it is faint while connected and coloured only while connecting, disconnected or failed. On the right, the sidebar toggle.
 - **New chat** (Ctrl+Shift+N) and **New terminal** (Ctrl+Shift+T), each with its shortcut in faint text.
-- **TERMINALS**, with a `+` that starts a new session, then one row per `zmx` session (see Sessions), or "No terminals running".
-- **CHATS**, with a `+` that opens **New session**, **New chat…** and **Continue a chat…**, then one row per chat (see Chats), or "No chats on this host yet".
+- **Terminals** (sentence case, secondary text, medium weight, the row count after it in faint text), with a `+` that starts a new session, then one row per `zmx` session (see Sessions), or "No terminals running".
+- **Chats**, with a `+` that opens **New session**, **New chat…** and **Continue a chat…**, then one row per chat (see Chats), or "No chats on this host yet".
 - At the bottom, past a hairline: **Hosts** (back to Home) and **Settings**.
 
 Only the two sections scroll. The active row has the raised background and semibold text.
@@ -216,13 +216,13 @@ Only the two sections scroll. The active row has the raised background and semib
 
 **Header** (52 px, the same for a terminal and a chat):
 
-- The title and, under it, a subtitle. A terminal: the session name; the cwd in mono, then the agent line in its heat colour (see Agents). A chat: its title; `<folder name> on <machine name>` in secondary text (a click copies the folder path), then the agent's name when it is not Claude.
+- The title and, under it, a subtitle. A terminal: the session name; the cwd in mono, then the agent line in secondary text (see Agents). A chat: its title; `<folder name> on <machine name>` in secondary text (a click copies the folder path), then the agent's name when it is not Claude.
 - A chat's state on the right (see Chats).
 - A terminal's **Find**, **Snippets**, **History** and **Send file…** (see those sections).
 - **Git**, on both. A chat attaches files from its composer's `+` instead of the header.
 - Under it, a hairline.
 
-The lamp follows the iOS connection lamp, not the agent heat ramp. Agent state is out of scope, and `waiting` red must not mean two things.
+The lamp follows the iOS connection lamp, not the agent state words, which carry no hue.
 
 | Status | Word | Lamp |
 |---|---|---|
@@ -376,7 +376,7 @@ The host's `tether` knows each zmx session's agent: `working`, `waiting` or `don
 
 **Degrading.** Nothing here can break the terminal. A failed exec keeps the last read for 30 s, then shows no badges. A missing binary, or output that is not a status array (an older `tether` without `status`), shows no badges and stops polling until the next connect. No error is shown for either.
 
-**Badges.** Every tab with an agent carries a small pill after its name, in words with colour only reinforcing them: `working` (accent), `needs you` (warning), `done 5m` (faint; the age is `now`, `Nm`, `Nh`, `Nd`, as on iOS). It is not the attention dot, which still means an OSC notification or bell arrived in a background tab. The active session's state and message also read in the header after the connection word: `· needs you · <message>`.
+**Badges.** Every tab with an agent carries a small pill after its name, in words with colour only reinforcing them: `working` (secondary text, text-colour dot), `needs you` (text colour, semibold, dot), `done 5m` (secondary, no dot; the age is `now`, `Nm`, `Nh`, `Nd`, as on iOS). It is not the attention dot, which still means an OSC notification or bell arrived in a background tab. The active session's state and message also read in the header after the connection word: `· needs you · <message>`.
 
 **Held prompts.** When the mod holds a question or a permission request, nobody is attached to that session, so the terminal shows nothing to answer. The active tab's held prompt opens a sheet over the terminal, as the iOS answer sheet does:
 
@@ -453,7 +453,7 @@ Same chrome. One sentence, then **Retry** and **Back to Home**.
 
 The iOS ACP chat, on the desktop: a conversation with an agent on the host (Claude Code through the pinned `claude-agent-acp` adapter, Codex through `codex-acp`, opencode, or GitHub Copilot through `copilot --acp`; `tether-core::acp::agent` holds the profiles), kept alive by the host's `tether acp` holder across disconnects. The protocol client, transcript reducer, journal, resume snapshots, host commands and composer rules are `tether-core::acp`, ported from `TetherKit/ACP` and `Chat/` with their test cases; the session model is `tether-app/src/terminal/model/chat`.
 
-**Where.** Chats are the sidebar's Chats section: the agent's mark, the title (the host's title, else the agent's last title stored here, else the folder name) and its state in words (`working` in the session heat amber, `needs you` in coral, then `idle`, `running` or `ended` in faint text). Hovering shows a close mark (Delete chat). Selecting one swaps the grid for the chat; selecting a terminal brings the grid back. The header is the same one a terminal has: Find, Snippets, History and Send file… give way, and **Git** stays. The composer's `+` is the one way to add a file from the chat. The section's `+` opens **New session**, **New chat…** and **Continue a chat…**.
+**Where.** Chats are the sidebar's Chats section: the agent's mark, the title (the host's title, else the agent's last title stored here, else the folder name) and its state in words (`working` and `N tasks` in secondary text with a text-colour dot, `needs you` in the text colour, semibold, with a dot, then `idle`, `done` or `ended` in secondary text with no dot; brightness, never hue, carries the state). Hovering shows a close mark (Delete chat). Selecting one swaps the grid for the chat; selecting a terminal brings the grid back. The header is the same one a terminal has: Find, Snippets, History and Send file… give way, and **Git** stays. The composer's `+` is the one way to add a file from the chat. The section's `+` opens **New session**, **New chat…** and **Continue a chat…**.
 
 **Host-managed agent versions.** A host whose `tether` has `acp versions` manages the Claude and Codex adapters: the dialog reads `acp versions` as it opens, and a host that answers it is remembered per `host:port` in `preferences.json` (`chat_managed`, with the update notices dismissed). On such a host Claude and Codex chats, `acp sessions` (`--agent-cmd`, also for delete) and `acp options` spawn `tether acp agent claude|codex`; any other host, and every other agent, keeps the pinned `npx` command. A holder's spawn line naming `acp agent claude|codex` (through any path to `tether`) is recognised as that agent. Under the agent picker the dialog shows at most two compact lines for the picked agent: the adapter (`Codex adapter 2.8.0 available · you have 2.3.0 (Codex 0.164.0)`) and, for an agent CLI installed on the host, the CLI (`Codex CLI 0.170.0 available · you have 0.164.0`; `Claude Code CLI`, `opencode CLI`, `Copilot CLI`; opencode and Copilot only have this one). **Update** runs `acp update <agent>` (`--cli` for the CLI) with a long deadline and shows `Updating…`, then reads `acp versions` again and says `Updated to 2.8.0` or the host's error (Update stays for a retry); **Not now** hides that kind, agent and `latest` for the host until a newer version appears. A CLI the host cannot run (`runnable` false) has no Update: the line carries the command with a **Copy** button. Nothing updates without the click. A host without `acp versions` gets one muted line instead, `Update tether on this host to manage agent versions.`, under a Claude or Codex pick. With a ready folder on a managed host the dialog also runs `acp options <folder> --agent-cmd <spawn>` in the background (after the folder check, so typing is debounced; a change of folder or agent drops an answer in flight): the Options row keeps showing the cached menus, then follows the answer, keeps what the user already picked, and the answer is stored in the per-host options cache. A failed read keeps the cache.
 
@@ -463,7 +463,7 @@ The iOS ACP chat, on the desktop: a conversation with an agent on the host (Clau
 
 **Agents.** A chat's agent is the one this computer recorded when it started the chat, else the `spawn` command `acp status` reports, else Claude. Its mark (Claude keeps its orange; Codex, opencode and Copilot take the text colour) leads the chat's tab, and the header names an agent other than Claude. Remembered model, effort and mode are kept per agent (`model`, `reasoning_effort` and `mode` for Codex and Copilot), Claude's spinner words and `claude` sign-in line stay on Claude chats, and Codex, opencode and Copilot sign in with `codex login`, `opencode auth login` and `copilot login`. Only the npx agents (Claude, Codex) need Node.js on the host. Copilot holds a prompt open while a shell it started in async mode runs; the host's holder ends such a turn 5 s after Copilot reports `assistant.idle` (see `apps/tether/acp_copilot.go`).
 
-**New chat.** A dialog: **New** or **Continue**, an **Agent** picker (last one used first), a working folder, and a folded **Options** row summing up what the chat starts with. Opened, it shows one menu each for the agent's model, effort and mode, filled from the stored defaults, else the values the agent had in its last session on this host (cached in `preferences.json`; before its first chat there the row says so and the agent starts on its own defaults). A changed menu has an accent edge, **Reset** starts on the agent's own defaults, and what the agent confirms becomes the stored default. Continue lists the picked agent's conversations (`acp sessions --agent-cmd`). The dialog's folder (the active session's directory, else `~`). Start runs the iOS host check (`tether` of protocol 1 or newer, and `npx`); a problem stops it with the iOS sentence. `~` is resolved against the host's `$HOME`. Continue lists `acp sessions <folder> --limit 20` (newest first, "Updated minutes ago" in warning under the last ten minutes) and starts a chat that sends `session/load`. A chat name is `chat-` and six of `[a-z0-9]`.
+**New chat.** A dialog: **New** or **Continue**, an **Agent** picker (last one used first), a working folder, and a folded **Options** row summing up what the chat starts with. Opened, it shows one menu each for the agent's model, effort and mode, filled from the stored defaults, else the values the agent had in its last session on this host (cached in `preferences.json`; before its first chat there the row says so and the agent starts on its own defaults). A changed menu has a faint edge, **Reset** starts on the agent's own defaults, and what the agent confirms becomes the stored default. Continue lists the picked agent's conversations (`acp sessions --agent-cmd`). The dialog's folder (the active session's directory, else `~`). Start runs the iOS host check (`tether` of protocol 1 or newer, and `npx`); a problem stops it with the iOS sentence. `~` is resolved against the host's `$HOME`. Continue lists `acp sessions <folder> --limit 20` (newest first, "Updated minutes ago" in warning under the last ten minutes) and starts a chat that sends `session/load`. A chat name is `chat-` and six of `[a-z0-9]`.
 
 **Session features.** Each depends on what the agent advertised in `initialize` (`agentCapabilities.sessionCapabilities`: a key's presence means supported; `mcpCapabilities.http`). The chat journal keeps them (`fork`, `resume`, `delete`, `additionalDirectories`, `mcpHttp`), so an ended chat can be judged without a live agent.
 - **Extra folders.** The dialog has an **Extra folders** row (a path with `~` expanded against the host's `$HOME` like the main folder, each removable). The journal keeps them and `additionalDirectories: [absolute paths]` goes on `session/new`, `load`, `fork` and `resume`, only when the agent advertised `additionalDirectories`.
@@ -487,7 +487,7 @@ The iOS ACP chat, on the desktop: a conversation with an agent on the host (Clau
 
 **Cards.** A pending permission or question sits above the composer, never in the scroll, and the composer says to answer it. The card is a surface with a 22 px radius and 16 px padding: no caps label, accent border, shadow or kind icon. A permission's title is semibold with the file's `+n −m` on its right and, under it, the relative path when the title does not already name it; below, the diff's first changed lines on the background colour (12 px radius, tinted rows, no edge bars; **Show full diff** opens the whole file over the chat) or the plan (**Show full plan**). Reject and the primary allow sit side by side as 36 px pills (reject on a raised fill in the text colour, the primary in the text colour with a background-colour label). When the primary is the one-off allow, the options hold exactly one `allow_always` and the tool is not a mode switch (`PermissionLayout::always_allow`), that option is a **switch** above the buttons labelled with its name instead of a button; with it on the primary sends it (the button's description says so), and it starts off for every request. A mode switch (plan approval, whose broader allows are modes, bypass among them) keeps explicit buttons. The remaining options are links in secondary text, behind **More options** when more than one remains and the card had over three. A question lists each field (single choice, several, text, yes or no, and **Other…** for the companion text field); the choices of a field are one grouped raised list (14 px radius, hairlines inset past the indicator), the radio or checkbox in the text colour when picked and faint otherwise, **Other…** inside the group; **Decline** and **Submit** are the same pills; one single-choice field answers on click. A failed answer stays answerable unless the host took one first. Debug builds: `TETHER_DEV_CHAT_ASK=permission|question` leaves one waiting on the sample chat.
 
-**No accent in the chat.** The accent never fills or tints a chat control: send, Resume, Send now on a queued chip, the strips' dots, the plan and link glyphs and the New chat dialog's links use the text colour on a raised surface or the text colour as a fill. Success and coral stay for diff numbers and failures; toggles keep the accent.
+**No accent outside toggles.** The accent never fills or tints a control, link or status word, in the chat or the rest of the app (primary buttons are the text colour with a background-colour label; plan usage bars are secondary until 80 %, then warning; info notices are faint). It stays on toggles, checkboxes, radio and segment selection, the check mark of a picked list row, focus rings and the text-selection highlight. In the chat: send, Resume, Send now on a queued chip, the strips' dots, the plan and link glyphs and the New chat dialog's links use the text colour on a raised surface or the text colour as a fill. Success and coral stay for diff numbers and failures; toggles keep the accent.
 
 **Controls.** The chat row menu's **Session settings**, or **All settings** in a composer chip, opens a side sheet: each of the agent's options (mode, model, effort) with its choices, the change shown only once the agent confirms, and **Bypass permissions** behind a confirm; the session's context bar, cost, model id, folder and connection; **Compact** and **Context**.
 

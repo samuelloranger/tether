@@ -1,5 +1,5 @@
 import { Tokens } from "tokens.slint";
-import { Aurora, Lamp, PrimaryButton, SecondaryButton } from "components.slint";
+import { Lamp, PrimaryButton, SecondaryButton } from "components.slint";
 
 export global ConnectVm {
     in property <string> expected;
@@ -30,7 +30,6 @@ component BlockPage inherits Rectangle {
     in property <color> heading-color: Tokens.text;
     background: Tokens.background;
     clip: true;
-    Aurora { }
     FocusScope {
         init => { self.focus(); }
         key-pressed(e) => {
@@ -71,18 +70,16 @@ export component HostKeyRefusedPage inherits BlockPage {
     Rectangle {
         background: Tokens.surface;
         border-radius: 12px;
-        border-width: 1px;
-        border-color: Tokens.border;
         VerticalLayout {
             padding-left: 14px;
             padding-right: 14px;
             padding-top: 12px;
             padding-bottom: 12px;
             spacing: 4px;
-            Caption { text: "EXPECTED"; }
+            Caption { text: "Expected"; }
             Fingerprint { text: ConnectVm.expected; }
             Rectangle { height: 6px; }
-            Caption { text: "GOT"; }
+            Caption { text: "Got"; }
             Fingerprint { text: ConnectVm.got; }
         }
     }
