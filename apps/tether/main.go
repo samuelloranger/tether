@@ -261,7 +261,15 @@ func sendPush(content PushContent, collapse string, dryRun bool) error {
 	if content.Level == "" {
 		content.Level = pushLevel(content.Category)
 	}
-	thread := threadKey(hostLabel(), content.Session)
+	if content.Thread == "" {
+		content.Thread = content.Session
+	}
+	thread := threadKey(hostLabel(), content.Thread)
+	content.Title = pushText(content.Title, pushTitleLimit)
+	content.Body = pushText(content.Body, pushBodyLimit)
+	if titleNames(content.Title, content.Session) {
+		content.Session = ""
+	}
 	url := strings.TrimRight(relayURL(), "/") + "/push"
 	client := &http.Client{Timeout: 5 * time.Second}
 

@@ -33,6 +33,9 @@ type PushContent struct {
 	// Session is the zmx session name; it stays inside the ciphertext, so the relay
 	// never reads it. The phone shows it as the subtitle and groups by it.
 	Session string `json:"session,omitempty"`
+	// Thread groups the push on the phone when it differs from Session (a chat groups by
+	// its holder name and shows its project as the subtitle). Never sent.
+	Thread string `json:"-"`
 	// Level is the push's urgency (urgent|normal|quiet); see pushLevel.
 	Level string `json:"level,omitempty"`
 	// ACP pushes: the holder session, the JSON-RPC id of the request (raw JSON text), and

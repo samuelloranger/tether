@@ -58,6 +58,8 @@ func runState(args []string, d stateDeps) error {
 	if !validState(*state) {
 		return fmt.Errorf("state requires --state working|waiting|done|clear")
 	}
+	// Stored as pushed, so a later flush sends the same text.
+	*body = pushText(*body, pushBodyLimit)
 	if *dryRun {
 		d.push = func(c PushContent, col string) error { return sendPush(c, col, true) }
 	}

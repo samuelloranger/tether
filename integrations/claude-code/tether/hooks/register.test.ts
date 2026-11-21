@@ -179,7 +179,15 @@ describe('summarize', () => {
     expect(summarize('Bash', { command: 'git push' })).toBe('Allow Bash: git push?')
     expect(summarize('Edit', { file_path: '/src/a.ts', old_string: 'x' })).toBe('Allow Edit: /src/a.ts?')
     expect(summarize('WebFetch', { url: 'https://example.com' })).toBe('Allow WebFetch: https://example.com?')
-    expect(summarize('mcp__srv__do', {})).toBe('Allow mcp__srv__do?')
+    expect(summarize('mcp__srv__do', {})).toBe('Allow srv: do?')
+    expect(summarize('mcp__my_srv__do_it', {})).toBe('Allow my_srv: do_it?')
+  })
+
+  test('leads a command with its description', () => {
+    expect(summarize('Bash', { command: 'npm test', description: 'Run the tests' })).toBe('Run: Run the tests · $ npm test')
+    expect(summarize('Bash', { command: 'ls', command_description: 'List files' })).toBe('Run: List files · $ ls')
+    expect(summarize('Bash', { description: 'Run the tests' })).toBe('Run: Run the tests?')
+    expect(summarize('Bash', { command: 'ls', description: '  ' })).toBe('Allow Bash: ls?')
   })
 
   test('keeps one short line', () => {

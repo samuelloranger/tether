@@ -348,7 +348,8 @@ each `session/prompt` turn. Outstanding requests live in `acp/<name>/pending.jso
   (button labels, at most 4, only when there are 2 or more), and parallel `optionIds` and
   `optionKinds`. Nothing is pushed when a client is attached.
 - When a `session/prompt` turn ends and no client is attached, a quiet push
-  (`tether.acp.done`, with `stopReason`) goes out.
+  (`tether.acp.done`, with `stopReason`) goes out. Its body is the agent's last top-level
+  prose of the turn, flattened to one line; a turn that ends early says why instead.
 - A response the attached client sends for a request clears it. Whole lines only are
   written to the agent's stdin, so a daemon-originated line never lands inside a client's
   half-written line (a partial line left by a dropped client is discarded).
