@@ -167,9 +167,11 @@ jobs:
                 }
                 PIPELINE='^\.github/(workflows/(release|desktop-build)\.yml|scripts/)'
                 # Only what ends up in the app: package.json changes only for releases (whose
-                # tag builds everything) and JS tooling, and the SSH frameworks are vendored.
+                # tag builds everything) and JS tooling, and a rebuilt SSH framework lands under
+                # clients/apple/ (the script that builds it doesn't run here). Resources/ ships
+                # its Markdown (font licences), so only the docs beside the code are dropped.
                 APPLE_SOURCES='^(clients/apple/|\.github/workflows/release\.yml$|\.github/scripts/wait-for-ci\.sh$)'
-                APPLE_UNSHIPPED='^clients/apple/(TetherKit/Tests/|TetherIOSUITests/|icons/)|^clients/apple/.*\.md$'
+                APPLE_UNSHIPPED='^clients/apple/(TetherKit/Tests/|TetherIOSUITests/|icons/)|^clients/apple/([^/]+|TetherKit/Frameworks/SSH/README)\.md$'
                 if changed ios "$APPLE_SOURCES" "$APPLE_UNSHIPPED"; then IOS=true; fi
                 if changed mac "$APPLE_SOURCES" "$APPLE_UNSHIPPED"; then MAC=true; fi
                 if changed desktop "^clients/desktop/|$PIPELINE"; then DESKTOP=true; fi
