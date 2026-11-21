@@ -45,8 +45,8 @@ component ButtonBase inherits Rectangle {
 }
 
 export component PrimaryButton inherits ButtonBase {
-    fill: Tokens.accent;
-    ink: Tokens.on-accent;
+    fill: Tokens.text;
+    ink: Tokens.background;
 }
 
 export component SecondaryButton inherits ButtonBase {
@@ -75,11 +75,11 @@ export component IconButton inherits Rectangle {
     height: root.size;
     border-radius: root.size * 0.27;
     background: !root.enabled ? transparent
-        : touch.has-hover ? (root.flat ? Tokens.raised : Tokens.raised.brighter(0.15))
+        : touch.has-hover || root.active ? Tokens.raised.brighter(0.15)
         : root.flat ? transparent : Tokens.raised;
     animate background, border-color { duration: Motion.fast; easing: ease-out; }
-    border-width: focus.has-focus || root.active ? 1.5px : root.flat ? 0px : 1px;
-    border-color: focus.has-focus || root.active ? Tokens.accent : Tokens.border;
+    border-width: focus.has-focus ? 1.5px : 0px;
+    border-color: Tokens.accent;
     accessible-role: button;
     accessible-label: root.tooltip;
     focus := FocusScope {
@@ -97,7 +97,7 @@ export component IconButton inherits Rectangle {
     }
     Image {
         source: root.icon;
-        colorize: !root.enabled ? Tokens.text-faint : root.active || touch.has-hover ? Tokens.accent : root.flat ? Tokens.text-secondary : Tokens.accent;
+        colorize: !root.enabled ? Tokens.text-faint : root.active || touch.has-hover ? Tokens.text : Tokens.text-secondary;
         animate colorize { duration: Motion.fast; easing: ease-out; }
         width: root.size * 0.47;
         height: root.size * 0.47;
@@ -157,7 +157,7 @@ export component BackButton inherits Rectangle {
 }
 
 export component Lamp inherits Rectangle {
-    in property <color> lamp: Tokens.accent;
+    in property <color> lamp: Tokens.text-faint;
     in property <bool> dim: false;
     width: 11px;
     height: 11px;
@@ -171,17 +171,14 @@ export component Pill inherits Rectangle {
     height: label.preferred-height + 4px;
     width: label.preferred-width + 16px;
     border-radius: self.height / 2;
-    border-width: 1px;
-    border-color: Tokens.border;
-    background: Tokens.dark ? #ffffff0a : #0000000a;
+    background: Tokens.raised;
     label := Text {
         x: 8px;
         y: 2px;
         text: root.text;
-        font-family: Tokens.mono-font;
         font-size: 11px;
-        font-weight: 650;
-        color: Tokens.text-faint;
+        font-weight: 600;
+        color: Tokens.text-secondary;
     }
 }
 
@@ -190,22 +187,21 @@ export component OriginTag inherits Rectangle {
     height: label.preferred-height + 4px;
     width: label.preferred-width + 12px;
     border-radius: 6px;
-    background: Tokens.accent.with-alpha(0.12);
+    background: Tokens.raised;
     label := Text {
         x: 6px;
         y: 2px;
         text: root.text;
-        font-family: Tokens.mono-font;
         font-size: 11px;
-        font-weight: 700;
-        color: Tokens.accent;
+        font-weight: 600;
+        color: Tokens.text-secondary;
     }
 }
 
 export component Segment inherits Rectangle {
     in property <[string]> options;
     in-out property <int> selected;
-    // Home's Machines/Keys tabs are a raised segment; form segments fill with the accent.
+    // Home's Machines/Keys tabs sit a step lower than form segments; both fill neutral.
     in property <bool> raised-style: false;
     callback changed(int);
     background: Tokens.input;
@@ -235,7 +231,7 @@ export component Segment inherits Rectangle {
         for option[i] in root.options: Rectangle {
             horizontal-stretch: 1;
             border-radius: root.raised-style ? 9px : 8px;
-            background: i == root.selected ? (root.raised-style ? Tokens.raised : Tokens.accent) : transparent;
+            background: i == root.selected ? Tokens.raised.brighter(root.raised-style ? 0 : 0.15) : transparent;
             Text {
                 width: 100%;
                 height: 100%;
@@ -244,7 +240,7 @@ export component Segment inherits Rectangle {
                 font-weight: 650;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                color: i == root.selected ? (root.raised-style ? Tokens.text : Tokens.on-accent) : Tokens.text-secondary;
+                color: i == root.selected ? Tokens.text : Tokens.text-secondary;
             }
             TouchArea {
                 mouse-cursor: pointer;
@@ -368,29 +364,6 @@ export component Hint inherits Text {
     wrap: word-wrap;
     color: Tokens.text-faint;
     font-size: 12px;
-}
-
-// Slint gradients are circles only; an SVG ellipse keeps the glow inside its box instead of
-// ending in a hard edge on a wide window.
-export component Aurora inherits Rectangle {
-    y: -30px;
-    height: 200px;
-    Image {
-        width: parent.width;
-        height: parent.height;
-        source: @image-url("icons/aurora-accent.svg");
-        colorize: Tokens.accent;
-        image-fit: fill;
-        opacity: Tokens.dark ? 1 : 0.57;
-    }
-    Image {
-        width: parent.width;
-        height: parent.height;
-        source: @image-url("icons/aurora-success.svg");
-        colorize: Tokens.success;
-        image-fit: fill;
-        opacity: Tokens.dark ? 1 : 0.57;
-    }
 }
 
 export component PageChrome inherits Rectangle {
@@ -681,14 +654,14 @@ export component TetherSwitch inherits Rectangle {
     }
 }
 
-// The preview's .ghost: accent text, no fill until hover. Sized for the 34 px header row.
+// The preview's .ghost: text-colour label, no fill until hover. Sized for the 34 px header row.
 export component GhostButton inherits Rectangle {
     in property <string> text;
     callback clicked();
     height: 30px;
     width: label.preferred-width + 16px;
     border-radius: 8px;
-    background: touch.has-hover ? Tokens.accent.with-alpha(0.1) : transparent;
+    background: touch.has-hover ? Tokens.raised : transparent;
     animate background { duration: Motion.fast; easing: ease-out; }
     border-width: focus.has-focus ? 2px : 0px;
     border-color: Tokens.accent;
@@ -704,7 +677,7 @@ export component GhostButton inherits Rectangle {
         width: 100%;
         height: 100%;
         text: root.text;
-        color: Tokens.accent;
+        color: Tokens.text;
         font-size: 13px;
         font-weight: 650;
         horizontal-alignment: center;

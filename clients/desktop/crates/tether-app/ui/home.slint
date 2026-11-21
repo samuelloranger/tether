@@ -1,7 +1,7 @@
 import { ListView } from "std-widgets.slint";
 import { Tokens, Motion } from "tokens.slint";
 import { HomeBridge, MachineCard, KeyCard } from "bridge.slint";
-import { Aurora, GhostButton, IconButton, Lamp, OriginTag, Pill, PrimaryButton, SecondaryButton, Segment } from "components.slint";
+import { GhostButton, IconButton, Lamp, OriginTag, Pill, PrimaryButton, SecondaryButton, Segment } from "components.slint";
 
 component MachineCardView inherits Rectangle {
     in property <MachineCard> card;
@@ -13,8 +13,8 @@ component MachineCardView inherits Rectangle {
     border-radius: Tokens.radius-card;
     background: touch.has-hover ? Tokens.surface-hover : Tokens.surface;
     animate background { duration: Motion.fast; easing: ease-out; }
-    border-width: focus.has-focus ? 2px : 1px;
-    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Tokens.accent;
     animate border-color { duration: Motion.fast; easing: ease-out; }
     // Right-click, or the Menu key while the card has focus.
     menu := ContextMenuArea {
@@ -71,24 +71,24 @@ component MachineCardView inherits Rectangle {
                 height: 26px;
                 width: chat-row.preferred-width + 22px;
                 border-radius: 13px;
-                background: Tokens.accent.with-alpha(chat-touch.has-hover ? 0.2 : 0.12);
+                background: chat-touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
                 animate background { duration: Motion.fast; easing: ease-out; }
                 chat-row := HorizontalLayout {
                     x: 11px;
                     spacing: 5px;
                     VerticalLayout {
                         alignment: center;
-                        Image { source: @image-url("icons/chat.svg"); colorize: Tokens.accent; width: 12px; height: 12px; }
+                        Image { source: @image-url("icons/chat.svg"); colorize: Tokens.text; width: 12px; height: 12px; }
                     }
-                    Text { text: "Chat"; color: Tokens.accent; font-size: 12px; font-weight: 650; vertical-alignment: center; }
+                    Text { text: "Chat"; color: Tokens.text; font-size: 12px; font-weight: 650; vertical-alignment: center; }
                 }
                 chat-touch := TouchArea { mouse-cursor: pointer; clicked => { root.chat(); } }
             }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "Open"; color: Tokens.accent; font-size: 12px; font-weight: 650; vertical-alignment: center; }
+            Text { text: "Open"; color: Tokens.text; font-size: 12px; font-weight: 650; vertical-alignment: center; }
             VerticalLayout {
                 alignment: center;
-                Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.accent; width: 12px; height: 12px; }
+                Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text; width: 12px; height: 12px; }
             }
         }
     }
@@ -101,8 +101,8 @@ component KeyCardView inherits Rectangle {
     height: body.preferred-height;
     border-radius: Tokens.radius-card;
     background: Tokens.surface;
-    border-width: focus.has-focus ? 2px : 1px;
-    border-color: focus.has-focus ? Tokens.accent : Tokens.border;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Tokens.accent;
     animate border-color { duration: Motion.fast; easing: ease-out; }
     menu := ContextMenuArea {
         width: 100%;
@@ -141,8 +141,6 @@ component KeyCardView inherits Rectangle {
                 height: 50px;
                 background: Tokens.well;
                 border-radius: 8px;
-                border-width: 1px;
-                border-color: Tokens.border;
                 Image {
                     x: 4px;
                     y: 4px;
@@ -171,7 +169,7 @@ component KeyCardView inherits Rectangle {
                 Rectangle {
                     width: link.preferred-width;
                     height: link.preferred-height;
-                    link := Text { text: "Copy public key"; color: Tokens.accent; font-size: 12.5px; font-weight: 650; }
+                    link := Text { text: "Copy public key"; color: Tokens.text; font-size: 12.5px; font-weight: 650; }
                     TouchArea { mouse-cursor: pointer; clicked => { root.copy(); } }
                 }
             }
@@ -185,7 +183,7 @@ component MachinesEmpty inherits VerticalLayout {
     padding-bottom: 40px;
     HorizontalLayout {
         alignment: center;
-        Image { source: @image-url("icons/tether.svg"); colorize: Tokens.accent; width: 46px; height: 46px; }
+        Image { source: @image-url("icons/tether.svg"); colorize: Tokens.text-secondary; width: 46px; height: 46px; }
     }
     Text { text: "No machines tethered yet"; font-size: 20px; font-weight: 650; color: Tokens.text; horizontal-alignment: center; }
     Text {
@@ -209,7 +207,6 @@ component MachinesEmpty inherits VerticalLayout {
 export component HomePage inherits Rectangle {
     background: Tokens.background;
     clip: true;
-    Aurora { }
     HorizontalLayout {
         alignment: center;
         VerticalLayout {

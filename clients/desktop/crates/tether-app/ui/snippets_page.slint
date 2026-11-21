@@ -7,7 +7,7 @@ import { SnippetRow, SnippetsBridge } from "extras_bridge.slint";
 component RowAction inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
-    in property <color> ink: Tokens.accent;
+    in property <color> ink: Tokens.text;
     callback clicked();
     width: label.preferred-width + 16px;
     height: 28px;

@@ -540,7 +540,7 @@ export global ChatStyle {
             : @image-url("icons/gear.svg");
     }
     public pure function tint(t: int) -> color {
-        return t == 1 ? Tokens.accent : t == 2 ? Tokens.success : t == 3 ? Tokens.danger : Tokens.text-secondary;
+        return t == 1 ? Tokens.text-secondary : t == 2 ? Tokens.success : t == 3 ? Tokens.danger : Tokens.text-secondary;
     }
     public pure function phase-ink(p: int) -> color {
         return p == 2 ? Tokens.success : p == 3 ? Tokens.danger : p == 4 ? Tokens.text-faint : Tokens.warning;
@@ -549,9 +549,9 @@ export global ChatStyle {
     public pure function tab-heat(s: int) -> int {
         return s == 0 ? 0 : s == 1 ? 1 : -1;
     }
-    // Info is accent, a warning amber, an error coral; a notice with no severity is quiet.
+    // Info is quiet, a warning amber, an error coral; a notice with no severity is quiet.
     public pure function severity-ink(s: int) -> color {
-        return s == 1 ? Tokens.accent : s == 2 ? Tokens.warning : s == 3 ? Tokens.danger : Tokens.text-faint;
+        return s == 1 ? Tokens.text-faint : s == 2 ? Tokens.warning : s == 3 ? Tokens.danger : Tokens.text-faint;
     }
     out property <length> column: 760px;
     out property <length> row-height: 34px;
@@ -874,7 +874,7 @@ component Md inherits VerticalLayout {
     }
     if root.kind == 5: HorizontalLayout {
         spacing: 10px;
-        Rectangle { width: 3px; background: Tokens.accent.with-alpha(0.6); border-radius: 2px; }
+        Rectangle { width: 3px; background: Tokens.text-faint.with-alpha(0.6); border-radius: 2px; }
         Para { scope: root.scope; selectable: root.selectable; text: root.text; font-size: root.font; ink: Tokens.text-secondary; }
     }
     if root.kind == 0: Para { scope: root.scope; selectable: root.selectable;
@@ -893,7 +893,7 @@ component Md inherits VerticalLayout {
             height: 22px;
             width: min(360px, link-label.preferred-width + 16px);
             border-radius: 11px;
-            background: link-touch.has-hover ? Tokens.accent.with-alpha(0.2) : Tokens.accent.with-alpha(0.1);
+            background: link-touch.has-hover ? Tokens.raised.brighter(0.15) : Tokens.raised;
             animate background { duration: Motion.fast; easing: ease-out; }
             link-label := Text {
                 x: 8px;
@@ -902,7 +902,7 @@ component Md inherits VerticalLayout {
                 overflow: elide;
                 font-size: 11.5px;
                 vertical-alignment: center;
-                color: Tokens.accent;
+                color: Tokens.text;
             }
             link-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.open-link(link.url); } }
         }
@@ -937,7 +937,7 @@ component DiffRow inherits Rectangle {
     // The accent-less cards draw a changed line as a tint only.
     in property <bool> edge: true;
     height: max(root.kind == 0 ? 28px : 18px, body.preferred-height + 2px);
-    background: root.kind == 0 ? Tokens.raised : root.kind == 1 ? Tokens.accent.with-alpha(0.08) : root.kind == 2 ? Tokens.success.with-alpha(0.12) : root.kind == 3 ? Tokens.danger.with-alpha(0.12) : transparent;
+    background: root.kind == 0 ? Tokens.raised : root.kind == 1 ? Tokens.text-faint.with-alpha(0.10) : root.kind == 2 ? Tokens.success.with-alpha(0.12) : root.kind == 3 ? Tokens.danger.with-alpha(0.12) : transparent;
     if root.edge && (root.kind == 2 || root.kind == 3): Rectangle {
         x: 0;
         width: 2px;
@@ -1595,7 +1595,7 @@ component PaletteList inherits Rectangle {
                         text: item.primary;
                         font-family: Tokens.mono-font;
                         font-size: 12.5px;
-                        color: ChatVm.palette-kind == 1 ? Tokens.accent : Tokens.text;
+                        color: ChatVm.palette-kind == 1 ? Tokens.text-secondary : Tokens.text;
                         vertical-alignment: center;
                     }
                     Text {
@@ -2564,7 +2564,7 @@ export component ChatControls inherits Rectangle {
                                             height: 4px;
                                             border-radius: 2px;
                                             background: Tokens.border;
-                                            Rectangle { x: 0; width: max(4px, parent.width * clamp(ChatVm.context, 0, 1)); border-radius: 2px; background: Tokens.accent; }
+                                            Rectangle { x: 0; width: max(4px, parent.width * clamp(ChatVm.context, 0, 1)); border-radius: 2px; background: Tokens.text-secondary; }
                                         }
                                     }
                                 }
@@ -2822,7 +2822,7 @@ component NcMenu inherits Rectangle {
     background: Tokens.raised;
     border-radius: 7px;
     border-width: 1px;
-    border-color: root.changed ? Tokens.accent.with-alpha(0.6) : Tokens.border;
+    border-color: root.changed ? Tokens.text-faint : Tokens.border;
     Text {
         x: 8px;
         width: parent.width - 28px;
@@ -2907,7 +2907,7 @@ component NcAgentSelect inherits Rectangle {
     background: Tokens.input;
     border-radius: Tokens.radius-control;
     border-width: 1px;
-    border-color: focus.has-focus || trigger.has-hover ? Tokens.accent.with-alpha(0.6) : Tokens.border;
+    border-color: focus.has-focus ? Tokens.accent : trigger.has-hover ? Tokens.text-faint : Tokens.border;
     animate border-color { duration: Motion.fast; easing: ease-out; }
     forward-focus: focus;
 
@@ -3629,15 +3629,15 @@ export component ChatSidebarRow inherits Rectangle {
         }
         if ChatStyle.tab-heat(root.tab.state) >= 0: HorizontalLayout {
             spacing: 5px;
-            TextDot { ink: Heat.ink(ChatStyle.tab-heat(root.tab.state)); line-height: word.preferred-height; }
-            word := Text { text: root.tab.label; color: Heat.ink(ChatStyle.tab-heat(root.tab.state)); font-size: 11px; vertical-alignment: center; }
+            TextDot { ink: Tokens.text; line-height: word.preferred-height; }
+            word := Text { text: root.tab.label; color: Heat.ink(ChatStyle.tab-heat(root.tab.state)); font-weight: Heat.weight(ChatStyle.tab-heat(root.tab.state)); font-size: 11px; vertical-alignment: center; }
         }
         if root.tab.state == 5: HorizontalLayout {
             spacing: 5px;
-            TextDot { ink: Tokens.accent; line-height: task-word.preferred-height; }
-            task-word := Text { text: root.tab.label; color: Tokens.accent; font-size: 11px; vertical-alignment: center; }
+            TextDot { ink: Tokens.text; line-height: task-word.preferred-height; }
+            task-word := Text { text: root.tab.label; color: Tokens.text-secondary; font-size: 11px; vertical-alignment: center; }
         }
-        if ChatStyle.tab-heat(root.tab.state) < 0 && root.tab.state != 5 && root.tab.label != "" && !touch.has-hover && !close-touch.has-hover: Text { text: root.tab.label; color: Tokens.text-faint; font-size: 11px; vertical-alignment: center; }
+        if ChatStyle.tab-heat(root.tab.state) < 0 && root.tab.state != 5 && root.tab.label != "" && !touch.has-hover && !close-touch.has-hover: Text { text: root.tab.label; color: Tokens.text-secondary; font-size: 11px; vertical-alignment: center; }
         if touch.has-hover || close-touch.has-hover: Rectangle { width: 16px; }
     }
     touch := TouchArea {
@@ -3782,7 +3782,7 @@ component QuotaBar inherits Rectangle {
         y: 0;
         height: parent.height;
         width: parent.width * clamp(root.used / 100, 0, 1);
-        background: root.used >= 80 ? Tokens.warning : Tokens.accent;
+        background: root.used >= 80 ? Tokens.warning : Tokens.text-secondary;
         border-radius: 2px;
     }
 }
