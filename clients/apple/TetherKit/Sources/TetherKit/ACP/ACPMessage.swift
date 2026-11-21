@@ -41,7 +41,7 @@ enum ACPToolStatus: String, Codable, Equatable, Sendable {
   case completed, failed
 }
 
-struct ACPDiff: Codable, Equatable, Sendable {
+struct ACPDiff: Codable, Hashable, Sendable {
   var path: String
   var oldText: String?
   var newText: String

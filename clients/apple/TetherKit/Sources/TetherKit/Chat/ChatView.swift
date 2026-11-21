@@ -64,8 +64,13 @@ struct ChatView: View {
   @State private var earlierBranchOpen = false
   @State private var cursor: Int?
   @State private var caretRequest: Int?
+  /// Finished turns' step runs the reader opened; folded by default.
+  @State private var openSteps: Set<Int> = []
+  @State private var diffCounts = ChatDiffCounts()
+  @State private var confirmingBypass: String?
 
   private let bottomID = "chat-bottom"
+  private static let bypass = "bypassPermissions"
   private static let space = "chat-scroll"
 
   var body: some View {
@@ -161,6 +166,17 @@ struct ChatView: View {
       }
     }
     .sheet(isPresented: $showingControls) { ChatControlsSheet(model: model) }
+    .confirmationDialog("Bypass permissions", isPresented: Binding(
+      get: { confirmingBypass != nil }, set: { if !$0 { confirmingBypass = nil } }
+    ), titleVisibility: .visible) {
+      Button("Bypass permissions", role: .destructive) {
+        if let option = confirmingBypass { model.setOption(id: option, value: Self.bypass) }
+        confirmingBypass = nil
+      }
+      Button("Cancel", role: .cancel) { confirmingBypass = nil }
+    } message: {
+      Text("Bypass permissions: the agent runs every tool without asking.")
+    }
     .sheet(item: $workflowSheet) { ChatWorkflowSheet(model: model, callId: $0.id) }
     .photosPicker(
       isPresented: $pickingPhotos, selection: $pickedPhotos, maxSelectionCount: max(1, attachments.room),
@@ -207,9 +223,15 @@ struct ChatView: View {
   }
 
   private var transcript: some View {
-    let blocks = ChatGrouping.blocks(visibleItems)
+    let items = visibleItems
+    let blocks = ChatGrouping.blocks(items)
     let lastIDs = blocks.map(\.lastID)
     let range = ChatTranscriptWindow.range(lastIDs: lastIDs, start: windowStart)
+    let working = model.state.turn == .working
+    let finished = ChatTurns.finishedThrough(items, working: working)
+    let cwd = model.cwd
+    let counts = diffCounts
+    let receipts = ChatTurns.receipts(items, working: working, cwd: cwd, count: { counts.count($0, cwd: cwd) })
     return VStack(alignment: .leading, spacing: 12) {
       if let branch = model.branch {
         VStack(alignment: .leading, spacing: 6) {
@@ -254,13 +276,17 @@ struct ChatView: View {
           )
           .equatable()
         case let .tools(items):
+          let foldable = block.lastID <= finished && Self.foldable(items)
           ToolGroupView(
             items: items, cwd: model.cwd, expandedIDs: Set(items.filter(isExpanded).map(\.id)),
             toggle: toggleExpanded, workflowIds: Set(model.workflowTracker.runs.map(\.toolCallId)),
-            openWorkflow: { workflowSheet = ChatWorkflowSelection(id: $0) }
+            openWorkflow: { workflowSheet = ChatWorkflowSelection(id: $0) },
+            toggleFold: foldable ? { toggleSteps(block.id) } : nil,
+            folded: foldable && !openSteps.contains(block.id)
           )
           .equatable()
         }
+        if let receipt = receipts[block.lastID] { ChatTurnReceiptView(receipt: receipt) }
       }
       ForEach(model.outbox.failed) { message in
         FailedMessageRow(
@@ -399,9 +425,9 @@ struct ChatView: View {
               if model.isWorking, !model.steerRefused {
                 Button { model.sendQueuedMessageNow(id) } label: {
                   Image(systemName: "arrow.up").font(.chat(.caption2).weight(.bold))
-                    .foregroundStyle(TetherColors.onAccent)
+                    .foregroundStyle(TetherColors.background)
                     .frame(width: 22, height: 22)
-                    .background(TetherColors.accent, in: Circle())
+                    .background(TetherColors.textPrimary, in: Circle())
                     .frame(width: 32, height: 36)
                     .contentShape(Rectangle())
                 }
@@ -472,7 +498,23 @@ struct ChatView: View {
       case let .tools(entries): entries.contains { $0.id == item.id }
       }
     }) {
+      openSteps.insert(block.id)
       windowAnchor = block.id
+    }
+  }
+
+  /// Two or more steps fold; a command still running in the background keeps its row in view.
+  private static func foldable(_ items: [ChatItem]) -> Bool {
+    let calls = items.compactMap { item -> ChatToolCall? in
+      if case let .tool(call) = item.kind { return call }
+      return nil
+    }
+    return calls.count >= 2 && !calls.contains { $0.isActive || $0.isBackgroundRunning }
+  }
+
+  private func toggleSteps(_ id: Int) {
+    withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) {
+      if openSteps.contains(id) { openSteps.remove(id) } else { openSteps.insert(id) }
     }
   }
 
@@ -501,25 +543,26 @@ struct ChatView: View {
 
   private var header: some View {
     HStack(spacing: 10) {
-      // Above the title so the status line's hit slop never takes a tap meant for the drawer button.
       backButton.zIndex(1)
       titleBlock.frame(maxWidth: .infinity, alignment: .leading)
-      HStack(spacing: 12) {
+      HStack(spacing: 10) {
         connectionBadge
         moreMenu
       }
     }
-    .padding(.leading, 12).padding(.trailing, 14).padding(.bottom, 6)
+    .padding(.leading, 12).padding(.trailing, 10).padding(.bottom, 6)
     .frame(minHeight: 48)
     .background(TetherColors.background.ignoresSafeArea(edges: .top))
-    .overlay(alignment: .bottom) { headerRule }
+    .overlay(alignment: .bottom) {
+      if scrolledUnder { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+    }
   }
 
   private var backButton: some View {
     Button { if let onSessions { onSessions() } else { dismiss() } } label: {
       Image(systemName: onSessions == nil ? "chevron.backward" : "line.3.horizontal")
         .font(.system(size: onSessions == nil ? 18 : 17, weight: .semibold))
-        .foregroundStyle(TetherColors.accent)
+        .foregroundStyle(TetherColors.textPrimary)
         .overlay(alignment: .topTrailing) {
           if onSessions != nil, sessionsNeedYou {
             Circle().fill(TetherColors.warning).frame(width: 8, height: 8).offset(x: 4, y: -3)
@@ -535,60 +578,21 @@ struct ChatView: View {
   }
 
   private var titleBlock: some View {
-    let line = ChatStatusLine(state: model.state, agent: model.agent)
-    return VStack(alignment: .leading, spacing: 2) {
+    VStack(alignment: .leading, spacing: 1) {
       HStack(spacing: 6) {
         if model.agent?.key != ChatAgents.claude.key { ChatAgentMark(agent: model.agent, size: 13) }
         Text(copiedFolder ? "Folder copied" : model.title)
           .font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary).lineLimit(1)
       }
-      .onLongPressGesture(minimumDuration: 0.4) { copyFolder() }
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(.isHeader)
-      .accessibilityHint("Long press copies the folder")
-      if line.isAvailable {
-        Button { showingControls = true } label: { statusLine(line) }
-          .buttonStyle(.plain)
-          .accessibilityLabel(line.spoken)
-          .accessibilityHint("Opens the session controls")
-          .accessibilityIdentifier("chatControls")
-      } else {
-        Text(ChatFormat.folderName(model.cwd)).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
-          .lineLimit(1)
-          .accessibilityLabel(model.cwd)
-      }
+      Text("\(ChatFormat.folderName(model.cwd)) on \(model.hostLabel)")
+        .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+        .accessibilityLabel("\(model.cwd) on \(model.hostLabel)")
     }
-  }
-
-  private func statusLine(_ line: ChatStatusLine) -> some View {
-    HStack(spacing: 8) {
-      HStack(spacing: 0) {
-        if let name = line.model { Text(name).foregroundStyle(TetherColors.textSecondary) }
-        if line.model != nil, !line.extras.isEmpty {
-          Text(" · ").foregroundStyle(TetherColors.textFaint)
-          Text(line.extras.joined(separator: " · ")).foregroundStyle(TetherColors.textSecondary)
-        }
-        if line.model != nil || !line.extras.isEmpty, line.mode != nil { Text(" · ").foregroundStyle(TetherColors.textFaint) }
-        if let mode = line.mode { Text(mode).foregroundStyle(tint(line.tint)).fixedSize() }
-      }
-      .lineLimit(1)
-      if let stats = line.stats {
-        Text(stats).foregroundStyle(TetherColors.textFaint).monospacedDigit().lineLimit(1).fixedSize()
-      }
-      Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(TetherColors.textFaint)
-    }
-    .font(.system(size: 12))
-    .frame(minHeight: 16)
-    .hitSlop(vertical: 8, horizontal: 8)
-  }
-
-  private func tint(_ tint: ChatModeTint) -> Color {
-    switch tint {
-    case .accent: TetherColors.accent
-    case .success: TetherColors.success
-    case .secondary: TetherColors.textSecondary
-    case .danger: TetherColors.danger
-    }
+    .contentShape(Rectangle())
+    .onLongPressGesture(minimumDuration: 0.4) { copyFolder() }
+    .accessibilityHint("Long press copies the folder")
   }
 
   private func copyFolder() {
@@ -601,30 +605,10 @@ struct ChatView: View {
     }
   }
 
-  /// Context usage as a 3pt line under the header; otherwise a hairline once content scrolls under it.
-  @ViewBuilder private var headerRule: some View {
-    if scrolledUnder, ChatFormat.contextFraction(used: model.state.contextUsed, size: model.state.contextSize) == nil {
-      Rectangle().fill(TetherColors.border).frame(height: 0.5)
-    } else { contextHairline }
-  }
-
-  @ViewBuilder private var contextHairline: some View {
-    if let fraction = ChatFormat.contextFraction(used: model.state.contextUsed, size: model.state.contextSize) {
-      Rectangle().fill(TetherColors.border).frame(height: 3)
-        .overlay(alignment: .leading) {
-          GeometryReader { proxy in
-            Rectangle().fill(TetherColors.accent).frame(width: proxy.size.width * fraction)
-          }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Context used")
-        .accessibilityValue(
-          ChatFormat.contextSummary(used: model.state.contextUsed, size: model.state.contextSize) ?? "")
-    }
-  }
-
   private var moreMenu: some View {
     Menu {
+      Button { showingControls = true } label: { MenuLabel("Session settings", systemImage: "slider.horizontal.3") }
+        .accessibilityIdentifier("chatControls")
       if let onShowGit {
         Button(action: onShowGit) { MenuLabel("Git changes", systemImage: "arrow.triangle.branch") }
           .accessibilityIdentifier("chatGit")
@@ -641,8 +625,8 @@ struct ChatView: View {
     } label: {
       Image(systemName: "ellipsis")
         .font(.system(size: 15, weight: .semibold))
-        .foregroundStyle(TetherColors.textSecondary)
-        .frame(width: 28, height: 28)
+        .foregroundStyle(TetherColors.textPrimary)
+        .frame(width: 32, height: 32)
         .contentShape(Rectangle())
     }
     .accessibilityLabel("More")
@@ -667,23 +651,30 @@ struct ChatView: View {
       }
       .accessibilityHint("The connection to the host was lost")
     case .connecting, .catchingUp:
-      badge(color: TetherColors.warning, text: model.link.phase == .connecting ? "Connecting" : "Catching up")
+      badge(color: TetherColors.textFaint, text: model.link.phase == .connecting ? "Connecting" : "Catching up")
     case .live:
-      badge(color: TetherColors.success, text: "Live")
+      if answerPending {
+        badge(color: TetherColors.textPrimary, text: "Needs you", strong: true)
+      } else if working {
+        badge(color: TetherColors.textPrimary, text: "Working", strong: true)
+      } else {
+        badge(color: nil, text: "Idle")
+      }
     case .ended:
-      badge(color: TetherColors.textFaint, text: "Ended")
+      badge(color: nil, text: "Ended")
     }
   }
 
-  private func badge(color: Color, text: String) -> some View {
-    HStack(spacing: 5) {
-      Circle().fill(color).frame(width: 6, height: 6)
-      Text(text).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).lineLimit(1)
+  private func badge(color: Color?, text: String, strong: Bool = false) -> some View {
+    HStack(spacing: 6) {
+      if let color { Circle().fill(color).frame(width: 6, height: 6) }
+      Text(text).font(.chat(.caption)).foregroundStyle(strong ? TetherColors.textPrimary : TetherColors.textSecondary)
+        .lineLimit(1)
     }
     // A long title gives way first; the badge never wraps.
     .fixedSize()
     .accessibilityElement(children: .combine)
-    .accessibilityLabel("Connection: \(text)")
+    .accessibilityLabel(text)
   }
 
   // MARK: Bottom bar
@@ -752,8 +743,8 @@ struct ChatView: View {
             Button { Task { await model.resume() } } label: {
               Text("Resume").font(.chat(.footnote).weight(.semibold))
                 .padding(.horizontal, 12).frame(minHeight: 30)
-                .foregroundStyle(TetherColors.onAccent)
-                .background(TetherColors.accent, in: Capsule())
+                .foregroundStyle(TetherColors.background)
+                .background(TetherColors.textPrimary, in: Capsule())
                 .frame(minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(TetherPressStyle())
@@ -769,7 +760,6 @@ struct ChatView: View {
     }
     .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
     .background(TetherColors.background.ignoresSafeArea(.all, edges: .bottom))
-    .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
     // Floats above the bar: anything in the bar's own stack would resize it while a chat reconnects.
     .overlay(alignment: .top) {
       if catchingUp {
@@ -816,27 +806,91 @@ struct ChatView: View {
         AttachmentErrorRow(message: error) { attachments.error = nil }
       }
       if !attachments.items.isEmpty { AttachmentStrip(attachments: attachments) }
-      HStack(alignment: .bottom, spacing: 4) {
-        attachButton
+      VStack(alignment: .leading, spacing: 8) {
         composerField
           .lineLimit(1...6)
           .font(.chat(.subheadline))
-          .padding(.horizontal, 14).padding(.vertical, 8)
-          .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
+          .padding(.horizontal, 6)
           .opacity(answerPending ? 0.55 : 1)
           .accessibilityLabel("Message the agent")
           .accessibilityHint(permissionPending ? "A permission is waiting above" : questionPending ? "A question is waiting above" : "")
           .accessibilityIdentifier("chatComposer")
-        actionButton.padding(.leading, 4)
+        HStack(spacing: 6) {
+          attachButton
+          ForEach(Self.chipOptions, id: \.self) { id in
+            if let option = model.state.option(id: id) { optionChip(option) }
+          }
+          Spacer(minLength: 4)
+          contextUsed
+          actionButton
+        }
       }
+      .padding(.leading, 8).padding(.trailing, 8).padding(.top, 12).padding(.bottom, 8)
+      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 22))
     }
     .onChange(of: mentionCandidate != nil) { _, open in
       if open { Task { await model.loadMentionFiles() } }
     }
   }
 
+  /// The settings that get a chip of their own; the rest sit behind "All settings".
+  private static let chipOptions = ["model", "mode"]
+
+  private func chipLabel(_ option: ACPConfigOption) -> String {
+    if option.id == "mode", let short = ChatStatusLine.shortMode(option.currentValue) { return short }
+    return model.state.currentChoice(of: option.id) ?? option.currentValue
+  }
+
+  private func choose(_ option: ACPConfigOption, _ value: String) {
+    if option.id == "mode", value == Self.bypass, option.currentValue != value {
+      confirmingBypass = option.id
+    } else {
+      model.setOption(id: option.id, value: value)
+    }
+  }
+
+  private func optionChip(_ option: ACPConfigOption) -> some View {
+    let change = model.optionChanges[option.id]
+    let pending: Bool = { if case .pending = change { return true }; return false }()
+    let failure: String? = { if case let .failed(_, message)? = change { return message }; return nil }()
+    let risky = option.id == "mode" && option.currentValue == Self.bypass
+    return Menu {
+      Picker(option.name, selection: Binding(get: { option.currentValue }, set: { choose(option, $0) })) {
+        ForEach(option.choices, id: \.value) { choice in Text(choice.name).tag(choice.value) }
+      }
+      if let failure { Text(failure) }
+      Divider()
+      Button { showingControls = true } label: { MenuLabel("All settings", systemImage: "slider.horizontal.3") }
+    } label: {
+      HStack(spacing: 4) {
+        if pending { ProgressView().controlSize(.mini) }
+        Text(chipLabel(option)).lineLimit(1)
+        Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(TetherColors.textFaint)
+      }
+      .font(.chat(.caption))
+      .foregroundStyle(failure != nil || risky ? TetherColors.danger : TetherColors.textPrimary)
+      .padding(.horizontal, 10).frame(height: 28)
+      .background(TetherColors.surfaceRaised, in: Capsule())
+      .hitSlop(vertical: 8)
+    }
+    .disabled(!model.canInteract)
+    .opacity(model.canInteract ? 1 : 0.55)
+    .accessibilityLabel(option.name)
+    .accessibilityValue(pending ? "Changing" : chipLabel(option))
+    .accessibilityIdentifier("chatChip-\(option.id)")
+  }
+
+  @ViewBuilder private var contextUsed: some View {
+    if let used = model.state.contextUsed, ChatFormat.contextFraction(used: used, size: model.state.contextSize) != nil {
+      Text(ChatFormat.compactCount(used)).font(.chat(.caption).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
+        .padding(.horizontal, 4)
+        .accessibilityLabel("Context used")
+        .accessibilityValue(ChatFormat.contextSummary(used: used, size: model.state.contextSize) ?? "")
+    }
+  }
+
   private var composerPrompt: Text {
-    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { $0.key == ChatAgents.claude.key ? "Message the agent" : "Message \($0.label)" } ?? "Message the agent")
+    Text(permissionPending ? "Answer the permission above" : questionPending ? "Answer the question above" : working ? "Queue a message" : model.agent.map { "Message \($0.label)" } ?? "Message the agent")
       .foregroundStyle(TetherColors.placeholder)
   }
 
@@ -878,15 +932,14 @@ struct ChatView: View {
       }
     } label: {
       Image(systemName: "plus")
-        .font(.system(size: 14, weight: .semibold))
+        .font(.system(size: 16, weight: .medium))
         .foregroundStyle(TetherColors.textSecondary)
-        .frame(width: 28, height: 28)
-        .background(TetherColors.surfaceRaised, in: Circle())
-        .hitSlop(vertical: 8, horizontal: 8)
+        .frame(width: 30, height: 30)
+        .contentShape(Rectangle())
+        .hitSlop(vertical: 7, horizontal: 4)
     }
     .disabled(answerPending || (attachments.room == 0 && onUpload == nil))
     .opacity(answerPending ? 0.55 : 1)
-    .padding(.bottom, 4)
     .accessibilityLabel(onUpload == nil ? "Attach image" : "Attach image or file")
     .accessibilityIdentifier("chatAttach")
   }
@@ -964,13 +1017,13 @@ struct ChatView: View {
   private var stopping: Bool { action == .stop }
 
   private var discColor: Color {
-    if stopping { return TetherColors.danger.opacity(0.2) }
-    return canSendNow ? TetherColors.accent : TetherColors.textFaint.opacity(0.35)
+    if stopping { return TetherColors.surfaceRaised }
+    return canSendNow ? TetherColors.textPrimary : TetherColors.surfaceRaised
   }
 
   private var glyphColor: Color {
-    if stopping { return TetherColors.danger }
-    return canSendNow ? TetherColors.onAccent : TetherColors.textSecondary
+    if stopping { return TetherColors.textPrimary }
+    return canSendNow ? TetherColors.background : TetherColors.textFaint
   }
 
   private func sendMessage() {
@@ -1015,33 +1068,45 @@ struct PermissionCard: View {
 
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var showMore = false
+  /// The broader allow, offered as a switch: on, the primary button sends it instead.
+  @State private var allowAlways = false
   var startOpen = false
 
   private func syncOpen() { if startOpen { showMore = true } }
 
   private var isPlan: Bool { permission.kind == .switchMode && !(permission.text ?? "").isEmpty && permission.diff == nil }
 
+  private var file: DiffFile? { permission.diff.map { ACPDiffAdapter.file(for: $0, relativeTo: cwd) } }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 8) {
-        Image(systemName: permission.kind.symbolName).foregroundStyle(TetherColors.accent)
-        VStack(alignment: .leading, spacing: 1) {
-          Text(isPlan ? "PLAN" : "PERMISSION").font(.chat(.caption2).weight(.bold)).tracking(0.8).foregroundStyle(TetherColors.textFaint)
-          Text(permission.title).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(permission.title).font(.chat(.body).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .lineLimit(2)
+            .accessibilityAddTraits(.isHeader)
+          if let file, !permission.title.contains(file.path) {
+            Text(file.path).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
+              .lineLimit(1).truncationMode(.head)
+          }
         }
         Spacer(minLength: 0)
+        if let file {
+          HStack(spacing: 5) {
+            if file.added > 0 { Text("+\(file.added)").foregroundStyle(TetherColors.success) }
+            if file.removed > 0 { Text("\u{2212}\(file.removed)").foregroundStyle(TetherColors.danger) }
+          }
+          .font(.chat(.footnote).monospacedDigit())
+        }
         if let position {
-          Text(position).font(.chat(.caption2).weight(.semibold).monospaced()).foregroundStyle(TetherColors.textFaint)
+          Text(position).font(.chat(.caption2).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
         }
       }
       preview
       actions
     }
-    .padding(14)
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 18))
-    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(TetherColors.accent.opacity(0.45)))
-    .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+    .padding(16)
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 22))
     .accessibilityElement(children: .contain)
     .onAppear(perform: syncOpen)
   }
@@ -1053,18 +1118,6 @@ struct PermissionCard: View {
       let file = ACPDiffAdapter.file(for: diff, relativeTo: cwd)
       let rows = previewRows(file)
       VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 8) {
-          Text(file.path).font(.caption.monospaced()).lineLimit(1).truncationMode(.head)
-            .foregroundStyle(TetherColors.textPrimary)
-          Spacer(minLength: 6)
-          HStack(spacing: 6) {
-            if file.added > 0 { Text("+\(file.added)").foregroundStyle(TetherColors.success) }
-            if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(TetherColors.danger) }
-          }
-          .font(.system(size: 14, weight: .semibold, design: .monospaced))
-        }
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(TetherColors.surfaceRaised)
         ScrollView(.horizontal, showsIndicators: false) {
           VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
@@ -1078,30 +1131,22 @@ struct PermissionCard: View {
               .font(.caption2.monospaced())
               .padding(.horizontal, 10).padding(.vertical, 1)
               .frame(maxWidth: .infinity, alignment: .leading)
-              .background(edge(row.kind).opacity(0.10))
-              .overlay(alignment: .leading) { edge(row.kind).frame(width: 2) }
+              .background(edge(row.kind).opacity(0.12))
               .accessibilityLabel("\(accessibleKind(row.kind)) \(row.text)")
             }
           }
           .frame(minWidth: previewWidth, alignment: .leading)
           .fixedSize(horizontal: true, vertical: false)
-          .padding(.vertical, 4)
+          .padding(.vertical, 6)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { previewWidth = $0 }
-        .mask {
-          VStack(spacing: 0) {
-            Color.black
-            LinearGradient(colors: [.black, .black.opacity(0.15)], startPoint: .top, endPoint: .bottom)
-              .frame(height: 16)
-          }
-        }
         Button(action: review) {
           HStack(spacing: 6) {
-            Text("Show full diff").font(.chat(.footnote).weight(.semibold))
-            Image(systemName: "arrow.up.left.and.arrow.down.right").font(.chat(.footnote))
+            Text("Show full diff").font(.chat(.footnote).weight(.medium))
+            Image(systemName: "arrow.up.left.and.arrow.down.right").font(.chat(.caption))
             Spacer(minLength: 0)
           }
-          .foregroundStyle(TetherColors.accent)
+          .foregroundStyle(TetherColors.textSecondary)
           .padding(.horizontal, 10)
           .frame(minHeight: 36)
           .contentShape(Rectangle())
@@ -1109,17 +1154,15 @@ struct PermissionCard: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Show full diff of \(file.path), \(file.added) added, \(file.removed) removed")
       }
-      .background(TetherColors.background.opacity(0.5))
-      .clipShape(RoundedRectangle(cornerRadius: 10))
-      .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+      .background(TetherColors.background)
+      .clipShape(RoundedRectangle(cornerRadius: 12))
     } else if isPlan, let text = permission.text {
       PlanPreview(text: text, review: review)
     } else if let text = permission.text, !text.isEmpty {
       Text(String(text.prefix(300))).font(.caption.monospaced()).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(4)
         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-        .background(TetherColors.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+        .background(TetherColors.background, in: RoundedRectangle(cornerRadius: 12))
     }
   }
 
@@ -1157,9 +1200,21 @@ struct PermissionCard: View {
 
   /// Reject and the primary allow share one row; the rest are links, or behind "More options" past three.
   private var actions: some View {
-    let layout = ChatPermissionOptions.layout(permission.options)
+    let full = ChatPermissionOptions.layout(permission.options)
+    let always = ChatPermissionOptions.alwaysAllow(full)
+    var layout = full
+    layout.more.removeAll { $0.optionId == always?.optionId }
+    layout.collapsed = full.collapsed && layout.more.count > 1
     let pair = [layout.reject, layout.primary].compactMap { $0 }
-    return VStack(spacing: 6) {
+    return VStack(spacing: 8) {
+      if let always {
+        Toggle(isOn: $allowAlways) {
+          Text(always.name).font(.chat(.subheadline)).foregroundStyle(TetherColors.textPrimary)
+        }
+        .tint(TetherColors.accent)
+        .disabled(!enabled)
+        .accessibilityIdentifier("permissionAllowAlways")
+      }
       if dynamicTypeSize.isAccessibilitySize {
         VStack(spacing: 8) { ForEach(pair, id: \.optionId) { actionButton($0, rejectId: layout.reject?.optionId) } }
       } else {
@@ -1183,7 +1238,7 @@ struct PermissionCard: View {
           VStack(spacing: 6) {
             ForEach(layout.more, id: \.optionId) { option in
               Button { approve(option) } label: {
-                Text(option.name).font(.chat(.subheadline).weight(.medium)).foregroundStyle(TetherColors.accent)
+                Text(option.name).font(.chat(.subheadline).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
                   .multilineTextAlignment(.center)
                   .frame(maxWidth: .infinity, minHeight: 36)
                   .padding(.horizontal, 10)
@@ -1199,7 +1254,7 @@ struct PermissionCard: View {
       } else {
         ForEach(layout.more, id: \.optionId) { option in
           Button { approve(option) } label: {
-            Text(option.name).font(.chat(.footnote).weight(.medium)).foregroundStyle(TetherColors.accent)
+            Text(option.name).font(.chat(.footnote).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
               .multilineTextAlignment(.center)
               .frame(maxWidth: .infinity, minHeight: 24)
               .hitSlop(vertical: 10)
@@ -1215,14 +1270,15 @@ struct PermissionCard: View {
 
   private func actionButton(_ option: ACPPermissionOption, rejectId: String?) -> some View {
     let deny = option.optionId == rejectId
-    return Button { approve(option) } label: {
+    let always = deny || !allowAlways ? nil : ChatPermissionOptions.alwaysAllow(ChatPermissionOptions.layout(permission.options))
+    return Button { approve(always ?? option) } label: {
       Text(option.name)
-        .font(.chat(.subheadline).weight(deny ? .medium : .semibold))
+        .font(.chat(.subheadline).weight(.semibold))
         .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity, minHeight: 34)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .foregroundStyle(deny ? TetherColors.danger : TetherColors.onAccent)
-        .background(deny ? TetherColors.danger.opacity(0.14) : TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity, minHeight: 36)
+        .padding(.horizontal, 10).padding(.vertical, 2)
+        .foregroundStyle(deny ? TetherColors.textPrimary : TetherColors.background)
+        .background(deny ? TetherColors.surfaceRaised : TetherColors.textPrimary, in: Capsule())
         .hitSlop(vertical: 5)
     }
     .buttonStyle(TetherPressStyle())
@@ -1256,11 +1312,11 @@ private struct PlanPreview: View {
       Rectangle().fill(TetherColors.border).frame(height: 0.5)
       Button(action: review) {
         HStack(spacing: 6) {
-          Text("Show full plan").font(.chat(.footnote).weight(.semibold))
-          Image(systemName: "arrow.up.left.and.arrow.down.right").font(.chat(.footnote))
+          Text("Show full plan").font(.chat(.footnote).weight(.medium))
+          Image(systemName: "arrow.up.left.and.arrow.down.right").font(.chat(.caption))
           Spacer(minLength: 0)
         }
-        .foregroundStyle(TetherColors.accent)
+        .foregroundStyle(TetherColors.textSecondary)
         .padding(.horizontal, 10)
         .frame(minHeight: 36)
         .contentShape(Rectangle())
@@ -1268,9 +1324,8 @@ private struct PlanPreview: View {
       .buttonStyle(.plain)
       .accessibilityIdentifier("planShowFull")
     }
-    .background(TetherColors.background.opacity(0.5))
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+    .background(TetherColors.background)
+    .clipShape(RoundedRectangle(cornerRadius: 12))
     .onChange(of: text) { _, next in blocks = MarkdownDocument.parse(next) }
   }
 }

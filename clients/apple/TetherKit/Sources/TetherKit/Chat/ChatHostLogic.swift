@@ -343,6 +343,14 @@ extension ChatPermissionOptions {
     let rest = ordered.map(\.option).filter { $0.optionId != primary?.optionId && $0.optionId != reject?.optionId }
     return Layout(primary: primary, reject: reject, more: rest, collapsed: options.count > 3)
   }
+
+  /// The one broader allow ("allow all edits this session") the card offers as a switch, when the
+  /// primary button is the one-off allow it widens.
+  static func alwaysAllow(_ layout: Layout) -> ACPPermissionOption? {
+    guard let primary = layout.primary, primary.kind == "allow_once" else { return nil }
+    let always = layout.more.filter { $0.kind == "allow_always" }
+    return always.count == 1 ? always[0] : nil
+  }
 }
 
 enum ChatFormat {

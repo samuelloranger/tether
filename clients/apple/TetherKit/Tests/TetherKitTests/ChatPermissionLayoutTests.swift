@@ -18,6 +18,23 @@ final class ChatPermissionLayoutTests: XCTestCase {
     XCTAssertTrue(layout.collapsed)
   }
 
+  func test_an_edit_permission_offers_its_one_broader_allow_as_the_switch() {
+    let layout = ChatPermissionOptions.layout([
+      option("once", "allow_once"), option("session", "allow_always"), option("no", "reject_once"),
+    ])
+    XCTAssertEqual(ChatPermissionOptions.alwaysAllow(layout)?.optionId, "session")
+  }
+
+  func test_the_plan_approval_and_a_card_without_allow_once_get_no_switch() {
+    let plan = ChatPermissionOptions.layout([
+      option("default", "allow_once"), option("acceptEdits", "allow_always"), option("auto", "allow_always"),
+      option("plan", "reject_once"),
+    ])
+    XCTAssertNil(ChatPermissionOptions.alwaysAllow(plan))
+    let noOnce = ChatPermissionOptions.layout([option("session", "allow_always"), option("no", "reject_once")])
+    XCTAssertNil(ChatPermissionOptions.alwaysAllow(noOnce))
+  }
+
   func test_three_options_or_fewer_are_never_collapsed() {
     let layout = ChatPermissionOptions.layout([
       option("a", "allow_once"), option("b", "allow_always"), option("c", "reject_once"),
