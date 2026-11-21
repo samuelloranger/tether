@@ -1880,6 +1880,10 @@ impl Session {
                 }
             }
             ChatMsg::OpenTool(key) => {
+                // The row is in a run of steps that may have folded since it was running.
+                if let Some(fold) = super::rows::fold_key_of(self, &key) {
+                    self.expanded.insert(fold);
+                }
                 self.expanded.insert(key);
             }
             ChatMsg::Earlier => {

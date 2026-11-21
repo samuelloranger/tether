@@ -1,7 +1,7 @@
 //! The transcript as rows: the agent's prose at full width, runs of tool calls as one surface,
 //! everything else quiet. Only the recent window is laid out; "Earlier messages" grows it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tether_core::acp::agent;
@@ -10,15 +10,17 @@ use tether_core::acp::files::ChatFiles;
 use tether_core::acp::format;
 use tether_core::acp::grouping::{self, Block};
 use tether_core::acp::images::ImageRef;
-use tether_core::acp::message::{ToolKind, ToolStatus};
+use tether_core::acp::message::ToolStatus;
 use tether_core::acp::question::QuestionState;
 use tether_core::acp::reducer::{ChatState, CompactionStatus, Item, ItemKind, ToolCall, Turn};
 use tether_core::acp::tooldetail;
+use tether_core::acp::turns::{self, DiffCounts};
 use tether_core::acp::verbs;
 
 use super::session::{Session, SignIn};
 use super::view::{
-    DiffKind, Entry, EntryBody, Icon, Picture, Pixels, Row, RowBody, TaskView, ToolState,
+    DiffKind, Entry, EntryBody, Picture, Pixels, RECEIPT_SHOWN, ReceiptView, Row, RowBody,
+    TaskView, ToolState,
 };
 
 pub struct RowCtx<'a> {
@@ -29,21 +31,7 @@ pub struct RowCtx<'a> {
     pub verbs: &'a [String],
     /// Pictures the rows show that have no thumbnail yet, with the file to make one from.
     pub need: Vec<(String, std::path::PathBuf)>,
-}
-
-fn icon(kind: &ToolKind) -> Icon {
-    match kind {
-        ToolKind::Read => Icon::Read,
-        ToolKind::Edit => Icon::Edit,
-        ToolKind::Delete => Icon::Delete,
-        ToolKind::Move => Icon::Move,
-        ToolKind::Search => Icon::Search,
-        ToolKind::Execute => Icon::Execute,
-        ToolKind::Think => Icon::Think,
-        ToolKind::Fetch => Icon::Fetch,
-        ToolKind::SwitchMode => Icon::SwitchMode,
-        ToolKind::Other => Icon::Other,
-    }
+    pub diffs: &'a mut DiffCounts,
 }
 
 fn diff_kind(kind: DiffRowKind) -> DiffKind {
@@ -215,13 +203,32 @@ pub fn build(s: &Session, ctx: &mut RowCtx<'_>) -> Vec<Row> {
         });
     }
     let last_item = state.items.last().map(|i| i.id);
+    let shown = visible(state);
+    let working = s.is_working();
+    let finished: HashSet<i64> = shown[..turns::finished_len(&shown, working)]
+        .iter()
+        .map(|i| i.id)
+        .collect();
+    let receipts = turns::receipts(&shown, working, &s.cwd, ctx.diffs);
     for block in &blocks[range] {
         match block {
             Block::Item(item) => item_rows(s, item, last_item, ctx, &mut rows),
-            Block::Tools(items) => rows.push(Row {
-                key: format!("tools:{}", items[0].id),
-                body: RowBody::Tools(tool_entries(s, items, ctx)),
-            }),
+            Block::Tools(items) => {
+                let fold = finished
+                    .contains(&block.last_id())
+                    .then(|| fold_of(s, items))
+                    .flatten();
+                rows.push(Row {
+                    key: format!("tools:{}", items[0].id),
+                    body: RowBody::Tools(tool_entries(s, items, fold, ctx)),
+                });
+            }
+        }
+        if let Some(receipt) = receipts.get(&block.last_id()) {
+            rows.push(Row {
+                key: format!("receipt:{}", block.last_id()),
+                body: RowBody::Receipt(receipt_view(receipt)),
+            });
         }
     }
     for failed in s.outbox.failed() {
@@ -303,7 +310,7 @@ fn item_rows(
             selectable: state_selectable(s.state(), item.id),
         },
         ItemKind::Tool(_) | ItemKind::Permission(_) => {
-            RowBody::Tools(tool_entries(s, std::slice::from_ref(item), ctx))
+            RowBody::Tools(tool_entries(s, std::slice::from_ref(item), None, ctx))
         }
         ItemKind::Question(q) => {
             let (answer, answered) = match &q.state {
@@ -336,7 +343,7 @@ fn item_rows(
                     .map(|(n, e)| Entry {
                         key: format!("{key}:step:{n}"),
                         depth: 0,
-                        first: n == 0,
+                        rail: 0,
                         body: EntryBody::PlanStep {
                             state: match e.status.as_str() {
                                 "completed" => 2,
@@ -415,31 +422,142 @@ fn status(shown: ToolStatus, active: bool) -> ToolState {
     }
 }
 
-fn tool_entries(s: &Session, items: &[Item], ctx: &mut RowCtx<'_>) -> Vec<Entry> {
+/// The key a finished turn's run of steps is folded or opened under.
+pub fn fold_key(items: &[Item]) -> String {
+    format!("fold:{}", items[0].id)
+}
+
+fn top_calls(items: &[Item]) -> Vec<&ToolCall> {
+    items
+        .iter()
+        .filter_map(|i| match &i.kind {
+            ItemKind::Tool(call) => Some(call),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Two or more steps fold; one still running, or a command running in the background, keeps
+/// its row in view. The folded run's summary, failures and whether the reader opened it.
+fn fold_of(s: &Session, items: &[Item]) -> Option<(String, usize, bool)> {
+    let calls = top_calls(items);
+    let busy = |c: &&ToolCall| {
+        c.is_active()
+            || c.is_background_running()
+            || matches!(
+                s.tool_status(c),
+                ToolStatus::Pending | ToolStatus::InProgress
+            )
+    };
+    if calls.len() < 2 || calls.iter().any(busy) {
+        return None;
+    }
+    let failed = calls
+        .iter()
+        .filter(|c| c.status == ToolStatus::Failed)
+        .count();
+    Some((
+        turns::fold_summary(&calls),
+        failed,
+        s.expanded.contains(&fold_key(items)),
+    ))
+}
+
+/// The fold key of the run of steps the item at `key` (a tool row or one of its children) sits in.
+pub fn fold_key_of(s: &Session, key: &str) -> Option<String> {
+    let id: i64 = key
+        .strip_prefix("item:")
+        .or_else(|| key.strip_prefix("child:item:"))?
+        .split(':')
+        .next()?
+        .parse()
+        .ok()?;
+    grouping::blocks(&visible(s.state()))
+        .into_iter()
+        .find_map(|block| match block {
+            Block::Tools(items) if items.iter().any(|i| i.id == id) => Some(fold_key(&items)),
+            _ => None,
+        })
+}
+
+fn receipt_view(r: &turns::Receipt) -> ReceiptView {
+    ReceiptView {
+        changed: r
+            .changed
+            .iter()
+            .take(RECEIPT_SHOWN)
+            .map(|c| (c.path.clone(), c.added, c.removed))
+            .collect(),
+        changed_more: r.changed.len().saturating_sub(RECEIPT_SHOWN),
+        ran: r
+            .ran
+            .iter()
+            .take(RECEIPT_SHOWN)
+            .map(|c| (c.title.clone(), c.failed))
+            .collect(),
+        ran_more: r.ran.len().saturating_sub(RECEIPT_SHOWN),
+    }
+}
+
+/// Dots are the rows that carry one; the rail runs from the first to the last of them.
+fn lay_rail(entries: &mut [Entry]) {
+    let dot = |e: &Entry| {
+        matches!(
+            e.body,
+            EntryBody::Tool { .. } | EntryBody::Resolved { .. } | EntryBody::Fold { .. }
+        )
+    };
+    let Some(first) = entries.iter().position(dot) else {
+        return;
+    };
+    let last = entries.iter().rposition(dot).unwrap_or(first);
+    for (i, e) in entries.iter_mut().enumerate() {
+        e.rail = match i {
+            _ if first == last || i < first || i > last => 0,
+            _ if i == first => 2,
+            _ if i == last => 3,
+            _ => 1,
+        };
+    }
+}
+
+fn tool_entries(
+    s: &Session,
+    items: &[Item],
+    fold: Option<(String, usize, bool)>,
+    ctx: &mut RowCtx<'_>,
+) -> Vec<Entry> {
     let mut out = Vec::new();
-    for item in items {
+    let folded = fold.as_ref().is_some_and(|(_, _, open)| !open);
+    if let Some((summary, failed, open)) = fold {
+        out.push(Entry {
+            key: fold_key(items),
+            depth: 0,
+            rail: 0,
+            body: EntryBody::Fold {
+                summary,
+                failed,
+                open,
+            },
+        });
+    }
+    for item in items.iter().filter(|_| !folded) {
         let key = format!("item:{}", item.id);
-        let first = out.is_empty();
         match &item.kind {
             ItemKind::Tool(call) if call.subagent.is_some() => {
-                subagent(s, call, &key, first, ctx, &mut out);
+                subagent(s, call, &key, ctx, &mut out);
             }
-            ItemKind::Tool(call) => tool(s, call, &key, 0, first, ctx, &mut out),
+            ItemKind::Tool(call) => tool(s, call, &key, 0, ctx, &mut out),
             ItemKind::Permission(p) => {
                 let Some(resolved) = &p.resolved_option_id else {
                     continue;
                 };
                 let option = p.options.iter().find(|o| &o.option_id == resolved);
-                let allowed = option.is_some_and(|o| {
-                    format::PermissionRole::from_kind(&o.kind)
-                        != format::PermissionRole::Destructive
-                });
                 out.push(Entry {
                     key,
                     depth: 0,
-                    first,
+                    rail: 0,
                     body: EntryBody::Resolved {
-                        allowed,
                         title: format!(
                             "{} \u{00B7} {}",
                             option.map_or("Cancelled", |o| o.name.as_str()),
@@ -451,6 +569,7 @@ fn tool_entries(s: &Session, items: &[Item], ctx: &mut RowCtx<'_>) -> Vec<Entry>
             _ => {}
         }
     }
+    lay_rail(&mut out);
     out
 }
 
@@ -467,11 +586,10 @@ fn tool(
     call: &ToolCall,
     key: &str,
     depth: u8,
-    first: bool,
     ctx: &mut RowCtx<'_>,
     out: &mut Vec<Entry>,
 ) {
-    let file = call.diff.as_ref().map(|d| diff::file_for(d, &s.cwd));
+    let counts = call.diff.as_ref().map(|d| ctx.diffs.count(d, &s.cwd));
     let short = two_lines(call.display_title());
     // A Workflow row the host lists opens the run's sheet instead of unfolding.
     let sheet = s.workflow_listed(call);
@@ -486,20 +604,15 @@ fn tool(
     out.push(Entry {
         key: key.to_string(),
         depth,
-        first,
+        rail: 0,
         body: EntryBody::Tool {
-            icon: if call.images.is_empty() {
-                icon(&call.kind)
-            } else {
-                Icon::Image
-            },
             title: short
                 .filter(|_| !open)
                 .unwrap_or_else(|| call.display_title().to_string()),
             subtitle: String::new(),
             state: status(shown, running || call.is_background_running()),
-            added: file.as_ref().map_or(0, |f| f.added),
-            removed: file.as_ref().map_or(0, |f| f.removed),
+            added: counts.as_ref().map_or(0, |c| c.1),
+            removed: counts.as_ref().map_or(0, |c| c.2),
             expandable,
             open,
             background: call.is_background_running(),
@@ -508,12 +621,13 @@ fn tool(
     if !open {
         return;
     }
-    if let Some(file) = file {
+    if let Some(d) = &call.diff {
+        let file = diff::file_for(d, &s.cwd);
         for (n, row) in file.rows.iter().enumerate() {
             out.push(Entry {
                 key: format!("{key}:diff:{n}"),
                 depth,
-                first: false,
+                rail: 0,
                 body: EntryBody::Diff {
                     selectable: !running && !call.is_background_running(),
                     kind: diff_kind(row.kind),
@@ -529,14 +643,14 @@ fn tool(
         out.push(Entry {
             key: format!("{key}:images"),
             depth,
-            first: false,
+            rail: 0,
             body: EntryBody::Pictures(pictures(s, &call.images, ctx)),
         });
     }
     out.push(Entry {
         key: format!("{key}:md"),
         depth,
-        first: false,
+        rail: 0,
         body: EntryBody::Markdown {
             items: tooldetail::blocks(call.text.as_deref(), call.raw_output.as_deref()),
             selectable: !running && !call.is_background_running(),
@@ -544,14 +658,7 @@ fn tool(
     });
 }
 
-fn subagent(
-    s: &Session,
-    call: &ToolCall,
-    key: &str,
-    first: bool,
-    ctx: &mut RowCtx<'_>,
-    out: &mut Vec<Entry>,
-) {
+fn subagent(s: &Session, call: &ToolCall, key: &str, ctx: &mut RowCtx<'_>, out: &mut Vec<Entry>) {
     let info = call.subagent.as_ref();
     let background = info.is_some_and(|i| i.background);
     let report = (!background && tooldetail::has_content(call.text.as_deref(), None))
@@ -578,9 +685,8 @@ fn subagent(
     out.push(Entry {
         key: key.to_string(),
         depth: 0,
-        first,
+        rail: 0,
         body: EntryBody::Tool {
-            icon: Icon::Subagent,
             title: call.subagent_title(),
             subtitle: parts.join(" \u{00B7} "),
             state: status(
@@ -599,7 +705,7 @@ fn subagent(
     }
     for child in &call.children {
         let child_key = format!("child:{key}:{}", child.id);
-        tool(s, child, &child_key, 1, false, ctx, out);
+        tool(s, child, &child_key, 1, ctx, out);
     }
     if let Some(brief) = brief {
         let brief_key = format!("brief:{key}");
@@ -607,14 +713,14 @@ fn subagent(
         out.push(Entry {
             key: brief_key.clone(),
             depth: 0,
-            first: false,
+            rail: 0,
             body: EntryBody::BriefToggle { open: brief_open },
         });
         if brief_open {
             out.push(Entry {
                 key: format!("{brief_key}:md"),
                 depth: 0,
-                first: false,
+                rail: 0,
                 body: EntryBody::Markdown {
                     items: tooldetail::blocks(Some(&brief), None),
                     selectable: true,
@@ -626,13 +732,13 @@ fn subagent(
         out.push(Entry {
             key: format!("report:{key}"),
             depth: 0,
-            first: false,
+            rail: 0,
             body: EntryBody::ReportLabel,
         });
         out.push(Entry {
             key: format!("report:{key}:md"),
             depth: 0,
-            first: false,
+            rail: 0,
             body: EntryBody::Markdown {
                 items: tooldetail::blocks(Some(&report), None),
                 selectable: !call.is_active(),

@@ -13,14 +13,14 @@ export struct ChatImageVm {
 }
 
 // kind: 0 tool header, 1 resolved permission, 2 markdown, 3 diff line, 4 images, 5 brief toggle,
-// 6 report label, 7 plan step.
+// 6 report label, 7 plan step, 8 folded steps (removed = how many failed).
+// rail: the timeline's line at this row: 0 none, 1 through it, 2 from the dot down, 3 from the top to the dot.
 export struct ChatEntryVm {
     selection-group: string,
     kind: int,
     key: string,
     depth: int,
-    first: bool,
-    icon: int,
+    rail: int,
     title: string,
     subtitle: string,
     state: int,             // tool: 0 running, 1 done, 2 failed. plan step: 0 pending, 1 in progress, 2 done.
@@ -44,7 +44,8 @@ export struct ChatEntryVm {
 // kind: 0 user, 1 assistant markdown block, 2 assistant images, 3 thinking, 4 tool group, 5 plan,
 // 6 notice, 7 error, 8 divider, 9 signed out, 10 answered question, 11 not sent, 12 working,
 // 13 earlier messages, 14 empty state, 15 agent notice (state = severity), 16 compaction
-// (state: 0 compacting, 1 done, 2 failed, 3 cancelled; flag = has a summary; open = summary shown).
+// (state: 0 compacting, 1 done, 2 failed, 3 cancelled; flag = has a summary; open = summary shown),
+// 18 turn receipt.
 export struct ChatCardEntryVm {
     id: string,
     key: string,
@@ -52,6 +53,13 @@ export struct ChatCardEntryVm {
     detail: string,
     meta: string,
     open: bool,
+}
+
+export struct ChatReceiptLineVm {
+    text: string,
+    added: int,
+    removed: int,
+    failed: bool,
 }
 
 export struct ChatRowVm {
@@ -75,6 +83,10 @@ export struct ChatRowVm {
     links: [MdLinkVm],
     images: [ChatImageVm],
     entries: [ChatEntryVm],
+    receipt-changed: [ChatReceiptLineVm],
+    receipt-ran: [ChatReceiptLineVm],
+    changed-more: int,
+    ran-more: int,
 }
 
 // state: -1 nothing to say, 0 working, 1 needs you, 2 idle, 3 running, 4 ended, 5 idle with background commands.
@@ -187,6 +199,16 @@ export struct CtlChoiceVm {
     pending: bool,
 }
 
+export struct ChipVm {
+    id: string,
+    name: string,
+    label: string,
+    pending: bool,
+    risky: bool,
+    failure: string,
+    choices: [CtlChoiceVm],
+}
+
 export struct CtlOptionVm {
     id: string,
     name: string,
@@ -229,6 +251,7 @@ export global ChatVm {
     in property <string> actions-title;
     in property <bool> actions-pinned;
     in property <bool> actions-archived;
+    in property <bool> actions-active;
     in property <bool> rename-open;
     in-out property <string> rename-title;
     in property <bool> branch-open;
@@ -267,13 +290,10 @@ export global ChatVm {
     in property <bool> folder-copied;
     in property <int> phase;                 // 0 connecting, 1 catching up, 2 live, 3 lost, 4 ended
     in property <string> phase-word;
-    in property <bool> has-status;
+    in property <string> place;              // "<folder> on <machine>"
+    in property <int> activity;              // while live: 0 idle, 1 working, 2 needs you
     in property <int> agent;                 // the chat's agent, as ChatTabVm.agent
     in property <string> agent-label;        // set for an agent other than Claude
-    in property <string> model-name;
-    in property <string> mode-name;
-    in property <int> mode-tint;             // 0 secondary, 1 accent, 2 success, 3 danger
-    in property <string> stats;
     in property <float> context: -1;
     in property <string> context-text;
     in property <[ChatRowVm]> rows;
@@ -298,6 +318,10 @@ export global ChatVm {
     in property <bool> stopping;
     in property <bool> action-enabled;
     in property <string> action-label: "Send";
+    in property <[ChipVm]> chips;
+    in property <bool> chips-enabled;
+    in property <string> context-used;
+    in property <string> context-detail;
     in property <[AttachmentVm]> attachments;
     in property <string> attach-error;
     in property <int> palette-kind;          // 0 none, 1 slash commands, 2 files
@@ -306,7 +330,7 @@ export global ChatVm {
     // Permission card.
     in property <bool> perm-shown;
     in property <bool> perm-plan;
-    in property <int> perm-icon;
+    in property <string> perm-key;
     in property <string> perm-title;
     in property <string> perm-position;
     in property <string> perm-path;
@@ -318,6 +342,7 @@ export global ChatVm {
     in property <bool> perm-reviewable;
     in property <PermOptionVm> perm-primary;
     in property <PermOptionVm> perm-reject;
+    in property <PermOptionVm> perm-always;
     in property <[PermOptionVm]> perm-more;
     in property <bool> perm-collapsed;
     in property <bool> perm-enabled;
@@ -530,6 +555,7 @@ export global ChatStyle {
     }
     out property <length> column: 760px;
     out property <length> row-height: 34px;
+    out property <length> dot-column: 9px;
 }
 
 // The agent's mark. Claude keeps its own colour; the single-colour marks take `ink`.
@@ -587,19 +613,23 @@ component Pressable inherits Rectangle {
 component SmallAction inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
-    // 0 plain, 1 accent fill, 2 danger tint, 3 accent tint.
+    // 0 plain, 1 primary (text colour fill), 2 danger text, 3 neutral raised.
     in property <int> style;
+    // The cards' buttons: 36 px tall and fully round.
+    in property <bool> pill;
     callback clicked();
-    height: 32px;
+    height: root.pill ? 36px : 32px;
     min-width: label.preferred-width + 24px;
-    border-radius: 9px;
+    border-radius: root.pill ? self.height / 2 : 9px;
     opacity: root.enabled ? 1 : 0.5;
-    background: root.style == 1 ? (touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent)
-        : root.style == 2 ? Tokens.danger.with-alpha(touch.has-hover ? 0.2 : 0.14)
-        : root.style == 3 ? Tokens.accent.with-alpha(touch.has-hover ? 0.2 : 0.14)
+    background: root.style == 1 ? (touch.has-hover ? Tokens.text.with-alpha(0.88) : Tokens.text)
+        : root.style == 2 || root.style == 3 ? (touch.has-hover ? Tokens.raised.brighter(0.12) : Tokens.raised)
         : touch.has-hover ? Tokens.surface-hover : Tokens.raised;
     border-width: root.style == 0 ? 1px : 0px;
     border-color: Tokens.border;
+    animate background { duration: Motion.fast; easing: ease-out; }
+    accessible-role: button;
+    accessible-label: root.text;
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
@@ -615,7 +645,7 @@ component SmallAction inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
-        color: root.style == 1 ? Tokens.on-accent : root.style == 2 ? Tokens.danger : root.style == 3 ? Tokens.accent : Tokens.text;
+        color: root.style == 1 ? Tokens.background : root.style == 2 ? Tokens.danger : Tokens.text;
     }
 }
 
@@ -904,9 +934,11 @@ component DiffRow inherits Rectangle {
     in property <string> new-no;
     in property <string> text;
     in property <bool> numbers: true;
+    // The accent-less cards draw a changed line as a tint only.
+    in property <bool> edge: true;
     height: max(root.kind == 0 ? 28px : 18px, body.preferred-height + 2px);
     background: root.kind == 0 ? Tokens.raised : root.kind == 1 ? Tokens.accent.with-alpha(0.08) : root.kind == 2 ? Tokens.success.with-alpha(0.12) : root.kind == 3 ? Tokens.danger.with-alpha(0.12) : transparent;
-    if root.kind == 2 || root.kind == 3: Rectangle {
+    if root.edge && (root.kind == 2 || root.kind == 3): Rectangle {
         x: 0;
         width: 2px;
         background: root.kind == 2 ? Tokens.success : Tokens.danger;
@@ -963,6 +995,24 @@ component Thumbs inherits HorizontalLayout {
     }
 }
 
+// A step's place on the timeline. Only a failure gets a colour: a done step is a faint dot,
+// an active one a ring (the chrome has no looping motion, DESIGN.md).
+component StepDot inherits Rectangle {
+    in property <int> state;     // 0 active, 1 done, 2 failed
+    width: ChatStyle.dot-column;
+    height: ChatStyle.dot-column;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 7px;
+        height: 7px;
+        border-radius: 3.5px;
+        background: root.state == 2 ? Tokens.danger : root.state == 0 ? Tokens.background : Tokens.text-faint.with-alpha(0.55);
+        border-width: root.state == 0 ? 1.5px : 0px;
+        border-color: Tokens.text;
+    }
+}
+
 component StatusMark inherits Rectangle {
     in property <int> state;
     width: 14px;
@@ -982,36 +1032,26 @@ component StatusMark inherits Rectangle {
 
 component Entry inherits Rectangle {
     in property <ChatEntryVm> e;
-    property <length> indent: root.e.depth * 22px;
-    if !root.e.first && (root.e.kind == 0 || root.e.kind == 1): Rectangle {
-        x: root.indent + 46px;
-        y: 0;
-        height: 1px;
-        width: parent.width - self.x;
-        background: Tokens.border;
-    }
-    if root.e.depth > 0: Rectangle {
-        x: 33px;
-        width: 2px;
-        background: Tokens.border;
-    }
+    property <length> indent: root.e.depth * (ChatStyle.dot-column + 10px);
+    property <length> detail-x: root.indent + ChatStyle.dot-column + 10px;
     VerticalLayout {
-        if root.e.kind == 0 || root.e.kind == 1: Pressable {
+        if root.e.kind == 0 || root.e.kind == 1 || root.e.kind == 8: Pressable {
             enabled: root.e.expandable;
             hover-fill: root.e.expandable;
+            border-radius: 8px;
+            accessible-role: button;
+            accessible-label: root.e.kind == 8 ? root.e.title + (root.e.removed > 0 ? ", " + root.e.removed + " failed" : "") : root.e.title;
+            accessible-expanded: root.e.expandable ? root.e.open : false;
             height: max(ChatStyle.row-height, tool-row.preferred-height);
             clicked => { ChatVm.toggle(root.e.key); }
             tool-row := HorizontalLayout {
-                padding-left: 12px + root.indent;
-                padding-right: 12px;
+                padding-left: root.indent;
+                padding-right: 6px;
                 spacing: 10px;
                 VerticalLayout {
                     alignment: center;
-                    width: 24px;
-                    Glyph {
-                        which: root.e.icon;
-                        ink: root.e.state == 2 ? Tokens.danger : root.e.state == 3 ? Tokens.warning : Tokens.text-faint;
-                    }
+                    width: ChatStyle.dot-column;
+                    StepDot { state: root.e.kind == 1 ? 1 : root.e.state; }
                 }
                 VerticalLayout {
                     horizontal-stretch: 1;
@@ -1022,28 +1062,27 @@ component Entry inherits Rectangle {
                         text: root.e.title;
                         font-size: 12.5px;
                         overflow: elide;
-                        color: root.e.state == 2 && root.e.kind == 0 ? Tokens.danger : root.e.kind == 1 ? Tokens.text-faint : Tokens.text-secondary;
+                        color: root.e.kind == 0 && root.e.state == 2 ? Tokens.danger : root.e.kind == 1 ? Tokens.text-faint : Tokens.text-secondary;
                     }
                     if root.e.subtitle != "": Text { text: root.e.subtitle; font-size: 11px; color: Tokens.text-faint; overflow: elide; }
                 }
-                if root.e.background: VerticalLayout {
+                if root.e.kind == 0 && root.e.background: VerticalLayout {
                     alignment: center;
                     Rectangle {
-                        border-width: 1px;
-                        border-color: Tokens.accent;
-                        border-radius: 4px;
-                        width: badge-text.preferred-width + 10px;
-                        height: badge-text.preferred-height + 2px;
-                        badge-text := Text { x: 5px; y: 1px; text: "background"; font-family: Tokens.mono-font; font-size: 10.5px; color: Tokens.accent; }
+                        background: Tokens.raised;
+                        border-radius: 9px;
+                        width: badge-text.preferred-width + 12px;
+                        height: badge-text.preferred-height + 4px;
+                        badge-text := Text { x: 6px; y: 2px; text: "background"; font-size: 11px; color: Tokens.text-secondary; }
                     }
                 }
-                if root.e.added + root.e.removed > 0: HorizontalLayout {
+                if root.e.kind == 8 && root.e.removed > 0: Text { text: root.e.removed + " failed"; font-size: 11.5px; color: Tokens.danger; vertical-alignment: center; }
+                if root.e.kind == 0 && root.e.added + root.e.removed > 0: HorizontalLayout {
                     spacing: 5px;
                     alignment: center;
                     if root.e.added > 0: Text { text: "+" + root.e.added; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.success; vertical-alignment: center; }
                     if root.e.removed > 0: Text { text: "\u{2212}" + root.e.removed; font-family: Tokens.mono-font; font-size: 11px; color: Tokens.danger; vertical-alignment: center; }
                 }
-                if root.e.kind == 0: VerticalLayout { alignment: center; StatusMark { state: root.e.state; } }
                 VerticalLayout {
                     alignment: center;
                     width: 10px;
@@ -1052,8 +1091,8 @@ component Entry inherits Rectangle {
             }
         }
         if root.e.kind == 2: HorizontalLayout {
-            padding-left: 12px + root.indent + 34px;
-            padding-right: 12px;
+            padding-left: root.detail-x;
+            padding-right: 8px;
             padding-bottom: 4px;
             MdDocument {
                 items: root.e.markdown;
@@ -1064,7 +1103,7 @@ component Entry inherits Rectangle {
             }
         }
         if root.e.kind == 3: HorizontalLayout {
-            padding-left: 8px + root.indent;
+            padding-left: root.detail-x;
             padding-right: 8px;
             DiffRow {
                 scope: { id: root.e.selection-group };
@@ -1076,7 +1115,7 @@ component Entry inherits Rectangle {
             }
         }
         if root.e.kind == 4: HorizontalLayout {
-            padding-left: 12px + root.indent + 34px;
+            padding-left: root.detail-x;
             padding-top: 4px;
             padding-bottom: 8px;
             Thumbs { images: root.e.images; tall: 160px; }
@@ -1087,7 +1126,7 @@ component Entry inherits Rectangle {
             height: 26px;
             clicked => { ChatVm.toggle(root.e.key); }
             HorizontalLayout {
-                padding-left: 12px + root.indent + 34px;
+                padding-left: root.detail-x;
                 spacing: 6px;
                 alignment: start;
                 Text { text: root.e.title; font-size: 11.5px; font-weight: 600; color: Tokens.text-faint; vertical-alignment: center; }
@@ -1107,8 +1146,8 @@ component Entry inherits Rectangle {
                 border-radius: 7px;
                 border-width: root.e.state == 0 ? 1.5px : 0px;
                 border-color: Tokens.text-faint;
-                background: root.e.state == 2 ? Tokens.success : root.e.state == 1 ? Tokens.accent : transparent;
-                if root.e.state == 2: Glyph { which: 23; size: 10px; ink: Tokens.on-accent; x: 2px; y: 2px; }
+                background: root.e.state == 2 ? Tokens.text-faint : root.e.state == 1 ? Tokens.text : transparent;
+                if root.e.state == 2: Glyph { which: 23; size: 10px; ink: Tokens.background; x: 2px; y: 2px; }
             }
             Para {
                 horizontal-stretch: 1;
@@ -1118,6 +1157,14 @@ component Entry inherits Rectangle {
                 ink: root.e.state == 2 ? Tokens.text-secondary : Tokens.text;
             }
         }
+    }
+    // The timeline rail: one hairline through the dots' column, from the first dot to the last.
+    if root.e.rail != 0: Rectangle {
+        x: (ChatStyle.dot-column - 1px) / 2;
+        y: root.e.rail == 2 ? root.height / 2 : 0px;
+        width: 1px;
+        height: root.e.rail == 1 ? root.height : root.height / 2;
+        background: Tokens.border;
     }
 }
 
@@ -1255,7 +1302,10 @@ component Row inherits VerticalLayout {
             Para { text: root.r.text; selectable: root.r.selectable; font-size: 12.5px; font-italic: true; ink: Tokens.text-faint; }
         }
     }
-    if root.r.kind == 4 || root.r.kind == 5: Rectangle {
+    if root.r.kind == 4: VerticalLayout {
+        for e in root.r.entries: Entry { e: e; }
+    }
+    if root.r.kind == 5: Rectangle {
         background: Tokens.surface;
         border-radius: 12px;
         border-width: 1px;
@@ -1263,7 +1313,7 @@ component Row inherits VerticalLayout {
         clip: true;
         height: group.preferred-height;
         group := VerticalLayout {
-            if root.r.kind == 5: Pressable {
+            Pressable {
                 height: ChatStyle.row-height;
                 clicked => { ChatVm.toggle(root.r.key); }
                 HorizontalLayout {
@@ -1285,7 +1335,51 @@ component Row inherits VerticalLayout {
                 }
             }
             for e in root.r.entries: Entry { e: e; }
-            if root.r.kind == 5 && root.r.open: Rectangle { height: 6px; }
+            if root.r.open: Rectangle { height: 6px; }
+        }
+    }
+    // The end of a finished turn: what it changed and ran.
+    if root.r.kind == 18: Rectangle {
+        background: Tokens.surface;
+        border-radius: 14px;
+        height: receipt.preferred-height;
+        receipt := VerticalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            if root.r.receipt-changed.length > 0: HorizontalLayout {
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                Text { width: 64px; text: "Changed"; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: top; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 4px;
+                    for line in root.r.receipt-changed: HorizontalLayout {
+                        spacing: 8px;
+                        Text { horizontal-stretch: 1; text: line.text; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text; overflow: elide; }
+                        if line.added > 0: Text { text: "+" + line.added; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.success; }
+                        if line.removed > 0: Text { text: "\u{2212}" + line.removed; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.danger; }
+                    }
+                    if root.r.changed-more > 0: Text { text: root.r.changed-more + " more"; font-size: 11.5px; color: Tokens.text-faint; }
+                }
+            }
+            if root.r.receipt-changed.length > 0 && root.r.receipt-ran.length > 0: Rectangle { height: 1px; background: Tokens.border; }
+            if root.r.receipt-ran.length > 0: HorizontalLayout {
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                Text { width: 64px; text: "Ran"; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: top; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 4px;
+                    for line in root.r.receipt-ran: HorizontalLayout {
+                        spacing: 8px;
+                        Text { horizontal-stretch: 1; text: line.text; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text; overflow: elide; }
+                        if line.failed: Text { text: "failed"; font-size: 11.5px; color: Tokens.danger; }
+                    }
+                    if root.r.ran-more > 0: Text { text: root.r.ran-more + " more"; font-size: 11.5px; color: Tokens.text-faint; }
+                }
+            }
         }
     }
     if root.r.kind == 6: QuietRow { icon: 15; text: root.r.text; }
@@ -1311,7 +1405,7 @@ component Row inherits VerticalLayout {
                 VerticalLayout { alignment: center; horizontal-stretch: 1; Rectangle { height: 1px; background: Tokens.border; } }
                 HorizontalLayout {
                     spacing: 6px;
-                    if root.r.state == 0: VerticalLayout { alignment: center; TextDot { ink: Tokens.accent; line-height: 14px; } }
+                    if root.r.state == 0: VerticalLayout { alignment: center; TextDot { ink: Tokens.text-faint; line-height: 14px; } }
                     Text { text: root.r.text; font-size: 11.5px; color: root.r.state == 2 ? Tokens.danger : Tokens.text-faint; vertical-alignment: center; }
                     if root.r.flag: VerticalLayout { alignment: center; Chevron { open: root.r.open; } }
                 }
@@ -1425,18 +1519,20 @@ export component ChatTitleBlock inherits VerticalLayout {
     Text { text: ChatVm.title; font-size: 14px; font-weight: 650; color: Tokens.text; overflow: elide; }
     HorizontalLayout {
         spacing: 0px;
-        if root.prefix != "": Text { text: root.prefix; font-size: 11px; color: Tokens.text-faint; vertical-alignment: center; }
+        if root.prefix != "": Text { text: root.prefix; font-size: 11.5px; color: Tokens.text-faint; vertical-alignment: center; }
         folder := Pressable {
             hover-fill: false;
             height: 16px;
             horizontal-stretch: 1;
+            accessible-role: button;
+            accessible-label: ChatVm.folder;
+            accessible-description: "Copies the folder";
             clicked => { ChatVm.copy-folder(); }
             Text {
                 width: 100%;
-                text: ChatVm.folder-copied ? "Folder copied" : ChatVm.folder + (ChatVm.agent-label != "" ? " · " + ChatVm.agent-label : "");
-                font-family: ChatVm.folder-copied ? Tokens.ui-font : Tokens.mono-font;
-                font-size: 11px;
-                color: folder.hovered ? Tokens.text-secondary : Tokens.text-faint;
+                text: ChatVm.folder-copied ? "Folder copied" : ChatVm.place + (ChatVm.agent-label != "" ? " \u{00B7} " + ChatVm.agent-label : "");
+                font-size: 11.5px;
+                color: folder.hovered ? Tokens.text : Tokens.text-secondary;
                 overflow: elide;
                 vertical-alignment: center;
             }
@@ -1444,43 +1540,26 @@ export component ChatTitleBlock inherits VerticalLayout {
     }
 }
 
+// How the chat stands: while the link is live what it is doing, else the state of the link.
 export component ChatStatus inherits HorizontalLayout {
+    property <bool> busy: ChatVm.phase == 2 && ChatVm.activity > 0;
     spacing: 8px;
-    if ChatVm.has-status: VerticalLayout {
-        alignment: center;
-        status := Pressable {
-            height: 28px;
-            width: status-row.preferred-width + 20px;
-            border-radius: 8px;
-            background: ChatVm.ctl-open || self.hovered ? Tokens.surface-hover : transparent;
-            clicked => { ChatVm.controls(); }
-            status-row := HorizontalLayout {
-                x: 10px;
-                width: self.preferred-width;
-                height: parent.height;
-                spacing: 0px;
-                if ChatVm.agent-label != "": HorizontalLayout {
-                    spacing: 5px;
-                    VerticalLayout { alignment: center; AgentMark { agent: ChatVm.agent; size: 12px; ink: Tokens.text-secondary; } }
-                    Rectangle { width: 1px; }
-                }
-                if ChatVm.model-name != "": Text { text: ChatVm.model-name; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
-                if ChatVm.model-name != "" && ChatVm.mode-name != "": Text { text: " \u{00B7} "; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
-                if ChatVm.mode-name != "": Text { text: ChatVm.mode-name; font-size: 12px; color: ChatStyle.tint(ChatVm.mode-tint); vertical-alignment: center; }
-                if ChatVm.stats != "": Text { text: "   " + ChatVm.stats; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
-                Rectangle { width: 6px; }
-                VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: ChatVm.ctl-open || status.hovered ? Tokens.text-secondary : Tokens.text-faint; width: 9px; height: 9px; transform-rotation: 90deg; } }
-            }
-        }
-    }
     if ChatVm.phase == 3: VerticalLayout {
         alignment: center;
         SmallAction { text: "Reconnect"; style: 3; clicked => { ChatVm.reconnect(); } }
     }
     if ChatVm.phase != 3: HorizontalLayout {
         spacing: 6px;
-        TextDot { ink: ChatStyle.phase-ink(ChatVm.phase); line-height: word.preferred-height; }
-        word := Text { text: ChatVm.phase-word; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
+        accessible-role: text;
+        accessible-label: word.text;
+        if root.busy || ChatVm.phase == 0 || ChatVm.phase == 1: TextDot { ink: root.busy ? Tokens.text : Tokens.text-faint; line-height: word.preferred-height; }
+        word := Text {
+            text: ChatVm.phase == 2 ? (ChatVm.activity == 2 ? "Needs you" : ChatVm.activity == 1 ? "Working" : "Idle") : ChatVm.phase-word;
+            font-size: 12px;
+            font-weight: root.busy ? 600 : 400;
+            color: root.busy ? Tokens.text : Tokens.text-secondary;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -1537,83 +1616,67 @@ component PaletteList inherits Rectangle {
 
 component Card inherits Rectangle {
     background: Tokens.surface;
-    border-radius: 16px;
-    border-width: 1px;
-    border-color: Tokens.accent.with-alpha(0.45);
+    border-radius: 22px;
 }
 
-component CardHeader inherits HorizontalLayout {
-    in property <int> icon;
-    in property <string> eyebrow;
-    in property <string> title;
-    in property <string> position;
-    spacing: 10px;
-    VerticalLayout { padding-top: 2px; Glyph { which: root.icon; ink: Tokens.accent; size: 16px; } }
-    VerticalLayout {
-        horizontal-stretch: 1;
-        spacing: 1px;
-        Text { text: root.eyebrow; font-size: 11px; font-weight: 600; color: Tokens.text-faint; }
-        Wrapped { text: root.title; font-size: 13.5px; font-weight: 650; ink: Tokens.text; }
+// "Show full diff" and the like: a quiet row at the foot of a preview.
+component PreviewLink inherits Pressable {
+    in property <string> text;
+    height: 36px;
+    hover-fill: false;
+    accessible-role: button;
+    accessible-label: root.text;
+    HorizontalLayout {
+        padding-left: 12px;
+        spacing: 6px;
+        alignment: start;
+        Text { text: root.text; font-size: 12.5px; font-weight: 550; color: root.hovered ? Tokens.text : Tokens.text-secondary; vertical-alignment: center; }
+        VerticalLayout { alignment: center; Image { source: @image-url("icons/expand.svg"); colorize: root.hovered ? Tokens.text : Tokens.text-secondary; width: 12px; height: 12px; } }
     }
-    if root.position != "": Text { text: root.position; font-size: 11px; font-family: Tokens.mono-font; color: Tokens.text-faint; }
 }
 
 component PermissionCard inherits Card {
     property <bool> more-open;
+    // The switch belongs to one request: the next card starts off.
+    property <bool> always-on;
+    property <string> request: ChatVm.perm-key;
+    changed request => { root.always-on = false; root.more-open = false; }
     height: col.preferred-height;
     col := VerticalLayout {
-        padding: 14px;
-        spacing: 10px;
-        CardHeader {
-            icon: ChatVm.perm-icon;
-            eyebrow: ChatVm.perm-plan ? "Plan" : "Permission";
-            title: ChatVm.perm-title;
-            position: ChatVm.perm-position;
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 2px;
+                Wrapped { text: ChatVm.perm-title; font-size: 14px; font-weight: 650; ink: Tokens.text; }
+                if ChatVm.perm-path != "": Text { text: ChatVm.perm-path; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text-secondary; overflow: elide; }
+            }
+            if ChatVm.perm-added + ChatVm.perm-removed > 0: HorizontalLayout {
+                spacing: 5px;
+                if ChatVm.perm-added > 0: Text { text: "+" + ChatVm.perm-added; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.success; vertical-alignment: top; }
+                if ChatVm.perm-removed > 0: Text { text: "\u{2212}" + ChatVm.perm-removed; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.danger; vertical-alignment: top; }
+            }
+            if ChatVm.perm-position != "": Text { text: ChatVm.perm-position; font-size: 11px; color: Tokens.text-faint; vertical-alignment: top; }
         }
-        if ChatVm.perm-path != "": Rectangle {
-            background: Tokens.input;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: Tokens.border;
+        if ChatVm.perm-rows.length > 0: Rectangle {
+            background: Tokens.background;
+            border-radius: 12px;
             clip: true;
             height: diff-col.preferred-height;
             diff-col := VerticalLayout {
-                Rectangle {
-                    height: 30px;
-                    background: Tokens.raised;
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 8px;
-                        Text { horizontal-stretch: 1; text: ChatVm.perm-path; font-family: Tokens.mono-font; font-size: 11.5px; color: Tokens.text; overflow: elide; vertical-alignment: center; }
-                        if ChatVm.perm-added > 0: Text { text: "+" + ChatVm.perm-added; font-family: Tokens.mono-font; font-size: 12px; font-weight: 600; color: Tokens.success; vertical-alignment: center; }
-                        if ChatVm.perm-removed > 0: Text { text: "\u{2212}" + ChatVm.perm-removed; font-family: Tokens.mono-font; font-size: 12px; font-weight: 600; color: Tokens.danger; vertical-alignment: center; }
-                    }
-                }
                 VerticalLayout {
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                    for line in ChatVm.perm-rows: DiffRow { kind: line.kind; text: line.text; numbers: false; }
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    for line in ChatVm.perm-rows: DiffRow { kind: line.kind; text: line.text; numbers: false; edge: false; }
                 }
-                review-link := Pressable {
-                    height: 32px;
-                    hover-fill: false;
-                    clicked => { ChatVm.review(); }
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        spacing: 6px;
-                        alignment: start;
-                        Text { text: "Show full diff"; font-size: 12.5px; font-weight: 600; color: review-link.hovered ? Tokens.accent.brighter(0.15) : Tokens.accent; vertical-alignment: center; }
-                        VerticalLayout { alignment: center; Image { source: @image-url("icons/expand.svg"); colorize: Tokens.accent; width: 12px; height: 12px; } }
-                    }
-                }
+                PreviewLink { text: "Show full diff"; clicked => { ChatVm.review(); } }
             }
         }
         if ChatVm.perm-plan: Rectangle {
-            background: Tokens.input;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: Tokens.border;
+            background: Tokens.background;
+            border-radius: 12px;
             clip: true;
             height: plan-col.preferred-height;
             plan-col := VerticalLayout {
@@ -1627,25 +1690,12 @@ component PermissionCard inherits Card {
                     }
                 }
                 Rectangle { height: 1px; background: Tokens.border; }
-                plan-link := Pressable {
-                    height: 32px;
-                    hover-fill: false;
-                    clicked => { ChatVm.review(); }
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        spacing: 6px;
-                        alignment: start;
-                        Text { text: "Show full plan"; font-size: 12.5px; font-weight: 600; color: plan-link.hovered ? Tokens.accent.brighter(0.15) : Tokens.accent; vertical-alignment: center; }
-                        VerticalLayout { alignment: center; Image { source: @image-url("icons/expand.svg"); colorize: Tokens.accent; width: 12px; height: 12px; } }
-                    }
-                }
+                PreviewLink { text: "Show full plan"; clicked => { ChatVm.review(); } }
             }
         }
-        if ChatVm.perm-path == "" && !ChatVm.perm-plan && ChatVm.perm-text != "": Rectangle {
-            background: Tokens.input;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: Tokens.border;
+        if ChatVm.perm-rows.length == 0 && !ChatVm.perm-plan && ChatVm.perm-text != "": Rectangle {
+            background: Tokens.background;
+            border-radius: 12px;
             height: min(perm-text.preferred-height + 20px, 96px);
             clip: true;
             perm-text := Text {
@@ -1659,21 +1709,41 @@ component PermissionCard inherits Card {
                 color: Tokens.text-secondary;
             }
         }
+        if ChatVm.perm-always.id != "": HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout { horizontal-stretch: 1; alignment: center; Wrapped { text: ChatVm.perm-always.label; font-size: 13px; ink: Tokens.text; } }
+            Rectangle {
+                width: 40px;
+                height: 22px;
+                opacity: ChatVm.perm-enabled ? 1 : 0.5;
+                TetherSwitch {
+                    checked <=> root.always-on;
+                    accessible-role: checkbox;
+                    accessible-label: ChatVm.perm-always.label;
+                    accessible-checkable: true;
+                    accessible-checked: root.always-on;
+                }
+                TouchArea { enabled: !ChatVm.perm-enabled; }
+            }
+        }
         HorizontalLayout {
             spacing: 8px;
             if ChatVm.perm-reject.id != "": SmallAction {
                 horizontal-stretch: 1;
+                pill: true;
                 text: ChatVm.perm-reject.label;
-                style: 2;
+                style: 3;
                 enabled: ChatVm.perm-enabled;
                 clicked => { ChatVm.approve(ChatVm.perm-reject.id); }
             }
             if ChatVm.perm-primary.id != "": SmallAction {
                 horizontal-stretch: 1;
+                pill: true;
                 text: ChatVm.perm-primary.label;
                 style: 1;
                 enabled: ChatVm.perm-enabled;
-                clicked => { ChatVm.approve(ChatVm.perm-primary.id); }
+                accessible-description: root.always-on && ChatVm.perm-always.id != "" ? "Sends: " + ChatVm.perm-always.label : "";
+                clicked => { ChatVm.approve(root.always-on && ChatVm.perm-always.id != "" ? ChatVm.perm-always.id : ChatVm.perm-primary.id); }
             }
         }
         if ChatVm.perm-collapsed && ChatVm.perm-more.length > 0: more-toggle := Pressable {
@@ -1687,13 +1757,16 @@ component PermissionCard inherits Card {
                 VerticalLayout { alignment: center; Chevron { open: root.more-open; } }
             }
         }
-        if !ChatVm.perm-collapsed || root.more-open: VerticalLayout {
-            spacing: 6px;
-            for option in ChatVm.perm-more: SmallAction {
-                text: option.label;
-                style: ChatVm.perm-collapsed ? 0 : 3;
+        if ChatVm.perm-more.length > 0 && (!ChatVm.perm-collapsed || root.more-open): VerticalLayout {
+            spacing: 2px;
+            for option in ChatVm.perm-more: link := Pressable {
+                height: 30px;
+                hover-fill: false;
                 enabled: ChatVm.perm-enabled;
+                accessible-role: button;
+                accessible-label: option.label;
                 clicked => { ChatVm.approve(option.id); }
+                Text { width: 100%; height: 100%; text: option.label; font-size: 12.5px; font-weight: 550; color: link.hovered ? Tokens.text : Tokens.text-secondary; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
             }
         }
         if ChatVm.perm-failure != "": Text { text: ChatVm.perm-failure; font-size: 11.5px; color: Tokens.text-faint; }
@@ -1709,7 +1782,7 @@ component QField inherits Rectangle {
     border-radius: 10px;
     background: Tokens.raised;
     border-width: 1px;
-    border-color: input.has-focus ? Tokens.accent.with-alpha(0.55) : Tokens.border;
+    border-color: input.has-focus ? Tokens.text-faint : Tokens.border;
     animate border-color { duration: Motion.fast; easing: ease-out; }
     init => { if (root.focus-on-open) { input.focus(); } }
     input := TextInput {
@@ -1741,9 +1814,13 @@ component QField inherits Rectangle {
 component QuestionCard inherits Card {
     height: col.preferred-height;
     col := VerticalLayout {
-        padding: 14px;
-        spacing: 10px;
-        CardHeader { icon: 17; eyebrow: "Question"; title: ChatVm.q-message; position: ChatVm.q-position; }
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            Wrapped { horizontal-stretch: 1; text: ChatVm.q-message; font-size: 14px; font-weight: 650; ink: Tokens.text; }
+            if ChatVm.q-position != "": Text { text: ChatVm.q-position; font-size: 11px; color: Tokens.text-faint; vertical-alignment: top; }
+        }
         if ChatVm.q-fields.length > 0: Flickable {
             height: min(fields.preferred-height, 300px);
             content-height: fields.preferred-height;
@@ -1751,62 +1828,84 @@ component QuestionCard inherits Card {
                 spacing: 12px;
                 for field in ChatVm.q-fields: VerticalLayout {
                     spacing: 6px;
-                    if field.show-title: Text { text: field.title; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; }
-                    if field.kind <= 1: VerticalLayout {
-                        spacing: 6px;
-                        for choice in field.choices: choice-row := Pressable {
-                            enabled: ChatVm.q-enabled;
-                            hover-fill: false;
-                            min-height: 34px;
-                            border-radius: 10px;
-                            background: choice.picked ? Tokens.accent.with-alpha(0.10) : self.hovered ? Tokens.surface-hover : Tokens.input;
-                            border-width: 1px;
-                            border-color: choice.picked ? Tokens.accent.with-alpha(0.55) : Tokens.border;
-                            clicked => { ChatVm.q-choose(field.name, choice.value); }
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                padding-top: 6px;
-                                padding-bottom: 6px;
-                                spacing: 10px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    Rectangle {
-                                        width: 14px;
-                                        height: 14px;
-                                        border-radius: field.kind == 1 ? 3px : 7px;
-                                        border-width: choice.picked ? 0px : 1.5px;
-                                        border-color: Tokens.text-faint;
-                                        background: choice.picked ? Tokens.accent : transparent;
-                                        if choice.picked && field.kind == 1: Glyph { which: 23; size: 10px; ink: Tokens.on-accent; x: 2px; y: 2px; }
-                                        if choice.picked && field.kind == 0: Rectangle { x: 4px; y: 4px; width: 6px; height: 6px; border-radius: 3px; background: Tokens.on-accent; }
+                    if field.show-title: Text { text: field.title; x: 2px; font-size: 12px; color: Tokens.text-secondary; }
+                    if field.kind <= 1: Rectangle {
+                        background: Tokens.raised;
+                        border-radius: 14px;
+                        clip: true;
+                        height: group.preferred-height;
+                        group := VerticalLayout {
+                            for choice[index] in field.choices: VerticalLayout {
+                                if index > 0: HorizontalLayout { padding-left: 44px; Rectangle { height: 1px; background: Tokens.border; } }
+                                choice-row := Pressable {
+                                    enabled: ChatVm.q-enabled;
+                                    hover-fill: false;
+                                    min-height: 44px;
+                                    background: self.hovered ? Tokens.text.with-alpha(0.06) : transparent;
+                                    accessible-role: checkbox;
+                                    accessible-label: choice.title;
+                                    accessible-checked: choice.picked;
+                                    accessible-checkable: true;
+                                    clicked => { ChatVm.q-choose(field.name, choice.value); }
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        padding-top: 7px;
+                                        padding-bottom: 7px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 20px;
+                                                height: 20px;
+                                                border-radius: field.kind == 1 ? 5px : 10px;
+                                                border-width: field.kind == 1 && choice.picked ? 0px : 1.5px;
+                                                border-color: choice.picked ? Tokens.text : Tokens.text-faint;
+                                                background: field.kind == 1 && choice.picked ? Tokens.text : transparent;
+                                                if choice.picked && field.kind == 1: Glyph { which: 23; size: 12px; ink: Tokens.background; x: 4px; y: 4px; }
+                                                if choice.picked && field.kind == 0: Rectangle { x: 5.5px; y: 5.5px; width: 9px; height: 9px; border-radius: 4.5px; background: Tokens.text; }
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Wrapped { text: choice.title; font-size: 13px; ink: Tokens.text; }
+                                            if choice.description != "": Wrapped { text: choice.description; font-size: 11.5px; ink: Tokens.text-secondary; }
+                                        }
                                     }
                                 }
-                                VerticalLayout {
-                                    horizontal-stretch: 1;
-                                    alignment: center;
-                                    Wrapped { text: choice.title; font-size: 13px; ink: Tokens.text; }
-                                    if choice.description != "": Wrapped { text: choice.description; font-size: 11.5px; ink: Tokens.text-secondary; }
+                            }
+                            if field.custom-name != "" && !field.custom-open: VerticalLayout {
+                                if field.choices.length > 0: HorizontalLayout { padding-left: 44px; Rectangle { height: 1px; background: Tokens.border; } }
+                                other := Pressable {
+                                    enabled: ChatVm.q-enabled;
+                                    height: 44px;
+                                    hover-fill: false;
+                                    background: self.hovered ? Tokens.text.with-alpha(0.06) : transparent;
+                                    accessible-role: button;
+                                    accessible-label: "Other";
+                                    clicked => { ChatVm.q-open-custom(field.custom-name); }
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout { alignment: center; width: 20px; Glyph { which: 1; size: 14px; } }
+                                        Text { text: "Other\u{2026}"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                                    }
                                 }
                             }
-                        }
-                        if field.custom-name != "" && !field.custom-open: other := Pressable {
-                            enabled: ChatVm.q-enabled;
-                            height: 32px;
-                            border-radius: 10px;
-                            clicked => { ChatVm.q-open-custom(field.custom-name); }
-                            HorizontalLayout {
-                                padding-left: 10px;
-                                spacing: 10px;
-                                VerticalLayout { alignment: center; Glyph { which: 1; size: 13px; } }
-                                Text { text: "Other\u{2026}"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                            if field.custom-name != "" && field.custom-open: VerticalLayout {
+                                if field.choices.length > 0: HorizontalLayout { padding-left: 44px; Rectangle { height: 1px; background: Tokens.border; } }
+                                HorizontalLayout {
+                                    padding: 8px;
+                                    QField {
+                                        horizontal-stretch: 1;
+                                        name: field.custom-name;
+                                        text: field.custom-text;
+                                        placeholder: "Your own answer, or a note";
+                                        focus-on-open: true;
+                                    }
+                                }
                             }
-                        }
-                        if field.custom-name != "" && field.custom-open: QField {
-                            name: field.custom-name;
-                            text: field.custom-text;
-                            placeholder: "Your own answer, or a note";
-                            focus-on-open: true;
                         }
                     }
                     if field.kind == 2: QField { name: field.name; text: field.text; placeholder: field.placeholder; }
@@ -1820,6 +1919,10 @@ component QuestionCard inherits Card {
                             background: field.flag ? Tokens.accent : Tokens.raised;
                             border-width: 1px;
                             border-color: field.flag ? Tokens.accent : Tokens.border;
+                            accessible-role: checkbox;
+                            accessible-label: field.placeholder;
+                            accessible-checkable: true;
+                            accessible-checked: field.flag;
                             Rectangle {
                                 x: field.flag ? parent.width - self.width - 4px : 4px;
                                 y: (parent.height - self.height) / 2;
@@ -1836,10 +1939,83 @@ component QuestionCard inherits Card {
         }
         HorizontalLayout {
             spacing: 8px;
-            SmallAction { horizontal-stretch: 1; text: "Decline"; style: 2; enabled: ChatVm.q-enabled; clicked => { ChatVm.q-decline(); } }
-            if ChatVm.q-show-submit: SmallAction { horizontal-stretch: 1; text: "Submit"; style: 1; enabled: ChatVm.q-can-submit; clicked => { ChatVm.q-submit(); } }
+            SmallAction { horizontal-stretch: 1; pill: true; text: "Decline"; style: 3; enabled: ChatVm.q-enabled; clicked => { ChatVm.q-decline(); } }
+            if ChatVm.q-show-submit: SmallAction { horizontal-stretch: 1; pill: true; text: "Submit"; style: 1; enabled: ChatVm.q-can-submit; clicked => { ChatVm.q-submit(); } }
         }
         if ChatVm.q-failure != "": Text { text: ChatVm.q-failure; font-size: 11.5px; color: Tokens.text-faint; }
+    }
+}
+
+// The model or mode setting as a chip over the composer: a menu of its choices, then "All settings".
+component ChatChip inherits Rectangle {
+    in property <ChipVm> chip;
+    property <length> menu-height: root.chip.choices.length * 30px + (root.chip.failure != "" ? 34px : 0px) + 48px;
+    height: 28px;
+    width: chip-row.preferred-width + 20px;
+    border-radius: 14px;
+    opacity: ChatVm.chips-enabled ? 1 : 0.55;
+    background: touch.has-hover && ChatVm.chips-enabled ? Tokens.raised.brighter(0.12) : Tokens.raised;
+    animate background { duration: Motion.fast; easing: ease-out; }
+    accessible-role: button;
+    accessible-label: root.chip.name;
+    accessible-description: root.chip.pending ? "Changing" : root.chip.label;
+    chip-row := HorizontalLayout {
+        x: 10px;
+        width: self.preferred-width;
+        height: parent.height;
+        spacing: 5px;
+        if root.chip.pending: VerticalLayout { alignment: center; StepDot { state: 0; } }
+        Text { text: root.chip.label; font-size: 12px; color: root.chip.risky ? Tokens.danger : Tokens.text; vertical-alignment: center; }
+        VerticalLayout { alignment: center; Image { source: @image-url("icons/chevron.svg"); colorize: Tokens.text-faint; width: 8px; height: 8px; transform-rotation: 90deg; } }
+    }
+    touch := TouchArea {
+        enabled: ChatVm.chips-enabled;
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: -root.menu-height - 6px;
+        width: 210px;
+        height: root.menu-height;
+        Rectangle {
+            property <bool> shown;
+            opacity: self.shown ? 1 : 0;
+            animate opacity { duration: Motion.fast; easing: ease-out; }
+            Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+            background: Tokens.surface;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Tokens.border;
+            VerticalLayout {
+                padding: 4px;
+                for c in root.chip.choices: Rectangle {
+                    height: 30px;
+                    border-radius: 8px;
+                    background: row-touch.has-hover ? Tokens.raised : transparent;
+                    animate background { duration: Motion.fast; easing: ease-out; }
+                    accessible-role: button;
+                    accessible-label: c.name;
+                    accessible-checked: c.selected;
+                    accessible-checkable: true;
+                    Text { x: 10px; width: parent.width - 36px; height: parent.height; text: c.name; font-size: 13px; color: Tokens.text; overflow: elide; vertical-alignment: center; }
+                    if c.selected: Glyph { which: 23; ink: Tokens.text; size: 13px; x: parent.width - 24px; y: (parent.height - self.height) / 2; }
+                    row-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.ctl-choose(root.chip.id, c.value); } }
+                }
+                if root.chip.failure != "": Text { x: 10px; width: parent.width - 20px; height: 34px; text: root.chip.failure; font-size: 11.5px; color: Tokens.danger; wrap: word-wrap; vertical-alignment: center; }
+                Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Tokens.border; } }
+                Rectangle {
+                    height: 30px;
+                    border-radius: 8px;
+                    background: all-touch.has-hover ? Tokens.raised : transparent;
+                    animate background { duration: Motion.fast; easing: ease-out; }
+                    accessible-role: button;
+                    accessible-label: "All settings";
+                    Text { x: 10px; height: parent.height; text: "All settings"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
+                    all-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatVm.controls(); } }
+                }
+            }
+        }
     }
 }
 
@@ -1886,100 +2062,120 @@ component Composer inherits VerticalLayout {
             }
         }
     }
-    HorizontalLayout {
-        spacing: 8px;
-        VerticalLayout {
-            alignment: end;
-            padding-bottom: 7px;
-            attach := Rectangle {
-                width: 30px;
-                height: 30px;
-                border-radius: 15px;
-                opacity: ChatVm.dimmed ? 0.45 : 1;
-                background: attach-touch.has-hover && !ChatVm.dimmed ? Tokens.surface-hover : Tokens.raised;
-                animate background { duration: Motion.fast; easing: ease-out; }
-                Image { source: @image-url("icons/plus.svg"); colorize: Tokens.text-secondary; width: 13px; height: 13px; x: 8.5px; y: 8.5px; }
-                accessible-role: button;
-                accessible-label: "Attach files";
-                attach-touch := TouchArea {
-                    enabled: !ChatVm.dimmed;
-                    mouse-cursor: pointer;
-                    clicked => { ChatVm.attach-files(); }
-                }
-            }
-        }
-        field := Rectangle {
-            horizontal-stretch: 1;
-            height: min(max(44px, input.preferred-height + 26px), 220px);
-            border-radius: 22px;
-            background: Tokens.raised;
-            border-width: 1px;
-            border-color: input.has-focus ? Tokens.accent.with-alpha(0.6) : Tokens.border;
-            opacity: ChatVm.dimmed ? 0.55 : 1;
-            animate border-color, opacity { duration: Motion.base; easing: ease-out; }
-            clip: true;
-            scroller := Flickable {
-                x: 16px;
-                y: 13px;
-                width: parent.width - 32px;
-                height: parent.height - 26px;
-                content-height: max(self.height, input.preferred-height);
-                input := TextInput {
-                    width: scroller.width;
-                    height: max(scroller.height, self.preferred-height);
-                    text <=> ChatVm.draft;
-                    single-line: false;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    color: Tokens.text;
-                    selection-background-color: Tokens.accent.with-alpha(0.35);
-                    accessible-label: "Message the agent";
-                    edited => { ChatVm.draft-edited(self.text, self.cursor-position-byte-offset); }
-                    cursor-position-changed(p) => {
-                        ChatVm.draft-edited(self.text, self.cursor-position-byte-offset);
-                        if (p.y + 20px > scroller.height - scroller.content-y) { scroller.content-y = scroller.height - p.y - 20px; }
-                        if (p.y < -scroller.content-y) { scroller.content-y = -p.y; }
-                    }
-                    key-pressed(e) => {
-                        if (ChatVm.palette-kind != 0) {
-                            if (e.text == Key.UpArrow) { ChatVm.palette-index = max(0, ChatVm.palette-index - 1); return accept; }
-                            if (e.text == Key.DownArrow) { ChatVm.palette-index = min(ChatVm.palette.length - 1, ChatVm.palette-index + 1); return accept; }
-                            if ((e.text == Key.Return || e.text == Key.Tab) && ChatVm.palette.length > 0) { ChatVm.palette-pick(ChatVm.palette-index); return accept; }
-                            if (e.text == Key.Escape) { ChatVm.palette-close(); return accept; }
+    box := Rectangle {
+        background: Tokens.surface;
+        border-radius: 22px;
+        border-width: 1px;
+        border-color: input.has-focus ? Tokens.text-faint.with-alpha(0.5) : transparent;
+        animate border-color { duration: Motion.base; easing: ease-out; }
+        height: box-col.preferred-height;
+        box-col := VerticalLayout {
+            padding-left: 16px;
+            padding-right: 8px;
+            padding-top: 12px;
+            padding-bottom: 8px;
+            spacing: 8px;
+            field := Rectangle {
+                height: min(max(24px, input.preferred-height), 200px);
+                opacity: ChatVm.dimmed ? 0.55 : 1;
+                animate opacity { duration: Motion.base; easing: ease-out; }
+                clip: true;
+                scroller := Flickable {
+                    width: parent.width - 8px;
+                    height: parent.height;
+                    content-height: max(self.height, input.preferred-height);
+                    input := TextInput {
+                        width: scroller.width;
+                        height: max(scroller.height, self.preferred-height);
+                        text <=> ChatVm.draft;
+                        single-line: false;
+                        wrap: word-wrap;
+                        font-size: 14px;
+                        color: Tokens.text;
+                        selection-background-color: Tokens.accent.with-alpha(0.35);
+                        accessible-label: ChatVm.placeholder;
+                        edited => { ChatVm.draft-edited(self.text, self.cursor-position-byte-offset); }
+                        cursor-position-changed(p) => {
+                            ChatVm.draft-edited(self.text, self.cursor-position-byte-offset);
+                            if (p.y + 20px > scroller.height - scroller.content-y) { scroller.content-y = scroller.height - p.y - 20px; }
+                            if (p.y < -scroller.content-y) { scroller.content-y = -p.y; }
                         }
-                        if (e.text == Key.Return && !e.modifiers.shift && !e.modifiers.alt) { ChatVm.send(); return accept; }
-                        if (e.text == "v" && e.modifiers.control && !e.modifiers.alt && ChatVm.paste-image()) { return accept; }
-                        reject
+                        key-pressed(e) => {
+                            if (ChatVm.palette-kind != 0) {
+                                if (e.text == Key.UpArrow) { ChatVm.palette-index = max(0, ChatVm.palette-index - 1); return accept; }
+                                if (e.text == Key.DownArrow) { ChatVm.palette-index = min(ChatVm.palette.length - 1, ChatVm.palette-index + 1); return accept; }
+                                if ((e.text == Key.Return || e.text == Key.Tab) && ChatVm.palette.length > 0) { ChatVm.palette-pick(ChatVm.palette-index); return accept; }
+                                if (e.text == Key.Escape) { ChatVm.palette-close(); return accept; }
+                            }
+                            if (e.text == Key.Return && !e.modifiers.shift && !e.modifiers.alt) { ChatVm.send(); return accept; }
+                            if (e.text == "v" && e.modifiers.control && !e.modifiers.alt && ChatVm.paste-image()) { return accept; }
+                            reject
+                        }
                     }
                 }
+                if input.text == "": Text {
+                    width: parent.width;
+                    height: 24px;
+                    horizontal-alignment: left;
+                    // The catch-up note lives in the placeholder: a row of its own made the composer jump.
+                    text: ChatVm.catching-up ? "Catching up\u{2026}" : ChatVm.placeholder;
+                    font-size: 14px;
+                    color: Tokens.placeholder;
+                    vertical-alignment: center;
+                }
             }
-            if input.text == "": Text {
-                x: 17px;
-                height: 44px;
-                // The catch-up note lives in the placeholder: a row of its own made the composer jump.
-                text: ChatVm.catching-up ? "Catching up\u{2026}" : ChatVm.placeholder;
-                font-size: 14px;
-                color: Tokens.placeholder;
-                vertical-alignment: center;
-            }
-        }
-        VerticalLayout {
-            alignment: end;
-            padding-bottom: 6px;
-            action := Rectangle {
-                width: 32px;
-                height: 32px;
-                border-radius: 16px;
-                background: ChatVm.stopping ? Tokens.danger.with-alpha(0.2) : ChatVm.action-enabled ? (action-touch.has-hover ? Tokens.accent.brighter(0.08) : Tokens.accent) : Tokens.text-faint.with-alpha(0.25);
-                animate background { duration: Motion.fast; easing: ease-out; }
-                accessible-role: button;
-                accessible-label: ChatVm.action-label;
-                if ChatVm.stopping: Image { source: @image-url("icons/stop.svg"); colorize: Tokens.danger; width: 14px; height: 14px; x: 9px; y: 9px; }
-                if !ChatVm.stopping: Image { source: @image-url("icons/arrow-up.svg"); colorize: ChatVm.action-enabled ? Tokens.on-accent : Tokens.text-secondary; width: 14px; height: 14px; x: 9px; y: 9px; }
-                action-touch := TouchArea {
-                    enabled: ChatVm.action-enabled;
-                    mouse-cursor: pointer;
-                    clicked => { if (ChatVm.stopping) { ChatVm.stop(); } else { ChatVm.send(); } }
+            HorizontalLayout {
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    attach := Rectangle {
+                        width: 30px;
+                        height: 30px;
+                        border-radius: 15px;
+                        opacity: ChatVm.dimmed ? 0.45 : 1;
+                        background: attach-touch.has-hover && !ChatVm.dimmed ? Tokens.raised : transparent;
+                        animate background { duration: Motion.fast; easing: ease-out; }
+                        Image { source: @image-url("icons/plus.svg"); colorize: Tokens.text-secondary; width: 14px; height: 14px; x: 8px; y: 8px; }
+                        accessible-role: button;
+                        accessible-label: "Attach files";
+                        attach-touch := TouchArea {
+                            enabled: !ChatVm.dimmed;
+                            mouse-cursor: pointer;
+                            clicked => { ChatVm.attach-files(); }
+                        }
+                    }
+                }
+                for chip in ChatVm.chips: VerticalLayout { alignment: center; ChatChip { chip: chip; } }
+                Rectangle { horizontal-stretch: 1; }
+                if ChatVm.context-used != "": VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: ChatVm.context-used;
+                        font-size: 11.5px;
+                        color: Tokens.text-faint;
+                        accessible-role: text;
+                        accessible-label: "Context used";
+                        accessible-description: ChatVm.context-detail;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    action := Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 16px;
+                        background: ChatVm.stopping || !ChatVm.action-enabled ? (action-touch.has-hover && ChatVm.action-enabled ? Tokens.raised.brighter(0.12) : Tokens.raised) : (action-touch.has-hover ? Tokens.text.with-alpha(0.88) : Tokens.text);
+                        animate background { duration: Motion.fast; easing: ease-out; }
+                        accessible-role: button;
+                        accessible-label: ChatVm.action-label;
+                        if ChatVm.stopping: Image { source: @image-url("icons/stop.svg"); colorize: Tokens.text; width: 14px; height: 14px; x: 9px; y: 9px; }
+                        if !ChatVm.stopping: Image { source: @image-url("icons/arrow-up.svg"); colorize: ChatVm.action-enabled ? Tokens.background : Tokens.text-faint; width: 14px; height: 14px; x: 9px; y: 9px; }
+                        action-touch := TouchArea {
+                            enabled: ChatVm.action-enabled;
+                            mouse-cursor: pointer;
+                            clicked => { if (ChatVm.stopping) { ChatVm.stop(); } else { ChatVm.send(); } }
+                        }
+                    }
                 }
             }
         }
@@ -2021,7 +2217,20 @@ component QueuedChip inherits Rectangle {
             VerticalLayout { alignment: center; Glyph { which: 19; size: 11px; } }
             Text { text: "Queued"; font-size: 11px; color: Tokens.text-faint; vertical-alignment: center; }
         }
-        if root.key != "": IconButton { flat: true; size: 22px; icon: @image-url("icons/arrow-up.svg"); tooltip: "Send now"; clicked => { root.send-now(root.key); } }
+        if root.key != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                background: now-touch.has-hover ? Tokens.text.with-alpha(0.88) : Tokens.text;
+                animate background { duration: Motion.fast; easing: ease-out; }
+                accessible-role: button;
+                accessible-label: "Send now";
+                Image { source: @image-url("icons/arrow-up.svg"); colorize: Tokens.background; width: 11px; height: 11px; x: 5.5px; y: 5.5px; }
+                now-touch := TouchArea { mouse-cursor: pointer; clicked => { root.send-now(root.key); } }
+            }
+        }
     }
 }
 
@@ -2044,7 +2253,7 @@ component TaskStrip inherits Rectangle {
                 padding-right: 12px;
                 spacing: 8px;
                 VerticalLayout { alignment: center; Chevron { open: root.open; } }
-                Text { text: ChatVm.tasks.length + " running"; font-size: 12px; color: Tokens.accent; vertical-alignment: center; }
+                Text { text: ChatVm.tasks.length + " running"; font-size: 12px; color: Tokens.text-secondary; vertical-alignment: center; }
             }
         }
         if ChatVm.tasks.length == 1 || root.open: VerticalLayout {
@@ -2055,7 +2264,7 @@ component TaskStrip inherits Rectangle {
                     padding-left: 12px;
                     padding-right: 12px;
                     spacing: 8px;
-                    task-dot := VerticalLayout { alignment: center; width: 6px; TextDot { ink: Tokens.accent; line-height: 14px; } }
+                    task-dot := VerticalLayout { alignment: center; width: 6px; TextDot { ink: Tokens.text; line-height: 14px; } }
                     Text { horizontal-stretch: 1; text: t.title; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
                 }
             }
@@ -2084,7 +2293,7 @@ component WorkflowStrip inherits Rectangle {
                 padding-left: 12px;
                 padding-right: 12px;
                 spacing: 8px;
-                VerticalLayout { alignment: center; width: 6px; TextDot { ink: Tokens.accent; line-height: 14px; } }
+                VerticalLayout { alignment: center; width: 6px; TextDot { ink: Tokens.text; line-height: 14px; } }
                 Text { horizontal-stretch: 1; text: w.text; font-family: Tokens.mono-font; font-size: 12px; color: Tokens.text-secondary; overflow: elide; vertical-alignment: center; }
                 VerticalLayout { alignment: center; width: 10px; Chevron { open: false; } }
             }
@@ -2135,7 +2344,7 @@ component BottomBar inherits Rectangle {
             padding-bottom: 4px;
             VerticalLayout { alignment: center; Glyph { which: ChatVm.banner-icon; size: 13px; ink: Tokens.text-secondary; } }
             Text { text: ChatVm.banner; font-size: 12.5px; color: Tokens.text-secondary; vertical-alignment: center; }
-            if ChatVm.can-resume: VerticalLayout { alignment: center; SmallAction { text: "Resume"; style: 3; clicked => { ChatVm.resume(); } } }
+            if ChatVm.can-resume: VerticalLayout { alignment: center; SmallAction { text: "Resume"; style: 1; clicked => { ChatVm.resume(); } } }
         }
         if ChatVm.workflows.length > 0: WorkflowStrip { }
         if ChatVm.tasks.length > 0: TaskStrip { }
@@ -2232,7 +2441,7 @@ component ChoiceRow inherits Pressable {
             if root.c.description != "": Text { text: root.c.description; font-size: 11.5px; color: Tokens.text-secondary; overflow: elide; }
         }
         if root.c.pending: VerticalLayout { alignment: center; Text { text: "\u{2026}"; color: Tokens.text-faint; } }
-        if root.c.selected && !root.c.pending: VerticalLayout { alignment: center; Glyph { which: 23; ink: Tokens.accent; size: 13px; } }
+        if root.c.selected && !root.c.pending: VerticalLayout { alignment: center; Glyph { which: 23; ink: Tokens.text; size: 13px; } }
     }
 }
 
@@ -2398,15 +2607,6 @@ export component ChatControls inherits Rectangle {
             }
         }
     }
-    bypass := Linger { open: ChatVm.bypass-confirm; }
-    if bypass.alive: ConfirmDialog {
-        shown: bypass.shown;
-        title: "Bypass permissions?";
-        body: "The agent runs every tool without asking.";
-        action: "Bypass permissions";
-        confirmed => { ChatVm.bypass-confirmed(); }
-        cancelled => { ChatVm.bypass-cancelled(); }
-    }
 }
 
 // Covers the chat under the terminal header, like the git viewer.
@@ -2499,7 +2699,7 @@ export component ChatWorkflow inherits Rectangle {
                         accessible-role: text;
                         accessible-label: ChatVm.wf-spoken;
                         VerticalLayout { alignment: center; StatusMark { state: ChatVm.wf-state; } }
-                        Text { text: ChatVm.wf-status; font-size: 12.5px; font-weight: 600; color: ChatVm.wf-state == 0 ? Tokens.accent : ChatVm.wf-state == 2 ? Tokens.danger : Tokens.text-secondary; vertical-alignment: center; }
+                        Text { text: ChatVm.wf-status; font-size: 12.5px; font-weight: 600; color: ChatVm.wf-state == 0 ? Tokens.text : ChatVm.wf-state == 2 ? Tokens.danger : Tokens.text-secondary; vertical-alignment: center; }
                         Text { text: ChatVm.wf-counts; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
                         Rectangle { horizontal-stretch: 1; }
                         Text { text: ChatVm.wf-elapsed; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
@@ -2893,7 +3093,7 @@ export component NewChatDialog inherits Rectangle {
                             height: 16px;
                             hover-fill: false;
                             clicked => { ChatVm.nc-update(n.kind); }
-                            update-text := Text { x: 4px; text: "Update"; font-size: 11.5px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                            update-text := Text { x: 4px; text: "Update"; font-size: 11.5px; font-weight: 600; color: Tokens.text-secondary; vertical-alignment: center; }
                         }
                     }
                     if n.copy != "": VerticalLayout {
@@ -2903,7 +3103,7 @@ export component NewChatDialog inherits Rectangle {
                             height: 16px;
                             hover-fill: false;
                             clicked => { ChatVm.nc-copy(n.copy); }
-                            copy-text := Text { x: 4px; text: "Copy"; font-size: 11.5px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                            copy-text := Text { x: 4px; text: "Copy"; font-size: 11.5px; font-weight: 600; color: Tokens.text-secondary; vertical-alignment: center; }
                         }
                     }
                 }
@@ -2972,7 +3172,7 @@ export component NewChatDialog inherits Rectangle {
                         enabled: !ChatVm.nc-creating && !ChatVm.nc-busy;
                         hover-fill: false;
                         clicked => { ChatVm.nc-create-folder(); }
-                        create-text := Text { x: 4px; text: ChatVm.nc-creating ? "Creating\u{2026}" : "Create folder"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                        create-text := Text { x: 4px; text: ChatVm.nc-creating ? "Creating\u{2026}" : "Create folder"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; vertical-alignment: center; }
                     }
                     if !ChatVm.nc-folder-missing && !ChatVm.nc-folder-loading && !ChatVm.nc-folder-ready && ChatVm.nc-folder-message != "": Pressable {
                         width: retry-text.preferred-width + 8px;
@@ -2980,7 +3180,7 @@ export component NewChatDialog inherits Rectangle {
                         enabled: !ChatVm.nc-busy && !ChatVm.nc-continuing;
                         hover-fill: false;
                         clicked => { ChatVm.nc-retry(); }
-                        retry-text := Text { x: 4px; text: "Retry"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                        retry-text := Text { x: 4px; text: "Retry"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; vertical-alignment: center; }
                     }
                 }
             }
@@ -3077,7 +3277,7 @@ export component NewChatDialog inherits Rectangle {
                                 height: 16px;
                                 hover-fill: false;
                                 clicked => { ChatVm.nc-reset(); }
-                                reset-text := Text { text: "Reset"; font-size: 11.5px; color: Tokens.accent; vertical-alignment: center; }
+                                reset-text := Text { text: "Reset"; font-size: 11.5px; color: Tokens.text-secondary; vertical-alignment: center; }
                             }
                         }
                     }
@@ -3105,7 +3305,7 @@ export component NewChatDialog inherits Rectangle {
                         height: 22px;
                         hover-fill: false;
                         clicked => { ChatVm.nc-server-form(true); }
-                        add-server-text := Text { x: 4px; text: "Add server\u{2026}"; font-size: 12px; font-weight: 600; color: Tokens.accent; vertical-alignment: center; }
+                        add-server-text := Text { x: 4px; text: "Add server\u{2026}"; font-size: 12px; font-weight: 600; color: Tokens.text-secondary; vertical-alignment: center; }
                     }
                     Rectangle { horizontal-stretch: 1; }
                 }
@@ -3224,8 +3424,8 @@ export component NewChatDialog inherits Rectangle {
                             padding-left: 4px;
                             padding-right: 6px;
                             spacing: 4px;
-                            VerticalLayout { alignment: center; Image { source: @image-url("icons/back.svg"); colorize: Tokens.accent; width: 11px; height: 11px; } }
-                            Text { text: "New chat"; font-size: 13px; color: Tokens.accent; vertical-alignment: center; }
+                            VerticalLayout { alignment: center; Image { source: @image-url("icons/back.svg"); colorize: Tokens.text-secondary; width: 11px; height: 11px; } }
+                            Text { text: "New chat"; font-size: 13px; color: Tokens.text-secondary; vertical-alignment: center; }
                         }
                     }
                     Text { horizontal-stretch: 1; text: "Choose folder"; font-size: 15px; font-weight: 650; color: Tokens.text; horizontal-alignment: center; vertical-alignment: center; }
@@ -3533,9 +3733,19 @@ export component ChatOverlays inherits Rectangle {
     controls := Linger { open: ChatVm.active && ChatVm.ctl-open; duration: Motion.slow; }
     review := Linger { open: ChatVm.active && ChatVm.review-open; }
     workflow := Linger { open: ChatVm.active && ChatVm.wf-open; }
+    bypass := Linger { open: ChatVm.active && ChatVm.bypass-confirm; }
     if controls.alive: ChatControls { shown: controls.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     if review.alive: ChatReview { shown: review.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
     if workflow.alive: ChatWorkflow { shown: workflow.shown; x: root.left; width: parent.width - root.left; y: 52px; height: parent.height - 52px; }
+    // From the controls or from a chip, so it belongs to neither.
+    if bypass.alive: ConfirmDialog {
+        shown: bypass.shown;
+        title: "Bypass permissions?";
+        body: "The agent runs every tool without asking.";
+        action: "Bypass permissions";
+        confirmed => { ChatVm.bypass-confirmed(); }
+        cancelled => { ChatVm.bypass-cancelled(); }
+    }
     organize := Linger { open: ChatVm.rename-open || ChatVm.branch-open || ChatVm.organization-error != ""; }
     if organize.alive: ChatOrganizationDialog { shown: organize.shown; }
     viewer := Linger { open: ChatVm.viewer-open; }

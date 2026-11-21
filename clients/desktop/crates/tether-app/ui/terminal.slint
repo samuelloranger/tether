@@ -462,16 +462,10 @@ component PaneHeader inherits Rectangle {
         IconButton { icon: @image-url("icons/git.svg"); tooltip: "Git"; active: GitVm.open; clicked => { GitVm.toggle(); } }
         if !root.docked: IconButton { icon: @image-url("icons/gear.svg"); tooltip: "Settings"; clicked => { TerminalVm.settings(); } }
     }
-    // A chat's context in use, as a 3 px rule under the header; otherwise a hairline.
     Rectangle {
         y: parent.height - self.height;
-        height: ChatVm.active && ChatVm.context >= 0 ? 3px : 1px;
+        height: 1px;
         background: Tokens.border;
-        if ChatVm.active && ChatVm.context >= 0: Rectangle {
-            x: 0;
-            width: parent.width * clamp(ChatVm.context, 0, 1);
-            background: Tokens.accent;
-        }
     }
 }
 
@@ -679,6 +673,7 @@ export component TerminalPage inherits Rectangle {
             drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
             pop-items := VerticalLayout {
                 padding: 4px;
+                if ChatVm.actions-active: MenuItem { text: "Session settings"; clicked => { ChatVm.actions-close(); ChatVm.controls(); } }
                 MenuItem { text: pop.pinned ? "Unpin" : "Pin"; clicked => { ChatVm.pin(pop.name); } }
                 MenuItem { text: "Rename\u{2026}"; clicked => { ChatVm.rename(pop.name); } }
                 MenuItem { text: pop.archived ? "Restore" : "Archive"; clicked => { if (pop.archived) { ChatVm.restore(pop.name); } else { ChatVm.archive(pop.name); } } }

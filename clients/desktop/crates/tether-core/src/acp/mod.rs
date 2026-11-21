@@ -25,6 +25,7 @@ pub mod reducer;
 pub mod session_setup;
 pub mod slash;
 pub mod tooldetail;
+pub mod turns;
 pub mod verbs;
 pub mod versions;
 pub mod workflows;
