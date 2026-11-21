@@ -136,7 +136,7 @@ struct AgentNoticeRow: View {
 
   private var tint: Color {
     switch notice.severity {
-    case .info: TetherColors.accent
+    case .info: TetherColors.textFaint
     case .warning: TetherColors.warning
     case .error: TetherColors.danger
     case nil: TetherColors.textFaint
@@ -248,8 +248,8 @@ struct SignedOutRow: View {
               Text(retry == .checking ? "Checking" : "Try again").font(.chat(.subheadline).weight(.semibold))
             }
             .padding(.horizontal, 14).frame(minHeight: 34)
-            .foregroundStyle(TetherColors.accent)
-            .background(TetherColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+            .foregroundStyle(TetherColors.textPrimary)
+            .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
             .hitSlop(vertical: 5)
           }
           .buttonStyle(TetherPressStyle())
@@ -301,8 +301,8 @@ struct UserMessageRow: View {
         ChatSelectableText(text, branch: branch)
       }
     }
-      .padding(.horizontal, 14).padding(.vertical, 10)
-      .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 14))
+      .padding(.horizontal, 14).padding(.vertical, 9)
+      .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 18))
       .opacity(queued ? 0.72 : 1)
       .padding(.leading, 28)
   }
@@ -336,8 +336,7 @@ struct ThoughtRow: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       Button(action: toggle) {
-        HStack(spacing: 6) {
-          Image(systemName: "brain").font(.chat(.caption))
+        HStack(spacing: 4) {
           Text("Thinking").font(.chat(.footnote))
           Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.chat(.caption2).weight(.semibold))
         }
@@ -356,7 +355,8 @@ struct ThoughtRow: View {
   }
 }
 
-/// Tool rows in one rounded surface: a 24pt icon column, one text column, trailing facts.
+/// Tool rows on one timeline: a dot per step on a thin rail, the step, then trailing facts.
+/// A finished turn's run of steps can fold into one summary row.
 struct ToolGroupView: View, Equatable {
   let items: [ChatItem]
   let cwd: String
@@ -365,23 +365,53 @@ struct ToolGroupView: View, Equatable {
   /// Workflow calls the host reports a run for: their rows open the run's sheet.
   var workflowIds: Set<String> = []
   var openWorkflow: (String) -> Void = { _ in }
+  /// Set for a run of steps in a finished turn: a summary row heads it and opens or folds the steps.
+  var toggleFold: (() -> Void)?
+  var folded = false
 
   static func == (lhs: ToolGroupView, rhs: ToolGroupView) -> Bool {
     lhs.items == rhs.items && lhs.cwd == rhs.cwd && lhs.expandedIDs == rhs.expandedIDs
-      && lhs.workflowIds == rhs.workflowIds
+      && lhs.workflowIds == rhs.workflowIds && lhs.folded == rhs.folded
+      && (lhs.toggleFold == nil) == (rhs.toggleFold == nil)
+  }
+
+  private var calls: [ChatToolCall] {
+    items.compactMap { if case let .tool(call) = $0.kind { return call }; return nil }
   }
 
   var body: some View {
     VStack(spacing: 0) {
-      ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-        if index > 0 { Rectangle().fill(TetherColors.border).frame(height: 0.5).padding(.leading, 46) }
-        row(item)
+      if let toggleFold { foldRow(toggleFold) }
+      if !folded {
+        ForEach(items, id: \.id) { item in row(item) }
       }
     }
-    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(TetherColors.border))
-    .clipShape(RoundedRectangle(cornerRadius: 12))
+    .background(alignment: .leading) {
+      Rectangle().fill(TetherColors.border).frame(width: 1)
+        .padding(.vertical, ToolRowMetrics.rowHeight / 2)
+        .padding(.leading, ToolRowMetrics.dotColumn / 2 - 0.5)
+    }
     .accessibilityElement(children: .contain)
+  }
+
+  private func foldRow(_ action: @escaping () -> Void) -> some View {
+    let failed = calls.filter { $0.status == .failed }.count
+    let summary = ChatTurns.foldSummary(calls)
+    return Button(action: action) {
+      ToolRowLayout(dot: failed > 0 ? .failed : .done, title: summary, titleTint: TetherColors.textSecondary) {
+        HStack(spacing: 8) {
+          if failed > 0 { Text("\(failed) failed").font(.chat(.caption)).foregroundStyle(TetherColors.danger) }
+          Image(systemName: folded ? "chevron.right" : "chevron.down")
+            .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+        }
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(failed > 0 ? "\(summary), \(failed) failed" : summary)
+    .accessibilityHint(folded ? "Shows the steps" : "Hides the steps")
+    .accessibilityIdentifier("chatStepsFold")
   }
 
   @ViewBuilder private func row(_ item: ChatItem) -> some View {
@@ -404,41 +434,72 @@ struct ToolGroupView: View, Equatable {
   }
 }
 
-/// The shared row frame: icon in a 24pt column, text, then whatever trails.
+enum ToolRowMetrics {
+  static let dotColumn: CGFloat = 9
+  static let rowHeight: CGFloat = 34
+}
+
+/// A step's place on the timeline. Only a failure gets a colour.
+enum ToolDot: Equatable {
+  case done, active, failed
+
+  init(call: ChatToolCall) {
+    if call.status == .failed {
+      self = .failed
+    } else if call.isActive || call.isBackgroundRunning {
+      self = .active
+    } else {
+      self = .done
+    }
+  }
+}
+
+struct ToolDotView: View {
+  let dot: ToolDot
+
+  var body: some View {
+    Group {
+      switch dot {
+      case .done: Circle().fill(TetherColors.textFaint.opacity(0.55))
+      case .failed: Circle().fill(TetherColors.danger)
+      case .active:
+        Circle().fill(TetherColors.background)
+          .overlay(Circle().strokeBorder(TetherColors.textPrimary, lineWidth: 1.5))
+      }
+    }
+    .frame(width: 7, height: 7)
+    .frame(width: ToolRowMetrics.dotColumn)
+    .accessibilityHidden(true)
+  }
+}
+
+/// The shared row frame: the timeline dot, the step, then whatever trails.
 struct ToolRowLayout<Trailing: View>: View {
-  let symbol: String
-  let tint: Color
+  let dot: ToolDot
   let title: String
   let titleTint: Color
   @ViewBuilder var trailing: Trailing
 
   var body: some View {
     HStack(spacing: 10) {
-      Image(systemName: symbol).font(.chat(.footnote)).foregroundStyle(tint)
-        .frame(width: 24)
-        .accessibilityHidden(true)
+      ToolDotView(dot: dot)
       Text(title).font(.chat(.footnote)).foregroundStyle(titleTint)
         .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: .infinity, alignment: .leading)
       trailing
     }
-    .padding(.horizontal, 12)
-    .frame(minHeight: 36)
+    .padding(.trailing, 2)
+    .frame(minHeight: ToolRowMetrics.rowHeight)
   }
 }
 
+/// A spinner while a step runs; the dot already says done or failed.
 struct ToolStatusGlyph: View {
   let status: ACPToolStatus
   let active: Bool
 
   var body: some View {
-    if active {
-      ProgressView().controlSize(.mini).tint(TetherColors.textFaint)
-    } else if status == .failed {
-      Image(systemName: "xmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.danger)
-    } else {
-      Image(systemName: "checkmark").font(.chat(.caption2).weight(.bold)).foregroundStyle(TetherColors.success)
-    }
+    if active { ProgressView().controlSize(.mini).tint(TetherColors.textFaint) }
   }
 }
 
@@ -469,8 +530,7 @@ struct ToolCallRow: View {
 
   private var header: some View {
     ToolRowLayout(
-      symbol: call.images.isEmpty ? call.kind.symbolName : "photo",
-      tint: call.status == .failed ? TetherColors.danger : TetherColors.textFaint,
+      dot: ToolDot(call: call),
       title: call.displayTitle,
       titleTint: call.status == .failed ? TetherColors.danger : TetherColors.textSecondary
     ) {
@@ -484,14 +544,14 @@ struct ToolCallRow: View {
           .font(.chat(.caption2).monospacedDigit())
         }
         if call.isBackgroundRunning {
-          Text("background").font(.caption2.monospaced()).foregroundStyle(TetherColors.accent)
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(TetherColors.accent.opacity(0.6), lineWidth: 1))
+          Text("background").font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(TetherColors.surfaceRaised, in: Capsule())
         }
-        statusGlyph.frame(width: 14)
+        statusGlyph
         if expandable {
           Image(systemName: expanded && open == nil ? "chevron.down" : "chevron.right")
-            .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+            .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint.opacity(0.7))
         }
       }
     }
@@ -545,9 +605,9 @@ struct ToolCallRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .background(TetherColors.background.opacity(0.5))
-    .clipShape(RoundedRectangle(cornerRadius: 8))
-    .padding(.horizontal, 8).padding(.bottom, 8)
+    .background(TetherColors.surface)
+    .clipShape(RoundedRectangle(cornerRadius: 10))
+    .padding(.leading, ToolRowMetrics.dotColumn + 10).padding(.bottom, 8)
   }
 }
 
@@ -570,7 +630,6 @@ struct PlanRow: View {
         withAnimation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion)) { open.toggle() }
       } label: {
         HStack(spacing: 6) {
-          Image(systemName: "checklist").font(.chat(.caption))
           Text("Plan · \(done) of \(entries.count)").font(.chat(.footnote).weight(.medium))
           if !open, let current {
             Text(current.content).font(.chat(.footnote)).lineLimit(1)
@@ -609,9 +668,9 @@ struct PlanRow: View {
   @ViewBuilder private func glyph(_ status: String) -> some View {
     switch status {
     case "completed":
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(TetherColors.success)
+      Image(systemName: "checkmark.circle.fill").foregroundStyle(TetherColors.textFaint)
     case "in_progress":
-      Image(systemName: "circle.lefthalf.filled").foregroundStyle(TetherColors.accent)
+      Image(systemName: "circle.lefthalf.filled").foregroundStyle(TetherColors.textPrimary)
     default:
       Image(systemName: "circle").foregroundStyle(TetherColors.textFaint)
     }
@@ -643,8 +702,7 @@ struct ResolvedPermissionRow: View {
 
   var body: some View {
     ToolRowLayout(
-      symbol: allowed ? "checkmark.shield" : "xmark.shield",
-      tint: allowed ? TetherColors.textFaint : TetherColors.warning,
+      dot: .done,
       title: "\(option?.name ?? "Cancelled") \u{00B7} \(permission.title)",
       titleTint: TetherColors.textFaint
     ) { EmptyView() }
