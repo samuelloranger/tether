@@ -74,12 +74,14 @@ export component IconButton inherits Rectangle {
     width: root.size;
     height: root.size;
     border-radius: root.size * 0.27;
+    // On is a step above hover and keeps a hairline, so hovering an off button never reads as on.
     background: !root.enabled ? transparent
-        : touch.has-hover || root.active ? Tokens.raised.brighter(0.15)
+        : root.active ? Tokens.raised.brighter(0.3)
+        : touch.has-hover ? Tokens.raised.brighter(0.15)
         : root.flat ? transparent : Tokens.raised;
     animate background, border-color { duration: Motion.fast; easing: ease-out; }
-    border-width: focus.has-focus ? 1.5px : 0px;
-    border-color: Tokens.accent;
+    border-width: focus.has-focus ? 1.5px : root.active ? 1px : 0px;
+    border-color: focus.has-focus ? Tokens.accent : Tokens.text-faint;
     accessible-role: button;
     accessible-label: root.tooltip;
     focus := FocusScope {
