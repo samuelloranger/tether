@@ -502,7 +502,6 @@ public struct SSHTerminalView: View {
         }
       }
       Circle().fill(lampColor).frame(width: lampSize, height: lampSize).padding(.leading, tabs == nil ? 4 : 8)
-        .shadow(color: lampColor.opacity(0.55), radius: 4)
         .scaleEffect(controller.status == .connected ? 1 : 1.12)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 0) {
@@ -513,10 +512,10 @@ public struct SSHTerminalView: View {
           Text("·")
           // State is spelled out as well as coloured — the lamp alone would be
           // invisible to Differentiate Without Color and to VoiceOver.
-          Text(statusLabel).foregroundStyle(lampColor)
+          Text(statusLabel).foregroundStyle(controller.status == .connected ? TetherColors.textSecondary : lampColor)
         }
-        .font(.caption2.monospaced())
-        .foregroundStyle(TetherColors.textFaint)
+        .font(.app(.caption))
+        .foregroundStyle(TetherColors.textSecondary)
       }
       .padding(.leading, 6)
       .lineLimit(1)
@@ -549,7 +548,7 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("sshTerminalOverflow")
       .accessibilityLabel("More terminal actions")
     }
-    .foregroundStyle(TetherColors.accent)
+    .foregroundStyle(TetherColors.textPrimary)
     .animation(TetherMotion.ui(TetherMotion.arrive, reduceMotion: reduceMotion), value: controller.status)
     .padding(.horizontal, 10).padding(.vertical, 6)
     // Up under the status bar too, or the strip there shows the terminal's colour.
@@ -563,7 +562,7 @@ public struct SSHTerminalView: View {
     let tint: Color = switch progress.state {
     case .error: TetherColors.danger
     case .warning: TetherColors.warning
-    case .normal, .indeterminate: TetherColors.accent
+    case .normal, .indeterminate: TetherColors.textPrimary
     }
     return Group {
       if progress.state == .indeterminate {
@@ -612,7 +611,7 @@ public struct SSHTerminalView: View {
           ForEach(sessions) { sessionRow($0, folder: folders[$0.name]) }
           if sessions.isEmpty && chatRows.isEmpty {
             Text("Nothing running yet. Use + to start a terminal or a chat.")
-              .font(.caption.monospaced()).multilineTextAlignment(.leading)
+              .font(.app(.caption)).multilineTextAlignment(.leading)
               .foregroundStyle(TetherColors.textFaint).padding(.top, 4)
           }
           if showingArchive {
@@ -642,11 +641,11 @@ public struct SSHTerminalView: View {
                 HStack(spacing: 6) {
                   Image(systemName: collapsedProjects.contains(group.path) ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                  Image(systemName: "folder").font(.app(.caption))
-                  Text(group.title).font(.app(.caption).weight(.semibold))
+                  Image(systemName: "folder").font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
+                  Text(group.title).font(.app(.caption).weight(.medium))
                   Spacer(minLength: 0)
                   if group.needsYou && collapsedProjects.contains(group.path) {
-                    Circle().fill(TetherColors.accent).frame(width: 8, height: 8)
+                    Circle().fill(TetherColors.textPrimary).frame(width: 7, height: 7)
                       .accessibilityLabel("A chat needs you")
                   }
                 }
@@ -704,7 +703,7 @@ public struct SSHTerminalView: View {
           setDrawer(open: false)
           onHome()
         } label: {
-          Text("Switch").font(.app(.footnote).weight(.semibold)).foregroundStyle(TetherColors.accent)
+          Text("Switch").font(.app(.footnote).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
             .padding(.horizontal, 6).frame(minHeight: max(44, tapTarget)).contentShape(Rectangle())
         }
         .buttonStyle(TetherPressStyle())
@@ -727,7 +726,7 @@ public struct SSHTerminalView: View {
           }
           .accessibilityIdentifier("sshContinueChat")
         } label: {
-          Image(systemName: "plus").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.accent)
+          Image(systemName: "plus").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
         }
         .accessibilityIdentifier("sshNewSessionAdd")
@@ -736,7 +735,7 @@ public struct SSHTerminalView: View {
       HStack(alignment: .firstTextBaseline, spacing: 5) {
         Circle().fill(lampColor).frame(width: 6, height: 6).accessibilityHidden(true)
         Text(DrawerLayout.summary(state: drawerStateLabel, terminals: terminals, chats: chats))
-          .font(.app(.caption2)).foregroundStyle(TetherColors.textFaint)
+          .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
       }
       .padding(.bottom, 8)
       .accessibilityElement(children: .combine)
@@ -746,11 +745,10 @@ public struct SSHTerminalView: View {
 
   private func sectionHeader(_ title: String, count: Int) -> some View {
     HStack(spacing: 6) {
-      Text(title)
-      Text("\(count)")
+      Text(title).foregroundStyle(TetherColors.textSecondary)
+      Text("\(count)").foregroundStyle(TetherColors.textFaint).monospacedDigit()
     }
-    .font(.app(.caption2).weight(.semibold)).tracking(0.6).textCase(.uppercase)
-    .foregroundStyle(TetherColors.textFaint)
+    .font(.app(.caption).weight(.medium))
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 2).padding(.top, 10)
     .accessibilityElement(children: .combine)
@@ -761,7 +759,7 @@ public struct SSHTerminalView: View {
   /// trailing. The kill control stays visible: keyboard and VoiceOver users never need the context menu,
   /// and a full-swipe kill would destroy work without a prompt.
   private func drawerRow<Main: View>(
-    selected: Bool, needsYou: Bool, ended: Bool = false,
+    selected: Bool,
     killID: String, killLabel: String, killSymbol: String = "xmark", onKill: @escaping () -> Void,
     @ViewBuilder main: () -> Main
   ) -> some View {
@@ -778,8 +776,8 @@ public struct SSHTerminalView: View {
       .accessibilityLabel(killLabel)
       .accessibilityHint("Asks to confirm first")
     }
-    .padding(.horizontal, 12).padding(.vertical, 10)
-    .modifier(DrawerRowChrome(selected: selected, needsYou: needsYou, ended: ended))
+    .padding(.horizontal, 12).padding(.vertical, 8)
+    .modifier(DrawerRowChrome(selected: selected))
     .animation(TetherMotion.ui(TetherMotion.state, reduceMotion: reduceMotion), value: selected)
   }
 
@@ -791,7 +789,7 @@ public struct SSHTerminalView: View {
     let shownFolder = showsDetail ? folder : nil
     let hasStatus = agent != nil || isCurrent
     return drawerRow(
-      selected: isSelected, needsYou: agent?.state == .waiting,
+      selected: isSelected,
       killID: "zmxKill_\(session.name)", killLabel: "Kill session \(session.name)",
       onKill: { pendingKill = session.name }
     ) {
@@ -801,7 +799,7 @@ public struct SSHTerminalView: View {
         HStack(alignment: .top, spacing: 10) {
           // The dot repeats what the label already says, so it can go when text
           // needs the room; "attached" is never carried by colour alone.
-          Circle().fill(isCurrent ? TetherColors.success : TetherColors.textFaint)
+          Circle().fill(isCurrent ? TetherColors.textPrimary : TetherColors.textFaint.opacity(0.55))
             .frame(width: lampSize, height: lampSize)
             .frame(width: glyphSlot).padding(.top, 4)
           VStack(alignment: .leading, spacing: 2) {
@@ -810,7 +808,7 @@ public struct SSHTerminalView: View {
             if shownFolder != nil || hasStatus {
               HStack(spacing: 4) {
                 if let shownFolder {
-                  Text(shownFolder).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.middle)
+                  Text(shownFolder).foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
                   if hasStatus { Text("·").foregroundStyle(TetherColors.textFaint) }
                 }
                 if let agent {
@@ -819,10 +817,10 @@ public struct SSHTerminalView: View {
                   }
                   .fixedSize()
                 } else if isCurrent {
-                  Text("attached").foregroundStyle(TetherColors.success).fixedSize()
+                  Text("attached").foregroundStyle(TetherColors.textSecondary).fixedSize()
                 }
               }
-              .font(.caption2.monospaced())
+              .font(.app(.caption))
               .accessibilityHidden(true)
             }
           }
@@ -864,11 +862,11 @@ public struct SSHTerminalView: View {
   private func chatSubtitle(_ row: DrawerChatRow, agentLabel: String?, folder: Bool) -> some View {
     HStack(spacing: 4) {
       if let agentLabel {
-        Text(agentLabel).foregroundStyle(TetherColors.textFaint).lineLimit(1).fixedSize()
+        Text(agentLabel).foregroundStyle(TetherColors.textSecondary).lineLimit(1).fixedSize()
         Text("·").foregroundStyle(TetherColors.textFaint)
       }
       if folder && !row.subtitle.isEmpty {
-        Text(row.subtitle).foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.middle)
+        Text(row.subtitle).foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.middle)
         Text("·").foregroundStyle(TetherColors.textFaint)
       }
       ChatStateTag(state: row.state)
@@ -880,7 +878,7 @@ public struct SSHTerminalView: View {
     let ended = row.state == .ended
     let showsDetail = DynamicTypeLayout.showsDetail(for: dynamicTypeSize)
     return drawerRow(
-      selected: isSelected, needsYou: row.state == .waiting, ended: ended,
+      selected: isSelected,
       killID: "chatActions_\(row.name)", killLabel: "Actions for \(row.title)", killSymbol: "ellipsis",
       onKill: { chatActions = row }
     ) {
@@ -911,7 +909,7 @@ public struct SSHTerminalView: View {
                 chatSubtitle(row, agentLabel: nil, folder: showsDetail)
               }
             }
-            .font(.caption2.monospaced())
+            .font(.app(.caption))
             .accessibilityHidden(true)
           }
           Spacer(minLength: 4)
@@ -1081,7 +1079,8 @@ public struct SSHTerminalView: View {
   private var lampColor: Color {
     switch controller.status {
     case .connecting, .disconnected: return TetherColors.warning
-    case .connected: return TetherColors.success
+    // Colour only when something is wrong; a healthy link is the quiet case.
+    case .connected: return TetherColors.textFaint
     case .failed: return TetherColors.danger
     }
   }
@@ -1207,7 +1206,7 @@ public struct SSHTerminalView: View {
     case .idle:
       EmptyView()
     case let .sending(name):
-      transferPill { HStack(spacing: 8) { ProgressView().tint(TetherColors.accent); Text("Sending \(name)…") } }
+      transferPill { HStack(spacing: 8) { ProgressView().tint(TetherColors.textFaint); Text("Sending \(name)…") } }
     case let .sent(path):
       transferPill { Label("Sent to \(path)", systemImage: "checkmark.circle") }
         .task { try? await Task.sleep(nanoseconds: 2_500_000_000); controller.clearTransfer() }
@@ -1260,7 +1259,7 @@ public struct SSHTerminalView: View {
       VStack(spacing: 12) {
         switch copy.indicator {
         case .spinner:
-          ProgressView().tint(TetherColors.accent)
+          ProgressView().tint(TetherColors.textFaint)
         case let .warning(symbol):
           Image(systemName: symbol).font(.app(.largeTitle)).foregroundStyle(TetherColors.warning)
         case let .error(symbol):
@@ -1270,9 +1269,9 @@ public struct SSHTerminalView: View {
           .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
         if copy.indicator.offersRetry {
           Button("Retry") { Task { await controller.connect(trigger: .manual) } }
-            .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+            .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.background)
             .padding(.horizontal, 20).padding(.vertical, 10)
-            .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+            .background(TetherColors.textPrimary, in: Capsule())
             .buttonStyle(TetherPressStyle())
             .accessibilityIdentifier("sshTerminalRetry")
         }
@@ -1321,7 +1320,7 @@ public struct SSHTerminalView: View {
             .multilineTextAlignment(.center)
           if controller.sessions.isEmpty && chats.isEmpty {
             Text("Nothing runs until you start one.")
-              .font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
+              .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary)
           } else {
             VStack(spacing: 6) {
               if !controller.sessions.isEmpty { sectionHeader("Terminals", count: controller.sessions.count) }
@@ -1329,20 +1328,19 @@ public struct SSHTerminalView: View {
                 Button { goToSession(session.name) } label: {
                   VStack(alignment: .leading, spacing: 2) {
                     Text(session.name).font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-                    Text(session.displayCwd).font(.caption2.monospaced())
-                      .foregroundStyle(TetherColors.textFaint).lineLimit(1).truncationMode(.head)
+                    Text(session.displayCwd).font(.app(.caption))
+                      .foregroundStyle(TetherColors.textSecondary).lineLimit(1).truncationMode(.head)
                   }
                   .frame(maxWidth: .infinity, alignment: .leading)
                   .padding(.horizontal, 12).padding(.vertical, 8)
-                  .background(TetherColors.background, in: RoundedRectangle(cornerRadius: 10))
-                  .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border))
+                  .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(TetherPressStyle())
                 .accessibilityIdentifier("sshEmptyStateSession_\(session.name)")
               }
               if controller.sessions.count > pickableSessions.count, tabs == nil {
                 Button("All sessions") { setDrawer(open: true) }
-                  .font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent)
+                  .font(.app(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
               }
               if !chats.isEmpty {
                 sectionHeader("Active chats", count: chats.count)
@@ -1355,46 +1353,31 @@ public struct SSHTerminalView: View {
               setDrawer(open: true)
             }
           }
-          .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.onAccent)
+          .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.background)
           .padding(.horizontal, 20).padding(.vertical, 10)
-          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 11))
+          .background(TetherColors.textPrimary, in: Capsule())
           .buttonStyle(TetherPressStyle())
           .accessibilityIdentifier("sshEmptyStateNew")
         }
-        .padding(24).frame(maxWidth: 300)
-        .background(TetherColors.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 16))
-        .padding(.vertical, 24)
+        .padding(.horizontal, 20).padding(.vertical, 28).frame(maxWidth: 460)
+        .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 22))
+        .padding(.horizontal, 16).padding(.vertical, 24)
         .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
     }
   }
 }
 
-/// The fill and outline of a drawer row: a selected row is tinted with an accent bar, an outline marks
-/// a row that needs an answer, and an ended chat is drawn as an empty dashed slot.
+/// A drawer row's fill: only the open row is marked.
 private struct DrawerRowChrome: ViewModifier {
   let selected: Bool
-  let needsYou: Bool
-  let ended: Bool
 
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 12)
+    // The state words carry "needs you" and "ended"; the row only marks what is open.
     content
-      .background(selected && !ended ? TetherColors.accent.opacity(0.10) : .clear, in: shape)
-      .background(ended ? Color.clear : TetherColors.surface, in: shape)
-      .overlay(alignment: .leading) {
-        if selected { Rectangle().fill(TetherColors.accent).frame(width: 3) }
-      }
-      .clipShape(shape)
-      .overlay {
-        if needsYou {
-          shape.strokeBorder(TetherColors.warning.opacity(0.7), lineWidth: 1.5)
-        } else if ended {
-          shape.strokeBorder(TetherColors.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-        } else {
-          shape.strokeBorder(TetherColors.border)
-        }
-      }
+      .background(selected ? TetherColors.surfaceRaised : .clear, in: shape)
+      .contentShape(shape)
   }
 }
 

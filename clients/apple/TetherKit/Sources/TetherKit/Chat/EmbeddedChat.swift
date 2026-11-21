@@ -172,7 +172,7 @@ struct NewChatSheet: View {
           .foregroundStyle(TetherColors.textPrimary)
           .accessibilityAddTraits(.isHeader)
         Spacer()
-        Button("Cancel", action: onCancel).font(.chat(.subheadline)).foregroundStyle(TetherColors.accent)
+        Button("Cancel", action: onCancel).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           .frame(minHeight: 44).buttonStyle(TetherPressStyle())
           .disabled(starting || creatingFolder || continuing != nil)
       }
@@ -259,13 +259,13 @@ struct NewChatSheet: View {
   private var startButton: some View {
     Button(action: start) {
       Group {
-        if starting { ProgressView().tint(TetherColors.onAccent) } else {
+        if starting { ProgressView().tint(TetherColors.background) } else {
           Text("Start chat").font(.chat(.subheadline).weight(.semibold))
         }
       }
       .frame(maxWidth: .infinity, minHeight: 44)
-      .foregroundStyle(TetherColors.onAccent)
-      .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+      .foregroundStyle(TetherColors.background)
+      .background(TetherColors.textPrimary, in: Capsule())
       .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
@@ -373,12 +373,12 @@ struct NewChatSheet: View {
           .accessibilityIdentifier("sshNewChatUpdateLater_\(version.key)")
           if version.kind == .adapter || version.runnable {
             Button("Update") { update(version) }
-              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
               .disabled(updating != nil)
               .accessibilityIdentifier("sshNewChatUpdate_\(version.key)")
           } else {
             Button("Copy") { UIPasteboard.general.string = version.command }
-              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
               .accessibilityHint("Copies the command that updates it on the host")
           }
         }
@@ -492,7 +492,7 @@ struct NewChatSheet: View {
         .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
         .overlay(
           RoundedRectangle(cornerRadius: 7)
-            .strokeBorder(row.changed ? TetherColors.accent.opacity(0.6) : TetherColors.border, lineWidth: 1))
+            .strokeBorder(row.changed ? TetherColors.textSecondary : TetherColors.border, lineWidth: 1))
       }
       .accessibilityLabel("\(row.name), \(row.selectedName)")
       .accessibilityIdentifier("sshNewChatOption_\(row.id)")
@@ -519,11 +519,11 @@ struct NewChatSheet: View {
         if resetNow {
           if !stored.isEmpty {
             Text("·").foregroundStyle(TetherColors.textFaint)
-            Button("Undo") { reset = false }.foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+            Button("Undo") { reset = false }.fontWeight(.semibold).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
           }
         } else {
           Text("·").foregroundStyle(TetherColors.textFaint)
-          Button("Reset") { changes = [:]; reset = true }.foregroundStyle(TetherColors.accent)
+          Button("Reset") { changes = [:]; reset = true }.fontWeight(.semibold).foregroundStyle(TetherColors.textPrimary)
             .frame(minHeight: 44).accessibilityIdentifier("sshNewChatOptionsReset")
         }
         Spacer(minLength: 0)
@@ -580,7 +580,7 @@ struct NewChatSheet: View {
             .textInputAutocapitalization(.never).autocorrectionDisabled()
             .onSubmit(addFolder)
             .accessibilityIdentifier("sshNewChatExtraFolder")
-          Button("Add", action: addFolder).font(.chat(.footnote).weight(.semibold)).foregroundStyle(TetherColors.accent)
+          Button("Add", action: addFolder).font(.chat(.footnote).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .disabled(newFolder.trimmingCharacters(in: .whitespaces).isEmpty)
             .frame(minHeight: 44)
         }
@@ -607,7 +607,7 @@ struct NewChatSheet: View {
               Label("Add MCP server", systemImage: "plus").font(.chat(.footnote))
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).foregroundStyle(TetherColors.accent)
+            .buttonStyle(.plain).foregroundStyle(TetherColors.textPrimary)
             .accessibilityIdentifier("sshNewChatAddMCP")
           }
         }
@@ -681,7 +681,7 @@ struct NewChatSheet: View {
             .fixedSize(horizontal: false, vertical: true)
           Spacer(minLength: 0)
           Button("Retry") { reloads += 1 }
-            .frame(minHeight: 44).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .frame(minHeight: 44).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .buttonStyle(TetherPressStyle())
             .accessibilityIdentifier("sshContinueRetry")
         }

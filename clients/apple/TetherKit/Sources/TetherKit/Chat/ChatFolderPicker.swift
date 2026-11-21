@@ -32,7 +32,7 @@ struct ChatFolderPicker: View {
         } label: {
           Image(systemName: "folder.badge.gearshape").frame(minWidth: 44, minHeight: 44)
         }
-        .buttonStyle(.plain).foregroundStyle(TetherColors.accent)
+        .buttonStyle(.plain).foregroundStyle(TetherColors.textPrimary)
         .accessibilityLabel("Choose folder")
         .accessibilityIdentifier("sshNewChatBrowse")
       }
@@ -218,7 +218,7 @@ private struct ChatFolderBrowser: View {
         Button(creating ? "Creating…" : "Create", action: createChild)
           .disabled(creating || ChatFolders.childPath(name: name, parent: info?.path ?? "") == nil)
       }
-      .buttonStyle(.plain).foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+      .buttonStyle(.plain).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
     }
   }
 
@@ -233,8 +233,8 @@ private struct ChatFolderBrowser: View {
       } label: {
         Text("Use this folder").font(.chat(.subheadline).weight(.semibold))
           .frame(maxWidth: .infinity, minHeight: 44)
-          .foregroundStyle(TetherColors.onAccent)
-          .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+          .foregroundStyle(TetherColors.background)
+          .background(TetherColors.textPrimary, in: Capsule())
       }
       .buttonStyle(.plain)
       .disabled(locked || loading || info?.ready != true)

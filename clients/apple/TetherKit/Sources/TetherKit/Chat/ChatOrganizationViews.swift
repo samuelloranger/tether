@@ -76,7 +76,7 @@ struct ChatPlanUsageView: View {
     TimelineView(.periodic(from: .now, by: 60)) { timeline in
       VStack(alignment: .leading, spacing: 2) {
         HStack {
-          Text("Subscriptions · used").font(.chat(.caption2)).foregroundStyle(TetherColors.textSecondary)
+          Text("Plan usage").font(.app(.caption).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
           Spacer(minLength: 0)
           Button(action: onRefresh) {
             Image(systemName: "arrow.clockwise").font(.chat(.caption)).frame(minWidth: 44, minHeight: 44)
@@ -176,7 +176,7 @@ private struct ChatQuotaBar: View {
       Capsule().fill(TetherColors.surfaceRaised)
         .overlay(alignment: .leading) {
           if let fraction {
-            Capsule().fill(warning ? TetherColors.warning : TetherColors.accent)
+            Capsule().fill(warning ? TetherColors.warning : TetherColors.textSecondary)
               .frame(width: proxy.size.width * fraction)
           }
         }
