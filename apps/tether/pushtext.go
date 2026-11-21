@@ -19,12 +19,12 @@ func pushText(s string, n int) string {
 var (
 	mdHeading = regexp.MustCompile(`(?m)^[ \t]*(#{1,6}|>)[ \t]+`)
 	mdLink    = regexp.MustCompile(`\[([^\]\n]+)\]\([^)\s]+\)`)
-	mdMarks   = strings.NewReplacer("**", "", "__", "", "`", "")
+	mdMarks   = strings.NewReplacer("**", "", "`", "")
 	spaces    = regexp.MustCompile(`\s+`)
 )
 
 // plainLine flattens an agent's markdown reply to one line of prose: headings, quotes,
-// links, bold and code marks go; underscores and #s inside words stay.
+// links, ** bold and code marks go; underscores (__init__) and #s inside text stay.
 func plainLine(s string) string {
 	s = mdHeading.ReplaceAllString(s, "")
 	s = mdLink.ReplaceAllString(s, "$1")

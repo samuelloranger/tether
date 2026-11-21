@@ -96,13 +96,14 @@ verb="done"
 [ "$state" = waiting ] && verb="needs you"
 [ "$state" = failed ] && verb="stopped"
 
-# Last assistant text in a JSONL transcript, flattened to one line. Per-line fromjson? so one
+# Last assistant text in a JSONL transcript, its lines kept for the markdown cleanup below:
+# each reply is printed as one JSON string so tail can pick the last. Per-line fromjson? so one
 # bad line doesn't blank the read; whole file, not a tail, since a turn can end with a long
 # run of tool calls after the final prose. $1 is the jq test that picks an assistant line.
 last_reply() { # <transcript> <jq select>
   jq -R -r "fromjson? | select($2)
     | (.message.content? // []) | map(select(.type==\"text\") | .text) | join(\" \")
-    | gsub(\"[\\\\n\\\\r\\\\t]+\"; \" \") | select(length > 0)" "$1" 2>/dev/null | tail -1 || true
+    | select(test(\"\\\\S\")) | @json" "$1" 2>/dev/null | tail -1 | jq -r . 2>/dev/null || true
 }
 
 body=""
@@ -142,12 +143,11 @@ fi
 
 # One line. A reply is markdown: headings, quotes, links, bold and code marks go, while a
 # command or path stays as typed. tether clips it to fit; this cut only bounds the argument.
-body="$(printf '%s' "$body" | tr '\n\t\r' '   ')"
 if [ "$state_out" = done ]; then
-  body="$(printf '%s\n' " $body" | sed -e 's/ #\{1,6\} / /g' \
-    -e 's/\[\([^]]*\)\]([^) ]*)/\1/g' -e 's/\*\*//g; s/__//g; s/`//g')"
+  body="$(printf '%s\n' "$body" | sed -e 's/^[[:space:]]*#\{1,6\}[[:space:]]\{1,\}//; s/^[[:space:]]*>[[:space:]]\{1,\}//' \
+    -e 's/\[\([^]]*\)\]([^) ]*)/\1/g' -e 's/\*\*//g; s/`//g')"
 fi
-body="$(printf '%s\n' "$body" | tr -s ' ' | sed 's/^ //; s/ $//' | cut -c1-1000)"
+body="$(printf '%s\n' "$body" | tr '\n\t\r' '   ' | tr -s ' ' | sed 's/^ //; s/ $//' | cut -c1-1000)"
 
 if [ -n "$sess" ]; then
   "$notify_bin" state --session "$sess" --agent "$agent" --state "$state_out" \

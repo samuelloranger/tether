@@ -327,10 +327,13 @@ test('claude done keeps a multi-line last reply whole', () => {
 test('a done reply loses its markdown but keeps underscores and #s in words', () => {
   const env = install();
   const transcript = path.join(env.home, 't.jsonl');
-  const text = '## Summary\n\nAll **tests** pass in `my_pkg` (see [PR #12](https://x.test/12)). a -> b';
+  const text =
+    '## Summary\n\n> Quoted.\nAll **tests** pass in `my_pkg` and __init__ (see [PR #12](https://x.test/12)), issue # 5. a -> b';
   writeTranscript(transcript, [{ type: 'assistant', message: { content: [{ type: 'text', text }] } }]);
   hook(env, 'claude', 'done', { cwd: '/src/proj', transcript_path: transcript });
-  expect(calls(env.log)[0]).toContain('--body Summary All tests pass in my_pkg (see PR #12). a -> b --link');
+  expect(calls(env.log)[0]).toContain(
+    '--body Summary Quoted. All tests pass in my_pkg and __init__ (see PR #12), issue # 5. a -> b --link',
+  );
 });
 
 test('a waiting command is passed as typed, and long bodies are left for tether to clip', () => {

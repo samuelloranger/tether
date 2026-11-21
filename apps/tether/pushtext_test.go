@@ -12,6 +12,7 @@ func TestPlainLine(t *testing.T) {
 		"> quoted\n- item one\n- item two":             "quoted - item one - item two",
 		"See [the PR](https://x.test/1) and `go vet`.": "See the PR and go vet.",
 		"PR #376 renamed my_file.py; a -> b":           "PR #376 renamed my_file.py; a -> b",
+		"Fixed __init__ and a__b, see issue # 5":       "Fixed __init__ and a__b, see issue # 5",
 		"  \t ":                                        "",
 	} {
 		if got := plainLine(in); got != want {

@@ -81,8 +81,8 @@ type acpTracker struct {
 	answers map[string]string
 	// done holds requests a client answered, so a second client's answer is not sent too.
 	done map[string]bool
-	// reply is the agent's latest top-level prose of the turn, for the done push; a tool call
-	// marks it stale so the next text starts a new one. Not persisted.
+	// reply is the start of the agent's latest top-level prose block of the turn, for the done
+	// push; a tool call marks it stale so the next text starts a new block. Not persisted.
 	reply      string
 	replyStale bool
 }
