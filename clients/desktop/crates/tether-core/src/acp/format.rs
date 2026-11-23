@@ -9,7 +9,7 @@ use uuid::Uuid;
 use super::host::ChatSummary;
 use super::images::ImageAttachment;
 use super::journal::{Journal, Snapshot};
-use super::message::{Command, Cost, PermissionOption};
+use super::message::{Command, Cost, PermissionOption, ToolKind};
 use super::reducer::ChatState;
 
 /// The folder name; a chat started in the home directory or the root has no better label.
@@ -370,6 +370,32 @@ pub struct PermissionLayout {
     pub more: Vec<PermissionOption>,
     /// More than three options: the primary allow and the reject stay visible, the rest sit behind a disclosure.
     pub collapsed: bool,
+}
+
+impl PermissionLayout {
+    /// The one broader allow ("allow all edits this session") a card offers as a switch, when the
+    /// primary button is the one-off allow it widens. A mode switch (a plan approval, whose
+    /// broader allows are modes, bypass among them), several broader allows, or a card without
+    /// an `allow_once` has none.
+    pub fn always_allow(&self, kind: ToolKind) -> Option<&PermissionOption> {
+        if kind == ToolKind::SwitchMode || self.primary.as_ref()?.kind != "allow_once" {
+            return None;
+        }
+        let mut always = self.more.iter().filter(|o| o.kind == "allow_always");
+        let one = always.next()?;
+        always.next().is_none().then_some(one)
+    }
+
+    /// The layout for a card that shows `always_allow` as a switch: the option leaves the links,
+    /// and the disclosure is only worth it while two or more links remain behind it.
+    pub fn with_switch(mut self, kind: ToolKind) -> (Self, Option<PermissionOption>) {
+        let always = self.always_allow(kind).cloned();
+        if let Some(always) = &always {
+            self.more.retain(|o| o.option_id != always.option_id);
+            self.collapsed = self.collapsed && self.more.len() > 1;
+        }
+        (self, always)
+    }
 }
 
 pub fn permission_layout(options: &[PermissionOption]) -> PermissionLayout {
@@ -963,6 +989,70 @@ mod tests {
         assert_eq!(layout.reject.unwrap().option_id, "plan");
         assert_eq!(ids(&layout.more), ["acceptEdits", "auto", "bypass"]);
         assert!(layout.collapsed);
+    }
+
+    #[test]
+    fn an_edit_permission_offers_its_one_broader_allow_as_the_switch() {
+        let layout = permission_layout(&[
+            opt("once", "allow_once"),
+            opt("session", "allow_always"),
+            opt("no", "reject_once"),
+        ]);
+        assert_eq!(
+            layout.always_allow(ToolKind::Edit).unwrap().option_id,
+            "session"
+        );
+        let (card, always) = layout.with_switch(ToolKind::Edit);
+        assert_eq!(always.unwrap().option_id, "session");
+        assert!(card.more.is_empty());
+    }
+
+    #[test]
+    fn the_plan_approval_and_a_card_without_allow_once_get_no_switch() {
+        let plan = permission_layout(&[
+            opt("default", "allow_once"),
+            opt("acceptEdits", "allow_always"),
+            opt("auto", "allow_always"),
+            opt("plan", "reject_once"),
+        ]);
+        assert!(plan.always_allow(ToolKind::Edit).is_none());
+        let (card, always) = plan.clone().with_switch(ToolKind::Edit);
+        assert!(always.is_none());
+        assert_eq!(card, plan);
+        let no_once =
+            permission_layout(&[opt("session", "allow_always"), opt("no", "reject_once")]);
+        assert!(no_once.always_allow(ToolKind::Edit).is_none());
+    }
+
+    #[test]
+    fn a_mode_switch_never_offers_the_switch_even_with_one_broader_allow() {
+        let layout = permission_layout(&[
+            opt("default", "allow_once"),
+            opt("bypassPermissions", "allow_always"),
+            opt("plan", "reject_once"),
+        ]);
+        assert!(layout.always_allow(ToolKind::SwitchMode).is_none());
+        assert!(layout.always_allow(ToolKind::Edit).is_some());
+        let (card, always) = layout.clone().with_switch(ToolKind::SwitchMode);
+        assert!(always.is_none());
+        assert_eq!(card, layout);
+    }
+
+    #[test]
+    fn the_switch_leaves_the_disclosure_only_when_two_links_remain() {
+        let options = |extra: usize| {
+            let mut o = vec![
+                opt("once", "allow_once"),
+                opt("session", "allow_always"),
+                opt("no", "reject_once"),
+            ];
+            o.extend((0..extra).map(|n| opt(&format!("x{n}"), "reject_always")));
+            permission_layout(&o)
+        };
+        let (one, _) = options(1).with_switch(ToolKind::Edit);
+        assert!(!one.collapsed, "four options, one link left");
+        let (two, _) = options(2).with_switch(ToolKind::Edit);
+        assert!(two.collapsed);
     }
 
     #[test]

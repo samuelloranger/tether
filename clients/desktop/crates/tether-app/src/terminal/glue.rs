@@ -87,7 +87,17 @@ pub(crate) fn platform() -> Arc<dyn Platform> {
 
 /// The body of M5's `open_machine::on_open_machine`.
 pub fn open_machine(app: &Rc<App>, machine: Machine) {
-    let (style, hostkeys, secrets, jumps, chats_root, chat_defaults, chat_options, chat_agent) = {
+    let (
+        style,
+        hostkeys,
+        secrets,
+        jumps,
+        chats_root,
+        chat_defaults,
+        chat_options,
+        chat_agent,
+        chat_managed,
+    ) = {
         let s = app.state.borrow();
         (
             TermStyle::from_prefs(&s.prefs.terminal),
@@ -98,6 +108,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
             s.prefs.chat_defaults.clone(),
             s.prefs.chat_options.clone(),
             s.prefs.chat_agent.clone(),
+            s.prefs.chat_managed.clone(),
         )
     };
     let chat_scope = format!("{}:{}", machine.host, machine.port);
@@ -109,6 +120,7 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         platform: platform(),
         send: sink.clone(),
     };
+    let mcp = crate::terminal::model::chat::McpLibrary::new(secrets.clone(), &chat_scope);
     let transport = tether_ssh::RusshTransport::new(rt.clone());
     let remote = Arc::new(SshRemote::new(
         transport,
@@ -141,8 +153,10 @@ pub fn open_machine(app: &Rc<App>, machine: Machine) {
         chats_root,
         &chat_scope,
     ));
+    model.set_chat_mcp(mcp);
     model.set_chat_defaults(chat_defaults);
     model.set_chat_options(chat_options, &chat_scope, &chat_agent);
+    model.set_chat_managed(chat_managed);
     model.set_sidebar_closed(app.state.borrow().prefs.sidebar_closed);
     crate::terminal::frame::attach_window(&app.ui, presented_sink(tx.clone()));
     rt.spawn(Driver::new(remote, ui, tx).run(model, initial, rx));
@@ -652,6 +666,23 @@ pub fn apply_on_ui(w: &AppWindow, fx: UiEffect) {
                 Shown::Hidden => 1,
                 Shown::Overlay => 2,
             });
+        }
+        UiEffect::ChatManaged {
+            scope,
+            supported,
+            dismissed,
+        } => {
+            let mut s = app.state.borrow_mut();
+            let mut changed = false;
+            if let Some(supported) = supported {
+                changed |= s.prefs.chat_managed.set_supported(&scope, supported);
+            }
+            if let Some((kind, agent, version)) = dismissed {
+                changed |= s.prefs.chat_managed.dismiss(&scope, kind, &agent, &version);
+            }
+            if changed {
+                s.save_prefs();
+            }
         }
         UiEffect::RememberChatAgent(agent) => {
             let mut s = app.state.borrow_mut();

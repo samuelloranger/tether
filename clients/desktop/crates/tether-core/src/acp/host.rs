@@ -40,8 +40,10 @@ pub fn attach_command(
     name: &str,
     cwd: &str,
     spawn: Option<&AgentProfile>,
+    managed: bool,
     from: usize,
     client: Option<&str>,
+    revive: bool,
 ) -> String {
     let mut command = format!("{TETHER} attach {} --from {from}", shell_quote(name));
     if let Some(client) = client {
@@ -50,11 +52,28 @@ pub fn attach_command(
     if let Some(agent) = spawn {
         command += &format!(
             " --spawn {} --cwd {}",
-            shell_quote(agent.spawn),
+            shell_quote(agent.spawn_for(managed)),
             shell_quote(cwd)
         );
+        // The host respawns the agent under the same chat name and keeps its log, so offsets continue.
+        if revive {
+            command += " --revive";
+        }
     }
     command
+}
+
+/// What the host said to a revive: the old tether doesn't know the flag, and a full log can't
+/// take another agent run. None for anything else.
+pub fn revive_failure(message: &str) -> Option<String> {
+    let lower = message.to_lowercase();
+    if lower.contains("flag provided but not defined") && lower.contains("revive") {
+        return Some("Update tether on the host to resume chats.".into());
+    }
+    if lower.contains("log is full") {
+        return Some(message.trim().replace("tether: ", ""));
+    }
+    None
 }
 
 pub const LIST: &str = concat!(tether_acp!(), " ls");
@@ -67,16 +86,71 @@ pub const HOME: &str = "printf %s \"$HOME\"";
 
 /// Earlier conversations of `agent` in `cwd`, newest first, as JSON lines. Runs the adapter
 /// briefly on the host. The host lists Claude's without being told which agent.
-pub fn sessions_command(cwd: &str, limit: usize, agent: &AgentProfile) -> String {
+pub fn sessions_command(cwd: &str, limit: usize, agent: &AgentProfile, managed: bool) -> String {
     let which = if agent == &CLAUDE {
         String::new()
     } else {
-        format!(" --agent-cmd {}", shell_quote(agent.spawn))
+        format!(" --agent-cmd {}", shell_quote(agent.spawn_for(managed)))
     };
     format!(
         "{TETHER} sessions {} --limit {limit}{which} 2>&1",
         shell_quote(cwd)
     )
+}
+
+/// Removes one stored conversation. The host prints `{"deleted":"<id>"}`; stderr is folded in so
+/// a host that predates the flag explains itself.
+pub fn delete_session_command(
+    cwd: &str,
+    session_id: &str,
+    agent: &AgentProfile,
+    managed: bool,
+) -> String {
+    let which = if agent == &CLAUDE {
+        String::new()
+    } else {
+        format!(" --agent-cmd {}", shell_quote(agent.spawn_for(managed)))
+    };
+    format!(
+        "{TETHER} sessions {} --delete {}{which} 2>&1",
+        shell_quote(cwd),
+        shell_quote(session_id)
+    )
+}
+
+/// `Ok` when the host printed `{"deleted":"<id>"}` for this conversation, else the reason.
+pub fn parse_delete_session(output: &str, session_id: &str) -> Result<(), String> {
+    let deleted = lines_of(output).any(|l| {
+        serde_json::from_str::<Value>(l.trim()).ok().and_then(|v| {
+            v.get("deleted")
+                .and_then(Value::as_str)
+                .map(|d| d == session_id)
+        }) == Some(true)
+    });
+    if deleted {
+        return Ok(());
+    }
+    let first = lines_of(output).map(str::trim).find(|l| !l.is_empty());
+    let lower = output.to_lowercase();
+    Err(match first {
+        Some(_)
+            if lower.contains("unknown acp command")
+                || lower.contains("usage")
+                || lower.contains("flag provided but not defined")
+                || lower.contains("unknown flag") =>
+        {
+            "Update tether on the host to delete conversations.".into()
+        }
+        Some(line) => {
+            let line = line.replace("tether: ", "");
+            if line.chars().count() > 160 {
+                format!("{}\u{2026}", line.chars().take(160).collect::<String>())
+            } else {
+                line
+            }
+        }
+        None => "The host didn't confirm the deletion.".into(),
+    })
 }
 
 pub fn kill_command(name: &str) -> String {
@@ -891,18 +965,73 @@ mod tests {
     #[test]
     fn attach_command_spawns_only_for_a_new_chat() {
         assert_eq!(
-            attach_command("chat-ab12", "/home/sam/my app", Some(&CLAUDE), 0, None),
+            attach_command(
+                "chat-ab12",
+                "/home/sam/my app",
+                Some(&CLAUDE),
+                false,
+                0,
+                None,
+                false
+            ),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0' --cwd '/home/sam/my app'"
         );
         assert_eq!(
-            attach_command("chat-ab12", "/x", None, 0, None),
+            attach_command("chat-ab12", "/x", None, false, 0, None, false),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0"
         );
-        assert!(attach_command("c", "/x", None, 4096, None).ends_with("--from 4096"));
+        assert!(attach_command("c", "/x", None, false, 4096, None, false).ends_with("--from 4096"));
         assert_eq!(
-            attach_command("chat-ab12", "/x", None, 0, Some("k3x9")),
+            attach_command("chat-ab12", "/x", None, false, 0, Some("k3x9"), false),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp attach 'chat-ab12' --from 0 --client 'k3x9'"
         );
+    }
+
+    #[test]
+    fn a_revive_rides_with_the_spawn_and_only_with_it() {
+        let command = attach_command("c", "/x", Some(&CLAUDE), false, 0, None, true);
+        assert!(command.ends_with(" --cwd '/x' --revive"), "{command}");
+        assert!(
+            !attach_command("c", "/x", Some(&CLAUDE), false, 0, None, false).contains("--revive")
+        );
+        assert!(!attach_command("c", "/x", None, false, 0, None, true).contains("--revive"));
+    }
+
+    #[test]
+    fn revive_failures_name_the_fix() {
+        assert_eq!(
+            revive_failure("flag provided but not defined: -revive").as_deref(),
+            Some("Update tether on the host to resume chats.")
+        );
+        assert_eq!(
+            revive_failure("tether: the chat's log is full\n").as_deref(),
+            Some("the chat's log is full")
+        );
+        assert_eq!(revive_failure("something else"), None);
+    }
+
+    #[test]
+    fn the_delete_command_quotes_everything_and_names_a_non_claude_agent() {
+        let c = delete_session_command("/x; rm -rf /", "id'1", &CLAUDE, false);
+        assert!(c.starts_with("PATH=\"$HOME/.local/bin:$PATH\" tether acp sessions "));
+        assert!(c.ends_with(" --delete 'id'\"'\"'1' 2>&1"), "{c}");
+        assert!(!c.contains("--agent-cmd"));
+        assert!(delete_session_command("/x", "a", &agent::CODEX, false).contains(" --agent-cmd "));
+    }
+
+    #[test]
+    fn delete_output_is_one_json_line_or_a_reason() {
+        assert_eq!(parse_delete_session("{\"deleted\":\"a\"}\n", "a"), Ok(()));
+        assert!(parse_delete_session("{\"deleted\":\"b\"}", "a").is_err());
+        assert_eq!(
+            parse_delete_session("tether: unknown acp command\nusage: ...", "a").unwrap_err(),
+            "Update tether on the host to delete conversations."
+        );
+        assert_eq!(
+            parse_delete_session("tether: no such conversation", "a").unwrap_err(),
+            "no such conversation"
+        );
+        assert!(parse_delete_session("", "a").is_err());
     }
 
     #[test]
@@ -912,14 +1041,14 @@ mod tests {
             "npx -y @agentclientprotocol/claude-agent-acp@0.95.0"
         );
         assert_eq!(ADAPTER_VERSION, "0.95.0");
-        let command = attach_command("c", "/x", Some(&CLAUDE), 0, None);
+        let command = attach_command("c", "/x", Some(&CLAUDE), false, 0, None, false);
         assert!(command.contains("--spawn 'npx -y @agentclientprotocol/claude-agent-acp@0.95.0'"));
-        assert!(!attach_command("c", "/x", None, 0, None).contains("npx"));
+        assert!(!attach_command("c", "/x", None, false, 0, None, false).contains("npx"));
     }
 
     #[test]
     fn shell_metacharacters_in_a_name_or_folder_are_quoted() {
-        let command = attach_command("a'b", "/x; rm -rf /", Some(&CLAUDE), 0, None);
+        let command = attach_command("a'b", "/x; rm -rf /", Some(&CLAUDE), false, 0, None, false);
         assert!(command.contains("'a'\"'\"'b'"));
         assert!(command.contains("'/x; rm -rf /'"));
         assert_eq!(
@@ -944,37 +1073,37 @@ mod tests {
 
     #[test]
     fn the_sessions_command_quotes_a_hostile_folder_and_folds_stderr_in() {
-        let command = sessions_command("/tmp/it's $(rm -rf ~)", 20, &CLAUDE);
+        let command = sessions_command("/tmp/it's $(rm -rf ~)", 20, &CLAUDE, false);
         assert!(command.contains(" sessions '/tmp/it'\"'\"'s $(rm -rf ~)' --limit 20"));
         assert!(command.ends_with("2>&1"));
     }
 
     #[test]
     fn the_sessions_command_names_the_agent_unless_it_is_claude() {
-        let claude = sessions_command("/x", 20, &CLAUDE);
+        let claude = sessions_command("/x", 20, &CLAUDE, false);
         assert_eq!(
             claude,
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp sessions '/x' --limit 20 2>&1"
         );
         assert!(!claude.contains("--agent-cmd"));
         assert_eq!(
-            sessions_command("/x", 20, &agent::CODEX),
+            sessions_command("/x", 20, &agent::CODEX, false),
             "PATH=\"$HOME/.local/bin:$PATH\" tether acp sessions '/x' --limit 20 --agent-cmd 'npx -y @agentclientprotocol/codex-acp@2.3.0' 2>&1"
         );
         assert!(
-            sessions_command("/x", 5, &agent::OPENCODE)
+            sessions_command("/x", 5, &agent::OPENCODE, false)
                 .contains(r#"--agent-cmd 'PATH="$HOME/.opencode/bin:$PATH" opencode acp' 2>&1"#)
         );
     }
 
     #[test]
     fn attach_spawns_the_picked_agent() {
-        let command = attach_command("c", "/x", Some(&agent::OPENCODE), 0, None);
+        let command = attach_command("c", "/x", Some(&agent::OPENCODE), false, 0, None, false);
         assert!(
             command
                 .contains(r#"--spawn 'PATH="$HOME/.opencode/bin:$PATH" opencode acp' --cwd '/x'"#)
         );
-        let command = attach_command("c", "/x", Some(&agent::CODEX), 0, None);
+        let command = attach_command("c", "/x", Some(&agent::CODEX), false, 0, None, false);
         assert!(command.contains("--spawn 'npx -y @agentclientprotocol/codex-acp@2.3.0'"));
     }
 

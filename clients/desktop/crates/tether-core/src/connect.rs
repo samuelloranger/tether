@@ -122,6 +122,14 @@ pub trait Connection: Send {
     ) -> impl Future<Output = Result<(), ConnectError>> + Send;
     fn start_keepalive(&mut self, every: Duration);
     fn exec(&self, command: &str) -> impl Future<Output = Result<String, ConnectError>> + Send;
+    /// `exec` with its own deadline, for a command that legitimately runs long.
+    fn exec_within(
+        &self,
+        command: &str,
+        _within: Duration,
+    ) -> impl Future<Output = Result<String, ConnectError>> + Send {
+        self.exec(command)
+    }
 }
 
 #[derive(Debug, Clone)]

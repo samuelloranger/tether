@@ -15,6 +15,11 @@ use crate::terminal::status::ConnStatus;
 impl TerminalModel {
     pub fn set_chat_files(&mut self, files: ChatFiles) {
         self.chats = Chats::new(Some(files), &self.machine.host);
+        self.chats.label = self.machine.name.clone();
+    }
+
+    pub fn set_chat_mcp(&mut self, library: super::chat::McpLibrary) {
+        self.chats.set_mcp(library);
     }
 
     pub fn set_chat_defaults(&mut self, defaults: ChatDefaults) {
@@ -22,6 +27,10 @@ impl TerminalModel {
     }
 
     /// `scope` is `host:port`, the key the options cache is stored under.
+    pub fn set_chat_managed(&mut self, state: tether_core::acp::versions::ManagedState) {
+        self.chats.set_managed(state);
+    }
+
     pub fn set_chat_options(&mut self, cache: OptionsCache, scope: &str, last_agent: &str) {
         self.chats.set_options_cache(cache, scope, last_agent);
     }
@@ -127,6 +136,13 @@ impl TerminalModel {
                     options,
                 }));
             }
+        }
+        if out.managed_support.is_some() || out.update_dismissed.is_some() {
+            fx.push(Effect::Ui(UiEffect::ChatManaged {
+                scope: self.chats.scope().to_string(),
+                supported: out.managed_support,
+                dismissed: out.update_dismissed,
+            }));
         }
         if let Some(agent) = out.picked_agent {
             fx.push(Effect::Ui(UiEffect::RememberChatAgent(agent)));

@@ -15,11 +15,13 @@ use tether_core::acp::host::{self, ChatSummary};
 use tether_core::acp::images::ImageAttachment;
 use tether_core::acp::message::{AcpId, ConfigOption};
 use tether_core::acp::options::{OptionsCache, OptionsDraft, StartOptions};
+use tether_core::acp::versions::{Kind, ManagedState};
 use tether_core::acp::workflows;
 use tether_core::connect::ConnectError;
 
 #[cfg(debug_assertions)]
 mod devsample;
+mod mcp;
 mod newchat;
 mod organization;
 mod rows;
@@ -27,7 +29,8 @@ mod screen;
 mod session;
 pub mod view;
 
-pub use newchat::NewChat;
+pub use mcp::McpLibrary;
+pub use newchat::{NewChat, NoticeRow};
 use session::Session;
 pub use view::{ChatScreen, Pixels};
 
@@ -74,8 +77,23 @@ pub enum ExecTag {
     },
     /// The host check the New chat dialog runs as it opens, to dim the agents the host can't run.
     AgentProbe,
+    /// The host's agent versions, read as the New chat dialog opens and after an update.
+    Versions {
+        request: u64,
+    },
     /// The words a running turn shows (see `acp::verbs`).
     Verbs,
+}
+
+impl ExecTag {
+    /// The longest the command may take, when the default is too short.
+    pub fn deadline(&self) -> Option<Duration> {
+        match self {
+            Self::NewChat { step, .. } => step.deadline(),
+            Self::Versions { .. } => newchat::Step::Versions.deadline(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +231,8 @@ pub enum ChatMsg {
     SignInRetry,
     DismissNotice,
     Reconnect,
+    /// Resume on an ended chat.
+    Resume,
     DraftEdited {
         text: String,
         cursor_byte: usize,
@@ -280,8 +300,30 @@ pub enum ChatMsg {
         value: String,
     },
     NewChatReset,
+    /// Update on the New chat dialog's notice: the one thing that starts an adapter update.
+    NewChatUpdate(Kind),
+    /// Not now on that notice.
+    NewChatDismissUpdate(Kind),
+    /// Copy on a notice for an update the user runs themselves.
+    NewChatCopy(String),
     NewChatContinue(String),
     NewChatRetry,
+    /// The trash on a saved conversation of the Continue list: asks first.
+    NewChatDelete(String),
+    NewChatDeleteConfirm,
+    NewChatDeleteCancel,
+    /// The extra-folder row's text, added to the chat's folders.
+    NewChatAddFolder(String),
+    NewChatRemoveFolder(usize),
+    NewChatToggleServer(String),
+    /// Opens or closes the Add server form.
+    NewChatServerForm(bool),
+    NewChatSaveServer {
+        name: String,
+        url: String,
+        headers: String,
+    },
+    NewChatDeleteServer(String),
     /// Esc with the chat in front: the topmost overlay closes.
     Escape,
     // From the driver.
@@ -341,6 +383,10 @@ pub struct Out {
     pub options_seen: Vec<(String, Vec<ConfigOption>)>,
     /// The agent a chat was just started with: the next dialog opens on it.
     pub picked_agent: Option<String>,
+    /// Whether the host manages agent versions, when that answer changed.
+    pub managed_support: Option<bool>,
+    /// An update notice dismissed: `(kind, agent key, version)`.
+    pub update_dismissed: Option<(Kind, String, String)>,
 }
 
 /// Chats kept connected while another chat or the terminal is in front. Each one holds an ACP
@@ -349,6 +395,7 @@ pub const LIVE_CHATS: usize = 4;
 
 pub struct Chats {
     files: Option<ChatFiles>,
+    mcp: Option<McpLibrary>,
     actions: Option<String>,
     rename: Option<String>,
     branch_dialog: Option<organization::BranchDialog>,
@@ -365,11 +412,14 @@ pub struct Chats {
     organization_error: String,
     defaults: ChatDefaults,
     options_cache: OptionsCache,
+    managed: ManagedState,
     /// The host as the options cache and the chat files name it (`host:port`).
     scope: String,
     last_agent: String,
     /// The host as messages name it.
     host: String,
+    /// The machine's own name, for the header's "folder on host".
+    pub(super) label: String,
     listed: Vec<ChatSummary>,
     /// Chats started here that the host has not listed yet.
     provisional: Vec<ChatSummary>,
@@ -387,6 +437,7 @@ pub struct Chats {
     delete_prompt: Option<String>,
     controls_open: bool,
     bypass: Option<(String, String)>,
+    diff_counts: tether_core::acp::turns::DiffCounts,
     review: bool,
     /// The Workflow call whose run the sheet shows.
     workflow_open: Option<String>,
@@ -410,6 +461,10 @@ pub struct Chats {
 }
 
 impl Chats {
+    pub fn set_mcp(&mut self, library: McpLibrary) {
+        self.mcp = Some(library);
+    }
+
     pub fn set_defaults(&mut self, defaults: ChatDefaults) {
         self.defaults = defaults;
     }
@@ -418,6 +473,15 @@ impl Chats {
         self.options_cache = cache;
         self.scope = scope.to_string();
         self.last_agent = last_agent.to_string();
+    }
+
+    pub fn set_managed(&mut self, state: ManagedState) {
+        self.managed = state;
+    }
+
+    /// The host manages agent versions: Claude and Codex chats spawn `tether acp agent …`.
+    pub fn managed_host(&self) -> bool {
+        self.managed.supported(&self.scope) == Some(true)
     }
 
     pub fn remember(&mut self, agent: &str, id: &str, value: &str) {
@@ -457,6 +521,7 @@ impl Chats {
     pub fn new(files: Option<ChatFiles>, host: &str) -> Self {
         Self {
             files,
+            mcp: None,
             actions: None,
             rename: None,
             branch_dialog: None,
@@ -472,9 +537,11 @@ impl Chats {
             organization_error: String::new(),
             defaults: ChatDefaults::default(),
             options_cache: OptionsCache::default(),
+            managed: ManagedState::default(),
             scope: host.to_string(),
             last_agent: String::new(),
             host: host.to_string(),
+            label: host.to_string(),
             listed: Vec::new(),
             provisional: Vec::new(),
             status_supported: true,
@@ -489,6 +556,7 @@ impl Chats {
             delete_prompt: None,
             controls_open: false,
             bypass: None,
+            diff_counts: Default::default(),
             review: false,
             workflow_open: None,
             workflow_redrawn: Duration::ZERO,
@@ -775,6 +843,8 @@ impl Chats {
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
+        // A bypass confirmation belongs to the chat it was raised in.
+        self.bypass = None;
         self.follow_seq += 1;
         self.focus_seq += 1;
         self.draft_seq += 1;
@@ -822,6 +892,7 @@ impl Chats {
         multi: bool,
         agent: &'static AgentProfile,
         start: StartOptions,
+        setup: tether_core::acp::journal::Journal,
         now: Duration,
         out: &mut Out,
     ) {
@@ -829,6 +900,12 @@ impl Chats {
             && let Err(e) = files.set_agent(&name, agent.key)
         {
             tracing::warn!("chat agent not saved: {e}");
+        }
+        if setup != tether_core::acp::journal::Journal::default()
+            && let Some(files) = &self.files
+            && let Err(e) = files.save_journal(&name, &setup)
+        {
+            tracing::warn!("chat setup not saved: {e}");
         }
         self.last_agent = agent.key.to_string();
         out.picked_agent = Some(agent.key.to_string());
@@ -839,7 +916,7 @@ impl Chats {
             log_bytes: 0,
             cwd: cwd.clone(),
             created,
-            spawn: agent.spawn.to_string(),
+            spawn: agent.spawn_for(self.managed_host()).to_string(),
             turn: host::HostTurn::Idle,
             host_title: None,
             has_status: false,
@@ -878,6 +955,9 @@ impl Chats {
         // and `TETHER_DEV_CHAT_WORKFLOW_OPEN` opens its sheet.
         let workflow = crate::app::dev_env("TETHER_DEV_CHAT_WORKFLOW");
         let mut state = devsample::state(workflow.is_some());
+        if let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_ASK") {
+            devsample::ask(&mut state, &kind);
+        }
         if let Some(files) = &self.files {
             for item in &mut state.items {
                 if let tether_core::acp::reducer::ItemKind::Card(card) = &mut item.kind {
@@ -897,6 +977,9 @@ impl Chats {
             }
         }
         sample.dev_state(state, now);
+        if crate::app::dev_env("TETHER_DEV_CHAT_ENDED").is_some() {
+            sample.dev_ended();
+        }
         if let Some(kind) = &workflow {
             let wall = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1021,7 +1104,17 @@ impl Chats {
     pub fn open_new_chat(&mut self, mode: u8, folder: String, now: Duration, out: &mut Out) {
         self.dirty = true;
         let agent = agent::by_key(&self.last_agent).unwrap_or(&CLAUDE);
-        self.new_chat = Some(NewChat::open(mode, folder, agent, self.draft_for(agent)));
+        let mut nc = NewChat::open(mode, folder, agent, self.draft_for(agent));
+        nc.saved_servers = self.mcp.as_ref().map(McpLibrary::list).unwrap_or_default();
+        nc.set_managed(&self.scope, self.managed.clone());
+        self.new_chat = Some(nc);
+        #[cfg(debug_assertions)]
+        if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
+            && let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_UPDATE")
+            && let Some(nc) = self.new_chat.as_mut()
+        {
+            nc.preview_update(&kind);
+        }
         #[cfg(debug_assertions)]
         if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
             && let Some(state) = crate::app::dev_env("TETHER_DEV_CHAT_FOLDER_STATE")
@@ -1029,7 +1122,19 @@ impl Chats {
         {
             nc.preview_folder(&state);
         }
+        #[cfg(debug_assertions)]
+        if crate::app::dev_env("TETHER_DEV_CHAT_SAMPLE").is_some()
+            && let Some(kind) = crate::app::dev_env("TETHER_DEV_CHAT_NC")
+            && let Some(nc) = self.new_chat.as_mut()
+        {
+            nc.preview_folder("ready");
+            nc.preview_setup(&kind);
+            return;
+        }
         out.jobs.push(newchat::probe_job());
+        if let Some(nc) = self.new_chat.as_mut() {
+            out.jobs.push(nc.versions_job());
+        }
         if let Some(job) = self.new_chat.as_mut().and_then(|n| n.reload(now)) {
             out.jobs.push(job);
         }
@@ -1044,6 +1149,8 @@ impl Chats {
         self.controls_open = false;
         self.review = false;
         self.workflow_open = None;
+        // A bypass confirmation belongs to the chat it was raised in.
+        self.bypass = None;
         self.viewer = None;
         self.dirty = true;
     }
@@ -1136,6 +1243,20 @@ impl Chats {
                     nc.options.pick(&id, &value);
                 }
             }
+            ChatMsg::NewChatUpdate(kind) => {
+                if let Some(job) = self.new_chat.as_mut().and_then(|n| n.start_update(kind)) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatDismissUpdate(kind) => {
+                if let Some((kind, agent, version)) =
+                    self.new_chat.as_mut().and_then(|n| n.dismiss_update(kind))
+                {
+                    self.managed.dismiss(&self.scope, kind, &agent, &version);
+                    out.update_dismissed = Some((kind, agent, version));
+                }
+            }
+            ChatMsg::NewChatCopy(text) => out.clipboard = Some(text),
             ChatMsg::NewChatReset => {
                 if let Some(nc) = self.new_chat.as_mut() {
                     nc.options.reset();
@@ -1156,9 +1277,68 @@ impl Chats {
                     out.jobs.push(job);
                 }
             }
+            ChatMsg::NewChatDelete(id) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.ask_delete(id);
+                }
+            }
+            ChatMsg::NewChatDeleteCancel => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.cancel_delete();
+                }
+            }
+            ChatMsg::NewChatDeleteConfirm => {
+                if let Some(job) = self.new_chat.as_mut().and_then(NewChat::confirm_delete) {
+                    out.jobs.push(job);
+                }
+            }
+            ChatMsg::NewChatAddFolder(text) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.add_folder(&text);
+                }
+            }
+            ChatMsg::NewChatRemoveFolder(i) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.remove_folder(i);
+                }
+            }
+            ChatMsg::NewChatToggleServer(name) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.toggle_server(&name);
+                }
+            }
+            ChatMsg::NewChatServerForm(open) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.set_adding_server(open);
+                }
+            }
+            ChatMsg::NewChatSaveServer { name, url, headers } => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.save_server(&name, &url, &headers, self.mcp.as_ref());
+                }
+            }
+            ChatMsg::NewChatDeleteServer(name) => {
+                if let Some(nc) = self.new_chat.as_mut() {
+                    nc.delete_server(&name, self.mcp.as_ref());
+                }
+            }
             ChatMsg::NewChatContinue(id) => {
                 if let Some(job) = self.new_chat.as_mut().and_then(|n| n.start(Some(id))) {
                     out.jobs.push(job);
+                }
+            }
+            ChatMsg::ExecDone {
+                tag: ExecTag::Versions { request },
+                result,
+            } => {
+                let Some(nc) = self.new_chat.as_mut() else {
+                    return;
+                };
+                if let newchat::Next::Support(supported) =
+                    nc.on_exec(request, newchat::Step::Versions, result, &self.host)
+                {
+                    self.managed.set_supported(&self.scope, supported);
+                    out.managed_support = Some(supported);
                 }
             }
             ChatMsg::ExecDone {
@@ -1179,16 +1359,40 @@ impl Chats {
                 match nc.on_exec(request, step, result, &self.host) {
                     newchat::Next::Nothing => {}
                     newchat::Next::Job(job) => out.jobs.push(job),
+                    newchat::Next::Support(supported) => {
+                        self.managed.set_supported(&self.scope, supported);
+                        out.managed_support = Some(supported);
+                    }
+                    newchat::Next::Options(options) => {
+                        // chat_out stores it in the model's own cache and saves it.
+                        let agent = nc.agent;
+                        let mut cache = self.options_cache.clone();
+                        if cache.store(&self.scope, agent.key, &options) {
+                            out.options_seen.push((agent.key.to_string(), options));
+                        }
+                        nc.options.refresh(
+                            agent,
+                            &self.defaults,
+                            cache.get(&self.scope, agent.key),
+                        );
+                    }
                     newchat::Next::Open {
                         cwd,
                         load,
                         multi,
                         agent,
                         start,
+                        dirs,
+                        mcp,
                     } => {
                         self.new_chat = None;
                         let name = host::new_chat_name();
-                        self.open_route(name, cwd, load, multi, agent, start, now, out);
+                        let setup = tether_core::acp::journal::Journal {
+                            additional_directories: dirs,
+                            mcp_servers: mcp,
+                            ..Default::default()
+                        };
+                        self.open_route(name, cwd, load, multi, agent, start, setup, now, out);
                     }
                 }
             }
@@ -1479,6 +1683,11 @@ impl Chats {
         if self.delete_prompt.take().is_some() {
             return;
         }
+        if let Some(nc) = self.new_chat.as_mut()
+            && (nc.delete_asked.take().is_some() || std::mem::take(&mut nc.adding_server))
+        {
+            return;
+        }
         if self.new_chat.take().is_some() {
             return;
         }
@@ -1539,6 +1748,8 @@ impl Chats {
             files: self.files.as_ref(),
             connected: self.connected,
             defaults: &self.defaults,
+            mcp: self.mcp.as_ref(),
+            managed: self.managed.supported(&self.scope) == Some(true),
         }
     }
 
@@ -1557,6 +1768,8 @@ impl Chats {
                 files: self.files.as_ref(),
                 connected: self.connected,
                 defaults: &self.defaults,
+                mcp: self.mcp.as_ref(),
+                managed: self.managed_host(),
             };
             f(&mut s, &mut ctx)
         };

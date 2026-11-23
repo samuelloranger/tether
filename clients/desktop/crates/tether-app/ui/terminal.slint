@@ -146,7 +146,7 @@ component Lamp inherits Rectangle {
     in property <int> lamp;
     in property <bool> flashing;
     width: 8px; height: 8px; border-radius: 4px;
-    background: lamp == 0 ? Tokens.warning : lamp == 1 ? Tokens.success : Tokens.danger;
+    background: lamp == 0 ? Tokens.warning : lamp == 1 ? Tokens.text-faint : Tokens.danger;
     opacity: flashing ? 0.25 : 1;
     animate opacity { duration: 90ms; }
 }
@@ -159,7 +159,7 @@ component ProgressBar inherits Rectangle {
         x: 0; height: parent.height;
         // Indeterminate is a steady partial bar: the chrome has no looping motion (DESIGN.md).
         width: state == 2 ? parent.width * 0.4 : parent.width * value;
-        background: state == 1 ? Tokens.danger : state == 3 ? Tokens.warning : Tokens.accent;
+        background: state == 1 ? Tokens.danger : state == 3 ? Tokens.warning : Tokens.text-secondary;
         opacity: state == 2 ? 0.6 : 1;
     }
 }
@@ -208,10 +208,14 @@ component SidebarAction inherits Rectangle {
 component SectionHeader inherits HorizontalLayout {
     in property <string> text;
     callback add(length, length);
+    in property <int> count: -1;
     height: 26px;
     padding-left: 8px;
     padding-top: 6px;
-    Text { horizontal-stretch: 1; text: root.text; font-size: 10.5px; font-weight: 650; letter-spacing: 0.6px; color: Tokens.text-faint; vertical-alignment: center; }
+    spacing: 6px;
+    Text { text: root.text; font-size: 12px; font-weight: 500; color: Tokens.text-secondary; vertical-alignment: center; }
+    if root.count >= 0: Text { text: root.count; font-size: 12px; color: Tokens.text-faint; vertical-alignment: center; }
+    Rectangle { horizontal-stretch: 1; }
     plus := Rectangle {
         width: 22px;
         border-radius: 6px;
@@ -243,7 +247,7 @@ component ChatSectionRow inherits Rectangle {
         if root.side.detail != "": Text { max-width: 90px; text: root.side.detail; color: Tokens.text-faint; font-size: 10.5px; vertical-alignment: center; overflow: elide; }
         Text { text: "· " + root.side.count; color: Tokens.text-faint; font-size: 11px; vertical-alignment: center; }
         Rectangle { horizontal-stretch: 1; }
-        if root.side.waiting && root.side.collapsed: VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: Tokens.accent; } }
+        if root.side.waiting && root.side.collapsed: VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: Tokens.text; } }
         if root.side.empty: Rectangle {
             width: 22px;
             border-radius: 6px;
@@ -293,7 +297,7 @@ component TermRow inherits Rectangle {
             font-size: 11px;
             vertical-alignment: center;
         }
-        if root.tab.attention: TextDot { ink: Tokens.warning; line-height: name.preferred-height; }
+        if root.tab.attention: TextDot { ink: Tokens.text; line-height: name.preferred-height; }
         if root.tab.agent-state >= 0: AgentChip { state: root.tab.agent-state; label: root.tab.agent-label; }
         if touch.has-hover || close-touch.has-hover: Rectangle { width: 16px; }
     }
@@ -359,7 +363,7 @@ component Sidebar inherits Rectangle {
                 Text {
                     text: TerminalVm.word;
                     font-size: 11.5px;
-                    color: TerminalVm.lamp == 0 ? Tokens.warning : TerminalVm.lamp == 1 ? Tokens.success : Tokens.danger;
+                    color: Tokens.text-secondary;
                 }
             }
             VerticalLayout { alignment: center; SideIcon { icon: @image-url("icons/sidebar.svg"); tooltip: "Hide sidebar · Ctrl+Shift+B"; clicked => { TerminalVm.toggle-sidebar(); } } }
@@ -373,7 +377,8 @@ component Sidebar inherits Rectangle {
                 alignment: start;
                 spacing: 2px;
                 SectionHeader {
-                    text: "TERMINALS";
+                    text: "Terminals";
+                    count: TerminalVm.tabs.length > 0 ? TerminalVm.tabs.length : -1;
                     add(x, y) => { TerminalVm.new-session(); }
                 }
                 for tab in TerminalVm.tabs: TermRow { tab: tab; picked => { root.picked(); } }
@@ -395,7 +400,7 @@ component Sidebar inherits Rectangle {
                             reject
                         }
                     }
-                    Image { x: 8px; y: (parent.height - self.height) / 2; source: @image-url("icons/terminal.svg"); colorize: Tokens.accent; width: 14px; height: 14px; }
+                    Image { x: 8px; y: (parent.height - self.height) / 2; source: @image-url("icons/terminal.svg"); colorize: Tokens.text-secondary; width: 14px; height: 14px; }
                 }
                 if TerminalVm.tabs.length == 0 && !TerminalVm.naming: Text {
                     x: 8px;
@@ -406,7 +411,8 @@ component Sidebar inherits Rectangle {
                     vertical-alignment: center;
                 }
                 SectionHeader {
-                    text: "PROJECTS";
+                    text: "Chats";
+                    count: ChatVm.tabs.length > 0 ? ChatVm.tabs.length : -1;
                     add(x, y) => {
                         ChatVm.add-menu-x = x;
                         ChatVm.add-menu-y = y;
@@ -459,7 +465,7 @@ component PaneHeader inherits Rectangle {
         if !root.docked: Text {
             text: TerminalVm.word;
             font-size: 11.5px;
-            color: TerminalVm.lamp == 0 ? Tokens.warning : TerminalVm.lamp == 1 ? Tokens.success : Tokens.danger;
+            color: Tokens.text-secondary;
             vertical-alignment: center;
         }
         if ChatVm.active: ChatTitleBlock { horizontal-stretch: 1; prefix: root.prefix; }
@@ -495,16 +501,10 @@ component PaneHeader inherits Rectangle {
         IconButton { icon: @image-url("icons/git.svg"); tooltip: "Git"; active: GitVm.open; clicked => { GitVm.toggle(); } }
         if !root.docked: IconButton { icon: @image-url("icons/gear.svg"); tooltip: "Settings"; clicked => { TerminalVm.settings(); } }
     }
-    // A chat's context in use, as a 3 px rule under the header; otherwise a hairline.
     Rectangle {
         y: parent.height - self.height;
-        height: ChatVm.active && ChatVm.context >= 0 ? 3px : 1px;
+        height: 1px;
         background: Tokens.border;
-        if ChatVm.active && ChatVm.context >= 0: Rectangle {
-            x: 0;
-            width: parent.width * clamp(ChatVm.context, 0, 1);
-            background: Tokens.accent;
-        }
     }
 }
 
@@ -712,6 +712,7 @@ export component TerminalPage inherits Rectangle {
             drop-shadow-blur: 16px; drop-shadow-color: #00000080; drop-shadow-offset-y: 4px;
             pop-items := VerticalLayout {
                 padding: 4px;
+                if ChatVm.actions-active: MenuItem { text: "Session settings"; clicked => { ChatVm.actions-close(); ChatVm.controls(); } }
                 MenuItem { text: pop.pinned ? "Unpin" : "Pin"; clicked => { ChatVm.pin(pop.name); } }
                 MenuItem { text: "Rename\u{2026}"; clicked => { ChatVm.rename(pop.name); } }
                 MenuItem { text: pop.archived ? "Restore" : "Archive"; clicked => { if (pop.archived) { ChatVm.restore(pop.name); } else { ChatVm.archive(pop.name); } } }

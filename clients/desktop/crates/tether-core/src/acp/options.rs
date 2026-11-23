@@ -119,6 +119,26 @@ impl OptionsDraft {
         }
     }
 
+    /// The menus follow a newer cache while the dialog is open; what the user already picked stays.
+    pub fn refresh(
+        &mut self,
+        agent: &AgentProfile,
+        defaults: &ChatDefaults,
+        cached: &[ConfigOption],
+    ) {
+        let mut fresh = Self::new(agent, defaults, cached);
+        if self.reset {
+            fresh.reset();
+        } else {
+            for (id, value) in &self.values {
+                if self.base.get(id) != Some(value) {
+                    fresh.pick(id, value);
+                }
+            }
+        }
+        *self = fresh;
+    }
+
     /// There are choices to show; before the agent's first chat on this host there are none.
     pub fn has_choices(&self) -> bool {
         !self.cached.is_empty()
@@ -262,6 +282,37 @@ mod tests {
             ),
             option("other", "x", &[("x", "X")]),
         ]
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_users_picks_and_takes_the_new_choices() {
+        let defaults = ChatDefaults::default();
+        let mut draft = OptionsDraft::new(&CLAUDE, &defaults, &claude_options());
+        assert!(draft.pick("model", "opus"));
+        let mut newer = claude_options();
+        newer[1] = option(
+            "model",
+            "sonnet",
+            &[("sonnet", "Sonnet"), ("opus", "Opus"), ("haiku", "Haiku")],
+        );
+        draft.refresh(&CLAUDE, &defaults, &newer);
+        let rows = draft.rows();
+        let model = rows.iter().find(|r| r.id == "model").unwrap();
+        assert_eq!(model.value, "opus");
+        assert!(model.changed);
+        assert_eq!(model.choices.len(), 3);
+        let effort = rows.iter().find(|r| r.id == "effort").unwrap();
+        assert!(!effort.changed);
+
+        draft.reset();
+        draft.refresh(&CLAUDE, &defaults, &newer);
+        assert!(draft.is_reset());
+
+        let mut gone = OptionsDraft::new(&CLAUDE, &defaults, &claude_options());
+        gone.pick("model", "opus");
+        let without_opus = vec![option("model", "sonnet", &[("sonnet", "Sonnet")])];
+        gone.refresh(&CLAUDE, &defaults, &without_opus);
+        assert_eq!(gone.rows()[0].value, "sonnet");
     }
 
     #[test]

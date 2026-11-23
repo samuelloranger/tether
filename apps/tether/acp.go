@@ -53,6 +53,8 @@ type acpMeta struct {
 	Tasks int    `json:"tasks,omitempty"`
 	// MultiClient is set by a daemon that lets several clients attach and echoes named ones.
 	MultiClient bool `json:"multiClient,omitempty"`
+	// AgentVersion is the adapter version a `tether acp agent` spawn started with; it holds for the chat's life.
+	AgentVersion string `json:"agentVersion,omitempty"`
 }
 
 func acpDir(name string) string { return filepath.Join(home(), "acp", name) }
@@ -107,7 +109,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|projects|usage|kill")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|projects|usage|kill|agent|options|versions|update")
 	}
 	switch args[0] {
 	case "attach":
@@ -138,6 +140,14 @@ func runACP(args []string) error {
 		return acpProjects(args[1:], os.Stdout)
 	case "usage":
 		return acpUsage(args[1:], os.Stdout)
+	case "agent":
+		return runACPAgent(args[1:])
+	case "options":
+		return acpOptions(args[1:], os.Stdout)
+	case "versions":
+		return acpVersions(args[1:], os.Stdout)
+	case "update":
+		return acpUpdate(args[1:], os.Stdout)
 	case "kill":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: acp kill <name>")
@@ -149,7 +159,7 @@ func runACP(args []string) error {
 
 func acpAttach(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: acp attach <name> [--spawn CMD] [--cwd DIR] [--from N] [--linger D] [--client ID]")
+		return fmt.Errorf("usage: acp attach <name> [--spawn CMD] [--cwd DIR] [--from N] [--linger D] [--client ID] [--revive]")
 	}
 	name := args[0]
 	fs := flag.NewFlagSet("acp attach", flag.ContinueOnError)
@@ -158,6 +168,7 @@ func acpAttach(args []string) error {
 	from := fs.Int64("from", 0, "byte offset in out.log to resume from")
 	linger := fs.Duration("linger", 0, "after stdin EOF, keep following output until idle this long")
 	client := fs.String("client", "", "names this client in the log so the other attached clients see what it sends")
+	revive := fs.Bool("revive", false, "with --spawn, restart the agent of an ended session and keep its log")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -176,14 +187,20 @@ func acpAttach(args []string) error {
 	if err != nil && !errors.Is(err, errNoSession) {
 		return err
 	}
-	if m != nil && m.State == "ended" {
+	if *revive && m == nil {
+		return errNoSession
+	}
+	if m != nil && m.State == "ended" && (!*revive || *spawn == "") {
 		return replayEnded(name, *from, os.Stdout, os.Stderr)
 	}
 	if m == nil || !metaRunning(m) {
 		if *spawn == "" {
 			return errNoSession
 		}
-		if m, err = spawnACPDaemon(name, *spawn, *cwd); err != nil {
+		if *revive && m.EndedReason == "log-limit" {
+			return fmt.Errorf("this chat's log is full; start a new chat")
+		}
+		if m, err = spawnACPDaemon(name, *spawn, *cwd, *revive); err != nil {
 			return err
 		}
 	}
@@ -274,10 +291,14 @@ func attachConn(sock string, from int64, linger time.Duration, name, client stri
 	return errReplaced
 }
 
-func spawnACPDaemon(name, spawn, cwd string) (*acpMeta, error) {
+// spawnACPDaemon starts a fresh session; with keepLog it restarts an ended one on its old log,
+// so clients keep their offsets and the transcript continues.
+func spawnACPDaemon(name, spawn, cwd string, keepLog bool) (*acpMeta, error) {
 	dir := acpDir(name)
-	if err := os.RemoveAll(dir); err != nil {
-		return nil, err
+	if !keepLog {
+		if err := os.RemoveAll(dir); err != nil {
+			return nil, err
+		}
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -460,7 +481,7 @@ func acpDaemon(name string) error {
 		return err
 	}
 
-	cmd := exec.Command(acpShell(), "-lc", m.Spawn)
+	cmd := exec.Command(acpShell(), "-lc", withSelf(m.Spawn))
 	cmd.Dir = m.Cwd
 	cmd.Env = acpAgentEnv(os.Environ(), name)
 	cmd.Stderr = errf
@@ -475,7 +496,12 @@ func acpDaemon(name string) error {
 	}
 	cmd.Stdout = pw
 
+	var size int64
+	if st, err := logf.Stat(); err == nil {
+		size = st.Size()
+	}
 	s := &acpDaemonState{
+		size:   size,
 		notify: make(chan struct{}), live: map[*acpClient]struct{}{}, stdin: stdin, log: logf, errf: errf,
 		tr: loadACPTracker(name), meta: m, activity: time.Now(), copilot: isCopilotSpawn(m.Spawn),
 		push: func(c PushContent, collapse string) error { return sendPush(c, collapse, false) },
@@ -484,6 +510,9 @@ func acpDaemon(name string) error {
 	pw.Close()
 	m.Pid = os.Getpid()
 	m.MultiClient = true
+	if a, ok := lookupManagedAgent(managedSpawnKey(m.Spawn)); ok {
+		m.AgentVersion = a.running()
+	}
 	if startErr == nil {
 		m.AgentPid = cmd.Process.Pid
 		s.agentPid = m.AgentPid

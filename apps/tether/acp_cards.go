@@ -12,7 +12,7 @@ var chatCardsSource string
 const chatCardInstructions = "You are answering inside Tether, which renders native weather, image and Docker cards. Use the tether-cards MCP tool tether_publish_card whenever these make your answer clearer; do not wait for the user to request a card format. Fetch real data with your existing tools first, or clearly label supplied test observations. The tool only presents data and does not grant data access. Keep surrounding prose concise and useful. Refresh existing card IDs with a higher revision. Card action requests must follow your normal permission policy and target verification."
 
 func supportsChatCards(spawn string) bool {
-	return strings.Contains(spawn, "claude-agent-acp") || strings.Contains(spawn, "codex-acp")
+	return strings.Contains(spawn, "claude-agent-acp") || strings.Contains(spawn, "codex-acp") || managedSpawnKey(spawn) != ""
 }
 
 // The holder owns registration, so old and new native clients get the same tools.
@@ -23,7 +23,7 @@ func withChatCards(line []byte, spawn string) []byte {
 	}
 	var method string
 	_ = json.Unmarshal(msg["method"], &method)
-	if method != "session/new" && method != "session/load" && method != "session/resume" {
+	if method != "session/new" && method != "session/load" && method != "session/resume" && method != "session/fork" {
 		return line
 	}
 	var params map[string]any

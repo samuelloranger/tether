@@ -14,13 +14,15 @@ enum ACPHostCommand {
   /// `--spawn` only starts an agent when the host has none for the name; a resume leaves it off so
   /// a lost holder never starts a fresh agent under a journal that names the old session.
   /// `client` names this client to a holder that takes several, so the others see what it sends.
+  /// `revive` restarts the agent of an ended chat on its old log; the client then resumes the session.
   static func attach(
     name: String, cwd: String, spawn: Bool, from offset: Int = 0, client: String? = nil,
-    spawnCommand: String = ACPHostCommand.spawnCommand
+    spawnCommand: String = ACPHostCommand.spawnCommand, revive: Bool = false
   ) -> String {
     var command = "\(prefix) attach \(shellQuote(name)) --from \(offset)"
     if let client { command += " --client \(shellQuote(client))" }
     if spawn { command += " --spawn \(shellQuote(spawnCommand)) --cwd \(shellQuote(cwd))" }
+    if spawn, revive { command += " --revive" }
     return command
   }
 
@@ -34,9 +36,17 @@ enum ACPHostCommand {
 
   /// Earlier conversations in `cwd`, newest first, as JSON lines. Runs the adapter briefly on the host.
   /// Claude's adapter is the host tool's default, so only another agent names its spawn command.
-  static func sessions(cwd: String, limit: Int, agent: ChatAgentProfile = ChatAgents.claude) -> String {
-    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.spawn))"
+  static func sessions(cwd: String, limit: Int, agent: ChatAgentProfile = ChatAgents.claude, managed: Bool = false) -> String {
+    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.command(managed: managed)))"
     return "\(prefix) sessions \(shellQuote(cwd)) --limit \(limit)\(agentFlag) 2>&1"
+  }
+
+  /// Deletes a saved conversation through the agent's `session/delete`; prints `{"deleted":id}`.
+  static func deleteSession(
+    cwd: String, sessionId: String, agent: ChatAgentProfile = ChatAgents.claude, managed: Bool = false
+  ) -> String {
+    let agentFlag = agent.key == ChatAgents.claude.key ? "" : " --agent-cmd \(shellQuote(agent.command(managed: managed)))"
+    return "\(prefix) sessions \(shellQuote(cwd)) --delete \(shellQuote(sessionId))\(agentFlag) 2>&1"
   }
 
   static func kill(name: String) -> String { "\(prefix) kill \(shellQuote(name))" }
@@ -148,6 +158,9 @@ struct ChatRoute: Hashable, Identifiable {
   var customTitle: String?
   /// This device starts the chat (a new one or a Continue), so it records the agent; an existing or joined chat leaves that to the host.
   var startedHere = false
+  /// The New chat sheet's extra folders (absolute) and picked MCP server names.
+  var extraDirectories: [String] = []
+  var mcpServerNames: [String] = []
   var agentToRecord: ChatAgentProfile? { startedHere ? ChatAgents.profile(forKey: agentKey) : nil }
   var id: String { name }
 
@@ -329,6 +342,15 @@ extension ChatPermissionOptions {
     let reject = ordered.first { $0.role == .destructive }?.option
     let rest = ordered.map(\.option).filter { $0.optionId != primary?.optionId && $0.optionId != reject?.optionId }
     return Layout(primary: primary, reject: reject, more: rest, collapsed: options.count > 3)
+  }
+
+  /// The one broader allow ("allow all edits this session") the card offers as a switch, when the
+  /// primary button is the one-off allow it widens. Never on a mode switch: its broader allows are
+  /// modes, bypass among them, and stay explicit buttons.
+  static func alwaysAllow(_ layout: Layout, kind: ACPToolKind) -> ACPPermissionOption? {
+    guard kind != .switchMode, let primary = layout.primary, primary.kind == "allow_once" else { return nil }
+    let always = layout.more.filter { $0.kind == "allow_always" }
+    return always.count == 1 ? always[0] : nil
   }
 }
 

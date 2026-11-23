@@ -33,6 +33,10 @@ struct ChatBranchPoint: Identifiable {
   var prompt: String
   var earlier: String
   var failure: String?
+  /// Set when the agent can fork its own session here; the copied text is then only a fallback.
+  var fork: ChatForkSource?
+  /// The earlier text can be copied; false when only a fork can carry it.
+  var copyable = true
   var id: Int { itemID }
 }
 
@@ -40,7 +44,9 @@ enum ChatBranching {
   /// Only committed conversation text before the chosen prompt is carried into a fresh agent.
   /// `inherited` is the branch context the current chat itself started from; it is not in `items`.
   /// Tool approvals, executable requests and hidden thoughts never become replayed instructions.
-  static func point(items: [ChatItem], at id: Int, queued: Set<Int> = [], inherited: String = "") -> ChatBranchPoint? {
+  static func point(
+    items: [ChatItem], at id: Int, queued: Set<Int> = [], inherited: String = "", sessionId: String? = nil, canFork: Bool = false
+  ) -> ChatBranchPoint? {
     guard let index = items.firstIndex(where: { $0.id == id }), !queued.contains(id),
       case let .user(prompt, images, _, _) = items[index].kind, images == 0
     else { return nil }
@@ -66,7 +72,9 @@ enum ChatBranching {
     } else if (seed(earlier)?.utf8.count ?? 0) > 128 * 1024 {
       failure = "This conversation is too long to copy safely. Start a new chat with a shorter summary instead."
     } else { failure = nil }
-    return ChatBranchPoint(itemID: id, prompt: prompt, earlier: earlier, failure: failure)
+    let fork = canFork ? ChatForkSource.before(items: items, at: id, sessionId: sessionId) : nil
+    return ChatBranchPoint(
+      itemID: id, prompt: prompt, earlier: earlier, failure: fork == nil ? failure : nil, fork: fork, copyable: failure == nil)
   }
 
   static func seed(_ earlier: String) -> String? {

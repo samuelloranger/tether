@@ -1,6 +1,7 @@
 //! User-owned chat metadata and explicit text-context branches. None of these operations change files.
 
 use super::reducer::{Item, ItemKind};
+use super::session_setup::ForkSource;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +83,25 @@ pub fn branch_before(
         parent,
         context,
         draft: text.clone(),
+    })
+}
+
+/// Where a native fork of `session_id` cuts: after the last assistant message before the selected
+/// prompt. None (copy the text instead) with no session, no earlier assistant message, or one
+/// the agent gave no id.
+pub fn fork_source_before(
+    items: &[Item],
+    selected: i64,
+    session_id: Option<&str>,
+) -> Option<ForkSource> {
+    let index = items.iter().position(|i| i.id == selected)?;
+    let message_id = items[..index].iter().rev().find_map(|i| match &i.kind {
+        ItemKind::Assistant { message_id, .. } => Some(message_id.clone()),
+        _ => None,
+    })??;
+    Some(ForkSource {
+        session_id: session_id?.to_string(),
+        message_id: Some(message_id),
     })
 }
 
@@ -365,6 +385,46 @@ mod tests {
         assert!(!b.context.contains("selected"));
         assert!(!b.context.contains("later"));
         assert_eq!(b.draft, "selected");
+    }
+    fn assistant(id: i64, message: Option<&str>) -> Item {
+        Item {
+            id,
+            kind: ItemKind::Assistant {
+                text: "a".into(),
+                message_id: message.map(String::from),
+            },
+        }
+    }
+    #[test]
+    fn the_fork_point_is_the_last_assistant_message_before_the_prompt() {
+        let items = [
+            user(1, "q1"),
+            assistant(2, Some("m1")),
+            user(3, "q2"),
+            assistant(4, Some("m2")),
+            assistant(5, Some("m2")),
+            user(6, "selected"),
+            assistant(7, Some("m3")),
+        ];
+        let source = fork_source_before(&items, 6, Some("sess")).unwrap();
+        assert_eq!(source.session_id, "sess");
+        assert_eq!(source.message_id.as_deref(), Some("m2"));
+        assert_eq!(
+            fork_source_before(&items, 3, Some("sess"))
+                .unwrap()
+                .message_id
+                .as_deref(),
+            Some("m1")
+        );
+    }
+    #[test]
+    fn no_fork_without_an_earlier_assistant_message_an_id_or_a_session() {
+        let items = [user(1, "q1"), assistant(2, None), user(3, "selected")];
+        assert!(fork_source_before(&items, 1, Some("s")).is_none());
+        assert!(fork_source_before(&items, 3, Some("s")).is_none());
+        let with_id = [assistant(2, Some("m")), user(3, "selected")];
+        assert!(fork_source_before(&with_id, 3, None).is_none());
+        assert!(fork_source_before(&with_id, 99, Some("s")).is_none());
     }
     #[test]
     fn a_branch_of_a_branch_keeps_the_inherited_context_first() {

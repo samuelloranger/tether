@@ -12,11 +12,12 @@ use crate::terminal::model::chat::view::*;
 use crate::terminal::model::chat::{ChatMsg, Pixels};
 use crate::{
     AttachmentVm, ChatCardEntryVm, ChatEntryVm, ChatImageVm, ChatRowVm, ChatSideVm, ChatTabVm,
-    ChatTaskVm, ChatVm, ChatWorkflowVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
-    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, PaletteItemVm,
-    PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm, SavedSessionVm,
-    WfAgentVm, WfPhaseVm,
+    ChatTaskVm, ChatVm, ChatWorkflowVm, ChipVm, CtlChoiceVm, CtlCommandVm, CtlOptionVm, DiffLineVm,
+    MdItemVm, MdLinkVm, MdTableCellVm, MdTableRowVm, NcChoiceVm, NcMenuVm, NcNoticeVm, NcServerVm,
+    PaletteItemVm, PermOptionVm, PlanUsageVm, QChoiceVm, QFieldVm, QueuedVm, QuotaWindowVm,
+    SavedSessionVm, WfAgentVm, WfPhaseVm,
 };
+use tether_core::acp::versions::Kind;
 
 thread_local! {
     static VIEWER_PATH: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
@@ -176,12 +177,11 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
     let mut vm = ChatEntryVm {
         key: e.key.as_str().into(),
         depth: i32::from(e.depth),
-        first: e.first,
+        rail: i32::from(e.rail),
         ..Default::default()
     };
     match &e.body {
         EntryBody::Tool {
-            icon,
             title,
             subtitle,
             state,
@@ -193,7 +193,6 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
         } => {
             vm.kind = 0;
             vm.background = *background;
-            vm.icon = *icon as i32;
             vm.title = title.as_str().into();
             vm.subtitle = subtitle.as_str().into();
             vm.state = tool_state(*state);
@@ -202,15 +201,21 @@ fn entry_vm(e: &Entry) -> ChatEntryVm {
             vm.expandable = *expandable;
             vm.open = *open;
         }
-        EntryBody::Resolved { allowed, title } => {
+        EntryBody::Resolved { title } => {
             vm.kind = 1;
-            vm.icon = if *allowed {
-                Icon::Allowed as i32
-            } else {
-                Icon::Refused as i32
-            };
-            vm.state = if *allowed { 1 } else { 3 };
             vm.title = title.as_str().into();
+        }
+        EntryBody::Fold {
+            summary,
+            failed,
+            open,
+        } => {
+            vm.kind = 8;
+            vm.title = summary.as_str().into();
+            vm.removed = *failed as i32;
+            vm.state = if *failed > 0 { 2 } else { 1 };
+            vm.open = *open;
+            vm.expandable = true;
         }
         EntryBody::Markdown { items, selectable } => {
             vm.kind = 2;
@@ -679,6 +684,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_archived_count(s.archived_count as i32);
     vm.set_organization_error(s.organization_error.as_str().into());
     let (name, title, pinned, archived) = s.actions.clone().unwrap_or_default();
+    vm.set_actions_active(s.tabs.iter().any(|t| t.active && t.name == name));
     vm.set_actions_name(name.into());
     vm.set_actions_title(title.into());
     vm.set_actions_pinned(pinned);
@@ -743,6 +749,21 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             }
             vm.set_nc_agent(i32::from(nc.agent));
             vm.set_nc_unavailable(model(nc.unavailable.clone()));
+            vm.set_nc_update_unsupported(nc.update_unsupported);
+            vm.set_nc_notices(model(
+                nc.notices
+                    .iter()
+                    .map(|n| NcNoticeVm {
+                        kind: n.kind.index(),
+                        text: n.text.as_str().into(),
+                        tone: i32::from(n.tone),
+                        busy: n.busy,
+                        update: n.update,
+                        dismiss: n.dismiss,
+                        copy: n.copy.as_str().into(),
+                    })
+                    .collect(),
+            ));
             vm.set_nc_summary(nc.summary.as_str().into());
             vm.set_nc_note(nc.note.as_str().into());
             vm.set_nc_is_reset(nc.reset);
@@ -802,6 +823,22 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_nc_busy(nc.busy);
             vm.set_nc_error(nc.error.as_str().into());
             vm.set_nc_continuing(nc.continuing);
+            vm.set_nc_delete_open(nc.delete_open);
+            vm.set_nc_extra_dirs(model(
+                nc.extra_dirs.iter().map(|d| d.as_str().into()).collect(),
+            ));
+            vm.set_nc_servers(model(
+                nc.servers
+                    .iter()
+                    .map(|s| NcServerVm {
+                        name: s.name.as_str().into(),
+                        url: s.url.as_str().into(),
+                        on: s.on,
+                    })
+                    .collect(),
+            ));
+            vm.set_nc_adding_server(nc.adding_server);
+            vm.set_nc_server_error(nc.server_error.as_str().into());
             let (listing, error, sessions) = match &nc.listing {
                 ListingView::Loading => (0, String::new(), Vec::new()),
                 ListingView::Failed(m) => (1, m.clone(), Vec::new()),
@@ -818,6 +855,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                         when: v.when.as_str().into(),
                         recent: v.recent,
                         busy: v.busy,
+                        deleting: v.deleting,
                     })
                     .collect(),
             ));
@@ -829,6 +867,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     }
     if !s.active {
         vm.set_ctl_open(false);
+        vm.set_bypass_confirm(false);
         vm.set_review_open(false);
         vm.set_wf_open(false);
         vm.set_viewer_open(false);
@@ -843,13 +882,8 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     vm.set_phase_word(h.phase_word.as_str().into());
     vm.set_agent(i32::from(h.agent));
     vm.set_agent_label(h.agent_label.as_str().into());
-    vm.set_has_status(!h.model.is_empty() || !h.mode.is_empty());
-    vm.set_model_name(h.model.as_str().into());
-    vm.set_mode_name(h.mode.as_str().into());
-    vm.set_mode_tint(i32::from(h.mode_tint));
-    vm.set_stats(h.stats.as_str().into());
-    vm.set_context(h.context.unwrap_or(-1.0));
-    vm.set_context_text(h.context_text.as_str().into());
+    vm.set_place(h.place.as_str().into());
+    vm.set_activity(i32::from(h.activity));
     vm.set_follow_seq(s.follow_seq as i32);
     vm.set_focus_seq(s.focus_seq as i32);
     vm.set_notice(s.notice.as_str().into());
@@ -924,6 +958,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
     let c = &s.composer;
     vm.set_composer_shown(c.shown);
     vm.set_banner(c.banner.as_str().into());
+    vm.set_can_resume(c.can_resume);
     vm.set_banner_icon(c.banner_icon.map_or(15, |i| i as i32));
     vm.set_placeholder(c.placeholder.as_str().into());
     vm.set_dimmed(c.dimmed);
@@ -942,6 +977,34 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             })
             .collect(),
     ));
+    vm.set_chips(model(
+        c.chips
+            .iter()
+            .map(|chip| ChipVm {
+                id: chip.id.as_str().into(),
+                name: chip.name.as_str().into(),
+                label: chip.label.as_str().into(),
+                pending: chip.pending,
+                risky: chip.risky,
+                failure: chip.failure.as_str().into(),
+                choices: model(
+                    chip.choices
+                        .iter()
+                        .map(|c| CtlChoiceVm {
+                            value: c.value.as_str().into(),
+                            name: c.name.as_str().into(),
+                            description: c.description.as_str().into(),
+                            selected: c.selected,
+                            pending: c.pending,
+                        })
+                        .collect(),
+                ),
+            })
+            .collect(),
+    ));
+    vm.set_chips_enabled(c.chips_enabled);
+    vm.set_context_used(c.context.as_str().into());
+    vm.set_context_detail(c.context_detail.as_str().into());
     vm.set_attach_error(c.attach_error.as_str().into());
     match &c.palette {
         Some((kind, rows)) => {
@@ -983,7 +1046,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
         Some(p) => {
             vm.set_perm_shown(true);
             vm.set_perm_plan(p.plan);
-            vm.set_perm_icon(p.icon as i32);
+            vm.set_perm_key(p.key.as_str().into());
             vm.set_perm_title(p.title.as_str().into());
             vm.set_perm_position(p.position.as_str().into());
             vm.set_perm_path(p.path.as_str().into());
@@ -994,6 +1057,7 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_perm_text(p.text.as_str().into());
             vm.set_perm_primary(option(&p.primary));
             vm.set_perm_reject(option(&p.reject));
+            vm.set_perm_always(option(&p.always));
             vm.set_perm_more(model(
                 p.more
                     .iter()
@@ -1038,9 +1102,10 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             vm.set_ctl_read_only(ctl.read_only);
             vm.set_ctl_enabled(ctl.enabled);
             vm.set_ctl_cost(ctl.cost.as_str().into());
+            vm.set_context(ctl.context.unwrap_or(-1.0));
+            vm.set_context_text(ctl.context_text.as_str().into());
             vm.set_ctl_model_id(ctl.model_id.as_str().into());
             vm.set_ctl_commands_enabled(ctl.commands_enabled);
-            vm.set_bypass_confirm(ctl.bypass_confirm);
             vm.set_ctl_options(model(
                 ctl.options
                     .iter()
@@ -1074,11 +1139,9 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
                     .collect(),
             ));
         }
-        None => {
-            vm.set_ctl_open(false);
-            vm.set_bypass_confirm(false);
-        }
+        None => vm.set_ctl_open(false),
     }
+    vm.set_bypass_confirm(s.bypass_confirm);
 
     match &s.review {
         Some(r) => {
@@ -1247,6 +1310,7 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_sign_in_retry(|| send(ChatMsg::SignInRetry));
     vm.on_dismiss_notice(|| send(ChatMsg::DismissNotice));
     vm.on_reconnect(|| send(ChatMsg::Reconnect));
+    vm.on_resume(|| send(ChatMsg::Resume));
     vm.on_draft_edited(|text, cursor| {
         send(ChatMsg::DraftEdited {
             text: text.into(),
@@ -1326,6 +1390,25 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_nc_folder_edited(|f| send(ChatMsg::NewChatFolder(f.into())));
     vm.on_nc_continue(|id| send(ChatMsg::NewChatContinue(id.into())));
     vm.on_nc_retry(|| send(ChatMsg::NewChatRetry));
+    vm.on_nc_delete(|id| send(ChatMsg::NewChatDelete(id.into())));
+    vm.on_nc_delete_confirm(|| send(ChatMsg::NewChatDeleteConfirm));
+    vm.on_nc_delete_cancel(|| send(ChatMsg::NewChatDeleteCancel));
+    vm.on_nc_add_folder(|text| send(ChatMsg::NewChatAddFolder(text.into())));
+    vm.on_nc_remove_folder(|i| {
+        send(ChatMsg::NewChatRemoveFolder(
+            usize::try_from(i).unwrap_or(0),
+        ))
+    });
+    vm.on_nc_toggle_server(|name| send(ChatMsg::NewChatToggleServer(name.into())));
+    vm.on_nc_server_form(|open| send(ChatMsg::NewChatServerForm(open)));
+    vm.on_nc_save_server(|name, url, headers| {
+        send(ChatMsg::NewChatSaveServer {
+            name: name.into(),
+            url: url.into(),
+            headers: headers.into(),
+        });
+    });
+    vm.on_nc_delete_server(|name| send(ChatMsg::NewChatDeleteServer(name.into())));
     vm.on_nc_agent_picked(|i| {
         if let Some(agent) = usize::try_from(i)
             .ok()
@@ -1341,6 +1424,9 @@ pub fn wire(ui: &crate::AppWindow) {
         })
     });
     vm.on_nc_reset(|| send(ChatMsg::NewChatReset));
+    vm.on_nc_update(|kind| send(ChatMsg::NewChatUpdate(Kind::from_index(kind))));
+    vm.on_nc_dismiss_update(|kind| send(ChatMsg::NewChatDismissUpdate(Kind::from_index(kind))));
+    vm.on_nc_copy(|text| send(ChatMsg::NewChatCopy(text.into())));
 }
 
 /// A machine opens with no chat shown: whatever the last one left goes.

@@ -59,6 +59,10 @@ struct NewChatRequest: Equatable {
   var picks: [String: String]?
   /// The options the sheet changed from what it opened with.
   var changed: Set<String> = []
+  /// Folders the agent may use besides the main one, as typed (`~` is resolved on the host).
+  var extraFolders: [String] = []
+  /// Saved MCP servers picked for this chat.
+  var mcpServerNames: [String] = []
 }
 
 /// The working-folder step of a new chat, opened from the drawer's "+" menu, with a second mode
@@ -92,6 +96,20 @@ struct NewChatSheet: View {
   let loadSessions: (String, ChatAgentProfile) async -> ChatContinueLoader.Result
   /// Opens the chat that continues `session`; a message leaves the sheet up showing it.
   let onContinue: (String, ACPSavedSession, NewChatRequest) async -> String?
+  /// Deletes an earlier conversation on the host; a message is the reason it failed.
+  var onDeleteSession: ((String, ACPSavedSession, ChatAgentProfile) async -> String?)?
+  /// This host's saved MCP servers; nil hides the section.
+  var mcpStore: ChatMCPServerStore?
+  var initiallyOpenAccess = false
+  var initialExtraFolders: [String] = []
+  var initialMCPPicks: Set<String> = []
+  /// The host's agent versions; nil leaves the update notice out.
+  var loadVersions: (() async -> ACPAgentVersions.Result?)?
+  /// Updates an agent's adapter on the host; a message is why it failed.
+  var onUpdateAgent: ((ACPAgentVersion) async -> String?)?
+  /// The options a new session in the folder starts with, read from the agent now.
+  var liveOptions: ((String, ChatAgentProfile) async -> [ACPConfigOption]?)?
+  var managedStore: ChatManagedAgentsStore?
   let onCancel: () -> Void
 
   @State private var mode: Mode = .new
@@ -110,6 +128,20 @@ struct NewChatSheet: View {
   @State private var changes: [String: String] = [:]
   @State private var reset = false
   @State private var unavailable: [String: String] = [:]
+  @State private var accessOpen = false
+  @State private var extraFolders: [String] = []
+  @State private var newFolder = ""
+  @State private var servers: [ChatMCPServer] = []
+  @State private var pickedServers: Set<String> = []
+  @State private var addingServer = false
+  @State private var deleting: ACPSavedSession?
+  @State private var deletingNow = false
+  @State private var versions: ACPAgentVersions.Result?
+  @State private var updating: String?
+  @State private var updateMessage: String?
+  @State private var dismissedUpdates: Set<String> = []
+  @State private var freshOptions: [String: [ACPConfigOption]] = [:]
+  @State private var optionReads = 0
   @FocusState private var focused: Bool
 
   enum Listing: Equatable {
@@ -122,14 +154,15 @@ struct NewChatSheet: View {
   /// The last failure, else why the picked agent can't run here; derived so a mode change keeps it.
   private var shownFailure: String? { failure ?? unavailable[agent.key] }
   private var stored: [String: String] { storedDefaults(agent) }
-  private var cached: [ACPConfigOption] { cachedOptions(agent) }
+  private var cached: [ACPConfigOption] { freshOptions[agent.key] ?? cachedOptions(agent) }
   private var optionRows: [ChatNewOptions.Row] {
     ChatNewOptions.rows(agent: agent, stored: stored, cached: cached, changes: changes, reset: reset)
   }
   private var request: NewChatRequest {
     NewChatRequest(
       agent: agent, picks: ChatNewOptions.picks(stored: stored, changes: changes, reset: reset),
-      changed: Set(changes.keys))
+      changed: Set(changes.keys), extraFolders: extraFolders,
+      mcpServerNames: servers.map(\.name).filter(pickedServers.contains))
   }
 
   var body: some View {
@@ -139,7 +172,7 @@ struct NewChatSheet: View {
           .foregroundStyle(TetherColors.textPrimary)
           .accessibilityAddTraits(.isHeader)
         Spacer()
-        Button("Cancel", action: onCancel).font(.chat(.subheadline)).foregroundStyle(TetherColors.accent)
+        Button("Cancel", action: onCancel).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
           .frame(minHeight: 44).buttonStyle(TetherPressStyle())
           .disabled(starting || creatingFolder || continuing != nil)
       }
@@ -152,6 +185,7 @@ struct NewChatSheet: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           agentPicker
+          agentNotice
           VStack(alignment: .leading, spacing: 6) {
             ChatFolderPicker(folder: $folder, folderInfo: $folderInfo, checkingFolder: $checkingFolder,
               creatingFolder: $creatingFolder, browsing: $browsing, focused: $focused,
@@ -164,6 +198,7 @@ struct NewChatSheet: View {
             }
           }
           optionsBox.disabled(starting || creatingFolder || continuing != nil)
+          accessBox.disabled(starting || creatingFolder || continuing != nil)
           if mode == .resume { sessionList.frame(minHeight: 140, maxHeight: 340) }
         }
       }
@@ -184,27 +219,53 @@ struct NewChatSheet: View {
       optionsOpen = initiallyOpenOptions
       browsing = initiallyBrowseFolders
       changes = initialChanges
+      accessOpen = initiallyOpenAccess
+      servers = mcpStore?.servers ?? []
+      extraFolders = initialExtraFolders
+      pickedServers = initialMCPPicks
     }
     .task(id: "\(mode.rawValue)|\(agent.key)|\(folder)|\(reloads)") { await reload() }
     .task { unavailable = await checkAgents() }
+    .task {
+      let knewManaged = managedStore?.supported == true
+      versions = await loadVersions?()
+      // The first read of options ran before this host was known to manage agents.
+      if case .supported? = versions, !knewManaged { optionReads += 1 }
+    }
+    .task(id: "\(agent.key)|\(folderInfo?.ready == true ? folder : "")|\(optionReads)") { await readLiveOptions() }
     .onChange(of: folder) { _, _ in
       folderInfo = nil
       checkingFolder = true
       failure = nil
     }
     .onChange(of: mode) { _, _ in failure = nil }
+    .sheet(isPresented: $addingServer) {
+      ChatMCPServerForm(existing: servers) { server in
+        servers.append(server)
+        mcpStore?.servers = servers
+        pickedServers.insert(server.name)
+      }
+    }
+    .confirmationDialog(
+      "Delete this conversation?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+      titleVisibility: .visible, presenting: deleting
+    ) { session in
+      Button("Delete", role: .destructive) { delete(session) }
+    } message: { _ in
+      Text("Its transcript is removed from the host. This can't be undone.")
+    }
   }
 
   private var startButton: some View {
     Button(action: start) {
       Group {
-        if starting { ProgressView().tint(TetherColors.onAccent) } else {
+        if starting { ProgressView().tint(TetherColors.background) } else {
           Text("Start chat").font(.chat(.subheadline).weight(.semibold))
         }
       }
       .frame(maxWidth: .infinity, minHeight: 44)
-      .foregroundStyle(TetherColors.onAccent)
-      .background(TetherColors.accent, in: RoundedRectangle(cornerRadius: 10))
+      .foregroundStyle(TetherColors.background)
+      .background(TetherColors.textPrimary, in: Capsule())
       .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
@@ -218,6 +279,10 @@ struct NewChatSheet: View {
     if folderInfo?.message != nil { height += 44 }
     if shownFailure != nil { height += 68 }
     if optionsOpen { height += optionRows.isEmpty ? 64 : CGFloat(optionRows.count) * 44 + 44 }
+    height += 56
+    height += CGFloat(pendingUpdates.count) * 48
+    if updateMessage != nil || (versions == .unsupported && agent.isHostManaged) { height += 40 }
+    if accessOpen { height += CGFloat(extraFolders.count + servers.count) * 44 + 44 * 3 + 12 }
     return height
   }
 
@@ -260,6 +325,94 @@ struct NewChatSheet: View {
     }
   }
 
+  // MARK: Agent version
+
+  /// The selected agent's adapter and CLI updates the user hasn't put off.
+  private var pendingUpdates: [ACPAgentVersion] {
+    guard case let .supported(all)? = versions else { return [] }
+    return [ACPAgentVersion.Kind.adapter, .cli].compactMap { kind in
+      guard let version = all["\(kind.rawValue):\(agent.key)"], version.updateAvailable,
+        !dismissedUpdates.contains(version.key + "@" + version.latest), managedStore?.isDismissed(version) != true
+      else { return nil }
+      return version
+    }
+  }
+
+  @ViewBuilder private var agentNotice: some View {
+    if !pendingUpdates.isEmpty || updateMessage != nil {
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(pendingUpdates, id: \.key) { updateRow($0) }
+        if let updateMessage {
+          Text(updateMessage).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+            .fixedSize(horizontal: false, vertical: true).padding(.vertical, 4)
+            .accessibilityIdentifier("sshNewChatUpdateResult")
+        }
+      }
+      .accessibilityIdentifier("sshNewChatUpdateNotice")
+    } else if versions == .unsupported, agent.isHostManaged {
+      Text("Update tether on this host to manage agent versions.").font(.chat(.caption))
+        .foregroundStyle(TetherColors.textFaint)
+        .accessibilityIdentifier("sshNewChatHostTooOld")
+    }
+  }
+
+  private func updateRow(_ version: ACPAgentVersion) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(version.notice(label: agent.label)).font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary)
+          .fixedSize(horizontal: false, vertical: true)
+        Spacer(minLength: 4)
+        if updating == version.key {
+          ProgressView().controlSize(.small).tint(TetherColors.textFaint)
+        } else {
+          Button("Not now") {
+            managedStore?.dismiss(version)
+            dismissedUpdates.insert(version.key + "@" + version.latest)
+          }
+          .font(.chat(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
+          .accessibilityIdentifier("sshNewChatUpdateLater_\(version.key)")
+          if version.kind == .adapter || version.runnable {
+            Button("Update") { update(version) }
+              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
+              .disabled(updating != nil)
+              .accessibilityIdentifier("sshNewChatUpdate_\(version.key)")
+          } else {
+            Button("Copy") { UIPasteboard.general.string = version.command }
+              .font(.chat(.caption).weight(.semibold)).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
+              .accessibilityHint("Copies the command that updates it on the host")
+          }
+        }
+      }
+      if version.kind == .cli, !version.runnable {
+        Text(version.command).font(.chat(.caption2).monospaced()).foregroundStyle(TetherColors.textFaint)
+          .lineLimit(1).truncationMode(.middle)
+      }
+    }
+  }
+
+  private func update(_ version: ACPAgentVersion) {
+    guard let onUpdateAgent, updating == nil else { return }
+    updating = version.key
+    Task {
+      defer { updating = nil }
+      let failure = await onUpdateAgent(version)
+      versions = await loadVersions?() ?? versions
+      let name = version.kind == .cli ? (ACPAgentVersion.cliNames[version.agent] ?? "The CLI") : "\(agent.label) adapter"
+      updateMessage = failure ?? "\(name) updated to \(version.latest). New chats use it."
+      if failure == nil { optionReads += 1 }
+    }
+  }
+
+  /// Shows the cached list meanwhile; an answer for a folder or agent no longer picked is dropped.
+  private func readLiveOptions() async {
+    guard let liveOptions, folderInfo?.ready == true else { return }
+    try? await Task.sleep(nanoseconds: 600_000_000)
+    let wanted = (folder, agent)
+    guard !Task.isCancelled, let options = await liveOptions(wanted.0, wanted.1) else { return }
+    guard !Task.isCancelled, folder == wanted.0, agent == wanted.1 else { return }
+    freshOptions[wanted.1.key] = options
+  }
+
   private func pick(_ option: ChatAgentProfile) {
     guard option != agent else { return }
     if let reason = unavailable[option.key] {
@@ -267,6 +420,7 @@ struct NewChatSheet: View {
       return
     }
     agent = option
+    updateMessage = nil
     changes = [:]
     reset = false
     failure = nil
@@ -338,7 +492,7 @@ struct NewChatSheet: View {
         .background(TetherColors.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
         .overlay(
           RoundedRectangle(cornerRadius: 7)
-            .strokeBorder(row.changed ? TetherColors.accent.opacity(0.6) : TetherColors.border, lineWidth: 1))
+            .strokeBorder(row.changed ? TetherColors.textSecondary : TetherColors.border, lineWidth: 1))
       }
       .accessibilityLabel("\(row.name), \(row.selectedName)")
       .accessibilityIdentifier("sshNewChatOption_\(row.id)")
@@ -365,11 +519,11 @@ struct NewChatSheet: View {
         if resetNow {
           if !stored.isEmpty {
             Text("·").foregroundStyle(TetherColors.textFaint)
-            Button("Undo") { reset = false }.foregroundStyle(TetherColors.accent).frame(minHeight: 44)
+            Button("Undo") { reset = false }.fontWeight(.semibold).foregroundStyle(TetherColors.textPrimary).frame(minHeight: 44)
           }
         } else {
           Text("·").foregroundStyle(TetherColors.textFaint)
-          Button("Reset") { changes = [:]; reset = true }.foregroundStyle(TetherColors.accent)
+          Button("Reset") { changes = [:]; reset = true }.fontWeight(.semibold).foregroundStyle(TetherColors.textPrimary)
             .frame(minHeight: 44).accessibilityIdentifier("sshNewChatOptionsReset")
         }
         Spacer(minLength: 0)
@@ -377,6 +531,137 @@ struct NewChatSheet: View {
       .font(.chat(.caption))
       .padding(.horizontal, 10).padding(.vertical, 8)
       .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+    }
+  }
+
+  // MARK: Access
+
+  private var accessSummary: String {
+    let folders = extraFolders.count, picked = pickedServers.count
+    if folders == 0 && picked == 0 { return "This folder only" }
+    return [folders > 0 ? "\(folders) more folder\(folders == 1 ? "" : "s")" : nil,
+      picked > 0 ? "\(picked) MCP server\(picked == 1 ? "" : "s")" : nil].compactMap { $0 }.joined(separator: " · ")
+  }
+
+  private var accessBox: some View {
+    VStack(spacing: 0) {
+      Button { withAnimation(.easeInOut(duration: 0.18)) { accessOpen.toggle() } } label: {
+        HStack(spacing: 8) {
+          Text("Access").font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
+          if !accessOpen {
+            Text(accessSummary).font(.chat(.caption))
+              .foregroundStyle(extraFolders.isEmpty && pickedServers.isEmpty ? TetherColors.textFaint : TetherColors.textPrimary)
+              .lineLimit(1).truncationMode(.tail)
+          }
+          Spacer(minLength: 4)
+          Image(systemName: accessOpen ? "chevron.down" : "chevron.right").font(.chat(.caption2).weight(.semibold))
+            .foregroundStyle(TetherColors.textFaint)
+        }
+        .padding(.horizontal, 10).frame(minHeight: 44)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Access, \(accessSummary)")
+      .accessibilityIdentifier("sshNewChatAccess")
+      if accessOpen {
+        accessHeading("More folders")
+        ForEach(extraFolders, id: \.self) { path in
+          accessRow {
+            Image(systemName: "folder").font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
+            Text(path).font(.chat(.footnote).monospaced()).foregroundStyle(TetherColors.textPrimary)
+              .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 4)
+            removeButton("Remove \(path)") { extraFolders.removeAll { $0 == path } }
+          }
+        }
+        accessRow {
+          TextField("~/src/other-project", text: $newFolder)
+            .font(.chat(.footnote).monospaced())
+            .textInputAutocapitalization(.never).autocorrectionDisabled()
+            .onSubmit(addFolder)
+            .accessibilityIdentifier("sshNewChatExtraFolder")
+          Button("Add", action: addFolder).font(.chat(.footnote).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+            .disabled(newFolder.trimmingCharacters(in: .whitespaces).isEmpty)
+            .frame(minHeight: 44)
+        }
+        if mcpStore != nil {
+          accessHeading("MCP servers")
+          ForEach(servers) { server in
+            accessRow {
+              Toggle(isOn: Binding(
+                get: { pickedServers.contains(server.name) },
+                set: { if $0 { pickedServers.insert(server.name) } else { pickedServers.remove(server.name) } })
+              ) {
+                VStack(alignment: .leading, spacing: 1) {
+                  Text(server.name).font(.chat(.footnote)).foregroundStyle(TetherColors.textPrimary)
+                  Text(URL(string: server.url)?.host ?? server.url).font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
+                }
+              }
+              .toggleStyle(.switch).controlSize(.mini)
+              .accessibilityIdentifier("sshNewChatMCP_\(server.name)")
+              removeButton("Delete \(server.name)") { remove(server) }
+            }
+          }
+          accessRow {
+            Button { addingServer = true } label: {
+              Label("Add MCP server", systemImage: "plus").font(.chat(.footnote))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(TetherColors.textPrimary)
+            .accessibilityIdentifier("sshNewChatAddMCP")
+          }
+        }
+      }
+    }
+    .background(TetherColors.surface, in: RoundedRectangle(cornerRadius: 10))
+    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(TetherColors.border, lineWidth: 0.5))
+    .clipShape(RoundedRectangle(cornerRadius: 10))
+  }
+
+  private func accessHeading(_ text: String) -> some View {
+    Text(text).font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 2)
+      .overlay(alignment: .top) { Rectangle().fill(TetherColors.border).frame(height: 0.5) }
+      .accessibilityAddTraits(.isHeader)
+  }
+
+  private func accessRow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    HStack(spacing: 8, content: content).padding(.horizontal, 10).frame(minHeight: 44)
+  }
+
+  private func removeButton(_ label: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Image(systemName: "minus.circle").font(.chat(.footnote)).foregroundStyle(TetherColors.textFaint)
+        .frame(minWidth: 32, minHeight: 44).contentShape(Rectangle())
+    }
+    .buttonStyle(.plain).accessibilityLabel(label)
+  }
+
+  private func addFolder() {
+    let path = newFolder.trimmingCharacters(in: .whitespaces)
+    guard !path.isEmpty else { return }
+    if !extraFolders.contains(path), path != folder { extraFolders.append(path) }
+    newFolder = ""
+  }
+
+  private func remove(_ server: ChatMCPServer) {
+    servers.removeAll { $0.name == server.name }
+    pickedServers.remove(server.name)
+    mcpStore?.servers = servers
+  }
+
+  private func delete(_ session: ACPSavedSession) {
+    guard let onDeleteSession, !deletingNow else { return }
+    deletingNow = true
+    let wanted = folder
+    Task {
+      defer { deletingNow = false }
+      if let message = await onDeleteSession(wanted, session, agent) {
+        failure = message
+      } else if case let .loaded(sessions) = listing {
+        listing = .loaded(sessions.filter { $0.id != session.id })
+      }
     }
   }
 
@@ -396,7 +681,7 @@ struct NewChatSheet: View {
             .fixedSize(horizontal: false, vertical: true)
           Spacer(minLength: 0)
           Button("Retry") { reloads += 1 }
-            .frame(minHeight: 44).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.accent)
+            .frame(minHeight: 44).font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
             .buttonStyle(TetherPressStyle())
             .accessibilityIdentifier("sshContinueRetry")
         }
@@ -451,7 +736,13 @@ struct NewChatSheet: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
-    .disabled(continuing != nil)
+    .disabled(continuing != nil || deletingNow)
+    .contextMenu {
+      if onDeleteSession != nil {
+        Button(role: .destructive) { deleting = session } label: { MenuLabel("Delete conversation", systemImage: "trash") }
+      }
+    }
+    .accessibilityAction(named: "Delete conversation") { if onDeleteSession != nil { deleting = session } }
     .accessibilityLabel("\(session.displayTitle), \(ChatContinueFormat.relative(session.updatedAt, now: now))")
     .accessibilityIdentifier("sshContinueRow_\(session.id)")
   }
@@ -466,7 +757,11 @@ struct NewChatSheet: View {
     let result = await loadSessions(wanted, wantedAgent)
     guard !Task.isCancelled, wanted == folder, agent == wantedAgent else { return }
     switch result {
-    case let .loaded(sessions): listing = .loaded(sessions)
+    case let .loaded(sessions):
+      listing = .loaded(sessions)
+      #if DEBUG
+      if ProcessInfo.processInfo.environment["TETHER_DEBUG_CHAT_FIXTURE"] == "continue-delete" { deleting = sessions.first }
+      #endif
     case let .failed(message): listing = .failed(message)
     }
   }
@@ -495,5 +790,63 @@ struct NewChatSheet: View {
       defer { continuing = nil }
       failure = await onContinue(folder, session, request)
     }
+  }
+}
+
+/// Adds one HTTP MCP server to the host's saved list.
+struct ChatMCPServerForm: View {
+  let existing: [ChatMCPServer]
+  let onSave: (ChatMCPServer) -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var name = ""
+  @State private var url = "https://"
+  @State private var headers = ""
+  @State private var problem: String?
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          TextField("Name", text: $name).autocorrectionDisabled().textInputAutocapitalization(.never)
+            .accessibilityIdentifier("mcpServerName")
+          TextField("URL", text: $url).keyboardType(.URL).autocorrectionDisabled().textInputAutocapitalization(.never)
+            .accessibilityIdentifier("mcpServerURL")
+        } footer: {
+          Text("An HTTP MCP server the agent connects to from the host.")
+        }
+        Section {
+          TextEditor(text: $headers).font(.chat(.footnote).monospaced()).frame(minHeight: 72)
+            .autocorrectionDisabled().textInputAutocapitalization(.never)
+            .accessibilityIdentifier("mcpServerHeaders")
+        } header: {
+          Text("Headers")
+        } footer: {
+          Text("One per line, like Authorization: Bearer <token>. Kept in this device's Keychain.")
+        }
+        if let problem { Text(problem).foregroundStyle(TetherColors.warning) }
+      }
+      .scrollContentBackground(.hidden).background(TetherColors.background)
+      .navigationTitle("Add MCP server").navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+        ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).accessibilityIdentifier("mcpServerSave") }
+      }
+    }
+    .tint(TetherColors.accent)
+  }
+
+  private func save() {
+    guard let parsed = ChatMCPServer.headers(from: headers) else {
+      problem = "Write each header as Name: value."
+      return
+    }
+    let server = ChatMCPServer(
+      name: name.trimmingCharacters(in: .whitespaces), url: url.trimmingCharacters(in: .whitespaces), headers: parsed)
+    if let found = server.problem(among: existing) {
+      problem = found
+      return
+    }
+    onSave(server)
+    dismiss()
   }
 }

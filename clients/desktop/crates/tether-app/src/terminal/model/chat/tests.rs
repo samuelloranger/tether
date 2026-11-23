@@ -516,7 +516,7 @@ fn a_permission_waits_in_its_card_and_approve_answers_it() {
     );
     let s = h.screen();
     let card = s.permission.expect("a permission card");
-    assert_eq!(card.path, "README.md");
+    assert_eq!(card.path, "", "the title already names the file");
     assert_eq!((card.added, card.removed), (1, 1));
     assert_eq!(card.primary.as_ref().unwrap().0, "allow");
     assert_eq!(card.reject.as_ref().unwrap().0, "reject");
@@ -3040,4 +3040,453 @@ fn projects_go_newest_first_with_pinned_chats_on_top_and_same_names_show_a_path(
             .unwrap()
             .collapsed
     );
+}
+
+const FORK_CAPS: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"fork":{},"resume":{},"delete":{}},"mcpCapabilities":{"http":true}}}}"#;
+
+impl Harness {
+    /// A chat whose agent advertised fork and resume, through session/new as `s1`.
+    fn capable_chat(&mut self) -> (String, u64) {
+        let name = self.new_chat();
+        let (_, generation, _) = self.open_stream();
+        self.feed(&name, generation, FORK_CAPS);
+        self.writes();
+        self.feed(
+            &name,
+            generation,
+            r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}"#,
+        );
+        self.settle();
+        (name, generation)
+    }
+
+    fn ask(
+        &mut self,
+        name: &str,
+        generation: u64,
+        id: i64,
+        text: &str,
+        reply: &str,
+        message: &str,
+    ) {
+        self.msg(ChatMsg::DraftEdited {
+            text: text.into(),
+            cursor_byte: text.len(),
+        });
+        self.msg(ChatMsg::Send);
+        self.writes();
+        self.feed(
+            name,
+            generation,
+            &serde_json::json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
+                "sessionUpdate":"agent_message_chunk","messageId":message,"content":{"type":"text","text":reply}}}})
+            .to_string(),
+        );
+        self.feed(
+            name,
+            generation,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn"}})
+                .to_string(),
+        );
+    }
+
+    /// Branches the chat in front before its last prompt and opens the branch's stream.
+    fn branch_last(&mut self, last_user_id: i64) -> (String, u64) {
+        self.msg(ChatMsg::Branch(format!("item:{last_user_id}")));
+        self.msg(ChatMsg::BranchCreate {
+            title: "Alternative".into(),
+            prompt: "Take another route".into(),
+        });
+        self.exec(|t| matches!(t, ExecTag::Organize { .. }), "{}");
+        let name = self.chats.active().unwrap().to_string();
+        let (_, generation, _) = self.open_stream();
+        (name, generation)
+    }
+}
+
+#[test]
+fn a_branch_forks_the_source_session_at_the_last_assistant_message_and_drops_the_text_seed() {
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.ask(
+        &name,
+        generation,
+        3,
+        "first question",
+        "first answer",
+        "m-1",
+    );
+    h.ask(
+        &name,
+        generation,
+        4,
+        "second question",
+        "second answer",
+        "m-2",
+    );
+    let last_user = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .filter(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .map(|i| i.id)
+        .next_back()
+        .unwrap();
+    let (branch, generation) = h.branch_last(last_user);
+    assert_ne!(branch, name);
+    let journal = h.files.journal(&branch);
+    assert_eq!(journal.fork_source.as_ref().unwrap().session_id, "s1");
+    assert_eq!(
+        journal.fork_source.as_ref().unwrap().message_id.as_deref(),
+        Some("m-1")
+    );
+    assert!(!h.files.branch(&branch).unwrap().context.is_empty());
+    h.feed(&branch, generation, FORK_CAPS);
+    let writes = h.writes();
+    let fork: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    assert_eq!(fork["method"], "session/fork");
+    assert_eq!(fork["params"]["sessionId"], "s1");
+    assert_eq!(
+        fork["params"]["_meta"]["jetbrains"]["air"]["fork"]["messageId"],
+        "m-1"
+    );
+    h.feed(
+        &branch,
+        generation,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"sessionId":"forked","modes":{}}})
+            .to_string(),
+    );
+    assert_eq!(
+        h.files.journal(&branch).session_id.as_deref(),
+        Some("forked")
+    );
+    assert!(h.files.branch(&branch).unwrap().context.is_empty());
+}
+
+#[test]
+fn a_refused_fork_shows_no_error_and_falls_back_to_a_new_session_with_the_seed() {
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.ask(
+        &name,
+        generation,
+        3,
+        "first question",
+        "first answer",
+        "m-1",
+    );
+    h.ask(
+        &name,
+        generation,
+        4,
+        "second question",
+        "second answer",
+        "m-2",
+    );
+    let last_user = h
+        .chats
+        .active_session()
+        .unwrap()
+        .state()
+        .items
+        .iter()
+        .filter(|i| matches!(i.kind, tether_core::acp::reducer::ItemKind::User { .. }))
+        .map(|i| i.id)
+        .next_back()
+        .unwrap();
+    let (branch, generation) = h.branch_last(last_user);
+    h.feed(&branch, generation, FORK_CAPS);
+    h.writes();
+    h.feed(
+        &branch,
+        generation,
+        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"cannot fork"}}"#,
+    );
+    let writes = h.writes();
+    assert!(
+        writes[0].contains("\"method\":\"session/new\""),
+        "{writes:?}"
+    );
+    h.feed(
+        &branch,
+        generation,
+        r#"{"jsonrpc":"2.0","id":3,"result":{"sessionId":"fresh","modes":{}}}"#,
+    );
+    h.settle();
+    let s = h.screen();
+    assert_eq!(s.notice, "");
+    assert!(
+        s.rows
+            .iter()
+            .all(|r| !format!("{:?}", r.body).contains("cannot fork"))
+    );
+    assert!(h.files.journal(&branch).fork_source.is_none());
+    assert!(!h.files.branch(&branch).unwrap().context.is_empty());
+}
+
+#[test]
+fn an_ended_chat_offers_resume_only_when_the_agent_advertised_it_and_revives_the_same_chat() {
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation,
+    });
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Loss,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\tended\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    let s = h.screen();
+    assert_eq!(s.header.phase_word, "Ended");
+    assert!(s.composer.can_resume);
+    h.msg(ChatMsg::Resume);
+    let jobs = h.take();
+    let (_, new_generation, command) = h.dial_of(&jobs).expect("a dial");
+    assert!(
+        command.contains(&format!("attach {name} "))
+            || command.contains(&format!("attach '{name}'")),
+        "{command}"
+    );
+    assert!(
+        command.contains("--spawn") && command.ends_with("--revive"),
+        "{command}"
+    );
+    h.jobs = jobs;
+    h.msg(ChatMsg::Dialed {
+        name: name.clone(),
+        generation: new_generation,
+        result: Ok(()),
+    });
+    h.exec(|t| matches!(t, ExecTag::Answers { .. }), "{}");
+    let writes = h.writes();
+    let init: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    assert_eq!(init["method"], "initialize");
+    h.feed(
+        &name,
+        new_generation,
+        &FORK_CAPS.replace("\"id\":1", &format!("\"id\":{}", init["id"])),
+    );
+    let writes = h.writes();
+    let resume: serde_json::Value = serde_json::from_str(&writes[0]).unwrap();
+    assert_eq!(resume["method"], "session/resume");
+    assert_eq!(resume["params"]["sessionId"], "s1");
+    assert_eq!(resume["params"]["cwd"], "/home/sam/proj");
+    h.feed(
+        &name,
+        new_generation,
+        &serde_json::json!({"jsonrpc":"2.0","id":resume["id"],"result":{"modes":{}}}).to_string(),
+    );
+    h.settle();
+    let s = h.screen();
+    assert_eq!(s.notice, "");
+    assert!(!s.composer.can_resume);
+    assert_eq!(s.header.phase, 2);
+}
+
+#[test]
+fn resume_is_not_offered_without_the_capability_and_a_failed_revive_says_so() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation,
+    });
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Loss,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\tended\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    assert!(!h.screen().composer.can_resume);
+
+    let mut h = Harness::new();
+    let (name, generation) = h.capable_chat();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation,
+    });
+    h.exec(
+        |t| {
+            matches!(
+                t,
+                ExecTag::Inspect {
+                    why: InspectWhy::Loss,
+                    ..
+                }
+            )
+        },
+        &format!("{name}\tended\t4096\t/home/sam/proj\t300\tnpx\n"),
+    );
+    h.msg(ChatMsg::Resume);
+    let jobs = h.take();
+    let (_, new_generation, _) = h.dial_of(&jobs).unwrap();
+    h.jobs = jobs;
+    h.msg(ChatMsg::Dialed {
+        name: name.clone(),
+        generation: new_generation,
+        result: Ok(()),
+    });
+    h.exec(|t| matches!(t, ExecTag::Answers { .. }), "{}");
+    h.writes();
+    h.msg(ChatMsg::Closed {
+        name: name.clone(),
+        generation: new_generation,
+    });
+    assert_eq!(
+        h.screen().notice,
+        "Couldn't resume this chat. Update tether on the host, or start a new chat."
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn a_finished_turn_folds_its_steps() {
+    use super::view::EntryBody;
+    let mut h = Harness::new();
+    h.chats.dev_sample("claude", t(h.now));
+    let s = h.screen();
+
+    let tools: Vec<&Vec<super::view::Entry>> = s
+        .rows
+        .iter()
+        .filter_map(|r| match &r.body {
+            RowBody::Tools(entries) => Some(entries),
+            _ => None,
+        })
+        .collect();
+    let EntryBody::Fold {
+        summary,
+        failed,
+        open,
+    } = &tools[0][0].body
+    else {
+        panic!("the ended turn's steps fold")
+    };
+    assert_eq!(
+        summary,
+        "Read 2 files, searched once, edited 1 file, ran 1 command"
+    );
+    assert_eq!((*failed, *open), (0, false));
+    assert_eq!(tools[0].len(), 1, "folded: the summary row only");
+    assert!(
+        !tools[1]
+            .iter()
+            .any(|e| matches!(e.body, EntryBody::Fold { .. })),
+        "commands running in the background keep their rows"
+    );
+
+    assert!(s.header.place.starts_with("app on "), "{}", s.header.place);
+    assert_eq!(s.header.activity, 0);
+    let chips: Vec<_> = s
+        .composer
+        .chips
+        .iter()
+        .map(|c| (c.id.as_str(), c.label.as_str()))
+        .collect();
+    assert_eq!(chips, [("model", "Opus"), ("mode", "Ask")]);
+    assert_eq!(s.composer.context, "41k");
+    assert_eq!(s.composer.placeholder, "Message Claude");
+
+    // Opening a row inside the folded run opens the run.
+    let fold = tools[0][0].key.clone();
+    let id: i64 = fold.strip_prefix("fold:").unwrap().parse().unwrap();
+    h.msg(ChatMsg::OpenTool(format!("item:{}", id + 1)));
+    let s = h.screen();
+    let opened = s.rows.iter().find_map(|r| match &r.body {
+        RowBody::Tools(entries) if entries[0].key == fold => Some(entries),
+        _ => None,
+    });
+    let opened = opened.unwrap();
+    assert!(matches!(opened[0].body, EntryBody::Fold { open: true, .. }));
+    assert!(opened.len() > 5);
+    assert_eq!(
+        opened.iter().map(|e| e.rail).collect::<Vec<_>>()[..3],
+        [2, 1, 1],
+        "the rail starts at the summary's dot and runs through the rows"
+    );
+    h.msg(ChatMsg::Toggle(fold));
+    let s = h.screen();
+    assert!(s.rows.iter().any(|r| matches!(
+        &r.body,
+        RowBody::Tools(entries) if entries.len() == 1 && matches!(entries[0].body, EntryBody::Fold { open: false, .. })
+    )));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn the_permission_card_turns_its_one_broader_allow_into_a_switch() {
+    let mut h = Harness::new();
+    h.chats.dev_sample("claude", t(h.now));
+    let mut state = devsample::state(false);
+    devsample::ask(&mut state, "permission");
+    h.chats
+        .sessions
+        .get_mut("sample")
+        .unwrap()
+        .dev_state(state, t(h.now));
+    let s = h.screen();
+    let p = s.permission.expect("a permission waits");
+    assert_eq!(p.always.map(|a| a.0), Some("always".to_string()));
+    assert_eq!(p.primary.map(|a| a.0), Some("allow".to_string()));
+    assert!(p.more.is_empty());
+    assert!(!p.collapsed);
+    assert_eq!(p.path, "", "the title already names the file");
+    assert_eq!(s.header.activity, 2);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn bypass_from_a_chip_asks_before_it_changes_anything() {
+    let mut h = Harness::new();
+    h.chats.dev_sample("claude", t(h.now));
+    assert!(!h.screen().bypass_confirm);
+    h.msg(ChatMsg::ControlsChoose {
+        id: "mode".into(),
+        value: "bypassPermissions".into(),
+    });
+    let s = h.screen();
+    assert!(s.bypass_confirm);
+    assert!(s.controls.is_none(), "the panel need not be open");
+    h.msg(ChatMsg::BypassCancelled);
+    assert!(!h.screen().bypass_confirm);
+    h.msg(ChatMsg::ControlsChoose {
+        id: "mode".into(),
+        value: "bypassPermissions".into(),
+    });
+    h.run(|c, now, out| c.leave_active(now, out));
+    assert!(
+        !h.screen().bypass_confirm,
+        "leaving the chat drops its confirmation"
+    );
+}
+
+#[test]
+fn a_permission_title_that_does_not_name_the_file_gets_its_path_under_it() {
+    let mut h = Harness::new();
+    let (name, generation) = h.live_chat();
+    h.feed(
+        &name,
+        generation,
+        r#"{"jsonrpc":"2.0","id":"p1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"toolCallId":"t1","title":"Update the readme","kind":"edit","content":[{"type":"diff","path":"/home/sam/proj/README.md","oldText":"a\n","newText":"b\n"}]},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#,
+    );
+    let card = h.screen().permission.expect("a permission card");
+    assert_eq!(card.path, "README.md");
+    assert!(card.always.is_none());
 }

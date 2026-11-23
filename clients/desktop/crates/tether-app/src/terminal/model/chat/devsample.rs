@@ -116,11 +116,12 @@ pub fn state(workflow: bool) -> ChatState {
         &mut s,
         r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s","modes":{"currentModeId":"default","availableModes":[]}}}"#,
     );
+    finished_turn(&mut s);
     reduce(
         &mut s,
         ChatEvent::user_prompt(
             "Start the dev server and the test watcher, then tell me when they are up.",
-            0,
+            100,
             Some(AcpId::Int(3)),
         ),
     );
@@ -153,7 +154,98 @@ pub fn state(workflow: bool) -> ChatState {
         &mut s,
         r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#,
     );
+    s.config_options = options("claude");
+    s.context_used = Some(41_200);
+    s.context_size = Some(200_000);
     s
+}
+
+fn tool(state: &mut ChatState, id: &str, kind: &str, title: &str, content: serde_json::Value) {
+    let call = serde_json::json!({"sessionUpdate": "tool_call", "toolCallId": id, "title": title,
+        "kind": kind, "status": "pending"});
+    update(state, &call.to_string());
+    let done = serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": id,
+        "status": "completed", "content": content});
+    update(state, &done.to_string());
+}
+
+/// An earlier turn that has ended: reads, a search, an edit and a command, so the steps fold.
+fn finished_turn(state: &mut ChatState) {
+    reduce(
+        state,
+        ChatEvent::user_prompt(
+            "Fix the flaky retry test in the queue worker.",
+            0,
+            Some(AcpId::Int(4)),
+        ),
+    );
+    let none = serde_json::json!([]);
+    tool(
+        state,
+        "f1",
+        "read",
+        "Read src/queue/worker.ts",
+        none.clone(),
+    );
+    tool(
+        state,
+        "f2",
+        "read",
+        "Read src/queue/retry.test.ts",
+        none.clone(),
+    );
+    tool(state, "f3", "search", "Search backoff in src", none);
+    tool(
+        state,
+        "f4",
+        "edit",
+        "Edit src/queue/retry.ts",
+        serde_json::json!([{"type": "diff", "path": "/srv/app/src/queue/retry.ts",
+            "oldText": "const delay = base * attempt;\nreturn sleep(delay);\n",
+            "newText": "const delay = Math.min(base * 2 ** attempt, cap);\nawait sleep(delay);\nreturn attempt + 1;\n"}]),
+    );
+    tool(
+        state,
+        "f5",
+        "execute",
+        "bun test packages/queue",
+        serde_json::json!([]),
+    );
+    update(
+        state,
+        r#"{"sessionUpdate":"agent_message_chunk","messageId":"m0","content":{"type":"text","text":"The retry delay now backs off exponentially and is capped, and the queue tests pass."}}"#,
+    );
+    line(
+        state,
+        r#"{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}"#,
+    );
+}
+
+/// `TETHER_DEV_CHAT_ASK`: leaves a `permission` (an edit with a diff and a broader allow) or a
+/// `question` waiting on the sample, for a screenshot of its card.
+pub fn ask(state: &mut ChatState, kind: &str) {
+    let frame = if kind == "question" {
+        serde_json::json!({"jsonrpc": "2.0", "id": 20, "method": "elicitation/create", "params": {
+            "mode": "form", "sessionId": "s", "toolCallId": "q1", "message": "Which retry cap should the queue use?",
+            "requestedSchema": {"type": "object", "properties": {
+                "question_0": {"type": "string", "title": "Cap", "oneOf": [
+                    {"const": "30s", "title": "30 seconds", "description": "Short, fails fast"},
+                    {"const": "5m", "title": "5 minutes", "description": "Gives the host time to recover"},
+                    {"const": "none", "title": "No cap"}]},
+                "question_0_custom": {"type": "string", "title": "Other", "description": "Your own answer"}}}}})
+    } else {
+        serde_json::json!({"jsonrpc": "2.0", "id": 21, "method": "session/request_permission", "params": {
+            "sessionId": "s",
+            "toolCall": {"toolCallId": "p1", "title": "Edit src/queue/retry.ts", "kind": "edit", "status": "pending",
+                "content": [{"type": "diff", "path": "/srv/app/src/queue/retry.ts",
+                    "oldText": "const cap = 30;\nconst jitter = 0;\nreturn base;\n",
+                    "newText": "const cap = 300;\nconst jitter = rand(base / 4);\nconst floor = 1;\nreturn base + jitter;\n"}]},
+            "options": [
+                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "always", "name": "Allow all edits this session", "kind": "allow_always"},
+                {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]}})
+    };
+    line(state, &frame.to_string());
 }
 
 fn option(id: &str, name: &str, current: &str, choices: &[(&str, &str)]) -> ConfigOption {
@@ -229,7 +321,11 @@ pub fn options(agent: &str) -> Vec<ConfigOption> {
                 "mode",
                 "Mode",
                 "default",
-                &[("default", "Ask"), ("plan", "Plan")],
+                &[
+                    ("default", "Ask"),
+                    ("plan", "Plan"),
+                    ("bypassPermissions", "Bypass permissions"),
+                ],
             ),
         ],
     }

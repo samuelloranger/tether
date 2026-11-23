@@ -8,10 +8,13 @@ use std::time::Duration;
 use tether_core::acp::agent::{self, AgentProfile};
 use tether_core::acp::folders::{self, Folder};
 use tether_core::acp::host::{self, SavedSession};
+use tether_core::acp::message::ConfigOption;
 use tether_core::acp::options::{OptionsDraft, StartOptions};
+use tether_core::acp::session_setup::{self, McpServer};
+use tether_core::acp::versions::{self, Kind, ManagedState, Versions};
 use tether_core::connect::ConnectError;
 
-use super::{ChatJob, ExecTag};
+use super::{ChatJob, ExecTag, McpLibrary};
 
 const LIST_LIMIT: usize = 20;
 const RELOAD_AFTER: Duration = Duration::from_millis(500);
@@ -28,6 +31,46 @@ pub enum Step {
     CreateChild,
     CreateFolder,
     Validate,
+    DeleteSession,
+    Versions,
+    Update,
+    LiveOptions,
+}
+
+impl Step {
+    /// Most commands answer in seconds; an update installs a package, an agent's options start it.
+    pub fn deadline(self) -> Option<Duration> {
+        let secs = match self {
+            Self::Versions => versions::VERSIONS_DEADLINE_SECS,
+            Self::Update => versions::UPDATE_DEADLINE_SECS,
+            Self::LiveOptions => versions::OPTIONS_DEADLINE_SECS,
+            _ => return None,
+        };
+        Some(Duration::from_secs(secs))
+    }
+}
+
+/// One line under the agent picker: an update waiting, or what the last Update came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticeRow {
+    pub kind: Kind,
+    pub text: String,
+    /// 0 plain, 1 done, 2 failed.
+    pub tone: u8,
+    pub busy: bool,
+    pub update: bool,
+    pub dismiss: bool,
+    /// An update only the user can run: shown with a Copy button.
+    pub copy: String,
+}
+
+/// What the dialog says under the agent picker about the host's versions for the picked agent.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UpdateNotice {
+    /// The host's tether predates managed versions.
+    pub unsupported: bool,
+    /// The adapter row, then the CLI row.
+    pub rows: Vec<NoticeRow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,7 +90,15 @@ pub enum Next {
         multi: bool,
         agent: &'static AgentProfile,
         start: StartOptions,
+        /// Extra folders, absolute on the host.
+        dirs: Vec<String>,
+        /// Names of the saved MCP servers to attach.
+        mcp: Vec<String>,
     },
+    /// The host's answer to whether it manages agent versions changed.
+    Support(bool),
+    /// The picked agent's options as a session on the host just offered them.
+    Options(Vec<ConfigOption>),
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +122,18 @@ pub struct NewChat {
     pub error: Option<String>,
     pub listing: Listing,
     pub continuing: Option<String>,
+    /// A saved conversation the user asked to delete, until they confirm or cancel.
+    pub delete_asked: Option<String>,
+    /// Extra folders as typed (`~` allowed), expanded when the chat starts.
+    pub extra_dirs: Vec<String>,
+    pub saved_servers: Vec<McpServer>,
+    /// Names of the saved servers switched on for this chat.
+    pub chosen_servers: Vec<String>,
+    /// The Add server form is open.
+    pub adding_server: bool,
+    pub server_error: Option<String>,
+    /// The conversation whose deletion is running on the host.
+    pub deleting: Option<String>,
     pub agent: &'static AgentProfile,
     pub options: OptionsDraft,
     request: u64,
@@ -79,6 +142,17 @@ pub struct NewChat {
     multi: bool,
     /// Agent key → why the host can't run it, from the probe the dialog sends as it opens.
     unavailable: HashMap<&'static str, String>,
+    scope: String,
+    managed_state: ManagedState,
+    versions: Option<Versions>,
+    /// The update running.
+    updating: Option<(Kind, &'static str)>,
+    update_outcome: Option<(Kind, &'static str, Result<String, String>)>,
+    versions_request: u64,
+    update_request: u64,
+    live_request: u64,
+    /// Options are to be read once the folder is ready.
+    live_pending: bool,
 }
 
 pub fn probe_job() -> ChatJob {
@@ -135,6 +209,13 @@ impl NewChat {
             error: None,
             listing: Listing::Loading,
             continuing: None,
+            delete_asked: None,
+            extra_dirs: Vec::new(),
+            saved_servers: Vec::new(),
+            chosen_servers: Vec::new(),
+            adding_server: false,
+            server_error: None,
+            deleting: None,
             agent,
             options,
             request: generation,
@@ -142,7 +223,137 @@ impl NewChat {
             reload_at: None,
             multi: false,
             unavailable: HashMap::new(),
+            scope: String::new(),
+            managed_state: ManagedState::default(),
+            versions: None,
+            updating: None,
+            update_outcome: None,
+            versions_request: generation,
+            update_request: generation,
+            live_request: generation,
+            live_pending: false,
         }
+    }
+
+    pub fn set_managed(&mut self, scope: &str, state: ManagedState) {
+        self.scope = scope.to_string();
+        self.managed_state = state;
+    }
+
+    /// The host manages versions: chats spawn `tether acp agent …`.
+    pub fn managed(&self) -> bool {
+        self.managed_state.supported(&self.scope) == Some(true)
+    }
+
+    pub fn versions_job(&mut self) -> ChatJob {
+        self.versions_request = next_request();
+        ChatJob::Exec {
+            tag: ExecTag::Versions {
+                request: self.versions_request,
+            },
+            command: versions::versions_command(),
+        }
+    }
+
+    fn picked_version(&self, kind: Kind) -> Option<&versions::AgentVersion> {
+        self.versions.as_ref()?.get(kind, self.agent.key)
+    }
+
+    fn notice_row(&self, kind: Kind) -> Option<NoticeRow> {
+        let key = self.agent.key;
+        let outcome = self
+            .update_outcome
+            .as_ref()
+            .filter(|(k, a, _)| *k == kind && *a == key)
+            .map(|(_, _, r)| r);
+        let row = |text: String, tone: u8| NoticeRow {
+            kind,
+            text,
+            tone,
+            busy: false,
+            update: false,
+            dismiss: false,
+            copy: String::new(),
+        };
+        if let Some(Ok(done)) = outcome {
+            return Some(row(done.clone(), 1));
+        }
+        let v = self.picked_version(kind).filter(|v| v.update_available)?;
+        let busy = self.updating == Some((kind, key));
+        if !busy
+            && self
+                .managed_state
+                .is_dismissed(&self.scope, kind, key, &v.latest)
+        {
+            return None;
+        }
+        let (text, tone) = match outcome {
+            Some(Err(e)) => (e.clone(), 2),
+            _ => (versions::update_line(self.agent, v), 0),
+        };
+        let runnable = kind == Kind::Adapter || v.runnable;
+        Some(NoticeRow {
+            busy,
+            update: runnable,
+            dismiss: !busy,
+            copy: if runnable {
+                String::new()
+            } else {
+                v.command.clone()
+            },
+            ..row(text, tone)
+        })
+    }
+
+    pub fn notice(&self) -> UpdateNotice {
+        UpdateNotice {
+            unsupported: self.agent.host_managed()
+                && self.managed_state.supported(&self.scope) == Some(false),
+            rows: [Kind::Adapter, Kind::Cli]
+                .into_iter()
+                .filter(|k| *k == Kind::Cli || self.agent.host_managed())
+                .filter_map(|k| self.notice_row(k))
+                .collect(),
+        }
+    }
+
+    /// The Update click; nothing else ever starts an update.
+    pub fn start_update(&mut self, kind: Kind) -> Option<ChatJob> {
+        let agent = self.agent;
+        let runnable = self
+            .picked_version(kind)
+            .is_some_and(|v| v.update_available && (kind == Kind::Adapter || v.runnable));
+        if self.updating.is_some() || !self.managed() || !runnable {
+            return None;
+        }
+        self.updating = Some((kind, agent.key));
+        self.update_outcome = None;
+        self.update_request = next_request();
+        Some(exec(
+            self.update_request,
+            Step::Update,
+            versions::update_command(agent, kind),
+        ))
+    }
+
+    /// Not now: the kind, agent and version dismissed, to be stored.
+    pub fn dismiss_update(&mut self, kind: Kind) -> Option<(Kind, String, String)> {
+        let latest = self
+            .picked_version(kind)
+            .filter(|v| v.update_available)?
+            .latest
+            .clone();
+        self.managed_state
+            .dismiss(&self.scope, kind, self.agent.key, &latest);
+        Some((kind, self.agent.key.to_string(), latest))
+    }
+
+    fn live_ready(&self) -> bool {
+        self.managed()
+            && !self.browsing
+            && !self.creating
+            && !self.folder_loading
+            && self.folder_info.as_ref().is_some_and(Folder::ready)
     }
 
     #[cfg(debug_assertions)]
@@ -163,6 +374,100 @@ impl NewChat {
                 .collect(),
         });
         self.browse_info = self.folder_info.clone();
+    }
+
+    /// Debug builds: `available` shows a waiting Codex adapter update, `done` the line after a
+    /// successful one, `unsupported` a host whose tether is too old.
+    #[cfg(debug_assertions)]
+    pub fn preview_update(&mut self, kind: &str) {
+        self.scope = "dev:22".into();
+        let entry =
+            |agent: &str, version: &str, engine: &str, latest: &str| versions::AgentVersion {
+                kind: Kind::Adapter,
+                agent: agent.into(),
+                version: version.into(),
+                engine: engine.into(),
+                latest: latest.into(),
+                update_available: version != latest,
+                ..Default::default()
+            };
+        let done = kind == "done";
+        self.managed_state
+            .set_supported(&self.scope, kind != "unsupported");
+        if kind == "unsupported" {
+            return;
+        }
+        self.versions = Some(Versions {
+            supported: Some(true),
+            agents: vec![
+                entry("claude", "0.95.0", "Claude Code 2.1.309", "0.95.0"),
+                if done {
+                    entry("codex", "2.8.0", "Codex 0.170.0", "2.8.0")
+                } else {
+                    entry("codex", "2.3.0", "Codex 0.164.0", "2.8.0")
+                },
+                versions::AgentVersion {
+                    kind: Kind::Cli,
+                    agent: "codex".into(),
+                    version: "0.164.0".into(),
+                    latest: "0.170.0".into(),
+                    update_available: true,
+                    command: "npm install -g @openai/codex@latest".into(),
+                    runnable: false,
+                    ..Default::default()
+                },
+            ],
+        });
+        if done {
+            self.update_outcome = Some((Kind::Adapter, "codex", Ok("Updated to 2.8.0".into())));
+        }
+    }
+
+    /// Debug builds: `extras` and `form` show an extra folder and a saved server switched on (`form`
+    /// also opens the Add server form), `continue` the saved conversations, `continue-delete` with the
+    /// delete confirmation open.
+    #[cfg(debug_assertions)]
+    pub fn preview_setup(&mut self, kind: &str) {
+        let server = |name: &str, url: &str| McpServer {
+            name: name.into(),
+            url: url.into(),
+            headers: Vec::new(),
+        };
+        self.saved_servers = vec![
+            server("docs", "https://mcp.example.com/docs"),
+            server("tracker", "https://mcp.example.com/tracker"),
+        ];
+        match kind {
+            "extras" | "form" => {
+                self.extra_dirs =
+                    vec!["~/shared/design-system".into(), "/srv/data/fixtures".into()];
+                self.chosen_servers = vec!["docs".into()];
+                self.adding_server = kind == "form";
+            }
+            _ => {
+                self.mode = 1;
+                let saved = |id: &str, title: &str, ago: i64| SavedSession {
+                    session_id: id.into(),
+                    title: title.into(),
+                    updated_at: Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64)
+                            - ago,
+                    ),
+                    cwd: "/home/dev/projects/api-server".into(),
+                };
+                let list = vec![
+                    saved("a", "Fix the pagination bug in the orders endpoint", 7200),
+                    saved("b", "Move the job queue to a worker pool", 86_400 * 2),
+                    saved("c", "Review the migration plan", 86_400 * 9),
+                ];
+                self.listing = Listing::Loaded(list);
+                if kind == "continue-delete" {
+                    self.delete_asked = Some("b".into());
+                }
+            }
+        }
     }
 
     pub fn display_path(&self, path: &str) -> String {
@@ -352,6 +657,8 @@ impl NewChat {
         self.agent = agent;
         self.options = options;
         self.error = None;
+        self.live_request = next_request();
+        self.live_pending = true;
         self.reload(now)
     }
 
@@ -366,6 +673,8 @@ impl NewChat {
         self.folder_loading = true;
         self.folder_request = next_request();
         self.folder_at = Some(now + RELOAD_AFTER);
+        self.live_request = next_request();
+        self.live_pending = false;
         if self.mode == 1 {
             self.list_request = next_request();
             self.listing = Listing::Loading;
@@ -387,6 +696,16 @@ impl NewChat {
                 self.folder_request,
                 Step::Folder,
                 folders::command(&self.folder, false),
+            ));
+        }
+        if self.live_pending && self.live_ready() {
+            self.live_pending = false;
+            self.live_request = next_request();
+            let cwd = self.folder_info.as_ref().map(|f| f.path.clone())?;
+            return Some(exec(
+                self.live_request,
+                Step::LiveOptions,
+                versions::options_command(&cwd, self.agent, true),
             ));
         }
         let due = self.reload_at.is_some_and(|at| now >= at);
@@ -420,9 +739,149 @@ impl NewChat {
             Step::Sessions,
             format!(
                 "{} || true",
-                host::sessions_command(cwd, LIST_LIMIT, self.agent)
+                host::sessions_command(cwd, LIST_LIMIT, self.agent, self.managed())
             ),
         )
+    }
+
+    /// `~` and absolute paths only; a duplicate is ignored. False says nothing was added.
+    pub fn add_folder(&mut self, text: &str) -> bool {
+        let path = text.trim();
+        if path.is_empty() {
+            return false;
+        }
+        if !(path.starts_with('/') || path == "~" || path.starts_with("~/")) {
+            self.error = Some("An extra folder is an absolute path, or starts with ~.".into());
+            return false;
+        }
+        self.error = None;
+        if !self.extra_dirs.iter().any(|d| d == path) {
+            self.extra_dirs.push(path.to_string());
+        }
+        true
+    }
+
+    pub fn remove_folder(&mut self, index: usize) {
+        if index < self.extra_dirs.len() {
+            self.extra_dirs.remove(index);
+        }
+    }
+
+    fn expanded_dirs(&self) -> Vec<String> {
+        let home = self.home.as_deref().unwrap_or("");
+        self.extra_dirs
+            .iter()
+            .map(|d| host::expand_cwd(d, home))
+            .collect()
+    }
+
+    fn extras_need_home(&self) -> bool {
+        self.home.is_none() && self.extra_dirs.iter().any(|d| host::needs_home(d))
+    }
+
+    pub fn toggle_server(&mut self, name: &str) {
+        if let Some(i) = self.chosen_servers.iter().position(|n| n == name) {
+            self.chosen_servers.remove(i);
+        } else if self.saved_servers.iter().any(|s| s.name == name) {
+            self.chosen_servers.push(name.to_string());
+        }
+    }
+
+    pub fn set_adding_server(&mut self, adding: bool) {
+        self.adding_server = adding;
+        self.server_error = None;
+    }
+
+    /// Saves a new server to the machine's list (the secret store) and leaves it switched off.
+    pub fn save_server(
+        &mut self,
+        name: &str,
+        url: &str,
+        headers: &str,
+        library: Option<&McpLibrary>,
+    ) -> bool {
+        let result = (|| {
+            let headers = session_setup::parse_header_lines(headers)?;
+            let server = McpServer {
+                name: name.trim().to_string(),
+                url: url.trim().to_string(),
+                headers,
+            };
+            server.validate(&self.saved_servers).map_err(String::from)?;
+            let library = library.ok_or("Secret storage is unavailable.")?;
+            let mut list = self.saved_servers.clone();
+            list.push(server);
+            library.save(&list)?;
+            Ok(list)
+        })();
+        match result {
+            Ok(list) => {
+                self.saved_servers = list;
+                self.adding_server = false;
+                self.server_error = None;
+                true
+            }
+            Err(message) => {
+                self.server_error = Some(message);
+                false
+            }
+        }
+    }
+
+    pub fn delete_server(&mut self, name: &str, library: Option<&McpLibrary>) {
+        let list: Vec<McpServer> = self
+            .saved_servers
+            .iter()
+            .filter(|s| s.name != name)
+            .cloned()
+            .collect();
+        match library.map(|l| l.save(&list)) {
+            Some(Ok(())) => {
+                self.saved_servers = list;
+                self.chosen_servers.retain(|n| n != name);
+            }
+            Some(Err(message)) => self.server_error = Some(message),
+            None => self.server_error = Some("Secret storage is unavailable.".into()),
+        }
+    }
+
+    pub fn ask_delete(&mut self, id: String) {
+        if self.continuing.is_none() && self.deleting.is_none() && self.saved(&id).is_some() {
+            self.delete_asked = Some(id);
+            self.error = None;
+        }
+    }
+
+    pub fn cancel_delete(&mut self) {
+        self.delete_asked = None;
+    }
+
+    fn saved(&self, id: &str) -> Option<&SavedSession> {
+        match &self.listing {
+            Listing::Loaded(list) => list.iter().find(|s| s.session_id == id),
+            _ => None,
+        }
+    }
+
+    /// Runs the delete on the host; the row goes once the host confirms it.
+    pub fn confirm_delete(&mut self) -> Option<ChatJob> {
+        let id = self.delete_asked.take()?;
+        if self.deleting.is_some() {
+            return None;
+        }
+        let cwd = self
+            .saved(&id)
+            .map(|s| s.cwd.clone())
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| host::expand_cwd(&self.folder, self.home.as_deref().unwrap_or("")));
+        let command = format!(
+            "{} || true",
+            host::delete_session_command(&cwd, &id, self.agent, self.managed())
+        );
+        self.deleting = Some(id);
+        self.error = None;
+        self.request = next_request();
+        Some(exec(self.request, Step::DeleteSession, command))
     }
 
     pub fn browse(&mut self, _now: Duration) -> Option<ChatJob> {
@@ -474,7 +933,12 @@ impl NewChat {
 
     /// `load` continues that earlier conversation instead of starting one.
     pub fn start(&mut self, load: Option<String>) -> Option<ChatJob> {
-        if self.busy || self.creating || self.continuing.is_some() || self.browsing {
+        if self.busy
+            || self.creating
+            || self.continuing.is_some()
+            || self.browsing
+            || self.deleting.is_some()
+        {
             return None;
         }
         self.folder_request = next_request();
@@ -493,6 +957,8 @@ impl NewChat {
             multi: self.multi,
             agent: self.agent,
             start: self.options.start_options(),
+            dirs: self.expanded_dirs(),
+            mcp: self.chosen_servers.clone(),
         }
     }
 
@@ -527,8 +993,15 @@ impl NewChat {
         host_name: &str,
     ) -> Next {
         match step {
-            Step::Check | Step::Home | Step::Validate if request != self.request => Next::Nothing,
+            Step::Check | Step::Home | Step::Validate | Step::DeleteSession
+                if request != self.request =>
+            {
+                Next::Nothing
+            }
             Step::ListHome | Step::Sessions if request != self.list_request => Next::Nothing,
+            Step::Versions if request != self.versions_request => Next::Nothing,
+            Step::Update if request != self.update_request => Next::Nothing,
+            Step::LiveOptions if request != self.live_request => Next::Nothing,
             Step::Folder | Step::FolderHome | Step::CreateFolder
                 if request != self.folder_request =>
             {
@@ -575,8 +1048,47 @@ impl NewChat {
                 self.folder_loading = false;
                 self.creating = false;
                 self.folder_info = Some(result.as_deref().map(Folder::parse).unwrap_or_default());
+                self.live_pending = self.folder_info.as_ref().is_some_and(Folder::ready);
                 Next::Nothing
             }
+            Step::Versions => {
+                let Ok(output) = result else {
+                    return Next::Nothing;
+                };
+                let read = versions::parse_versions(&output);
+                let supported = read.supported;
+                if !read.agents.is_empty() {
+                    self.versions = Some(read);
+                }
+                match supported {
+                    Some(supported) if self.managed_state.set_supported(&self.scope, supported) => {
+                        self.live_pending = supported;
+                        Next::Support(supported)
+                    }
+                    _ => Next::Nothing,
+                }
+            }
+            Step::Update => {
+                let Some((kind, key)) = self.updating.take() else {
+                    return Next::Nothing;
+                };
+                let outcome = match result {
+                    Ok(output) => versions::parse_update(&output).map(|u| u.sentence()),
+                    Err(e) => Err(exec_failure(&e)),
+                };
+                let done = outcome.is_ok();
+                self.update_outcome = Some((kind, key, outcome));
+                if !done {
+                    return Next::Nothing;
+                }
+                self.live_request = next_request();
+                self.live_pending = true;
+                Next::Job(self.versions_job())
+            }
+            Step::LiveOptions => match result.ok().and_then(|o| versions::parse_options(&o)) {
+                Some(options) => Next::Options(options),
+                None => Next::Nothing,
+            },
             Step::Validate => {
                 self.folder_loading = false;
                 let info = result.as_deref().map(Folder::parse).unwrap_or_default();
@@ -599,13 +1111,16 @@ impl NewChat {
                     return self.stop(message);
                 }
                 self.multi = result.as_ref().is_ok_and(|o| host::host_multi_client(o));
-                if host::needs_home(&self.folder) {
+                if host::needs_home(&self.folder) || self.extras_need_home() {
                     return Next::Job(exec(self.request, Step::Home, host::HOME.to_string()));
                 }
                 self.validate(&host::expand_cwd(&self.folder, ""))
             }
             Step::Home => match result {
                 Ok(home) if home.trim().starts_with('/') => {
+                    if self.home.is_none() {
+                        self.home = Some(home.trim().trim_end_matches('/').to_string());
+                    }
                     self.validate(&host::expand_cwd(&self.folder, home.trim()))
                 }
                 _ => self.stop("Couldn't read the host's home folder.".into()),
@@ -623,6 +1138,24 @@ impl NewChat {
                     Next::Nothing
                 }
             },
+            Step::DeleteSession => {
+                let Some(id) = self.deleting.take() else {
+                    return Next::Nothing;
+                };
+                let outcome = match result {
+                    Ok(output) => host::parse_delete_session(&output, &id),
+                    Err(e) => Err(exec_failure(&e)),
+                };
+                match outcome {
+                    Ok(()) => {
+                        if let Listing::Loaded(list) = &mut self.listing {
+                            list.retain(|s| s.session_id != id);
+                        }
+                    }
+                    Err(message) => self.error = Some(message),
+                }
+                Next::Nothing
+            }
             Step::Sessions => {
                 self.listing = match result {
                     Ok(output) => {
@@ -643,6 +1176,7 @@ impl NewChat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tether_core::acp::versions::{Kind, ManagedState};
     use tether_core::acp::{agent::CLAUDE, defaults::ChatDefaults};
 
     fn dialog(path: &str) -> NewChat {
@@ -657,14 +1191,215 @@ mod tests {
     }
 
     fn reply(nc: &mut NewChat, job: ChatJob, output: &str) -> Next {
-        let ChatJob::Exec {
-            tag: ExecTag::NewChat { request, step },
-            ..
-        } = job
-        else {
-            panic!("expected exec")
+        let (request, step) = match job {
+            ChatJob::Exec {
+                tag: ExecTag::NewChat { request, step },
+                ..
+            } => (request, step),
+            ChatJob::Exec {
+                tag: ExecTag::Versions { request },
+                ..
+            } => (request, Step::Versions),
+            _ => panic!("expected exec"),
         };
         nc.on_exec(request, step, Ok(output.into()), "host")
+    }
+
+    const READY: &str = "__TETHER_FOLDER__\0ready\0/proj\0";
+    const ADAPTER: &str = r#"{"kind":"adapter","agent":"codex","version":"2.3.0","engine":"Codex 0.164.0","latest":"2.8.0","updateAvailable":true}"#;
+    const CLI: &str = r#"{"kind":"cli","agent":"codex","version":"0.164.0","latest":"0.170.0","updateAvailable":true,"command":"npm install -g @openai/codex@latest","runnable":false}"#;
+
+    fn codex_dialog() -> NewChat {
+        let mut nc = dialog("/proj");
+        nc.set_managed("h:22", ManagedState::default());
+        nc.agent = &agent::CODEX;
+        nc
+    }
+
+    fn read_versions(nc: &mut NewChat, output: &str) -> Next {
+        let job = nc.versions_job();
+        reply(nc, job, output)
+    }
+
+    fn folder_ready(nc: &mut NewChat) {
+        let job = nc.tick(Duration::ZERO).unwrap();
+        reply(nc, job, READY);
+    }
+
+    fn command(job: &ChatJob) -> &str {
+        match job {
+            ChatJob::Exec { command, .. } => command,
+            _ => panic!("expected exec"),
+        }
+    }
+
+    #[test]
+    fn a_versions_read_sets_support_and_chats_then_spawn_the_managed_agent() {
+        let mut nc = codex_dialog();
+        assert!(!nc.managed());
+        assert!(command(&nc.sessions_job("/x")).contains("npx -y @agentclientprotocol/codex-acp"));
+        assert!(matches!(
+            read_versions(&mut nc, ADAPTER),
+            Next::Support(true)
+        ));
+        assert!(nc.managed());
+        assert!(command(&nc.sessions_job("/x")).contains("--agent-cmd 'tether acp agent codex'"));
+        // Unchanged support is not reported again.
+        assert!(matches!(read_versions(&mut nc, ADAPTER), Next::Nothing));
+    }
+
+    #[test]
+    fn an_old_host_shows_the_update_tether_line_and_keeps_the_pinned_spawn() {
+        let mut nc = codex_dialog();
+        assert!(matches!(
+            read_versions(&mut nc, "unknown acp command \"versions\"\n"),
+            Next::Support(false)
+        ));
+        assert!(!nc.managed());
+        assert!(nc.notice().unsupported);
+        assert!(nc.notice().rows.is_empty());
+        assert!(command(&nc.sessions_job("/x")).contains("codex-acp@"));
+        nc.agent = &agent::OPENCODE;
+        assert!(!nc.notice().unsupported);
+    }
+
+    #[test]
+    fn a_failed_read_changes_nothing() {
+        let mut nc = codex_dialog();
+        read_versions(&mut nc, ADAPTER);
+        assert!(matches!(read_versions(&mut nc, ""), Next::Nothing));
+        assert!(nc.managed());
+        assert_eq!(nc.notice().rows.len(), 1);
+    }
+
+    #[test]
+    fn the_notice_lists_the_adapter_then_the_cli_and_dismissal_is_per_version() {
+        let mut nc = codex_dialog();
+        read_versions(&mut nc, &format!("{ADAPTER}\n{CLI}\n"));
+        let rows = nc.notice().rows;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].text,
+            "Codex adapter 2.8.0 available \u{b7} you have 2.3.0 (Codex 0.164.0)"
+        );
+        assert!(rows[0].update && rows[0].dismiss && rows[0].copy.is_empty());
+        assert_eq!(
+            rows[1].text,
+            "Codex CLI 0.170.0 available \u{b7} you have 0.164.0"
+        );
+        assert!(!rows[1].update, "a CLI the host can't run has no Update");
+        assert_eq!(rows[1].copy, "npm install -g @openai/codex@latest");
+        assert!(nc.start_update(Kind::Cli).is_none());
+
+        let dismissed = nc.dismiss_update(Kind::Adapter).unwrap();
+        assert_eq!(dismissed, (Kind::Adapter, "codex".into(), "2.8.0".into()));
+        assert_eq!(nc.notice().rows.len(), 1);
+        let newer = ADAPTER.replace("2.8.0", "2.9.0");
+        read_versions(&mut nc, &format!("{newer}\n{CLI}\n"));
+        assert_eq!(nc.notice().rows.len(), 2);
+        // Another agent has none of these.
+        nc.agent = &agent::CLAUDE;
+        assert!(nc.notice().rows.is_empty());
+    }
+
+    #[test]
+    fn nothing_updates_without_the_click_and_the_click_runs_one_update() {
+        let mut nc = codex_dialog();
+        assert!(
+            nc.start_update(Kind::Adapter).is_none(),
+            "nothing is known yet"
+        );
+        read_versions(&mut nc, ADAPTER);
+        let job = nc.start_update(Kind::Adapter).expect("update");
+        assert!(command(&job).contains(" update codex 2>&1"));
+        assert!(nc.start_update(Kind::Adapter).is_none());
+        assert!(nc.notice().rows[0].busy);
+        assert!(!nc.notice().rows[0].dismiss);
+
+        let Next::Job(reread) = reply(
+            &mut nc,
+            job,
+            "{\"agent\":\"codex\",\"from\":\"2.3.0\",\"to\":\"2.8.0\"}\n",
+        ) else {
+            panic!("a successful update reads the versions again")
+        };
+        assert_eq!(command(&reread), versions::versions_command());
+        let row = nc.notice().rows.remove(0);
+        assert_eq!((row.text.as_str(), row.tone), ("Updated to 2.8.0", 1));
+        assert!(!row.update);
+        let fresh = ADAPTER
+            .replace("\"2.3.0\"", "\"2.8.0\"")
+            .replace("true", "false");
+        reply(&mut nc, reread, &fresh);
+        assert_eq!(nc.notice().rows[0].text, "Updated to 2.8.0");
+    }
+
+    #[test]
+    fn a_failed_update_shows_the_hosts_words_and_can_be_tried_again() {
+        let mut nc = codex_dialog();
+        read_versions(&mut nc, ADAPTER);
+        let job = nc.start_update(Kind::Adapter).unwrap();
+        assert!(matches!(
+            reply(&mut nc, job, "tether: npm install failed\n"),
+            Next::Nothing
+        ));
+        let row = nc.notice().rows.remove(0);
+        assert_eq!((row.text.as_str(), row.tone), ("npm install failed", 2));
+        assert!(row.update, "the retry stays");
+        assert!(nc.start_update(Kind::Adapter).is_some());
+    }
+
+    #[test]
+    fn options_are_read_once_the_folder_is_ready_on_a_managed_host() {
+        let mut nc = dialog("/proj");
+        nc.set_managed("h:22", ManagedState::default());
+        folder_ready(&mut nc);
+        assert!(
+            nc.tick(Duration::ZERO).is_none(),
+            "an unmanaged host reads nothing"
+        );
+        read_versions(&mut nc, ADAPTER);
+        let job = nc.tick(Duration::ZERO).expect("options job");
+        assert!(command(&job).contains("options '/proj' --agent-cmd 'tether acp agent claude'"));
+        assert!(nc.tick(Duration::ZERO).is_none(), "one read per change");
+        let line = r#"{"configOptions":[{"id":"model","name":"Model","type":"select","currentValue":"a","options":[{"value":"a","name":"A"}]}]}"#;
+        let Next::Options(options) = reply(&mut nc, job, line) else {
+            panic!("options")
+        };
+        assert_eq!(options[0].id, "model");
+    }
+
+    #[test]
+    fn a_stale_options_answer_is_dropped_and_a_failure_keeps_the_cache() {
+        let mut nc = dialog("/proj");
+        nc.set_managed("h:22", ManagedState::default());
+        read_versions(&mut nc, ADAPTER);
+        folder_ready(&mut nc);
+        let old = nc.tick(Duration::ZERO).unwrap();
+        nc.set_folder("/other".into(), Duration::ZERO);
+        let line = r#"{"configOptions":[]}"#;
+        assert!(matches!(reply(&mut nc, old, line), Next::Nothing));
+
+        let job = nc.tick(Duration::from_secs(1)).unwrap();
+        reply(&mut nc, job, "__TETHER_FOLDER__\0ready\0/other\0");
+        let job = nc.tick(Duration::from_secs(1)).unwrap();
+        assert!(command(&job).contains("options '/other'"));
+        assert!(matches!(
+            reply(&mut nc, job, "agent exited before starting a session"),
+            Next::Nothing
+        ));
+
+        // Another agent invalidates a read still in flight.
+        nc.live_pending = true;
+        let job = nc.tick(Duration::from_secs(2)).unwrap();
+        nc.set_agent(
+            &agent::CODEX,
+            OptionsDraft::new(&agent::CODEX, &ChatDefaults::default(), &[]),
+            Duration::ZERO,
+        );
+        assert!(matches!(reply(&mut nc, job, line), Next::Nothing));
+        let job = nc.tick(Duration::from_secs(2)).unwrap();
+        assert!(command(&job).contains("tether acp agent codex"));
     }
 
     #[test]
@@ -705,6 +1440,137 @@ mod tests {
         let (_, step) = exec_of(nc.tick(Duration::ZERO));
         assert_eq!(step, Step::Folder);
         assert!(nc.error.is_some());
+    }
+
+    fn saved(id: &str) -> SavedSession {
+        SavedSession {
+            session_id: id.into(),
+            title: id.into(),
+            updated_at: None,
+            cwd: "/projects/api".into(),
+        }
+    }
+
+    #[test]
+    fn deleting_a_saved_conversation_asks_first_then_runs_the_host_command_and_drops_the_row() {
+        let mut nc = dialog("/projects/api");
+        nc.listing = Listing::Loaded(vec![saved("a"), saved("b")]);
+        nc.ask_delete("missing".into());
+        assert!(nc.delete_asked.is_none());
+        nc.ask_delete("a".into());
+        nc.cancel_delete();
+        assert!(nc.confirm_delete().is_none());
+        nc.ask_delete("a".into());
+        let job = nc.confirm_delete().unwrap();
+        let ChatJob::Exec { command, .. } = &job else {
+            panic!()
+        };
+        assert!(
+            command.contains("sessions '/projects/api' --delete 'a'")
+                || command.contains("sessions /projects/api --delete a"),
+            "{command}"
+        );
+        assert_eq!(nc.deleting.as_deref(), Some("a"));
+        reply(&mut nc, job, "{\"deleted\":\"a\"}\n");
+        let Listing::Loaded(list) = &nc.listing else {
+            panic!()
+        };
+        assert_eq!(list.len(), 1);
+        assert!(nc.deleting.is_none() && nc.error.is_none());
+    }
+
+    #[test]
+    fn extra_folders_are_absolute_or_tilde_deduplicated_and_expanded_with_the_home() {
+        let mut nc = dialog("/projects/api");
+        assert!(!nc.add_folder("  "));
+        assert!(!nc.add_folder("relative/dir"));
+        assert!(nc.error.is_some());
+        assert!(nc.add_folder("~/shared"));
+        assert!(nc.add_folder("/data/lib"));
+        assert!(nc.add_folder("/data/lib"));
+        assert_eq!(nc.extra_dirs, ["~/shared", "/data/lib"]);
+        assert_eq!(nc.expanded_dirs(), ["/home/dev/shared", "/data/lib"]);
+        nc.remove_folder(0);
+        assert_eq!(nc.extra_dirs, ["/data/lib"]);
+        let Next::Open { dirs, .. } = nc.open_next("/projects/api".into()) else {
+            panic!()
+        };
+        assert_eq!(dirs, ["/data/lib"]);
+    }
+
+    #[test]
+    fn a_tilde_folder_makes_the_start_ask_for_the_home_first() {
+        let mut nc = dialog("/projects/api");
+        nc.home = None;
+        nc.add_folder("~/shared");
+        let check = nc.start(None).unwrap();
+        let Next::Job(home) = reply(&mut nc, check, "") else {
+            panic!("home read")
+        };
+        let ChatJob::Exec { command, .. } = &home else {
+            panic!()
+        };
+        assert_eq!(command, host::HOME);
+        let Next::Job(validate) = reply(&mut nc, home, "/home/dev\n") else {
+            panic!()
+        };
+        let Next::Open { dirs, .. } = reply(
+            &mut nc,
+            validate,
+            "__TETHER_FOLDER__\0ready\0/projects/api\0",
+        ) else {
+            panic!()
+        };
+        assert_eq!(dirs, ["/home/dev/shared"]);
+    }
+
+    fn server_form(nc: &mut NewChat, name: &str, url: &str, library: &McpLibrary) -> bool {
+        nc.save_server(name, url, "Authorization: Bearer t", Some(library))
+    }
+
+    #[test]
+    fn saved_servers_validate_persist_toggle_and_delete() {
+        let library = McpLibrary::new(
+            std::sync::Arc::new(tether_core::secrets::MemorySecretStore::default()),
+            "devbox:22",
+        );
+        let mut nc = dialog("/projects/api");
+        nc.set_adding_server(true);
+        assert!(!server_form(&mut nc, "", "https://x.test", &library));
+        assert!(nc.server_error.is_some() && nc.adding_server);
+        assert!(!server_form(&mut nc, "docs", "ftp://x", &library));
+        assert!(server_form(&mut nc, "docs", "https://x.test/mcp", &library));
+        assert!(!nc.adding_server && nc.chosen_servers.is_empty());
+        assert!(!server_form(&mut nc, "docs", "https://y.test", &library));
+        assert_eq!(library.list().len(), 1);
+        nc.toggle_server("docs");
+        nc.toggle_server("nope");
+        assert_eq!(nc.chosen_servers, ["docs"]);
+        let Next::Open { mcp, .. } = nc.open_next("/p".into()) else {
+            panic!()
+        };
+        assert_eq!(mcp, ["docs"]);
+        nc.delete_server("docs", Some(&library));
+        assert!(nc.saved_servers.is_empty() && nc.chosen_servers.is_empty());
+        assert!(library.list().is_empty());
+    }
+
+    #[test]
+    fn a_failed_delete_keeps_the_row_and_says_why() {
+        let mut nc = dialog("/projects/api");
+        nc.listing = Listing::Loaded(vec![saved("a")]);
+        nc.ask_delete("a".into());
+        let job = nc.confirm_delete().unwrap();
+        reply(
+            &mut nc,
+            job,
+            "tether: unknown acp command\nusage: tether acp ...",
+        );
+        assert_eq!(
+            nc.error.as_deref(),
+            Some("Update tether on the host to delete conversations.")
+        );
+        assert!(matches!(&nc.listing, Listing::Loaded(l) if l.len() == 1));
     }
 
     #[test]

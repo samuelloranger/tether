@@ -172,7 +172,9 @@ final class ChatTranscriptTests: XCTestCase {
       .update(.plan([ACPPlanEntry(content: "a", status: "pending", priority: "high")])))
     XCTAssertEqual(
       ACPDecoder.decode(Data(ACPFixture.agentLines[0].utf8)),
-      .response(id: .int(1), result: ACPResult(loadSession: true, sessionId: nil, stopReason: nil)))
+      .response(id: .int(1), result: ACPResult(
+        loadSession: true, sessionId: nil, stopReason: nil,
+        capabilities: ACPAgentCapabilities(fork: true, resume: true, delete: true, additionalDirectories: true, mcpHttp: true))))
   }
 
   func test_errors_and_plan_and_thought_reduce_into_items() {

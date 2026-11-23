@@ -69,6 +69,9 @@ enum ChatAgents {
     let command = spawn.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !command.isEmpty else { return nil }
     if command.contains("antigravity-acp") || command.contains("agy_acp_server") { return antigravity }
+    if let rest = command.split(separator: " ").dropFirst(3).first, command.hasPrefix("tether acp agent ") {
+      return profile(forKey: String(rest))
+    }
     return all.first { $0.spawn == command } ?? all.first { command.contains($0.marker) }
       ?? all.first { $0.key == command.lowercased() }
   }

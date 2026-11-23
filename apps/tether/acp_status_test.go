@@ -234,3 +234,36 @@ read l; case "$l" in *c1*) echo '{"jsonrpc":"2.0","id":3,"result":{"sessions":[{
 		t.Fatalf("%q %v", b.String(), err)
 	}
 }
+
+func TestACPSessionsDelete(t *testing.T) {
+	acpEnv(t)
+	deleteAgent := `read l; echo '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"sessionCapabilities":{"delete":{}}}}}'
+read l
+case "$l" in *'"method":"session/delete"'*'"sessionId":"abc"'*) echo '{"jsonrpc":"2.0","id":2,"result":{}}';; *) echo '{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"wrong request"}}';; esac
+sleep 30`
+	out, errb, code := runAcp(t, "sessions", "/proj", "--delete", "abc", "--agent-cmd", fakeAgent(t, deleteAgent))
+	if code != 0 || strings.TrimSpace(out) != `{"deleted":"abc"}` {
+		t.Fatalf("exit %d out %q err %q", code, out, errb)
+	}
+	noDelete := `read l; echo '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{}}}'; sleep 30`
+	_, errb, code = runAcp(t, "sessions", "/proj", "--delete", "abc", "--agent-cmd", fakeAgent(t, noDelete))
+	if code == 0 || !strings.Contains(errb, "can't delete") {
+		t.Fatalf("unsupported: exit %d %q", code, errb)
+	}
+}
+
+func TestACPOptionsPrintsTheNewSessionsOptions(t *testing.T) {
+	acpEnv(t)
+	agent := `read l; echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read l
+case "$l" in *'"method":"session/new"'*'"cwd":"/proj"'*) echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s","configOptions":[{"id":"model","currentValue":"a"}]}}';; esac
+sleep 30`
+	out, errb, code := runAcp(t, "options", "/proj", "--agent-cmd", fakeAgent(t, agent))
+	if code != 0 || strings.TrimSpace(out) != `{"configOptions":[{"id":"model","currentValue":"a"}]}` {
+		t.Fatalf("exit %d out %q err %q", code, out, errb)
+	}
+	bare := `read l; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; read l; echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}'; sleep 30`
+	if out, _, code := runAcp(t, "options", "/proj", "--agent-cmd", fakeAgent(t, bare)); code != 0 || strings.TrimSpace(out) != `{"configOptions":[]}` {
+		t.Fatalf("no options: %d %q", code, out)
+	}
+}

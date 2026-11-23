@@ -97,16 +97,19 @@ func (a *scriptedAgent) stdin() string {
 
 const permReq = `{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t","title":"Write out.txt","kind":"edit"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"always","name":"Always allow","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}`
 
-// startDetached spawns the holder and drops the client, leaving nobody attached.
-func startDetached(t *testing.T, name, script string) {
+// startDetached spawns the holder and drops the client, leaving nobody attached. It returns
+// the chat's folder.
+func startDetached(t *testing.T, name, script string) string {
 	t.Helper()
 	cleanupSession(t, name)
-	p := startAttach(t, name, "--spawn", script, "--cwd", t.TempDir())
+	cwd := t.TempDir()
+	p := startAttach(t, name, "--spawn", script, "--cwd", cwd)
 	_ = p.stdin.Close()
 	if code := p.exitCode(t); code != 0 {
 		t.Fatalf("attach exit %d", code)
 	}
 	time.Sleep(250 * time.Millisecond)
+	return cwd
 }
 
 func runAcp(t *testing.T, args ...string) (string, string, int) {
@@ -133,7 +136,7 @@ func TestACPPermissionPushedOnceWithNoClient(t *testing.T) {
 	acpEnv(t)
 	fr := newFakeRelay(t, 200)
 	a, script := newScriptedAgent(t)
-	startDetached(t, "p", script)
+	cwd := startDetached(t, "p", script)
 	a.emit(t, `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"session_info_update","title":"Fix the bug"}}}`)
 	a.emit(t, permReq)
 	got := fr.waitPushes(t, 1)
@@ -143,14 +146,15 @@ func TestACPPermissionPushedOnceWithNoClient(t *testing.T) {
 	}
 	c := got[0]
 	if c.Category != acpPermissionCategory || c.Level != levelUrgent || c.Body != "Allow: Write out.txt?" ||
-		c.Session != "Fix the bug" || c.ACPSession != "p" || c.RequestID != "7" || c.Title != "Fix the bug · needs you" {
+		c.Session != filepath.Base(cwd) || c.ACPSession != "p" || c.RequestID != "7" || c.Title != "Fix the bug · needs you" {
 		t.Fatalf("payload %+v", c)
 	}
 	if strings.Join(c.Options, ",") != "Allow,Always allow,Reject" || strings.Join(c.OptionIDs, ",") != "allow,always,reject" ||
 		strings.Join(c.OptionKinds, ",") != "allow_once,allow_always,reject_once" {
 		t.Fatalf("options %+v", c)
 	}
-	if want := threadKey("box", "Fix the bug"); fr.reqs[0].ThreadKey != want || fr.reqs[0].Level != levelUrgent {
+	// Grouped by the holder, which a rename doesn't change.
+	if want := threadKey("box", "p"); fr.reqs[0].ThreadKey != want || fr.reqs[0].Level != levelUrgent {
 		t.Fatalf("relay request %+v", fr.reqs[0])
 	}
 	if pendingCount("p") != 1 {
@@ -356,17 +360,27 @@ func TestACPDonePushOnTurnEndWithNoClient(t *testing.T) {
 	fr := newFakeRelay(t, 200)
 	a, script := newScriptedAgent(t)
 	cleanupSession(t, "t")
-	p := startAttach(t, "t", "--spawn", script, "--cwd", t.TempDir())
+	cwd := t.TempDir()
+	p := startAttach(t, "t", "--spawn", script, "--cwd", cwd)
 	fmt.Fprint(p.stdin, `{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[]}}`+"\n")
 	waitFor(t, "prompt seen", func() bool { return strings.Contains(a.stdin(), "session/prompt") })
 	_ = p.stdin.Close()
 	p.exitCode(t)
 	a.emit(t, permReq)
 	fr.waitPushes(t, 1)
+	upd := func(u string) { a.emit(t, `{"jsonrpc":"2.0","method":"session/update","params":{"update":`+u+`}}`) }
+	upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Looking."}}`)
+	upd(`{"sessionUpdate":"tool_call","toolCallId":"x","title":"Read a.go","kind":"read"}`)
+	upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Inner.","_meta":{}},"_meta":{"claudeCode":{"parentToolUseId":"x"}}}`)
+	upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"## Done\n\nAll **tests** pass in "}}`)
+	upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + "`my_pkg`" + `."}}`)
 	a.emit(t, `{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}`)
 	got := fr.waitPushes(t, 2)
 	d := got[1]
-	if d.Category != acpDoneCategory || d.Level != levelQuiet || d.StopReason != "end_turn" || !strings.Contains(d.Body, "end_turn") || d.Title != "t" {
+	// Untitled: named after its folder, which then isn't repeated as the subtitle; the body is
+	// the last top-level prose, not a subagent's and not text before a tool call.
+	if d.Category != acpDoneCategory || d.Level != levelQuiet || d.StopReason != "end_turn" ||
+		d.Body != "Done All tests pass in my_pkg." || d.Title != filepath.Base(cwd)+" · done" || d.Session != "" {
 		t.Fatalf("done push %+v", d)
 	}
 	if pendingCount("t") != 0 {
@@ -476,7 +490,7 @@ func TestACPElicitationPushedOnceWithNoClient(t *testing.T) {
 	acpEnv(t)
 	fr := newFakeRelay(t, 200)
 	a, script := newScriptedAgent(t)
-	startDetached(t, "e1", script)
+	cwd := startDetached(t, "e1", script)
 	a.emit(t, elicitReq)
 	fr.waitPushes(t, 1)
 	time.Sleep(300 * time.Millisecond)
@@ -486,7 +500,7 @@ func TestACPElicitationPushedOnceWithNoClient(t *testing.T) {
 	}
 	c := got[0]
 	if c.Category != acpPermissionCategory || c.Level != levelUrgent || c.Body != "Which colour do you prefer?" ||
-		c.ACPSession != "e1" || c.RequestID != "0" || !c.Elicitation || c.Title != "e1 · needs you" || c.State != "waiting" {
+		c.ACPSession != "e1" || c.RequestID != "0" || !c.Elicitation || c.Title != filepath.Base(cwd)+" · needs you" || c.State != "waiting" {
 		t.Fatalf("payload %+v", c)
 	}
 	if strings.Join(c.Options, ",") != "red,green,blue" || strings.Join(c.OptionIDs, ",") != "red,green,blue" ||

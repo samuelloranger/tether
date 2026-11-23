@@ -133,7 +133,7 @@ component PaletteRow inherits Rectangle {
     in property <bool> active;
     callback chosen();
     height: 44px;
-    background: root.active ? Tokens.accent.with-alpha(0.14) : touch.has-hover ? Tokens.surface-hover : transparent;
+    background: root.active ? Tokens.raised : touch.has-hover ? Tokens.surface-hover : transparent;
     animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
         padding-left: 16px;

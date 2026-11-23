@@ -34,7 +34,8 @@ extension SSHTerminalController {
     let parent = ChatParent(name: source.chatName, title: source.title)
     var journal = UserDefaultsChatJournalStore(name: route.name).load()
     journal.branch = ChatBranch(parent: parent, title: title, earlier: point.earlier)
-    journal.branchSeed = ChatBranching.seed(point.earlier)
+    journal.fork = point.fork
+    journal.branchSeed = point.copyable ? ChatBranching.seed(point.earlier) : nil
     journal.branchDraft = prompt
     UserDefaultsChatJournalStore(name: route.name).save(journal)
     if let failure = await organizeChat(route.name, patch: [
@@ -128,8 +129,68 @@ extension SSHTerminalController {
     let result = await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed) {
       try await self.control.exec($0)
     }
-    if case .ready = result { projectsReadAt = nil }
+    return await withAccess(result, request)
+  }
+
+  /// The sheet's extra folders, resolved like the main one, and its MCP server picks.
+  private func withAccess(_ result: ChatStart, _ request: NewChatRequest) async -> ChatStart {
+    guard case var .ready(route) = result else { return result }
+    guard let folders = await ChatRoute.extraDirectories(request.extraFolders, exec: { try await self.control.exec($0) }) else {
+      return .failed("Couldn't read the host's home folder.")
+    }
+    route.extraDirectories = folders
+    route.mcpServerNames = request.mcpServerNames
+    projectsReadAt = nil
+    return .ready(route)
+  }
+
+  var mcpServerStore: ChatMCPServerStore { ChatMCPServerStore(config: config) }
+
+  var managedAgents: ChatManagedAgentsStore { ChatManagedAgentsStore(config: config) }
+
+  /// Off the serial `control` queue: these run the agent or npm on the host for seconds to minutes.
+  private func hostRun(_ command: String, deadline: TimeInterval) async -> String? {
+    await ACPHostExec.run(command: command, config: config, store: hostKeyStore, deadline: deadline)
+  }
+
+  /// Also records whether this host manages agents, which picks the spawn command of later chats.
+  func agentVersions() async -> ACPAgentVersions.Result? {
+    guard let output = await hostRun(ACPHostCommand.versions, deadline: 60), let result = ACPAgentVersions.parse(output)
+    else { return nil }
+    managedAgents.record(result)
     return result
+  }
+
+  /// Runs only on the user's tap. Nil once the host switched versions, else why it didn't.
+  func updateAgent(_ version: ACPAgentVersion) async -> String? {
+    guard let output = await hostRun(ACPHostCommand.update(version), deadline: 660) else {
+      return "The host didn't finish the update in time."
+    }
+    return ACPHostCommand.updateFailure(output)
+  }
+
+  /// The options a new chat in this folder would start with, read from the agent now; kept as the
+  /// cached list. Nil on a host without managed agents or when the agent didn't answer.
+  func liveOptions(folderText: String, agent: ChatAgentProfile) async -> [ACPConfigOption]? {
+    guard managedAgents.supported,
+      let cwd = await ChatRoute.extraDirectories([folderText], exec: { try await self.control.exec($0) })?.first,
+      let output = await hostRun(ACPHostCommand.options(cwd: cwd, agent: agent, managed: true), deadline: 60),
+      let options = ACPHostCommand.parseOptions(output), !options.isEmpty
+    else { return nil }
+    ChatOptionsCache(config: config).save(options, agent: agent)
+    return options
+  }
+
+  /// Nil once the host confirmed the delete, else what to show.
+  func deleteSavedSession(_ session: ACPSavedSession, agent: ChatAgentProfile) async -> String? {
+    let control = control
+    let command = ACPHostCommand.deleteSession(
+      cwd: session.cwd.isEmpty ? "." : session.cwd, sessionId: session.sessionId, agent: agent,
+      managed: ChatManagedAgentsStore(config: config).supported)
+    guard let output = try? await ChatContinueLoader.withDeadline(30, { try await control.exec(command) }) else {
+      return "The host didn't answer. Try again."
+    }
+    return ACPHostCommand.deleteFailure(output)
   }
 
   /// Agent key → why this host can't run it; a host that could not be checked dims nothing.
@@ -140,7 +201,8 @@ extension SSHTerminalController {
 
   func savedSessions(folderText: String, agent: ChatAgentProfile = ChatAgents.claude) async -> ChatContinueLoader.Result {
     let control = control
-    return await ChatContinueLoader.load(folderText: folderText, agent: agent) { try await control.exec($0) }
+    let managed = ChatManagedAgentsStore(config: config).supported
+    return await ChatContinueLoader.load(folderText: folderText, agent: agent, managed: managed) { try await control.exec($0) }
   }
 
   func continueChat(
@@ -150,8 +212,7 @@ extension SSHTerminalController {
       session: session, cwdText: folderText, host: config.host, agent: request.agent, picks: request.picks,
       changed: request.changed
     ) { try await self.control.exec($0) }
-    if case .ready = result { projectsReadAt = nil }
-    return result
+    return await withAccess(result, request)
   }
 
   /// What the New chat sheet's Options row offers for an agent on this host.

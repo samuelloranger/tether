@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// defaultACPAgentCmd is the adapter `acp sessions` spawns; the app pins the same version for chats.
-const defaultACPAgentCmd = "npx -y @agentclientprotocol/claude-agent-acp@0.95.0"
+// defaultACPAgentCmd is the agent `acp sessions` spawns: Claude, at the version its chats run.
+const defaultACPAgentCmd = "tether acp agent claude"
 
 var acpSessionsTimeout = 15 * time.Second
 
@@ -35,6 +35,8 @@ type acpStatusLine struct {
 	Tasks int `json:"tasks,omitempty"`
 	// Spawn is the command that started the agent, so a client can tell which agent a chat runs.
 	Spawn string `json:"spawn,omitempty"`
+	// AgentVersion is the adapter version of a host-managed agent (`tether acp agent`).
+	AgentVersion string `json:"agentVersion,omitempty"`
 	// MultiClient: the session's holder lets several clients attach at once (absent from older ones).
 	MultiClient       bool       `json:"multiClient,omitempty"`
 	Pinned            bool       `json:"pinned,omitempty"`
@@ -50,7 +52,7 @@ func acpStatusOf(name string) (*acpStatusLine, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient, Spawn: m.Spawn}
+	l := &acpStatusLine{Name: m.Name, State: "ended", Turn: "idle", Title: m.Title, Cwd: m.Cwd, Created: m.Created, EndedReason: m.EndedReason, MultiClient: m.MultiClient, Spawn: m.Spawn, AgentVersion: m.AgentVersion}
 	organization, err := readACPOrganization(name)
 	if err != nil {
 		// Ancillary metadata must never hide a healthy agent or its pending approval.
@@ -113,12 +115,13 @@ type acpSavedSession struct {
 
 func acpSessions(args []string, w io.Writer) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: acp sessions <cwd> [--limit N] [--agent-cmd CMD]")
+		return fmt.Errorf("usage: acp sessions <cwd> [--limit N] [--delete ID] [--agent-cmd CMD]")
 	}
 	cwd := args[0]
 	fs := flag.NewFlagSet("acp sessions", flag.ContinueOnError)
 	limit := fs.Int("limit", 0, "most sessions to print (0 = all)")
 	agentCmd := fs.String("agent-cmd", "", "agent command (default $TETHER_ACP_AGENT_CMD, else the pinned adapter)")
+	del := fs.String("delete", "", "delete this saved conversation instead of listing")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -131,6 +134,12 @@ func acpSessions(args []string, w io.Writer) error {
 	}
 	if cmdline == "" {
 		cmdline = defaultACPAgentCmd
+	}
+	if *del != "" {
+		if err := deleteAgentSession(cmdline, cwd, *del, acpSessionsTimeout); err != nil {
+			return err
+		}
+		return json.NewEncoder(w).Encode(map[string]string{"deleted": *del})
 	}
 	list, err := listAgentSessions(cmdline, cwd, acpSessionsTimeout)
 	if err != nil {
@@ -169,9 +178,12 @@ type rpcReply struct {
 	key  string
 }
 
-// listAgentSessions runs the agent just long enough to ask it for its saved conversations in cwd.
-func listAgentSessions(cmdline, cwd string, timeout time.Duration) ([]acpSavedSession, error) {
-	cmd := exec.Command(acpShell(), "-lc", cmdline)
+type agentCall func(id int, method string, params any) (json.RawMessage, error)
+
+// withAgent runs the agent just long enough for fn's requests, after an initialize whose result
+// fn gets; doing names the work in the error of an agent that exits early.
+func withAgent(cmdline, cwd, doing string, timeout time.Duration, fn func(init json.RawMessage, call agentCall) error) error {
+	cmd := exec.Command(acpShell(), "-lc", withSelf(cmdline))
 	if st, err := os.Stat(cwd); err == nil && st.IsDir() {
 		cmd.Dir = cwd
 	}
@@ -180,14 +192,14 @@ func listAgentSessions(cmdline, cwd string, timeout time.Duration) ([]acpSavedSe
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return err
 	}
 	pgid := cmd.Process.Pid
 	defer func() {
@@ -207,16 +219,16 @@ func listAgentSessions(cmdline, cwd string, timeout time.Duration) ([]acpSavedSe
 		}
 	}()
 	deadline := time.After(timeout)
-	call := func(id int, method string, params any) (json.RawMessage, error) {
+	call := agentCall(func(id int, method string, params any) (json.RawMessage, error) {
 		line, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 		if _, err := stdin.Write(append(line, '\n')); err != nil {
-			return nil, agentGone(cmdline, stderr)
+			return nil, agentGone(cmdline, doing, stderr)
 		}
 		for {
 			select {
 			case r, ok := <-replies:
 				if !ok {
-					return nil, agentGone(cmdline, stderr)
+					return nil, agentGone(cmdline, doing, stderr)
 				}
 				if r.key != fmt.Sprint(id) {
 					continue
@@ -229,44 +241,109 @@ func listAgentSessions(cmdline, cwd string, timeout time.Duration) ([]acpSavedSe
 				return nil, fmt.Errorf("agent did not answer %s within %s", method, timeout)
 			}
 		}
-	}
+	})
 
 	caps := map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false, "elicitation": map[string]any{"form": map[string]any{}}}
-	if _, err := call(1, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": caps}); err != nil {
-		return nil, err
+	init, err := call(1, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": caps})
+	if err != nil {
+		return err
 	}
-	var out []acpSavedSession
-	cursor := ""
-	for id := 2; ; id++ {
-		params := map[string]any{"cwd": cwd}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-		raw, err := call(id, "session/list", params)
-		if err != nil {
-			return nil, err
-		}
-		var res struct {
-			Sessions   []acpSavedSession `json:"sessions"`
-			NextCursor string            `json:"nextCursor"`
-		}
-		if err := json.Unmarshal(raw, &res); err != nil {
-			return nil, fmt.Errorf("agent sent an unreadable session list: %w", err)
-		}
-		out = append(out, res.Sessions...)
-		if res.NextCursor == "" || res.NextCursor == cursor || len(out) >= 1000 {
-			return out, nil
-		}
-		cursor = res.NextCursor
-	}
+	return fn(init, call)
 }
 
-func agentGone(cmdline string, stderr *lockedBuf) error {
+// listAgentSessions asks the agent for its saved conversations in cwd.
+func listAgentSessions(cmdline, cwd string, timeout time.Duration) ([]acpSavedSession, error) {
+	var out []acpSavedSession
+	err := withAgent(cmdline, cwd, "listing sessions", timeout, func(_ json.RawMessage, call agentCall) error {
+		cursor := ""
+		for id := 2; ; id++ {
+			params := map[string]any{"cwd": cwd}
+			if cursor != "" {
+				params["cursor"] = cursor
+			}
+			raw, err := call(id, "session/list", params)
+			if err != nil {
+				return err
+			}
+			var res struct {
+				Sessions   []acpSavedSession `json:"sessions"`
+				NextCursor string            `json:"nextCursor"`
+			}
+			if err := json.Unmarshal(raw, &res); err != nil {
+				return fmt.Errorf("agent sent an unreadable session list: %w", err)
+			}
+			out = append(out, res.Sessions...)
+			if res.NextCursor == "" || res.NextCursor == cursor || len(out) >= 1000 {
+				return nil
+			}
+			cursor = res.NextCursor
+		}
+	})
+	return out, err
+}
+
+var acpOptionsTimeout = 45 * time.Second
+
+// acpOptions prints the options a new session in cwd starts with, as `{"configOptions":[…]}`. The
+// session is never prompted, so neither Claude Code nor Codex keeps a trace of it.
+func acpOptions(args []string, w io.Writer) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: acp options <cwd> [--agent-cmd CMD]")
+	}
+	cwd := args[0]
+	fs := flag.NewFlagSet("acp options", flag.ContinueOnError)
+	agentCmd := fs.String("agent-cmd", "", "agent command (default $TETHER_ACP_AGENT_CMD, else Claude)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	cmdline := *agentCmd
+	if cmdline == "" {
+		cmdline = os.Getenv("TETHER_ACP_AGENT_CMD")
+	}
+	if cmdline == "" {
+		cmdline = defaultACPAgentCmd
+	}
+	return withAgent(cmdline, cwd, "starting a session", acpOptionsTimeout, func(_ json.RawMessage, call agentCall) error {
+		raw, err := call(2, "session/new", map[string]any{"cwd": cwd, "mcpServers": []any{}})
+		if err != nil {
+			return err
+		}
+		var res struct {
+			ConfigOptions json.RawMessage `json:"configOptions"`
+		}
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("agent sent an unreadable session: %w", err)
+		}
+		if len(res.ConfigOptions) == 0 || string(res.ConfigOptions) == "null" {
+			res.ConfigOptions = json.RawMessage("[]")
+		}
+		return json.NewEncoder(w).Encode(res)
+	})
+}
+
+// deleteAgentSession removes a saved conversation; the agent must advertise session/delete.
+func deleteAgentSession(cmdline, cwd, sessionID string, timeout time.Duration) error {
+	return withAgent(cmdline, cwd, "deleting the session", timeout, func(init json.RawMessage, call agentCall) error {
+		var res struct {
+			AgentCapabilities struct {
+				SessionCapabilities map[string]json.RawMessage `json:"sessionCapabilities"`
+			} `json:"agentCapabilities"`
+		}
+		_ = json.Unmarshal(init, &res)
+		if _, ok := res.AgentCapabilities.SessionCapabilities["delete"]; !ok {
+			return fmt.Errorf("this agent can't delete saved conversations")
+		}
+		_, err := call(2, "session/delete", map[string]any{"sessionId": sessionID})
+		return err
+	})
+}
+
+func agentGone(cmdline, doing string, stderr *lockedBuf) error {
 	errLog := stderr.String()
 	if msg := notFoundMessage(0, errLog); strings.Contains(errLog, "not found") && msg != "" {
 		return fmt.Errorf("%s", msg)
 	}
-	msg := "agent exited before listing sessions"
+	msg := "agent exited before " + doing
 	if lines := strings.Split(strings.TrimSpace(errLog), "\n"); lines[0] != "" {
 		msg += ": " + clip(strings.TrimSpace(lines[len(lines)-1]), 300)
 	}

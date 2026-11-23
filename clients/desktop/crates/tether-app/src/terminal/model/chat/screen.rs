@@ -6,7 +6,7 @@ use std::time::Duration;
 use tether_core::acp::agent::{self, CLAUDE};
 use tether_core::acp::diff::{self, DiffRowKind};
 use tether_core::acp::format::{
-    self, ComposerAction, ModeTint, Phase as LinkPhase, QuickCommand, StatusLine,
+    self, ComposerAction, Phase as LinkPhase, QuickCommand, StatusLine,
 };
 use tether_core::acp::host::{self, DrawerChatState};
 use tether_core::acp::message::ToolKind;
@@ -46,21 +46,6 @@ fn agent_index(agent: Option<&'static agent::AgentProfile>) -> i8 {
         .iter()
         .position(|p| Some(*p) == agent)
         .map_or(-1, |i| i as i8)
-}
-
-fn icon_of(kind: &ToolKind) -> Icon {
-    match kind {
-        ToolKind::Read => Icon::Read,
-        ToolKind::Edit => Icon::Edit,
-        ToolKind::Delete => Icon::Delete,
-        ToolKind::Move => Icon::Move,
-        ToolKind::Search => Icon::Search,
-        ToolKind::Execute => Icon::Execute,
-        ToolKind::Think => Icon::Think,
-        ToolKind::Fetch => Icon::Fetch,
-        ToolKind::SwitchMode => Icon::SwitchMode,
-        ToolKind::Other => Icon::Other,
-    }
 }
 
 fn line(kind: DiffRowKind, old: Option<usize>, new: Option<usize>, text: &str) -> DiffLine {
@@ -339,7 +324,10 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
             .map_or_else(|| name.clone(), |t| t.title.clone());
     }
     if let Some(nc) = &chats.new_chat {
+        let notice = nc.notice();
         screen.new_chat = Some(NewChatView {
+            update_unsupported: notice.unsupported,
+            notices: notice.rows,
             host: chats.host.clone(),
             browse_path: nc.display_path(&nc.browse_folder),
             crumbs: nc.crumbs(),
@@ -400,11 +388,25 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                             when: host::continue_relative(s.updated_at, unix_now()),
                             recent: host::is_recent(s.updated_at, unix_now()),
                             busy: nc.continuing.as_deref() == Some(s.session_id.as_str()),
+                            deleting: nc.deleting.as_deref() == Some(s.session_id.as_str()),
                         })
                         .collect(),
                 ),
             },
             continuing: nc.continuing.is_some(),
+            delete_open: nc.delete_asked.is_some(),
+            extra_dirs: nc.extra_dirs.clone(),
+            servers: nc
+                .saved_servers
+                .iter()
+                .map(|s| ServerView {
+                    name: s.name.clone(),
+                    url: s.url.clone(),
+                    on: nc.chosen_servers.contains(&s.name),
+                })
+                .collect(),
+            adding_server: nc.adding_server,
+            server_error: nc.server_error.clone().unwrap_or_default(),
         });
     }
     let Some(name) = chats.active.clone() else {
@@ -416,7 +418,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     let state = s.state();
 
     let (phase_n, word) = phase(s.link.phase());
-    let status = StatusLine::new(state);
+    let asked = !state.pending_permissions().is_empty() || !state.pending_questions().is_empty();
     screen.header = HeaderView {
         title: ordered
             .iter()
@@ -427,18 +429,12 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         folder_copied: chats.folder_copied_at.is_some(),
         phase: phase_n,
         phase_word: word.to_string(),
-        model: status.model.clone().unwrap_or_default(),
-        mode: status.mode.clone().unwrap_or_default(),
-        mode_tint: match status.tint {
-            ModeTint::Secondary => 0,
-            ModeTint::Accent => 1,
-            ModeTint::Success => 2,
-            ModeTint::Danger => 3,
+        place: if chats.label.is_empty() {
+            format::folder_name(&s.cwd)
+        } else {
+            format!("{} on {}", format::folder_name(&s.cwd), chats.label)
         },
-        stats: status.stats().unwrap_or_default(),
-        context: format::context_fraction(state.context_used, state.context_size).map(|f| f as f32),
-        context_text: format::context_summary(state.context_used, state.context_size)
-            .unwrap_or_default(),
+        activity: if asked { 2 } else { u8::from(s.is_working()) },
         agent_label: if s.agent() == Some(&CLAUDE) {
             String::new()
         } else {
@@ -469,6 +465,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         thumbs: &chats.thumbs,
         verbs: &chats.verbs,
         need: Vec::new(),
+        diffs: &mut chats.diff_counts,
     };
     screen.rows = rows::build(s, &mut ctx);
     (screen.queued, screen.queued_keys) = rows::queued(s);
@@ -532,20 +529,25 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                     .collect()
             })
             .unwrap_or_default();
-        let layout = format::permission_layout(&p.options);
+        let (layout, always) = format::permission_layout(&p.options).with_switch(p.kind);
         let pair = |o: &Option<tether_core::acp::message::PermissionOption>| {
             o.as_ref().map(|o| (o.option_id.clone(), o.name.clone()))
         };
         screen.permission = Some(PermissionView {
             plan,
-            icon: icon_of(&p.kind),
+            // Request ids are per agent process: two chats can both have `int(1)` waiting.
+            key: format!("{}:{}", s.name, p.request_id.describe()),
             title: p.title.clone(),
             position: if total > 1 {
                 format!("1 of {total}")
             } else {
                 String::new()
             },
-            path: file.as_ref().map(|f| f.path.clone()).unwrap_or_default(),
+            path: file
+                .as_ref()
+                .filter(|f| !p.title.contains(&f.path))
+                .map(|f| f.path.clone())
+                .unwrap_or_default(),
             added: file.as_ref().map_or(0, |f| f.added),
             removed: file.as_ref().map_or(0, |f| f.removed),
             preview,
@@ -561,6 +563,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 .unwrap_or_default(),
             primary: pair(&layout.primary),
             reject: pair(&layout.reject),
+            always: pair(&always),
             more: layout
                 .more
                 .iter()
@@ -630,6 +633,10 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 .collect(),
             enabled: s.can_interact(),
             cost: state.cost.as_ref().map(format::cost).unwrap_or_default(),
+            context: format::context_fraction(state.context_used, state.context_size)
+                .map(|f| f as f32),
+            context_text: format::context_summary(state.context_used, state.context_size)
+                .unwrap_or_default(),
             model_id: state.model_id.clone().unwrap_or_default(),
             commands: QuickCommand::ALL
                 .iter()
@@ -637,9 +644,9 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
                 .map(|c| (c.title().to_string(), c.detail().to_string(), c.text()))
                 .collect(),
             commands_enabled: s.can_send() && !s.is_working(),
-            bypass_confirm: chats.bypass.is_some(),
         });
     }
+    screen.bypass_confirm = chats.bypass.is_some();
 
     if let Some(id) = &chats.viewer {
         let full = format!("full:{id}");
@@ -791,19 +798,19 @@ fn composer(s: &Session, screen: &mut ChatScreen) {
         c.banner_icon = Some(Icon::Eye);
     } else if s.has_ended() {
         c.banner = "This chat has ended. You can still read it.".into();
+        c.can_resume = s.can_resume();
         c.banner_icon = Some(Icon::Moon);
     }
     c.shown = true;
     c.placeholder = if permission {
-        "Answer the permission above"
+        "Answer the permission above".to_string()
     } else if question {
-        "Answer the question above"
+        "Answer the question above".to_string()
     } else if working {
-        "Queue a message"
+        "Queue a message".to_string()
     } else {
-        "Message the agent"
-    }
-    .into();
+        format!("Message {}", agent::label(s.agent()))
+    };
     c.dimmed = permission || question;
     c.catching_up = matches!(
         s.link.phase(),
@@ -837,6 +844,18 @@ fn composer(s: &Session, screen: &mut ChatScreen) {
             },
         })
         .collect();
+    c.chips_enabled = s.can_interact();
+    c.chips = ["model", "mode"]
+        .into_iter()
+        .filter_map(|id| chip(s, id))
+        .collect();
+    if format::context_fraction(state.context_used, state.context_size).is_some()
+        && let Some(used) = state.context_used
+    {
+        c.context = format::compact_count(used);
+        c.context_detail =
+            format::context_summary(state.context_used, state.context_size).unwrap_or_default();
+    }
     c.attach_error = s.attach_error.clone().unwrap_or_default();
     c.palette = s.palette().map(|(slash, rows)| {
         (
@@ -848,6 +867,41 @@ fn composer(s: &Session, screen: &mut ChatScreen) {
             rows,
         )
     });
+}
+
+/// The settings that get a chip of their own; the rest sit behind "All settings".
+fn chip(s: &Session, id: &str) -> Option<ChipView> {
+    let state = s.state();
+    let option = state.option(id)?;
+    let change = s.option_changes.get(id);
+    let failure = match change {
+        Some(OptionChange::Failed(_, m)) => m.clone(),
+        _ => String::new(),
+    };
+    let label = (id == "mode")
+        .then(|| StatusLine::short_mode(&option.current_value))
+        .flatten()
+        .or_else(|| state.current_choice(id))
+        .unwrap_or_else(|| option.current_value.clone());
+    Some(ChipView {
+        id: option.id.clone(),
+        name: option.name.clone(),
+        label,
+        choices: option
+            .choices
+            .iter()
+            .map(|c| ChoiceRowView {
+                value: c.value.clone(),
+                name: c.name.clone(),
+                description: c.description.clone(),
+                selected: option.current_value == c.value,
+                pending: matches!(change, Some(OptionChange::Pending(v)) if *v == c.value),
+            })
+            .collect(),
+        pending: matches!(change, Some(OptionChange::Pending(_))),
+        risky: !failure.is_empty() || (id == "mode" && option.current_value == "bypassPermissions"),
+        failure,
+    })
 }
 
 fn question_view(

@@ -116,6 +116,9 @@ final class ChatSessionModel {
   private var attempt: ChatResume.Attempt?
   private var skipSnapshot = false
   private var stopping: Task<Void, Never>?
+  /// The next dial restarts the ended chat's agent on the host and resumes its session.
+  private var reviving = false
+  private let mcpServers: (@Sendable () -> [ChatMCPServer])?
   private let optionDefaults: ChatOptionDefaultsStore?
   private let optionsCache: ChatOptionsCache?
   private var lastCachedOptions: [ACPConfigOption] = []
@@ -128,8 +131,10 @@ final class ChatSessionModel {
     outbox outboxStore: (any ChatOutboxStore)? = nil, hostLabel: String = "the host", loadSessionId: String? = nil,
     listFiles: ListFiles? = nil, spinnerVerbs: SpinnerVerbs? = nil, workflows: Workflows? = nil, workflowInterval: Duration = ChatWorkflowTracker.pollInterval, images: ChatImageStore? = nil,
     optionDefaults: ChatOptionDefaultsStore? = nil, agent: ChatAgentProfile? = ChatAgents.claude,
-    optionPicks: [String: String]? = nil, changedPicks: Set<String> = [], optionsCache: ChatOptionsCache? = nil, dial: @escaping Dial
+    optionPicks: [String: String]? = nil, changedPicks: Set<String> = [], optionsCache: ChatOptionsCache? = nil,
+    mcpServers: (@Sendable () -> [ChatMCPServer])? = nil, dial: @escaping Dial
   ) {
+    self.mcpServers = mcpServers
     self.preferredTitle = customTitle
     let stored = store.load()
     self.branch = stored.branch
@@ -171,6 +176,14 @@ final class ChatSessionModel {
         store.save(journal)
       }
     }
+    if route.startedHere, !route.extraDirectories.isEmpty || !route.mcpServerNames.isEmpty {
+      var journal = store.load()
+      if journal.sessionId == nil {
+        journal.extraDirectories = route.extraDirectories
+        journal.mcpServerNames = route.mcpServerNames
+        store.save(journal)
+      }
+    }
     let files = ChatLocalFiles(scope: ChatTitleStore.scope(for: config))
     let titleStore = ChatTitleStore(config: config)
     let agent = ChatAgents.profile(forKey: route.agentKey)
@@ -200,12 +213,15 @@ final class ChatSessionModel {
         await ACPHostExec.run(command: ChatWorkflowListing.command(sessionId: id), config: config, store: hostKeyStore)
       },
       images: files.images(route.name), optionDefaults: ChatOptionDefaultsStore(), agent: agent,
-      optionPicks: route.optionPicks, changedPicks: route.changedPicks, optionsCache: ChatOptionsCache(config: config)
+      optionPicks: route.optionPicks, changedPicks: route.changedPicks, optionsCache: ChatOptionsCache(config: config),
+      mcpServers: { [store] in ChatMCPServerStore(config: config).resolve(store.load().mcpServerNames ?? []) }
     ) { spawn, from in
+      // A spawn for a chat that already has an agent session can only be a revive.
       try await SSHConnector.connectExec(
         config: config, store: hostKeyStore,
         command: ACPHostCommand.attach(name: route.name, cwd: route.cwd, spawn: spawn, from: from, client: clientId,
-          spawnCommand: agent?.spawn ?? ACPHostCommand.spawnCommand))
+          spawnCommand: agent?.command(managed: ChatManagedAgentsStore(config: config).supported) ?? ACPHostCommand.spawnCommand,
+          revive: spawn && store.load().sessionId != nil))
     }
   }
 
@@ -243,13 +259,37 @@ final class ChatSessionModel {
   var isWorking: Bool { state.turn == .working }
   /// The agent is gone for good: the transcript stays readable, nothing can be sent and nothing redials.
   var hasEnded: Bool { link.phase == .ended }
+  /// An ended chat whose agent can pick its session back up; chats from before capabilities were
+  /// recorded count Claude's adapter as able to.
+  var canResume: Bool {
+    guard hasEnded, !readOnly, !join, let agent else { return false }
+    let journal = store.load()
+    return journal.sessionId != nil && (journal.capabilities?.resume ?? (agent.key == ChatAgents.claude.key))
+  }
+
+  /// The agent's session, from the transcript or, before the log names it, the journal.
+  var agentSessionId: String? { state.sessionId ?? store.load().sessionId }
+
+  /// Chats from before capabilities were recorded count Claude's adapter as able to fork.
+  var canFork: Bool {
+    guard let agent else { return false }
+    return store.load().capabilities?.fork ?? (agent.key == ChatAgents.claude.key)
+  }
+
+  /// Restarts the ended chat's agent on the host and resumes its session without a replay.
+  func resume() async {
+    guard canResume, !dialInFlight else { return }
+    reviving = true
+    defer { reviving = false }
+    await connect()
+  }
 
   func connect() async {
     if !verbsAsked, let spinnerVerbs, agent?.usesClaudeVerbs == true {
       verbsAsked = true
       Task { verbs = await spinnerVerbs() }
     }
-    guard !dialInFlight, !left, client == nil || link.phase == .lost else { return }
+    guard !dialInFlight, !left, client == nil || link.phase == .lost || reviving else { return }
     dialInFlight = true
     generation += 1
     let mine = generation
@@ -261,7 +301,8 @@ final class ChatSessionModel {
     notice = nil
     held = nil
     let journal = store.load()
-    let spawn = !readOnly && !join && journal.sessionId == nil
+    let resuming = reviving
+    let spawn = !readOnly && !join && (journal.sessionId == nil || resuming)
     // Asked alongside the dial; the replay can't start before the answers are in the journal.
     let answersRead = Task { await self.hostAnswers?() }
     let inspectRead = Task { await self.inspect?() }
@@ -290,6 +331,7 @@ final class ChatSessionModel {
       guard mine == generation else { return }
       dialInFlight = false
       fail(error)
+      if resuming { link.ended() }
       return
     }
     let answersOutput = await answersRead.value
@@ -298,9 +340,10 @@ final class ChatSessionModel {
       await stream.close()
       return
     }
+    let servers = mcpServers?() ?? []
     let fresh = ACPClient(
       stream: stream, store: store, resume: resume, snapshots: snapshots, images: imageLibrary?.store,
-      subagents: agent?.key == ChatAgents.codex.key)
+      subagents: agent?.key == ChatAgents.codex.key, mcpServers: servers)
     if resume == nil, snapshots != nil { learnIdentity(of: fresh, from: inspectRead, retry: spawn) }
     if let answersOutput { await fresh.adoptHostAnswers(ACPAnswerCommand.parseAnswers(answersOutput)) }
     client = fresh
@@ -322,12 +365,22 @@ final class ChatSessionModel {
       } else if join {
         await fresh.startJoining()
       } else {
-        if try await fresh.start(cwd: cwd, loadSessionId: loadSessionId) { await applyStoredDefaults(fresh, generation: mine) }
+        if try await fresh.start(cwd: cwd, loadSessionId: loadSessionId, resuming: resuming) {
+          await applyStoredDefaults(fresh, generation: mine)
+        }
+        if !servers.isEmpty, await fresh.capabilities?.mcpHttp != true, mine == generation {
+          notice = "This agent can't use MCP servers from Tether. The chat runs without them."
+        }
       }
     } catch {
       guard mine == generation else { return }
       if case let .agent(_, message)? = error as? ACPClientError, loadSessionId != nil, !ChatAuthError.matches(error) {
         notice = "Couldn't load that conversation" + (message.isEmpty ? "." : ": \(message)")
+        return
+      }
+      // The host's reason goes to stderr, which the exec drops: an old tether, a full log or a pruned chat.
+      if resuming, case .connectionLost? = error as? ACPClientError {
+        notice = "Couldn't resume this chat. Update tether on the host, or start a new chat."
         return
       }
       // The transcript already carries the sign-in row; the link itself is fine.

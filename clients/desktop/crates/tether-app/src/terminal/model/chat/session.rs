@@ -35,9 +35,14 @@ pub struct Ctx<'a> {
     pub files: Option<&'a ChatFiles>,
     pub connected: bool,
     pub defaults: &'a ChatDefaults,
+    pub mcp: Option<&'a super::mcp::McpLibrary>,
+    /// The host manages agent versions, so a new chat spawns `tether acp agent …`.
+    pub managed: bool,
 }
 
 const SNAPSHOT_EVERY: Duration = Duration::from_secs(3);
+const RESUME_FAILED: &str =
+    "Couldn't resume this chat. Update tether on the host, or start a new chat.";
 const LEARN_RETRY: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,6 +89,12 @@ pub struct Session {
     pub read_only: bool,
     /// Opened on a chat another client started: no spawn and no handshake, the session comes from the log.
     joined: bool,
+    /// Resume was pressed on an ended chat: the next dial revives the holder and resumes the session.
+    reviving: bool,
+    /// What the host said to the revive, shown when the stream closes.
+    revive_note: Option<String>,
+    /// The journal says the agent can resume this chat's session; kept here so an ended chat with no client can offer it.
+    resumable: bool,
     multi: bool,
     /// What this client is called to a holder that takes several (`attach --client`).
     client_id: Option<String>,
@@ -201,6 +212,9 @@ impl Session {
             cwd: cwd.to_string(),
             read_only: mode == host::OpenMode::ReadOnly,
             joined: mode == host::OpenMode::Join,
+            reviving: false,
+            revive_note: None,
+            resumable: files.is_some_and(|f| Self::journal_resumable(&f.journal(name))),
             multi,
             client_id: None,
             load,
@@ -263,6 +277,27 @@ impl Session {
         }
     }
 
+    fn journal_resumable(journal: &tether_core::acp::journal::Journal) -> bool {
+        journal.session_id.is_some() && journal.capabilities.is_some_and(|c| c.resume)
+    }
+
+    /// An ended chat of this device's own whose agent advertised `session/resume`.
+    pub fn can_resume(&self) -> bool {
+        self.has_ended() && !self.read_only && !self.joined && self.resumable
+    }
+
+    /// Brings the holder back under the same chat name; the log and the transcript stay.
+    pub fn resume(&mut self, ctx: &mut Ctx<'_>) {
+        if !self.can_resume() || self.dialing {
+            return;
+        }
+        self.background(ctx);
+        self.reviving = true;
+        self.revive_note = None;
+        self.notice = None;
+        self.connect(ctx);
+    }
+
     pub fn with_agent(mut self, agent: Option<&'static AgentProfile>) -> Self {
         self.agent = agent;
         self
@@ -299,6 +334,12 @@ impl Session {
         let options = options.clone();
         self.published = options.clone();
         ctx.out.options_seen.push((agent.key.to_string(), options));
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn dev_ended(&mut self) {
+        self.link.ended();
+        self.resumable = true;
     }
 
     #[cfg(debug_assertions)]
@@ -397,7 +438,8 @@ impl Session {
             saved(files.save_journal(&self.name, &journal));
         }
         self.client_id = journal.client_id.clone().filter(|_| self.multi);
-        let spawn = !self.read_only && !self.joined && journal.session_id.is_none();
+        let spawn =
+            !self.read_only && !self.joined && (journal.session_id.is_none() || self.reviving);
         self.spawned = spawn;
         self.answers = None;
         self.early.clear();
@@ -449,8 +491,10 @@ impl Session {
             &self.name,
             &self.cwd,
             spawn.then(|| self.agent.unwrap_or(&CLAUDE)),
+            ctx.managed,
             offset,
             self.client_id.as_deref(),
+            self.reviving,
         );
         self.applying = None;
         self.chan = Chan::Opening(self.generation);
@@ -588,8 +632,16 @@ impl Session {
         let images: Option<Arc<dyn ImageSink>> = ctx
             .files
             .map(|f| Arc::new(f.images(&self.name)) as Arc<dyn ImageSink>);
+        let servers = ctx
+            .mcp
+            .map(|m| {
+                tether_core::acp::session_setup::resolve_servers(&m.list(), &journal.mcp_servers)
+            })
+            .unwrap_or_default();
         let mut client = ChatClient::new(journal, self.resume.take(), images)
-            .with_subagents(self.agent.is_some_and(|a| a.key == "codex"));
+            .with_subagents(self.agent.is_some_and(|a| a.key == "codex"))
+            .with_servers(servers)
+            .with_revive(self.reviving);
         if self.joined {
             client.join();
         }
@@ -616,7 +668,7 @@ impl Session {
     fn needs_handshake(&self) -> bool {
         self.client
             .as_ref()
-            .is_some_and(|c| c.journal().session_id.is_none())
+            .is_some_and(ChatClient::needs_handshake)
     }
 
     fn begin_handshake(&mut self, ctx: &mut Ctx<'_>) {
@@ -632,6 +684,11 @@ impl Session {
     pub fn on_data(&mut self, generation: u64, bytes: &[u8], ctx: &mut Ctx<'_>) {
         if generation != self.generation || self.left {
             return;
+        }
+        if self.reviving
+            && let Some(why) = host::revive_failure(&String::from_utf8_lossy(bytes))
+        {
+            self.revive_note = Some(why);
         }
         if self.client.is_none() {
             self.early.push(bytes.to_vec());
@@ -664,6 +721,7 @@ impl Session {
             self.maybe_start(true, ctx);
         }
         self.chan = Chan::Closed;
+        let revive_failed = std::mem::take(&mut self.reviving);
         if let Some(client) = self.client.as_mut() {
             let completions = client.connection_lost();
             for c in completions {
@@ -673,6 +731,13 @@ impl Session {
         } else {
             self.dialing = false;
             self.agent_stopped();
+        }
+        if revive_failed {
+            self.notice = Some(
+                self.revive_note
+                    .take()
+                    .unwrap_or_else(|| RESUME_FAILED.into()),
+            );
         }
         self.touched();
     }
@@ -690,16 +755,55 @@ impl Session {
                     let Some(client) = self.client.as_mut() else {
                         return;
                     };
-                    let out = match load {
-                        Some(id) => client.load_session(&id, &cwd),
-                        None => client.new_session(&cwd),
-                    };
+                    let out = client.open_session(&cwd, load.as_deref());
+                    if client.servers_dropped() {
+                        self.notice =
+                            Some("This agent can't use MCP servers, so none were attached.".into());
+                    }
                     self.handshake = Handshake::Opening;
                     self.persist_journal(ctx);
                     self.write(out.line.clone(), Some(WriteTag::Request(out)), ctx);
                 }
                 Err(e) => self.start_failed(e),
             },
+            RequestKind::ForkSession => match c.outcome {
+                Ok(_) => {
+                    // The agent holds the conversation now; the text seed would repeat it.
+                    if let Some(branch) = self.branch.as_mut() {
+                        branch.context.clear();
+                        if let Some(files) = ctx.files {
+                            saved(files.save_branch(&self.name, branch));
+                        }
+                    }
+                    self.handshake = Handshake::Ready;
+                    self.touched();
+                }
+                Err(_) => {
+                    let cwd = self.cwd.clone();
+                    let Some(client) = self.client.as_mut() else {
+                        return;
+                    };
+                    client.drop_fork_source();
+                    let out = client.new_session(&cwd);
+                    self.handshake = Handshake::Opening;
+                    self.persist_journal(ctx);
+                    self.write(out.line.clone(), Some(WriteTag::Request(out)), ctx);
+                }
+            },
+            RequestKind::ResumeSession => {
+                self.reviving = false;
+                match c.outcome {
+                    Ok(_) => {
+                        self.handshake = Handshake::Ready;
+                        self.touched();
+                    }
+                    Err(_) => {
+                        self.handshake = Handshake::Idle;
+                        self.notice = Some(RESUME_FAILED.into());
+                        self.link.ended();
+                    }
+                }
+            }
             RequestKind::NewSession | RequestKind::LoadSession => match c.outcome {
                 Ok(_) => {
                     self.handshake = Handshake::Ready;
@@ -1133,6 +1237,7 @@ impl Session {
             && client.take_journal_changed()
         {
             saved(files.save_journal(&self.name, client.journal()));
+            self.resumable = Self::journal_resumable(client.journal());
         }
     }
 
@@ -1775,6 +1880,10 @@ impl Session {
                 }
             }
             ChatMsg::OpenTool(key) => {
+                // The row is in a run of steps that may have folded since it was running.
+                if let Some(fold) = super::rows::fold_key_of(self, &key) {
+                    self.expanded.insert(fold);
+                }
                 self.expanded.insert(key);
             }
             ChatMsg::Earlier => {
@@ -1799,6 +1908,7 @@ impl Session {
             ChatMsg::SignInRetry => self.retry_sign_in(ctx),
             ChatMsg::DismissNotice => self.notice = None,
             ChatMsg::Reconnect => self.reconnect_if_lost(ctx),
+            ChatMsg::Resume => self.resume(ctx),
             ChatMsg::DraftEdited { text, cursor_byte } => {
                 let cursor = text
                     .get(..cursor_byte.min(text.len()))
