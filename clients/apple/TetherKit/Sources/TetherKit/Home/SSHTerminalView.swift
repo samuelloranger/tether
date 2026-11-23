@@ -724,7 +724,7 @@ public struct SSHTerminalView: View {
   }
 
   private func startChat(in path: String) {
-    newChatFolder = path
+    newChatFolder = DrawerLayout.tildeFolder(path, user: controller.config.username)
     newChatMode = .new
     showNewChat = true
   }

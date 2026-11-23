@@ -2998,6 +2998,10 @@ fn a_saved_project_without_chats_stays_listed_and_can_be_removed() {
     h.msg(ChatMsg::NewChatIn("/srv/empty".into()));
     assert_eq!(h.screen().new_chat.unwrap().folder, "/srv/empty");
     h.msg(ChatMsg::NewChatCancel);
+    h.chats.user = "me".into();
+    h.msg(ChatMsg::NewChatIn("/home/me/sites/app".into()));
+    assert_eq!(h.screen().new_chat.unwrap().folder, "~/sites/app");
+    h.msg(ChatMsg::NewChatCancel);
 
     h.take();
     h.msg(ChatMsg::RemoveProject("/srv/empty".into()));

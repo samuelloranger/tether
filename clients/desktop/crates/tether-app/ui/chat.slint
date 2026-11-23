@@ -967,8 +967,10 @@ component Thumbs inherits HorizontalLayout {
     alignment: start;
     for img in root.images: Rectangle {
         property <float> aspect: img.height > 0 ? img.width / img.height : 1.33;
-        height: root.tall;
-        width: min(root.tall * self.aspect, 420px);
+        // Never larger than the picture itself: a small screenshot stretched to fill the box blurs.
+        property <length> natural: img.loaded && img.image.width > 0 ? img.image.width * 1px : 420px;
+        width: min(root.tall * self.aspect, 420px, self.natural);
+        height: self.width / self.aspect;
         border-radius: 10px;
         clip: true;
         background: Tokens.raised;
