@@ -2593,32 +2593,20 @@ fn the_sample_shows_a_running_and_an_ended_workflow() {
 }
 
 #[test]
-fn project_sidebar_pins_once_and_keeps_archived_waiting_chats_discoverable() {
+fn project_sidebar_keeps_pinned_chats_in_their_project_and_archived_waiting_chats_discoverable() {
     let mut h = Harness::new();
     h.exec(|t|*t==ExecTag::Status,concat!(
         r#"{"name":"p","state":"running","cwd":"/srv/a","created":1,"pinned":true,"customTitle":"Pinned title"}"#,"\n",
         r#"{"name":"w","state":"running","cwd":"/srv/b","created":2,"archived":true,"turn":"waiting"}"#,"\n",
         r#"{"name":"a","state":"ended","cwd":"/srv/a","created":3,"archived":true}"#));
     let s = h.screen();
-    assert_eq!(
-        s.sidebar
-            .iter()
-            .filter_map(|r| r.tab.as_ref())
-            .filter(|t| t.name == "p")
-            .count(),
-        1
-    );
-    assert!(s.sidebar.iter().any(|r| r.section == "Pinned"));
+    assert_eq!(sections(&s), ["Needs you · archived", "  w", "a", "  p"]);
     assert!(
         s.sidebar
             .iter()
-            .any(|r| r.section == "Needs you · archived")
-    );
-    assert!(
-        !s.sidebar
-            .iter()
-            .filter_map(|r| r.tab.as_ref())
-            .any(|t| t.name == "a")
+            .find(|r| r.tab.as_ref().is_some_and(|t| t.name == "p"))
+            .unwrap()
+            .pinned
     );
     h.msg(ChatMsg::Archived(true));
     let s = h.screen();
@@ -2991,6 +2979,67 @@ fn the_folder_field_shows_what_was_typed_not_an_abbreviation() {
     assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam");
     h.msg(ChatMsg::NewChatFolder("/home/sam/e".into()));
     assert_eq!(h.screen().new_chat.unwrap().folder, "/home/sam/e");
+}
+
+#[test]
+fn a_saved_project_without_chats_stays_listed_and_can_be_removed() {
+    let mut h = Harness::new();
+    h.exec(|t| *t == ExecTag::Status, PROJECT_LINE);
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Projects,
+        result: Ok("{\"path\":\"/srv/a\"}\n{\"path\":\"/srv/empty\"}\n".into()),
+    });
+    let s = h.screen();
+    assert_eq!(sections(&s), ["a", "  c", "empty"]);
+    let empty = s.sidebar.iter().find(|r| r.section == "empty").unwrap();
+    assert!(empty.empty && empty.project && !empty.collapsed);
+    assert!(!s.sidebar.iter().find(|r| r.section == "a").unwrap().empty);
+
+    h.msg(ChatMsg::NewChatIn("/srv/empty".into()));
+    assert_eq!(h.screen().new_chat.unwrap().folder, "/srv/empty");
+    h.msg(ChatMsg::NewChatCancel);
+
+    h.take();
+    h.msg(ChatMsg::RemoveProject("/srv/empty".into()));
+    assert_eq!(sections(&h.screen()), ["a", "  c"]);
+    assert!(h.take().iter().any(|j| matches!(j, ChatJob::Exec { tag: ExecTag::Projects, command } if command.contains("projects remove '/srv/empty'"))));
+}
+
+#[test]
+fn projects_go_newest_first_with_pinned_chats_on_top_and_same_names_show_a_path() {
+    let mut h = Harness::new();
+    h.exec(|t| *t == ExecTag::Status, concat!(
+        r#"{"name":"old","state":"running","cwd":"/home/me/work/app","created":1}"#, "\n",
+        r#"{"name":"pin","state":"running","cwd":"/home/me/docs","created":2,"pinned":true}"#, "\n",
+        r#"{"name":"new","state":"running","cwd":"/home/me/docs","created":5}"#, "\n",
+        r#"{"name":"mid","state":"running","cwd":"/home/me/work/app","created":3,"turn":"waiting"}"#));
+    h.msg(ChatMsg::ExecDone {
+        tag: ExecTag::Projects,
+        result: Ok("{\"path\":\"/home/me/sites/app\"}\n".into()),
+    });
+    let s = h.screen();
+    assert_eq!(
+        sections(&s),
+        ["docs", "  pin", "  new", "app", "  mid", "  old", "app"]
+    );
+    let heads: Vec<_> = s.sidebar.iter().filter(|r| r.tab.is_none()).collect();
+    assert_eq!(
+        heads.iter().map(|r| r.detail.as_str()).collect::<Vec<_>>(),
+        ["", "~/work/app", "~/sites/app"]
+    );
+    assert_eq!(heads.iter().map(|r| r.count).collect::<Vec<_>>(), [2, 2, 0]);
+    assert!(heads[1].waiting && !heads[0].waiting);
+    h.msg(ChatMsg::CollapseProject("/home/me/work/app".into()));
+    let s = h.screen();
+    assert_eq!(sections(&s), ["docs", "  pin", "  new", "app", "app"]);
+    assert!(
+        s.sidebar
+            .iter()
+            .filter(|r| r.tab.is_none())
+            .nth(1)
+            .unwrap()
+            .collapsed
+    );
 }
 
 const FORK_CAPS: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"fork":{},"resume":{},"delete":{}},"mcpCapabilities":{"http":true}}}}"#;

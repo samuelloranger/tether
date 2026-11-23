@@ -109,7 +109,7 @@ func metaRunning(m *acpMeta) bool {
 
 func runACP(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|usage|kill|agent|options|versions|update")
+		return fmt.Errorf("usage: acp attach|answer|answers|ls|status|sessions|workflows|organize|projects|usage|kill|agent|options|versions|update")
 	}
 	switch args[0] {
 	case "attach":
@@ -136,6 +136,8 @@ func runACP(args []string) error {
 		return acpWorkflows(args[1:], os.Stdout)
 	case "organize":
 		return acpOrganize(args[1:], os.Stdout)
+	case "projects":
+		return acpProjects(args[1:], os.Stdout)
 	case "usage":
 		return acpUsage(args[1:], os.Stdout)
 	case "agent":
@@ -308,6 +310,7 @@ func spawnACPDaemon(name, spawn, cwd string, keepLog bool) (*acpMeta, error) {
 	if err := writeACPMeta(m); err != nil {
 		return nil, err
 	}
+	rememberACPProject(cwd)
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err

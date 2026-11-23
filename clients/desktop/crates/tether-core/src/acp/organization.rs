@@ -270,9 +270,39 @@ impl UsageWindow {
     }
 }
 
+/// `acp projects`: one `{"path":…}` line per saved project. `None` when the host predates it.
+pub fn parse_projects(output: &str) -> Option<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Line {
+        path: String,
+    }
+    output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            serde_json::from_str::<Line>(l)
+                .ok()
+                .map(|p| p.path)
+                .filter(|p| p.starts_with('/'))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn projects_parse_lines_and_an_old_host_reads_as_unsupported() {
+        assert_eq!(
+            parse_projects("{\"path\":\"/a\"}\n{\"path\":\"/b c\"}\n"),
+            Some(vec!["/a".to_string(), "/b c".to_string()])
+        );
+        assert_eq!(parse_projects(""), Some(vec![]));
+        assert_eq!(
+            parse_projects("tether: unknown acp command \"projects\""),
+            None
+        );
+    }
     #[test]
     fn copilot_credit_meters_keep_counts_without_inventing_percentages() {
         let mut meter = MonthlyMeter {

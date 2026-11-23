@@ -64,6 +64,24 @@ extension SSHTerminalController {
     restoreLastChat()
   }
 
+  /// Saved projects change only when a chat starts or one is removed, so a minute between reads is enough.
+  func refreshProjects(force: Bool = false) async {
+    guard force || projectsReadAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+    projectsReadAt = Date()
+    guard let output = try? await control.exec(ACPHostCommand.projects),
+      let paths = ACPHostCommand.parseProjects(output), paths != projects
+    else { return }
+    projects = paths
+  }
+
+  func removeProject(_ path: String) async -> String? {
+    guard let output = try? await control.exec(ACPHostCommand.removeProject(path)),
+      let paths = ACPHostCommand.parseProjects(output)
+    else { return "Couldn't remove this project. Update tether on the host and try again." }
+    projects = paths
+    return nil
+  }
+
   /// Restore once, after a successful host listing. Never recreate a missing or ended chat.
   private func restoreLastChat() {
     guard chatRestorationPending else { return }
@@ -122,6 +140,7 @@ extension SSHTerminalController {
     }
     route.extraDirectories = folders
     route.mcpServerNames = request.mcpServerNames
+    projectsReadAt = nil
     return .ready(route)
   }
 

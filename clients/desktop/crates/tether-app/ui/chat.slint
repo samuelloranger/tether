@@ -87,7 +87,7 @@ export struct ChatTabVm {
     agent: int,             // the agent's mark: 0 Claude, 1 Codex, 2 opencode, 3 Copilot, 4 Antigravity, -1 an agent not known here
 }
 
-export struct ChatSideVm { section: string, project-key: string, collapsed: bool, tab: ChatTabVm, }
+export struct ChatSideVm { section: string, project-key: string, project: bool, empty: bool, collapsed: bool, detail: string, count: int, waiting: bool, pinned: bool, tab: ChatTabVm, }
 export struct QuotaWindowVm { window: string, short-window: string, used: float, value: string, detail-value: string, reset: string, }
 export struct PlanUsageVm { provider: string, agent: int, windows: [QuotaWindowVm], freshness: string, stale: bool, }
 
@@ -257,6 +257,8 @@ export global ChatVm {
     callback restore(string);
     callback show-archived(bool);
     callback collapse-project(string);
+    callback new-chat-in(string);
+    callback remove-project(string);
     callback rename(string);
     callback rename-save(string);
     callback branch(string);
@@ -3548,13 +3550,15 @@ export component NewChatDialog inherits Rectangle {
 // One chat in the sidebar's Chats section.
 export component ChatSidebarRow inherits Rectangle {
     in property <ChatTabVm> tab;
+    in property <bool> pinned;
+    in property <length> indent;
     callback picked();
     height: 30px;
     border-radius: 8px;
     background: root.tab.active ? Tokens.raised : touch.has-hover ? Tokens.surface-hover : transparent;
     animate background { duration: Motion.fast; easing: ease-out; }
     HorizontalLayout {
-        padding-left: 8px;
+        padding-left: 8px + root.indent;
         padding-right: 8px;
         spacing: 8px;
         VerticalLayout {
@@ -3562,7 +3566,7 @@ export component ChatSidebarRow inherits Rectangle {
             AgentMark { agent: root.tab.agent; size: 14px; ink: root.tab.active ? Tokens.text : Tokens.text-secondary; }
         }
         name := Text {
-            horizontal-stretch: 1;
+            horizontal-stretch: root.pinned ? 0 : 1;
             text: root.tab.title;
             overflow: elide;
             color: root.tab.active || touch.has-hover ? Tokens.text : Tokens.text-secondary;
@@ -3570,6 +3574,10 @@ export component ChatSidebarRow inherits Rectangle {
             font-size: 12.5px;
             font-weight: root.tab.active ? 600 : 500;
             vertical-alignment: center;
+        }
+        if root.pinned: HorizontalLayout {
+            horizontal-stretch: 1;
+            VerticalLayout { alignment: center; Image { source: @image-url("icons/pin.svg"); colorize: Tokens.text-faint; width: 10px; height: 10px; } }
         }
         if ChatStyle.tab-heat(root.tab.state) >= 0: HorizontalLayout {
             spacing: 5px;

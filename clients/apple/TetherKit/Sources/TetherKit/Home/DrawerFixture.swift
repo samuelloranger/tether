@@ -124,6 +124,9 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
         {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":\(now + 8280)},"weekly":{"usedPercent":68,"resetsAt":\(now + 273600)},"updatedAt":\(now),"stale":false},"codex":{"fiveHour":{"usedPercent":24,"resetsAt":\(now + 14760)},"weekly":{"usedPercent":83,"resetsAt":\(now + 115200)},"updatedAt":\(now),"stale":false},"opencode":{"active":true,"fiveHour":{"usedPercent":28,"resetsAt":\(now + 13320)},"weekly":{"usedPercent":46,"resetsAt":\(now + 378000)},"monthly":{"usedPercent":63,"resetsAt":\(now + 1036800)},"updatedAt":\(now),"stale":false},"copilot":{"active":true,"monthlyMeter":{"used":23.5,"limit":null,"unit":"credits","resetsAt":\(now + 1036800)},"updatedAt":\(now),"stale":false}}
         """
     }
+    if command.contains("acp projects") {
+      return env["TETHER_DEBUG_DRAWER"]?.hasPrefix("projects") == true ? "{\"path\":\"/home/dev/notes\"}\n{\"path\":\"/home/dev/work/labby\"}\n" : ""
+    }
     if command.contains("acp status") {
       if env["TETHER_DEBUG_CHAT_STATUS"] == "legacy" { return "tether: unknown acp command \"status\"" }
       func line(
@@ -186,6 +189,7 @@ private final class FixtureOps: SSHConnectionOps, @unchecked Sendable {
       ].joined(separator: "\n")
     }
     if command.contains("zmx") && command.hasSuffix(" ls") {
+      if ["projects-only", "projects-collapsed"].contains(env["TETHER_DEBUG_DRAWER"] ?? "") { return "name=api\tpid=1\tclients=1\tcreated=\(now - 9000)\tcwd=file://devbox/home/dev" }
       return [
         ("api", "/home/dev/projects/api-server", 1), ("default", "/home/dev", 0),
         ("tether", "/home/dev/projects/tether", 0),

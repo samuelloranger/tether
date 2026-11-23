@@ -214,6 +214,11 @@ exempt from automatic retention; restoring/unpinning grants a fresh normal reten
 Unreadable organization metadata leaves the agent visible with an `organizationError` and
 conservatively prevents pruning until the metadata can be recovered.
 
+`acp projects` lists the saved projects, one `{"path":"/abs/path"}` line each, so a client
+can show a project with no chat in it. Starting a chat saves its `projectRoot`;
+`acp projects add PATH` and `acp projects remove PATH` edit the list and print it. The first
+read seeds the list from the host's unarchived chats.
+
 `acp usage --json` reads the Claude, Codex, OpenCode Go and Copilot accounts signed in on this host:
 
     {"claude":{"fiveHour":{"usedPercent":42,"resetsAt":1800000000},"weekly":null,"updatedAt":1799999000,"stale":false},"codex":{"fiveHour":null,"weekly":null,"updatedAt":0,"stale":false,"error":"codex is not available on this host"},"checkedAt":1799999000}

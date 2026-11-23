@@ -47,6 +47,8 @@ public struct SSHTerminalView: View {
   @State private var newChatOptionsOpen = false
   @State private var newChatBrowseFolders = false
   @State private var newChatChanges: [String: String] = [:]
+  /// A project's + sets the New chat sheet's folder; nil uses the attached session's.
+  @State private var newChatFolder: String?
   @State private var showFileImporter = false
   @State private var showHistory = false
   @State private var showPhotoPicker = false
@@ -179,6 +181,7 @@ public struct SSHTerminalView: View {
       while !Task.isCancelled, scenePhase == .active, controller.status == .connected {
         await controller.refreshAgentStatus()
         await controller.refreshChats()
+        await controller.refreshProjects()
         try? await Task.sleep(nanoseconds: 5_000_000_000)
       }
     }
@@ -261,9 +264,9 @@ public struct SSHTerminalView: View {
       TerminalSettingsSheet(preferences: preferences) { showSettings = false }
         .macSheetSize(width: 560, height: 680)
     }
-    .sheet(isPresented: $showNewChat) {
+    .sheet(isPresented: $showNewChat, onDismiss: { newChatFolder = nil }) {
       NewChatSheet(
-        initialFolder: controller.activeSessionCwd ?? "~",
+        initialFolder: newChatFolder ?? controller.activeSessionCwd ?? "~",
         hostName: controller.title,
         initialMode: newChatMode,
         initialAgent: newChatAgent,
@@ -599,8 +602,7 @@ public struct SSHTerminalView: View {
     let folders = DrawerLayout.sessionFolders(controller.sessions)
     let visible = chatRows.filter { !$0.archived }
     let archived = chatRows.filter(\.archived)
-    let pinned = ChatOrganization.pinned(chatRows)
-    let groups = ChatOrganization.groups(chatRows)
+    let groups = ChatOrganization.groups(chatRows, saved: controller.projects)
     let attention = ChatOrganization.attention(chatRows)
     return VStack(alignment: .leading, spacing: 0) {
       drawerHeader(terminals: sessions.count, chats: visible.count)
@@ -609,7 +611,7 @@ public struct SSHTerminalView: View {
         VStack(spacing: 8) {
           if !sessions.isEmpty { sectionHeader("Terminals", count: sessions.count) }
           ForEach(sessions) { sessionRow($0, folder: folders[$0.name]) }
-          if sessions.isEmpty && chatRows.isEmpty {
+          if sessions.isEmpty && chatRows.isEmpty && groups.isEmpty {
             Text("Nothing running yet. Use + to start a terminal or a chat.")
               .font(.app(.caption)).multilineTextAlignment(.leading)
               .foregroundStyle(TetherColors.textFaint).padding(.top, 4)
@@ -628,31 +630,9 @@ public struct SSHTerminalView: View {
               sectionHeader("Needs you · archived", count: attention.count)
               ForEach(attention) { chatRow($0) }
             }
-            if !pinned.isEmpty {
-              sectionHeader("Pinned", count: pinned.count)
-              ForEach(pinned) { chatRow($0) }
-            }
             if !groups.isEmpty { sectionHeader("Projects", count: groups.count) }
             ForEach(groups) { group in
-              Button {
-                if collapsedProjects.contains(group.path) { collapsedProjects.remove(group.path) }
-                else { collapsedProjects.insert(group.path) }
-              } label: {
-                HStack(spacing: 6) {
-                  Image(systemName: collapsedProjects.contains(group.path) ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                  Image(systemName: "folder").font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
-                  Text(group.title).font(.app(.caption).weight(.medium))
-                  Spacer(minLength: 0)
-                  if group.needsYou && collapsedProjects.contains(group.path) {
-                    Circle().fill(TetherColors.textPrimary).frame(width: 7, height: 7)
-                      .accessibilityLabel("A chat needs you")
-                  }
-                }
-                .foregroundStyle(TetherColors.textSecondary).frame(minHeight: 36).contentShape(Rectangle())
-              }
-              .buttonStyle(TetherPressStyle()).accessibilityLabel(group.path)
-              .accessibilityValue(collapsedProjects.contains(group.path) ? "collapsed" : "expanded")
+              projectHeader(group)
               if !collapsedProjects.contains(group.path) { ForEach(group.rows) { chatRow($0) } }
             }
           }
@@ -686,6 +666,67 @@ public struct SSHTerminalView: View {
     .background(TetherColors.background.ignoresSafeArea())
     .accessibilityIdentifier("sshSessionDrawer")
     .accessibilityAction(.escape) { setDrawer(open: false) }
+  }
+
+  private func projectHeader(_ group: ChatProjectGroup) -> some View {
+    let collapsed = collapsedProjects.contains(group.path) && !group.rows.isEmpty
+    return HStack(spacing: 0) {
+      Button {
+        if collapsedProjects.contains(group.path) { collapsedProjects.remove(group.path) }
+        else { collapsedProjects.insert(group.path) }
+      } label: {
+        HStack(spacing: 6) {
+          Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+            .font(.system(size: 9, weight: .semibold))
+            .frame(width: 10)
+            .opacity(group.rows.isEmpty ? 0 : 1)
+          Image(systemName: "folder").font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
+          Text(group.title).font(.app(.caption).weight(.semibold)).lineLimit(1).layoutPriority(1)
+          if let detail = group.detail {
+            Text(detail).font(.app(.caption2)).foregroundStyle(TetherColors.textFaint)
+              .lineLimit(1).truncationMode(.head)
+          }
+          Text("· \(group.rows.count)").font(.app(.caption)).foregroundStyle(TetherColors.textFaint)
+          Spacer(minLength: 0)
+          if group.needsYou && collapsed {
+            Circle().fill(TetherColors.textPrimary).frame(width: 7, height: 7)
+              .accessibilityLabel("A chat needs you")
+          }
+        }
+        .foregroundStyle(TetherColors.textSecondary).frame(minHeight: 36).contentShape(Rectangle())
+      }
+      .buttonStyle(TetherPressStyle()).accessibilityLabel(group.path)
+      .accessibilityValue(
+        group.rows.isEmpty ? "no chats" : "\(group.rows.count) chat\(group.rows.count == 1 ? "" : "s"), \(collapsed ? "collapsed" : "expanded")")
+      Button { startChat(in: group.path) } label: {
+        Image(systemName: "plus").font(.app(.caption).weight(.semibold))
+          .foregroundStyle(TetherColors.textSecondary)
+          .frame(width: 36, height: 36).contentShape(Rectangle())
+      }
+      .buttonStyle(TetherPressStyle())
+      .accessibilityLabel("New chat in \(group.title)")
+      .accessibilityIdentifier("projectNewChat_\(group.title)")
+    }
+    .opacity(group.rows.isEmpty ? 0.55 : 1)
+    .contextMenu {
+      Button { startChat(in: group.path) } label: { Label("New chat here", systemImage: "plus.bubble") }
+      Button {
+        acknowledgeCopy(group.path, announce: "Folder copied", into: $showCopyConfirmation)
+      } label: { Label("Copy folder", systemImage: "folder") }
+      if group.rows.isEmpty {
+        Button(role: .destructive) {
+          Task { if let failure = await controller.removeProject(group.path) { promptNotice = failure } }
+        } label: {
+          Label("Remove project", systemImage: "minus.circle")
+        }
+      }
+    }
+  }
+
+  private func startChat(in path: String) {
+    newChatFolder = path
+    newChatMode = .new
+    showNewChat = true
   }
 
   private var drawerStateLabel: String {
@@ -891,9 +932,15 @@ public struct SSHTerminalView: View {
             .frame(width: glyphSlot).padding(.top, 1)
             .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 2) {
-            Text(row.title).font(.app(.subheadline).weight(.semibold))
-              .foregroundStyle(ended ? TetherColors.textSecondary : TetherColors.textPrimary)
-              .lineLimit(2).multilineTextAlignment(.leading)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+              Text(row.title).font(.app(.subheadline).weight(.semibold))
+                .foregroundStyle(ended ? TetherColors.textSecondary : TetherColors.textPrimary)
+                .lineLimit(2).multilineTextAlignment(.leading)
+              if row.pinned {
+                Image(systemName: "pin.fill").font(.system(size: 9, weight: .semibold))
+                  .foregroundStyle(TetherColors.textFaint).accessibilityHidden(true)
+              }
+            }
             Group {
               if let agentLabel = row.agentLabel, showsDetail {
                 let fits = DrawerLayout.chatSubtitleFits
@@ -919,7 +966,7 @@ public struct SSHTerminalView: View {
       .buttonStyle(TetherPressStyle())
       .accessibilityIdentifier("chatRow_\(row.name)")
       .accessibilityLabel(
-        (["Chat \(row.title)", row.agentLabel, row.stateLabel, row.subtitle].compactMap { $0 }.filter { !$0.isEmpty })
+        (["Chat \(row.title)", row.pinned ? "pinned" : nil, row.agentLabel, row.stateLabel, row.subtitle].compactMap { $0 }.filter { !$0.isEmpty })
           .joined(separator: ", "))
       .accessibilityHint(isSelected ? "Already open" : "Opens this chat")
       .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -1053,6 +1100,10 @@ public struct SSHTerminalView: View {
       if let row { content.open(controller.chatRoute(for: row)) }
       if mode == "chat-open" { try? await Task.sleep(nanoseconds: 700_000_000); drawerOpen = true }
     case "projects-archive": showingArchive = true; drawerOpen = true
+    case "projects-newchat": startChat(in: "/home/dev/notes")
+    case "projects-collapsed":
+      collapsedProjects = ["/home/dev/sites/rawkoon", "/home/dev/sites/tether"]
+      drawerOpen = true
     case "newchat", "newchat-missing": showNewChat = true
     case "newchat-folders": newChatBrowseFolders = true; showNewChat = true
     case "newchat-claude", "newchat-codex-open", "newchat-opencode-first":
