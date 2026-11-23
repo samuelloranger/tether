@@ -61,7 +61,7 @@ final class ChatOrganizationTests: XCTestCase {
     let rows = DrawerChatRows.rows(chats: listing.chats, titles: [:])
     XCTAssertEqual(rows.first { $0.name == "a" }?.title, "My title")
     XCTAssertEqual(ChatOrganization.groups(rows).map(\.path), ["/work/api"])
-    XCTAssertEqual(ChatOrganization.groups(rows).first?.rows.map(\.name), ["c"])
+    XCTAssertEqual(ChatOrganization.groups(rows).first?.rows.map(\.name), ["a", "c"], "a pinned chat leads its own project")
     XCTAssertEqual(ChatOrganization.attention(rows).map(\.name), ["b"])
     XCTAssertEqual(rows.first { $0.name == "c" }?.parent?.name, "a")
     XCTAssertEqual(rows.first { $0.name == "c" }?.route(journal: ChatJournal()).parent?.name, "a")
@@ -181,6 +181,30 @@ extension ChatOrganizationTests {
     }
     XCTAssertTrue(ChatProjectGroup(path: "/w", rows: [row("a", .idle), row("b", .waiting)]).needsYou)
     XCTAssertFalse(ChatProjectGroup(path: "/w", rows: [row("a", .idle)]).needsYou)
+  }
+
+  func test_saved_projects_show_without_chats_and_merge_with_chat_groups() {
+    func row(_ name: String, _ root: String, pinned: Bool = false) -> DrawerChatRow {
+      DrawerChatRow(name: name, title: name, subtitle: "", state: .idle, cwd: root + "/sub", pinned: pinned, projectRoot: root, agentKey: nil)
+    }
+    // Newest chat first: /z's chat is newer than /a's, and the empty saved projects come last.
+    let rows = [row("new", "/z"), row("old", "/a"), row("older", "/z", pinned: true)]
+    let groups = ChatOrganization.groups(rows, saved: ["/a", "/home/me/x/app", "/empty"])
+    XCTAssertEqual(groups.map(\.path), ["/z", "/a", "/empty", "/home/me/x/app"])
+    XCTAssertEqual(groups.map(\.rows.count), [2, 1, 0, 0])
+    XCTAssertEqual(groups[0].rows.map(\.name), ["older", "new"])
+    XCTAssertTrue(groups.allSatisfy { $0.detail == nil })
+  }
+
+  func test_projects_with_the_same_folder_name_show_their_path() {
+    let groups = ChatOrganization.groups([], saved: ["/home/me/work/app", "/home/me/sites/app", "/home/me/notes"])
+    XCTAssertEqual(groups.map(\.detail), [nil, "~/sites/app", "~/work/app"])
+  }
+
+  func test_projects_listing_parses_lines_and_reads_an_old_host_as_unsupported() {
+    XCTAssertEqual(ACPHostCommand.parseProjects("{\"path\":\"/a\"}\n{\"path\":\"/b c\"}\n"), ["/a", "/b c"])
+    XCTAssertEqual(ACPHostCommand.parseProjects(""), [])
+    XCTAssertNil(ACPHostCommand.parseProjects("tether: unknown acp command \"projects\""))
   }
 }
 

@@ -63,6 +63,24 @@ extension SSHTerminalController {
     restoreLastChat()
   }
 
+  /// Saved projects change only when a chat starts or one is removed, so a minute between reads is enough.
+  func refreshProjects(force: Bool = false) async {
+    guard force || projectsReadAt.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+    projectsReadAt = Date()
+    guard let output = try? await control.exec(ACPHostCommand.projects),
+      let paths = ACPHostCommand.parseProjects(output), paths != projects
+    else { return }
+    projects = paths
+  }
+
+  func removeProject(_ path: String) async -> String? {
+    guard let output = try? await control.exec(ACPHostCommand.removeProject(path)),
+      let paths = ACPHostCommand.parseProjects(output)
+    else { return "Couldn't remove this project. Update tether on the host and try again." }
+    projects = paths
+    return nil
+  }
+
   /// Restore once, after a successful host listing. Never recreate a missing or ended chat.
   private func restoreLastChat() {
     guard chatRestorationPending else { return }
@@ -110,6 +128,7 @@ extension SSHTerminalController {
     let result = await ChatRoute.start(cwdText: cwdText, host: config.host, agent: request.agent, picks: request.picks, changed: request.changed) {
       try await self.control.exec($0)
     }
+    if case .ready = result { projectsReadAt = nil }
     return result
   }
 
@@ -127,10 +146,12 @@ extension SSHTerminalController {
   func continueChat(
     session: ACPSavedSession, folderText: String, request: NewChatRequest = .init(agent: ChatAgents.claude)
   ) async -> ChatStart {
-    await ChatRoute.startContinuing(
+    let result = await ChatRoute.startContinuing(
       session: session, cwdText: folderText, host: config.host, agent: request.agent, picks: request.picks,
       changed: request.changed
     ) { try await self.control.exec($0) }
+    if case .ready = result { projectsReadAt = nil }
+    return result
   }
 
   /// What the New chat sheet's Options row offers for an agent on this host.

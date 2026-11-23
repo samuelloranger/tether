@@ -653,7 +653,13 @@ pub fn apply(w: &crate::AppWindow, s: ChatScreen) {
             .map(|r| ChatSideVm {
                 section: r.section.as_str().into(),
                 project_key: r.project_key.as_str().into(),
+                project: r.project,
+                empty: r.empty,
                 collapsed: r.collapsed,
+                detail: r.detail.as_str().into(),
+                count: r.count as i32,
+                waiting: r.waiting,
+                pinned: r.pinned,
                 tab: r
                     .tab
                     .as_ref()
@@ -1139,6 +1145,8 @@ pub fn wire(ui: &crate::AppWindow) {
     vm.on_restore(|n| send(ChatMsg::Restore(n.into())));
     vm.on_show_archived(|v| send(ChatMsg::Archived(v)));
     vm.on_collapse_project(|p| send(ChatMsg::CollapseProject(p.into())));
+    vm.on_new_chat_in(|p| send(ChatMsg::NewChatIn(p.into())));
+    vm.on_remove_project(|p| send(ChatMsg::RemoveProject(p.into())));
     vm.on_rename(|n| send(ChatMsg::Rename(n.into())));
     vm.on_rename_save(|title| send(ChatMsg::RenameSave(title.into())));
     vm.on_branch(|k| send(ChatMsg::Branch(k.into())));

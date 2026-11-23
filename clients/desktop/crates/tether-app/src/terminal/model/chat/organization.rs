@@ -36,6 +36,20 @@ impl Chats {
             command: format!("{} usage --json 2>&1", host::TETHER),
         });
     }
+    /// Saved projects change only when a chat starts or one is removed: a minute between reads.
+    pub(super) fn poll_projects(&mut self, now: Duration, out: &mut Out) {
+        if self
+            .projects_asked
+            .is_some_and(|at| now.saturating_sub(at) < Duration::from_secs(60))
+        {
+            return;
+        }
+        self.projects_asked = Some(now);
+        out.jobs.push(ChatJob::Exec {
+            tag: ExecTag::Projects,
+            command: format!("{} projects 2>&1", host::TETHER),
+        });
+    }
     fn patch_organization(&mut self, name: &str, patch: serde_json::Value, out: &mut Out) {
         self.actions = None;
         if !self.connected {
@@ -96,6 +110,34 @@ impl Chats {
                 }
             }
             ChatMsg::RefreshUsage => self.poll_usage(now, out),
+            ChatMsg::NewChatIn(path) => self.open_new_chat(0, path.clone(), now, out),
+            ChatMsg::RemoveProject(path) => {
+                if !self.connected {
+                    self.organization_error = "Connect to the host to remove a project.".into();
+                    return true;
+                }
+                self.projects.retain(|p| p != path);
+                out.jobs.push(ChatJob::Exec {
+                    tag: ExecTag::Projects,
+                    command: format!(
+                        "{} projects remove {} 2>&1",
+                        host::TETHER,
+                        shell_quote(path)
+                    ),
+                });
+            }
+            ChatMsg::ExecDone {
+                tag: ExecTag::Projects,
+                result,
+            } => {
+                if let Some(paths) = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|s| organization::parse_projects(s))
+                {
+                    self.projects = paths;
+                }
+            }
             ChatMsg::ExecDone {
                 tag: ExecTag::Usage,
                 result,

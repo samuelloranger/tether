@@ -523,11 +523,22 @@ pub struct ChatScreen {
     pub delete_title: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SidebarView {
     pub section: String,
     pub project_key: String,
+    /// A project section, not Pinned or Needs you: it offers a new chat in its folder.
+    pub project: bool,
     pub collapsed: bool,
+    /// A saved project with no chat left in it.
+    pub empty: bool,
+    /// The `~`-relative path, only when another project has the same folder name.
+    pub detail: String,
+    /// The section's chats, and whether one of them needs an answer.
+    pub count: u32,
+    pub waiting: bool,
+    /// On a chat row: the chat is pinned to the top of its project.
+    pub pinned: bool,
     pub tab: Option<TabView>,
 }
 

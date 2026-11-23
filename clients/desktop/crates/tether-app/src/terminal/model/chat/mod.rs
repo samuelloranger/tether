@@ -42,6 +42,7 @@ const FOLDER_COPIED_FOR: Duration = Duration::from_millis(1300);
 pub enum ExecTag {
     Status,
     Usage,
+    Projects,
     Organize {
         name: String,
     },
@@ -166,6 +167,9 @@ pub enum ChatMsg {
     Restore(String),
     Archived(bool),
     CollapseProject(String),
+    /// A project's +: the New chat dialog opens on its folder.
+    NewChatIn(String),
+    RemoveProject(String),
     Rename(String),
     RenameSave(String),
     Branch(String),
@@ -351,6 +355,9 @@ pub struct Chats {
     pending_branch: Option<(String, organization::BranchDialog)>,
     archived: bool,
     collapsed_projects: HashSet<String>,
+    /// The host's saved projects, shown even with no chat in them.
+    projects: Vec<String>,
+    projects_asked: Option<Duration>,
     plan_usage: tether_core::acp::organization::PlanUsage,
     usage_asked: Option<Duration>,
     usage_loading: bool,
@@ -456,6 +463,8 @@ impl Chats {
             pending_branch: None,
             archived: false,
             collapsed_projects: HashSet::new(),
+            projects: Vec::new(),
+            projects_asked: None,
             plan_usage: Default::default(),
             usage_asked: None,
             usage_loading: false,
@@ -656,6 +665,7 @@ impl Chats {
             (ExecTag::List, format!("{} 2>/dev/null || true", host::LIST))
         };
         out.jobs.push(ChatJob::Exec { tag, command });
+        self.poll_projects(now, out);
     }
 
     fn on_listing(&mut self, chats: Vec<ChatSummary>, now: Duration, out: &mut Out) {
@@ -919,6 +929,7 @@ impl Chats {
             self.provisional.push(chat);
         }
         if crate::app::dev_env("TETHER_DEV_CHAT_ORGANIZATION").is_some() {
+            self.projects = vec!["/srv/notes".into(), "/srv/old/site".into()];
             let wall = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);

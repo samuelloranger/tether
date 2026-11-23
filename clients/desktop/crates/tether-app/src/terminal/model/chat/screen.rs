@@ -1,5 +1,6 @@
 //! Builds the pane from the chats' state.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use tether_core::acp::agent::{self, CLAUDE};
@@ -125,7 +126,7 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
     screen.archived = chats.archived;
     screen.archived_count = ordered.iter().filter(|c| c.organization.archived).count();
     screen.organization_error = chats.organization_error.clone();
-    let mut sidebar = ordered
+    let sidebar = ordered
         .iter()
         .filter(|c| {
             if chats.archived {
@@ -145,46 +146,86 @@ pub fn build(chats: &mut Chats, now: Duration, out: &mut Out) -> ChatScreen {
         if c.organization.archived && c.turn == host::HostTurn::Waiting && !chats.archived {
             return (0, "Needs you · archived".into());
         }
-        if c.organization.pinned && !chats.archived {
-            return (1, "Pinned".into());
-        }
         let path = if c.organization.project_root.is_empty() {
             &c.cwd
         } else {
             &c.organization.project_root
         };
-        (2, path.clone())
+        (1, path.clone())
     };
-    sidebar.sort_by_key(|c| (group(c), std::cmp::Reverse(c.created)));
-    let mut previous = None;
+    // Projects by their newest chat, pinned chats first inside their own; saved projects with no
+    // chat left come last.
+    let mut groups: Vec<((u8, String), Vec<&host::ChatSummary>)> = Vec::new();
     for c in sidebar {
         let key = group(c);
-        let collapsed = chats.collapsed_projects.contains(&key.1);
-        if previous.as_ref() != Some(&key) {
-            let label = if key.0 < 2 {
-                key.1.clone()
-            } else {
-                tether_core::acp::format::folder_name(&key.1)
-            };
-            screen.sidebar.push(SidebarView {
-                section: label,
-                project_key: key.1.clone(),
-                collapsed,
-                tab: None,
-            });
-            previous = Some(key);
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, rows)) => rows.push(c),
+            None => groups.push((key, vec![c])),
         }
-        if !collapsed && let Some(tab) = screen.tabs.iter().find(|t| t.name == c.name) {
-            let mut tab = tab.clone();
-            if !c.organization.custom_title.is_empty() {
-                tab.title = c.organization.custom_title.clone();
+    }
+    for (_, rows) in &mut groups {
+        rows.sort_by_key(|c| (!c.organization.pinned, std::cmp::Reverse(c.created)));
+    }
+    groups.sort_by_key(|(key, rows)| {
+        (
+            key.0,
+            std::cmp::Reverse(rows.iter().map(|c| c.created).max().unwrap_or(0)),
+        )
+    });
+    if !chats.archived {
+        let mut empty: Vec<&String> = chats
+            .projects
+            .iter()
+            .filter(|p| !groups.iter().any(|(k, _)| k.0 == 1 && &k.1 == *p))
+            .collect();
+        empty.sort();
+        groups.extend(empty.into_iter().map(|p| ((1, p.clone()), Vec::new())));
+    }
+    let mut names: HashMap<String, usize> = HashMap::new();
+    for ((kind, path), _) in &groups {
+        if *kind == 1 {
+            *names.entry(format::folder_name(path)).or_default() += 1;
+        }
+    }
+    for ((kind, path), rows) in groups {
+        let project = kind == 1;
+        let collapsed = chats.collapsed_projects.contains(&path) && !rows.is_empty();
+        let name = if project {
+            format::folder_name(&path)
+        } else {
+            path.clone()
+        };
+        screen.sidebar.push(SidebarView {
+            detail: if project && names.get(&name).copied().unwrap_or(0) > 1 {
+                format::home_relative(&path)
+            } else {
+                String::new()
+            },
+            section: name,
+            project_key: path,
+            project,
+            collapsed,
+            empty: rows.is_empty(),
+            count: rows.len() as u32,
+            waiting: rows.iter().any(|c| c.turn == host::HostTurn::Waiting),
+            pinned: false,
+            tab: None,
+        });
+        if collapsed {
+            continue;
+        }
+        for c in rows {
+            if let Some(tab) = screen.tabs.iter().find(|t| t.name == c.name) {
+                let mut tab = tab.clone();
+                if !c.organization.custom_title.is_empty() {
+                    tab.title = c.organization.custom_title.clone();
+                }
+                screen.sidebar.push(SidebarView {
+                    pinned: c.organization.pinned,
+                    tab: Some(tab),
+                    ..SidebarView::default()
+                });
             }
-            screen.sidebar.push(SidebarView {
-                section: String::new(),
-                project_key: String::new(),
-                collapsed: false,
-                tab: Some(tab),
-            });
         }
     }
     if let Some(name) = &chats.actions

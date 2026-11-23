@@ -79,21 +79,34 @@ enum ChatBranching {
 struct ChatProjectGroup: Identifiable {
   var path: String
   var rows: [DrawerChatRow]
+  /// The `~`-relative path, set only when another project has the same folder name.
+  var detail: String?
   var id: String { path }
   var title: String { ChatFormat.folderName(path) }
   var needsYou: Bool { rows.contains { $0.state == .waiting } }
 }
 
 enum ChatOrganization {
-  static func pinned(_ rows: [DrawerChatRow]) -> [DrawerChatRow] {
-    rows.filter { $0.pinned && !$0.archived }
-  }
-
-  static func groups(_ rows: [DrawerChatRow]) -> [ChatProjectGroup] {
-    let grouped = Dictionary(grouping: rows.filter { !$0.archived && !$0.pinned }) {
-      $0.projectRoot.flatMap { $0.isEmpty ? nil : $0 } ?? $0.cwd
+  /// One group per project, in the order of its newest chat (`rows` come newest first), pinned
+  /// chats at the top of their own project. `saved` adds the host's saved projects, so a project
+  /// with no chat left still shows, after the others.
+  static func groups(_ rows: [DrawerChatRow], saved: [String] = []) -> [ChatProjectGroup] {
+    var order: [String] = []
+    var grouped: [String: [DrawerChatRow]] = [:]
+    for row in rows where !row.archived {
+      let key = row.projectRoot.flatMap { $0.isEmpty ? nil : $0 } ?? row.cwd
+      if grouped[key] == nil { order.append(key) }
+      grouped[key, default: []].append(row)
     }
-    return grouped.keys.sorted().map { ChatProjectGroup(path: $0, rows: grouped[$0] ?? []) }
+    order += Set(saved).subtracting(order).sorted()
+    var names: [String: Int] = [:]
+    for path in order { names[ChatFormat.folderName(path), default: 0] += 1 }
+    return order.map { path in
+      let rows = grouped[path] ?? []
+      return ChatProjectGroup(
+        path: path, rows: rows.filter(\.pinned) + rows.filter { !$0.pinned },
+        detail: names[ChatFormat.folderName(path), default: 0] > 1 ? DrawerLayout.homeRelative(path) : nil)
+    }
   }
 
   static func attention(_ rows: [DrawerChatRow]) -> [DrawerChatRow] {
@@ -210,6 +223,24 @@ struct ChatUsageSubscription: Identifiable {
 
 extension ACPHostCommand {
   static let usage = "PATH=\"$HOME/.local/bin:$PATH\" tether acp usage --json 2>&1"
+  static let projects = "PATH=\"$HOME/.local/bin:$PATH\" tether acp projects 2>&1"
+
+  static func removeProject(_ path: String) -> String {
+    "PATH=\"$HOME/.local/bin:$PATH\" tether acp projects remove \(shellQuote(path)) 2>&1"
+  }
+
+  /// `acp projects`: one `{"path":…}` line each. Nil when the host predates the command.
+  static func parseProjects(_ output: String) -> [String]? {
+    var paths: [String] = []
+    for line in output.split(whereSeparator: \.isNewline) {
+      guard let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+        let path = object["path"] as? String, path.hasPrefix("/")
+      else { return nil }
+      paths.append(path)
+    }
+    return paths
+  }
+
   static func organize(name: String, patch: [String: Any]) -> String? {
     guard let data = try? JSONSerialization.data(withJSONObject: patch, options: [.sortedKeys]),
       let json = String(data: data, encoding: .utf8) else { return nil }

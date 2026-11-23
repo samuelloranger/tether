@@ -23,6 +23,19 @@ pub fn folder_name(cwd: &str) -> String {
 }
 
 /// The folder a chat sits in, for the row's subtitle; None at the root or for a bare `~`.
+/// `/home/<user>/a/b` (or `/Users/…`) as `~/a/b`; any other path as it is.
+pub fn home_relative(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.len() < 2 || (parts[0] != "home" && parts[0] != "Users") {
+        return path.to_string();
+    }
+    if parts.len() == 2 {
+        "~".into()
+    } else {
+        format!("~/{}", parts[2..].join("/"))
+    }
+}
+
 pub fn parent_path(cwd: &str) -> Option<String> {
     let mut parts: Vec<&str> = cwd.split('/').filter(|p| !p.is_empty()).collect();
     if parts.is_empty() || cwd == "~" {
@@ -657,6 +670,13 @@ impl Resume {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_relative_shortens_only_a_home_directory() {
+        assert_eq!(home_relative("/home/me/work/app"), "~/work/app");
+        assert_eq!(home_relative("/Users/me"), "~");
+        assert_eq!(home_relative("/srv/app"), "/srv/app");
+    }
     use crate::acp::fixture;
     use crate::acp::journal::TranscriptBuilder;
     use crate::acp::message::ConfigChoice;
