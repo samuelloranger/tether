@@ -740,6 +740,34 @@ pub fn expand_cwd(text: &str, home: &str) -> String {
     path
 }
 
+/// `path` as the folder field shows it: `~` for the SSH user's own home, the path unchanged
+/// anywhere else (another user's home included).
+pub fn tilde_path(path: &str, user: &str) -> String {
+    if user.is_empty() || user.contains('/') {
+        return path.to_string();
+    }
+    let homes = [
+        format!("/home/{user}"),
+        format!("/Users/{user}"),
+        if user == "root" {
+            "/root".to_string()
+        } else {
+            String::new()
+        },
+    ];
+    for home in homes.iter().filter(|h| !h.is_empty()) {
+        if path == home || path == format!("{home}/") {
+            return "~".to_string();
+        }
+        if let Some(rest) = path.strip_prefix(home.as_str())
+            && rest.starts_with('/')
+        {
+            return format!("~{rest}");
+        }
+    }
+    path.to_string()
+}
+
 pub fn needs_home(text: &str) -> bool {
     let path = text.trim();
     path.is_empty() || path == "~" || path.starts_with("~/")
@@ -1709,5 +1737,16 @@ mod tests {
             explain_list_line("something else", Some("box")),
             "something else"
         );
+    }
+    #[test]
+    fn tilde_path_only_shortens_the_ssh_users_own_home() {
+        assert_eq!(tilde_path("/home/me/sites/app", "me"), "~/sites/app");
+        assert_eq!(tilde_path("/home/me", "me"), "~");
+        assert_eq!(tilde_path("/Users/me/x", "me"), "~/x");
+        assert_eq!(tilde_path("/root/x", "root"), "~/x");
+        assert_eq!(tilde_path("/home/other/x", "me"), "/home/other/x");
+        assert_eq!(tilde_path("/home/meta/x", "me"), "/home/meta/x");
+        assert_eq!(tilde_path("/srv/x", "me"), "/srv/x");
+        assert_eq!(tilde_path("/home/me/x", ""), "/home/me/x");
     }
 }

@@ -16,6 +16,7 @@ impl TerminalModel {
     pub fn set_chat_files(&mut self, files: ChatFiles) {
         self.chats = Chats::new(Some(files), &self.machine.host);
         self.chats.label = self.machine.name.clone();
+        self.chats.user = self.machine.user.clone();
     }
 
     pub fn set_chat_mcp(&mut self, library: super::chat::McpLibrary) {

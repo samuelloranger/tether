@@ -16,7 +16,8 @@ pub const MAX_ENCODED_BYTES: usize = 5 * 1024 * 1024;
 const JPEG_QUALITY: u8 = 80;
 /// The file read before decoding; anything past this is not a picture someone pastes into a chat.
 const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
-pub const THUMB_EDGE: u32 = 640;
+/// Twice the widest row picture (420 px), so it stays sharp at 200 % scaling.
+pub const THUMB_EDGE: u32 = 1024;
 pub const CHIP_EDGE: u32 = 160;
 pub const FULL_EDGE: u32 = 4096;
 
@@ -166,7 +167,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.png");
         std::fs::write(&path, png(1280, 640, 255)).unwrap();
-        let t = thumbnail(&path, THUMB_EDGE).unwrap();
+        let t = thumbnail(&path, 640).unwrap();
         assert_eq!((t.width, t.height), (640, 320));
         assert_eq!(t.rgba.len(), 640 * 320 * 4);
         assert!(thumbnail(&dir.path().join("gone"), THUMB_EDGE).is_none());

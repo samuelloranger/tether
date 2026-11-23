@@ -112,7 +112,10 @@ impl Chats {
                 }
             }
             ChatMsg::RefreshUsage => self.poll_usage(now, out),
-            ChatMsg::NewChatIn(path) => self.open_new_chat(0, path.clone(), now, out),
+            ChatMsg::NewChatIn(path) => {
+                let folder = tether_core::acp::host::tilde_path(path, &self.user);
+                self.open_new_chat(0, folder, now, out)
+            }
             ChatMsg::RemoveProject(path) => {
                 if !self.connected {
                     self.organization_error = "Connect to the host to remove a project.".into();

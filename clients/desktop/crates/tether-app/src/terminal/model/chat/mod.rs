@@ -420,6 +420,8 @@ pub struct Chats {
     host: String,
     /// The machine's own name, for the header's "folder on host".
     pub(super) label: String,
+    /// The SSH user, so a project folder opens New chat as `~/…`.
+    pub(super) user: String,
     listed: Vec<ChatSummary>,
     /// Chats started here that the host has not listed yet.
     provisional: Vec<ChatSummary>,
@@ -542,6 +544,7 @@ impl Chats {
             last_agent: String::new(),
             host: host.to_string(),
             label: host.to_string(),
+            user: String::new(),
             listed: Vec::new(),
             provisional: Vec::new(),
             status_supported: true,

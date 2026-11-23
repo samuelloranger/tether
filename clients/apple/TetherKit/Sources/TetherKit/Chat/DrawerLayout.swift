@@ -42,6 +42,17 @@ enum DrawerLayout {
     return parts.count == 2 ? "~" : "~/" + parts.dropFirst(2).joined(separator: "/")
   }
 
+  /// `path` as the New chat folder field shows it: `~` for the SSH user's own home, unchanged
+  /// anywhere else (another user's home included).
+  static func tildeFolder(_ path: String, user: String) -> String {
+    guard !user.isEmpty, !user.contains("/") else { return path }
+    for home in ["/home/\(user)", "/Users/\(user)"] + (user == "root" ? ["/root"] : []) {
+      if path == home || path == home + "/" { return "~" }
+      if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+    }
+    return path
+  }
+
   /// The fallbacks for a chat's second line when it does not fit, widest first. The logo already
   /// names the agent, so a narrow row gives up the agent label before the folder.
   static let chatSubtitleFits: [(agentLabel: Bool, folder: Bool)] = [(true, true), (false, true), (true, false)]

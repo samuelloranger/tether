@@ -42,6 +42,16 @@ final class DrawerLayoutTests: XCTestCase {
     XCTAssertEqual(DrawerLayout.homeRelative("/srv/x"), "/srv/x")
   }
 
+  func test_tilde_folder_only_shortens_the_ssh_users_own_home() {
+    XCTAssertEqual(DrawerLayout.tildeFolder("/home/me/sites/app", user: "me"), "~/sites/app")
+    XCTAssertEqual(DrawerLayout.tildeFolder("/home/me", user: "me"), "~")
+    XCTAssertEqual(DrawerLayout.tildeFolder("/Users/me/x", user: "me"), "~/x")
+    XCTAssertEqual(DrawerLayout.tildeFolder("/root/x", user: "root"), "~/x")
+    XCTAssertEqual(DrawerLayout.tildeFolder("/home/other/x", user: "me"), "/home/other/x")
+    XCTAssertEqual(DrawerLayout.tildeFolder("/home/meta/x", user: "me"), "/home/meta/x")
+    XCTAssertEqual(DrawerLayout.tildeFolder("/srv/x", user: "me"), "/srv/x")
+  }
+
   func test_home_relative_handles_a_bare_home_root_and_trailing_slashes() {
     XCTAssertEqual(DrawerLayout.homeRelative("/home"), "/home")
     XCTAssertEqual(DrawerLayout.homeRelative("/Users"), "/Users")
