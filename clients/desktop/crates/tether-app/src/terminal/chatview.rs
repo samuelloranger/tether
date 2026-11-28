@@ -279,7 +279,12 @@ fn row_vm(r: &Row) -> ChatRowVm {
             vm.card_pending = *pending;
             vm.flag = card.supported();
             vm.text = card.title.as_str().into();
-            vm.meta = format!("{}\nFetched {}", card.source, fetched_label(&card.fetched_at)).into();
+            vm.meta = format!(
+                "{}\nFetched {}",
+                card.source,
+                fetched_label(&card.fetched_at)
+            )
+            .into();
             vm.images = pictures(images);
             let p = &card.payload;
             let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
