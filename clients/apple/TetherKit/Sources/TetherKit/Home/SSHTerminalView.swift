@@ -67,7 +67,7 @@ public struct SSHTerminalView: View {
   @ScaledMetric(relativeTo: .title3) private var tapTarget: CGFloat = 40
   /// Four scaled targets plus the title are wider than a phone at accessibility sizes, and an oversize
   /// header widens the whole screen (the drawer slides off its left edge).
-  private var headerTapTarget: CGFloat { min(tapTarget, 52) }
+  private var headerTapTarget: CGFloat { min(tapTarget, 44) }
   @ScaledMetric(relativeTo: .caption2) private var lampSize: CGFloat = 9
   @ScaledMetric(relativeTo: .caption2) private var glyphSlot: CGFloat = 14
 
