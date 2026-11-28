@@ -68,6 +68,8 @@ public struct SSHTerminalView: View {
   /// Four scaled targets plus the title are wider than a phone at accessibility sizes, and an oversize
   /// header widens the whole screen (the drawer slides off its left edge).
   private var headerTapTarget: CGFloat { min(tapTarget, 44) }
+  /// The drawer header stacks at accessibility sizes, but three uncapped targets still outgrew the panel.
+  private var drawerTapTarget: CGFloat { min(max(44, tapTarget), 56) }
   @ScaledMetric(relativeTo: .caption2) private var lampSize: CGFloat = 9
   @ScaledMetric(relativeTo: .caption2) private var glyphSlot: CGFloat = 14
 
@@ -515,7 +517,7 @@ public struct SSHTerminalView: View {
           }
         }
       }
-      Circle().fill(lampColor).frame(width: lampSize, height: lampSize).padding(.leading, tabs == nil ? 4 : 8)
+      Circle().fill(lampColor).frame(width: min(lampSize, 12), height: min(lampSize, 12)).padding(.leading, tabs == nil ? 4 : 8)
         .scaleEffect(controller.status == .connected ? 1 : 1.12)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 0) {
@@ -562,8 +564,12 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("sshTerminalOverflow")
       .accessibilityLabel("More terminal actions")
       .help("More terminal actions")
+      .accessibilityShowsLargeContentViewer()
     }
     .foregroundStyle(TetherColors.textPrimary)
+    // A bar, like the system's: past this size the row outgrows the screen and widens every view under it
+    // (the drawer measures its width from here). The buttons offer the Large Content Viewer instead.
+    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     // Behind the open drawer the header's controls recede instead of reading as a second set.
     .opacity(1 - 0.6 * min(drawerProgress, 1))
     .animation(TetherMotion.ui(TetherMotion.arrive, reduceMotion: reduceMotion), value: controller.status)
@@ -605,6 +611,7 @@ public struct SSHTerminalView: View {
     .accessibilityIdentifier(id)
     .accessibilityLabel(label)
     .help(label)
+    .accessibilityShowsLargeContentViewer()
   }
 
   private var drawer: some View {
@@ -766,7 +773,7 @@ public struct SSHTerminalView: View {
     } label: {
       Text("Switch").font(.app(.footnote).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
         .lineLimit(1).fixedSize()
-        .padding(.horizontal, 6).frame(minHeight: max(44, tapTarget)).contentShape(Rectangle())
+        .padding(.horizontal, 6).frame(minHeight: drawerTapTarget).contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("sshDrawerHome")
@@ -774,7 +781,7 @@ public struct SSHTerminalView: View {
     .help("Switch machine")
     Button { showSettings = true } label: {
       Image(systemName: "gearshape").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
-        .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
+        .frame(width: drawerTapTarget, height: drawerTapTarget).contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier("sshDrawerSettings")
@@ -791,7 +798,7 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier("sshContinueChat")
     } label: {
       Image(systemName: "plus").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-        .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
+        .frame(width: drawerTapTarget, height: drawerTapTarget).contentShape(Rectangle())
     }
     .accessibilityIdentifier("sshNewSessionAdd")
     .accessibilityLabel("New terminal or chat")
@@ -986,8 +993,9 @@ public struct SSHTerminalView: View {
                     .fixedSize(horizontal: true, vertical: false)
                   chatSubtitle(row, agentLabel: fits[1].agentLabel ? agentLabel : nil, folder: fits[1].folder)
                     .fixedSize(horizontal: true, vertical: false)
+                  // The last candidate is what ViewThatFits falls back to when nothing fits, so it must
+                  // be able to shrink; fixed, it widened the whole drawer at the largest text sizes.
                   chatSubtitle(row, agentLabel: fits[2].agentLabel ? agentLabel : nil, folder: fits[2].folder)
-                    .fixedSize(horizontal: true, vertical: false)
                 }
               } else {
                 chatSubtitle(row, agentLabel: nil, folder: showsDetail)
