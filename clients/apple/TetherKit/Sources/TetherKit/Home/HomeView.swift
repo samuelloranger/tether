@@ -106,6 +106,7 @@ public struct HomeView: View {
         .foregroundStyle(TetherColors.textSecondary)
         .padding(.trailing, 6)
         .accessibilityLabel("Close home")
+        .help("Close home")
       }
       if TetherPlatform.isMac, preferences != nil {
         Button { showSettings = true } label: {
@@ -117,17 +118,22 @@ public struct HomeView: View {
         .buttonStyle(TetherPressStyle())
         .accessibilityIdentifier("homeSettings")
         .accessibilityLabel("Settings")
+        .help("Settings")
         .padding(.trailing, 6)
       }
-      Button { showAdd = true } label: {
-        Image(systemName: "plus").font(.app(.title3).weight(.medium))
-          .frame(width: addButtonSize, height: addButtonSize)
-          .background(TetherColors.surfaceRaised, in: Circle())
+      // Keys has its own Generate / Import / Paste bar; the header + adds a machine, so it belongs to Machines.
+      if tab == .machines {
+        Button { showAdd = true } label: {
+          Image(systemName: "plus").font(.app(.title3).weight(.medium))
+            .frame(width: addButtonSize, height: addButtonSize)
+            .background(TetherColors.surfaceRaised, in: Circle())
+        }
+        .foregroundStyle(TetherColors.textPrimary)
+        .buttonStyle(TetherPressStyle())
+        .accessibilityIdentifier("homeAddServer")
+        .accessibilityLabel("Add a machine")
+        .help("Add a machine")
       }
-      .foregroundStyle(TetherColors.textPrimary)
-      .buttonStyle(TetherPressStyle())
-      .accessibilityIdentifier("homeAddServer")
-      .accessibilityLabel("Add a machine")
     }
     .padding(.horizontal, 18)
     .padding(.top, 20)

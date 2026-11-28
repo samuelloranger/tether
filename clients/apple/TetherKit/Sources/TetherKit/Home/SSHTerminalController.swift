@@ -81,6 +81,16 @@ public final class SSHTerminalController {
     public var indicator: Indicator
     /// The header lamp's one word for the same state.
     public var shortLabel: String
+    /// Set for a refused host key; a mismatch is refused on every attempt, so it never offers Retry.
+    var hostKeyMismatch: HostKeyRefusal?
+
+    var offersRetry: Bool { indicator.offersRetry && hostKeyMismatch == nil }
+  }
+
+  /// The two fingerprints of a refused connection, kept as data so the screen never has to parse an error's text.
+  public struct HostKeyRefusal: Equatable, Sendable {
+    public var expected: String
+    public var got: String
   }
 
   /// Why a dial is being asked for. Everything automatic passes through the
@@ -102,7 +112,11 @@ public final class SSHTerminalController {
 
   /// Newest grid, handed to the surface without going through Observation.
   public let frames = TerminalFrameFeed()
-  public private(set) var status: Status = .connecting
+  public private(set) var status: Status = .connecting {
+    didSet { if case .failed = status {} else { refusedHostKey = nil } }
+  }
+  /// Set alongside `.failed` when the host's key did not match its pin.
+  public private(set) var refusedHostKey: HostKeyRefusal?
   public private(set) var mouseMode: MouseMode = .off
   public private(set) var mouseSgr = true
   /// Bumped each time the bell rings, at most once per throttle window.
@@ -340,7 +354,11 @@ public final class SSHTerminalController {
         Task { await refreshSessions() }
         return
       } catch let error as SSHConnectError {
-        if case .hostKeyMismatch = error { status = .failed(Self.describe(error)); return }
+        if case let .hostKeyMismatch(expected, got) = error {
+          refusedHostKey = HostKeyRefusal(expected: expected, got: got)
+          status = .failed(Self.describe(error))
+          return
+        }
         if attempt == 2 { status = .failed(Self.describe(error)); return }
       } catch {
         if attempt == 2 { status = .failed(Self.describe(error)); return }
@@ -1130,7 +1148,9 @@ public final class SSHTerminalController {
 
   /// Overlay copy for a terminal without a live session. A real SSH or host-key
   /// failure always outranks network copy — that is what the user must act on.
-  nonisolated static func connectionCopy(status: Status, reachability: NetworkReachability?) -> ConnectionCopy? {
+  nonisolated static func connectionCopy(
+    status: Status, reachability: NetworkReachability?, refusedHostKey: HostKeyRefusal? = nil
+  ) -> ConnectionCopy? {
     switch status {
     case .connected:
       return nil
@@ -1138,7 +1158,8 @@ public final class SSHTerminalController {
       return ConnectionCopy(message: "Connecting…", indicator: .spinner, shortLabel: "connecting")
     case let .failed(message):
       return ConnectionCopy(
-        message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error")
+        message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error",
+        hostKeyMismatch: refusedHostKey)
     case .disconnected:
       // On a dead path the session is waiting for the network, not the host.
       switch reachability?.availability {
