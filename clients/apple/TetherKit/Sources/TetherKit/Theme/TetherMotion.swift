@@ -65,11 +65,8 @@ public struct TetherPressStyle: ButtonStyle {
 
     var body: some View {
       configuration.label
-        // Behind the label, so it adds no layout; a label with its own fill simply covers it.
-        .background(
-          TetherColors.textPrimary.opacity(TetherPlatform.isMac && hovering && isEnabled ? 0.07 : 0),
-          in: RoundedRectangle(cornerRadius: 10)
-        )
+        // Brightness, not a fill: it follows whatever shape the label draws (circle, capsule, card).
+        .brightness(TetherPlatform.isMac && hovering && isEnabled ? (ChromeTheme.shared.isLight ? -0.05 : 0.08) : 0)
         .scaleEffect(configuration.isPressed && !reduceMotion ? TetherMotion.pressScale : 1)
         .opacity(configuration.isPressed ? 0.9 : 1)
         .animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: configuration.isPressed)

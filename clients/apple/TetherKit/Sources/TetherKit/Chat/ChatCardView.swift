@@ -104,8 +104,10 @@ struct ChatCardView: View {
 
   /// The viewer's own clock: the stamp carries the fetch's offset, which means little to the reader.
   static func fetchedLabel(_ stamp: String) -> String {
-    let parser = ISO8601DateFormatter()
-    guard let date = parser.date(from: stamp) else { return stamp }
+    let plain = ISO8601DateFormatter()
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions.insert(.withFractionalSeconds)
+    guard let date = plain.date(from: stamp) ?? fractional.date(from: stamp) else { return stamp }
     return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
   }
 

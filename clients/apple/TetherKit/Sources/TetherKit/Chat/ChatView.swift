@@ -1081,7 +1081,7 @@ struct PermissionCard: View {
 
   private func syncOpen() { if startOpen { showMore = true } }
 
-  private var isPlan: Bool { permission.kind == .switchMode && !(permission.text ?? "").isEmpty && permission.diff == nil }
+  private var isPlan: Bool { permission.isPlanApproval }
 
   private var file: DiffFile? { permission.diff.map { ACPDiffAdapter.file(for: $0, relativeTo: cwd) } }
 
@@ -1341,6 +1341,9 @@ private struct PlanPreview: View {
 
 extension ChatPermission: Identifiable {
   var id: ACPID { requestId }
+
+  /// A mode switch that carries a plan's text: the agent asking to leave plan mode.
+  var isPlanApproval: Bool { kind == .switchMode && !(text ?? "").isEmpty && diff == nil }
 }
 
 private struct PermissionReviewSheet: View {
@@ -1359,7 +1362,7 @@ private struct PermissionReviewSheet: View {
         }
       }
       .background(TetherColors.background)
-      .navigationTitle(permission.kind == .switchMode ? "Plan" : permission.title)
+      .navigationTitle(permission.isPlanApproval ? "Plan" : permission.title)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }.withoutGlass() }
     }

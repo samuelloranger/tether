@@ -67,7 +67,7 @@ Operate defaults: short state transitions only. No page-load choreography, no lo
 
 **Heat rises fast, cools slow.** The one motion idea: a session becoming live arrives on a decelerating curve (`working` 260ms / `waiting` 340ms), and a session going quiet lets go over 700ms. Equal durations would make two different events read as one. The curve is a confident deceleration, never a spring — an overshoot on a status colour reads as a second state change.
 
-Supporting scale: 90ms touch feedback (`TetherPressStyle`: a 0.96 press scale on cards and chrome; on Mac a hover adds a faint raised fill), 200ms routine state change, 280ms overlay in. A screen arrives from just inside its final size (0.965 scale + fade), never by translating the whole view tree — that is fragile around UIKit and reads as theatrical on a terminal.
+Supporting scale: 90ms touch feedback (`TetherPressStyle`: a 0.96 press scale on cards and chrome; on Mac a hover lightens the control slightly), 200ms routine state change, 280ms overlay in. A screen arrives from just inside its final size (0.965 scale + fade), never by translating the whole view tree — that is fragile around UIKit and reads as theatrical on a terminal.
 
 **Reduce Motion is a first-class path**, not a fallback: every travel collapses to a 120ms crossfade (Apple's own substitution for movement), with nothing that translates.
 

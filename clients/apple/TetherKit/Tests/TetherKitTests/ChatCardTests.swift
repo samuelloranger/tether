@@ -2,6 +2,13 @@ import XCTest
 @testable import TetherKit
 
 final class ChatCardTests: XCTestCase {
+  func test_fetched_time_reads_as_a_date_and_unparsable_stamps_pass_through() {
+    let stamp = "2026-11-01T08:00:00-05:00"
+    let expected = ISO8601DateFormatter().date(from: stamp)!.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+    XCTAssertEqual(ChatCardView.fetchedLabel(stamp), expected)
+    XCTAssertFalse(ChatCardView.fetchedLabel("2026-11-01T13:00:00.250Z").contains("T13"))
+    XCTAssertEqual(ChatCardView.fetchedLabel("yesterday"), "yesterday")
+  }
   func test_a_card_for_a_queued_prompt_follows_that_prompt() throws {
     var builder = ChatTranscriptBuilder()
     builder.apply(.userPrompt(text: "First request", atOffset: 0, requestId: .int(1)))
