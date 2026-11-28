@@ -91,7 +91,7 @@ struct TerminalSettingsSheet: View {
             Picker("Cursor", selection: $preferences.cursorShape) {
               ForEach(TerminalCursorStyle.Shape.allCases) { Text($0.label).tag($0) }
             }
-            Toggle("Blink cursor", isOn: $preferences.cursorBlink)
+            Toggle("Blink cursor", isOn: $preferences.cursorBlink).tint(TetherColors.accent)
             HStack {
               Text("Preview").foregroundStyle(.secondary)
               Spacer()
@@ -134,7 +134,7 @@ struct TerminalSettingsSheet: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone).macShortcut(.cancelAction) } }
     }
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
   }
 }
 

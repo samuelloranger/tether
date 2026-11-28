@@ -198,7 +198,7 @@ private struct ChatFolderBrowser: View {
         }
       }
     }
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
     .interactiveDismissDisabled(creating)
     .task(id: "\(location)|\(reloads)") { await load() }
   }

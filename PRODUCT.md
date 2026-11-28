@@ -41,7 +41,7 @@ Sessions survive because they live in `zmx` on the host, not in the app — reat
 - Product name: **Tether**
 - User binding (2026-07-31): dark mode remains a first-class, night-usable default — not a light-only chrome redesign. Light (system / Default light) may exist, but the primary use scene is dark.
 - User binding (2026-07-31): visual direction must stay **relatable** for a remote-shell tool (familiar density and affordances); avoid museum/poster chrome that fights the PTY.
-- Theme set: **Default dark** / **Default light** (instrument bezel chrome; terminal well Mocha / Latte) plus Catppuccin Latte / Frappé / Macchiato / Mocha as optional full themes. System follows OS into Default dark / Default light.
+- Theme set: **Default dark** / **Default light** (Graphite chrome: neutral greys, one accent; the terminal well is the chrome background) plus Catppuccin Latte / Frappé / Macchiato / Mocha as optional full themes. System follows OS into Default dark / Default light.
 
 ## Evidence on Hand
 

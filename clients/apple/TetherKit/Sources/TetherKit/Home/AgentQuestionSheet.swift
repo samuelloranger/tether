@@ -97,7 +97,7 @@ struct AgentQuestionSheet: View {
       )
     } header: {
       VStack(alignment: .leading, spacing: 4) {
-        Text(question.header.uppercased()).font(.app(.caption2).weight(.semibold)).foregroundStyle(TetherColors.accent)
+        Text(question.header).font(.app(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
         Text(question.question).font(.app(.headline)).foregroundStyle(TetherColors.textPrimary).textCase(nil)
         if question.multiSelect {
           Text("Pick any").font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).textCase(nil)

@@ -58,25 +58,25 @@ fn tether_theme() -> TerminalTheme {
     TerminalTheme {
         id: "tether".into(),
         name: "Tether".into(),
-        background: 0x1E1E2E,
+        background: 0x000000,
         foreground: 0xCCCCCC,
         cursor: 0xFFFFFF,
         selection: None,
         ansi: [
-            0x1E1E2E, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xCDD6F4,
+            0x000000, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xCDD6F4,
             0x585872, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xFFFFFF,
         ],
     }
 }
 
-/// Aurora light's terminal: Catppuccin Latte with Aurora light's accent and state colours.
+/// Tether Light's terminal: Catppuccin Latte with Tether Light's accent and state colours.
 fn tether_light_theme() -> TerminalTheme {
     TerminalTheme {
         id: "tether-light".into(),
         name: "Tether Light".into(),
-        background: 0xFBFBFD,
-        foreground: 0x14141B,
-        cursor: 0x14141B,
+        background: 0xFBFBFB,
+        foreground: 0x141414,
+        cursor: 0x141414,
         selection: None,
         ansi: [
             0x5C5F77, 0xC4381C, 0x1C7A4F, 0x8A5A00, 0x4353D0, 0xEA76CB, 0x179299, 0xACB0BE,
@@ -127,7 +127,7 @@ mod tests {
             (first.id.as_str(), first.name.as_str()),
             ("tether", "Tether")
         );
-        assert_eq!(first.background, 0x1E1E2E);
+        assert_eq!(first.background, 0x000000);
         assert_eq!(first.foreground, 0xCCCCCC);
         assert_eq!(first.cursor, 0xFFFFFF);
         assert_eq!(first.ansi[15], 0xFFFFFF);

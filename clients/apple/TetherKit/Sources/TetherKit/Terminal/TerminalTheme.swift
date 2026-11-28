@@ -28,19 +28,19 @@ public struct TerminalTheme: Equatable, Identifiable, Sendable {
   /// The palette Tether has always shipped with.
   public static let tether = TerminalTheme(
     id: "tether", name: "Tether",
-    background: 0xFF1E_1E2E, foreground: 0xFFCC_CCCC, cursor: 0xFFFF_FFFF,
+    background: 0xFF00_0000, foreground: 0xFFCC_CCCC, cursor: 0xFFFF_FFFF,
     ansi: [
-      0xFF1E_1E2E, 0xFFF3_8BA8, 0xFFA6_E3A1, 0xFFF9_E2AF,
+      0xFF00_0000, 0xFFF3_8BA8, 0xFFA6_E3A1, 0xFFF9_E2AF,
       0xFF89_B4FA, 0xFFCB_A6F7, 0xFF94_E2D5, 0xFFCD_D6F4,
       0xFF58_5872, 0xFFF3_8BA8, 0xFFA6_E3A1, 0xFFF9_E2AF,
       0xFF89_B4FA, 0xFFCB_A6F7, 0xFF94_E2D5, 0xFFFF_FFFF,
     ]
   )
 
-  /// Aurora light's terminal: Catppuccin Latte with Aurora light's accent and state colours.
+  /// Tether Light's terminal: Catppuccin Latte with Tether Light's accent and state colours.
   public static let tetherLight = TerminalTheme(
     id: "tether-light", name: "Tether Light",
-    background: 0xFFFB_FBFD, foreground: 0xFF14_141B, cursor: 0xFF14_141B,
+    background: 0xFFFB_FBFB, foreground: 0xFF14_1414, cursor: 0xFF14_1414,
     ansi: [
       0xFF5C_5F77, 0xFFC4_381C, 0xFF1C_7A4F, 0xFF8A_5A00,
       0xFF43_53D0, 0xFFEA_76CB, 0xFF17_9299, 0xFFAC_B0BE,

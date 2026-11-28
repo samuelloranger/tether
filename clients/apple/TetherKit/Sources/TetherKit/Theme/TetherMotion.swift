@@ -51,14 +51,27 @@ public enum TetherMotion {
 /// Shared tactile response for cards and chrome. Terminal keys keep their
 /// specialised style, while ordinary controls gain the same physical language.
 public struct TetherPressStyle: ButtonStyle {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
   public init() {}
 
   public func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .scaleEffect(configuration.isPressed && !reduceMotion ? TetherMotion.pressScale : 1)
-      .opacity(configuration.isPressed ? 0.9 : 1)
-      .animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: configuration.isPressed)
+    PressBody(configuration: configuration)
+  }
+
+  private struct PressBody: View {
+    let configuration: Configuration
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    var body: some View {
+      configuration.label
+        // Brightness, not a fill: it follows whatever shape the label draws (circle, capsule, card).
+        .brightness(TetherPlatform.isMac && hovering && isEnabled ? (ChromeTheme.shared.isLight ? -0.05 : 0.08) : 0)
+        .scaleEffect(configuration.isPressed && !reduceMotion ? TetherMotion.pressScale : 1)
+        .opacity(configuration.isPressed ? 0.9 : 1)
+        .animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: configuration.isPressed)
+        .animation(TetherMotion.ui(TetherMotion.feedback, reduceMotion: reduceMotion), value: hovering)
+        .onHover { if TetherPlatform.isMac { hovering = $0 } }
+    }
   }
 }

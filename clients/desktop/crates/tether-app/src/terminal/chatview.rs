@@ -279,7 +279,12 @@ fn row_vm(r: &Row) -> ChatRowVm {
             vm.card_pending = *pending;
             vm.flag = card.supported();
             vm.text = card.title.as_str().into();
-            vm.meta = format!("{}\nFetched {}", card.source, card.fetched_at).into();
+            vm.meta = format!(
+                "{}\nFetched {}",
+                card.source,
+                fetched_label(&card.fetched_at)
+            )
+            .into();
             vm.images = pictures(images);
             let p = &card.payload;
             let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
@@ -350,7 +355,7 @@ fn row_vm(r: &Row) -> ChatRowVm {
                         detail: format!(
                             "{} · {}",
                             s(&c["state"]),
-                            c["health"].as_str().unwrap_or("Health unavailable")
+                            c["health"].as_str().unwrap_or("health unavailable")
                         )
                         .into(),
                         meta: format!(
@@ -1464,10 +1469,28 @@ pub fn close_add_menu(ui: &crate::AppWindow) -> bool {
     open
 }
 
+/// The viewer's own clock: the stamp carries the fetch's offset, which means little to the reader.
+fn fetched_label(stamp: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(stamp).map_or_else(
+        |_| stamp.to_string(),
+        |t| {
+            t.with_timezone(&chrono::Local)
+                .format("%b %-d, %-I:%M %p")
+                .to_string()
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{md_vm, queue_shift};
+    use super::{fetched_label, md_vm, queue_shift};
     use slint::Model;
+
+    #[test]
+    fn fetched_stamp_is_readable_and_unparsable_input_passes_through() {
+        assert!(!fetched_label("2026-11-01T08:00:00-05:00").contains('T'));
+        assert_eq!(fetched_label("yesterday"), "yesterday");
+    }
 
     #[test]
     fn table_cells_share_bounded_column_widths_and_keep_empty_cells() {

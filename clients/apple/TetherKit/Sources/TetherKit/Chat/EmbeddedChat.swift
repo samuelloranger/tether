@@ -48,7 +48,7 @@ struct EmbeddedChat: View {
       GitDiffView(controller: controller) { showGit = false }
         .onAppear { controller.setGitTarget(GitTarget.forChat(folder: folder)) }
     }
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
   }
 }
 
@@ -597,7 +597,7 @@ struct NewChatSheet: View {
                   Text(URL(string: server.url)?.host ?? server.url).font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
                 }
               }
-              .toggleStyle(.switch).controlSize(.mini)
+              .toggleStyle(.switch).controlSize(.mini).tint(TetherColors.accent)
               .accessibilityIdentifier("sshNewChatMCP_\(server.name)")
               removeButton("Delete \(server.name)") { remove(server) }
             }
@@ -832,7 +832,7 @@ struct ChatMCPServerForm: View {
         ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).accessibilityIdentifier("mcpServerSave") }
       }
     }
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
   }
 
   private func save() {

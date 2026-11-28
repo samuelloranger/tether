@@ -51,7 +51,7 @@ struct TetherIOSApp: App {
           onOpen: { _ in },
           onChat: { _ in }
         )
-        .tint(TetherColors.accent)
+        .tint(TetherColors.textPrimary)
         .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
       } else {
         appRoot

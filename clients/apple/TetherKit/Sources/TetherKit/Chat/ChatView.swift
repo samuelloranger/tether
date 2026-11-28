@@ -288,7 +288,7 @@ struct ChatView: View {
           message: message, canRetry: model.canSend,
           retry: { model.retry(message.id) }, discard: { model.discard(message.id) })
       }
-      if model.state.turn == .working && !answerPending {
+      if model.state.turn == .working && !answerPending && !catchingUp {
         WorkingIndicator(activity: model.state.subagentActivity ?? ChatVerbs.pick(model.verbs, seed: turnSeed))
       }
       #if DEBUG
@@ -302,6 +302,7 @@ struct ChatView: View {
       }
       #endif
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16 + (queuedTexts.isEmpty ? 0 : chipsHeight + 8))
   }
 
@@ -879,7 +880,10 @@ struct ChatView: View {
 
   @ViewBuilder private var contextUsed: some View {
     if let used = model.state.contextUsed, ChatFormat.contextFraction(used: used, size: model.state.contextSize) != nil {
-      Text(ChatFormat.compactCount(used)).font(.chat(.caption).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
+      // At accessibility sizes the bare count keeps the composer row inside the screen.
+      Text(dynamicTypeSize.isAccessibilitySize ? ChatFormat.compactCount(used) : "\(ChatFormat.compactCount(used)) context")
+        .font(.chat(.caption).monospacedDigit()).foregroundStyle(TetherColors.textFaint)
+        .lineLimit(1).minimumScaleFactor(0.7)
         .padding(.horizontal, 4)
         .accessibilityLabel("Context used")
         .accessibilityValue(ChatFormat.contextSummary(used: used, size: model.state.contextSize) ?? "")
@@ -918,6 +922,12 @@ struct ChatView: View {
     return ChatSlash.query(in: draft)
   }
 
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @ScaledMetric(relativeTo: .body) private var attachSide: CGFloat = 30
+  @ScaledMetric(relativeTo: .body) private var attachGlyph: CGFloat = 16
+  @ScaledMetric(relativeTo: .body) private var actionSide: CGFloat = 32
+  @ScaledMetric(relativeTo: .body) private var actionGlyph: CGFloat = 14
+
   private var attachButton: some View {
     Menu {
       Button { pickingPhotos = true } label: { MenuLabel("Photo Library", systemImage: "photo.on.rectangle") }
@@ -929,9 +939,9 @@ struct ChatView: View {
       }
     } label: {
       Image(systemName: "plus")
-        .font(.system(size: 16, weight: .medium))
+        .font(.system(size: min(attachGlyph, 28), weight: .medium))
         .foregroundStyle(TetherColors.textSecondary)
-        .frame(width: 30, height: 30)
+        .frame(width: min(attachSide, 52), height: min(attachSide, 52))
         .contentShape(Rectangle())
         .hitSlop(vertical: 7, horizontal: 4)
     }
@@ -1041,8 +1051,8 @@ struct ChatView: View {
       if stopping { model.cancel() } else { sendMessage() }
     } label: {
       Image(systemName: stopping ? "stop.fill" : "arrow.up")
-        .font(.system(size: 14, weight: .bold))
-        .frame(width: 32, height: 32)
+        .font(.system(size: min(actionGlyph, 26), weight: .bold))
+        .frame(width: min(actionSide, 56), height: min(actionSide, 56))
         .foregroundStyle(glyphColor)
         .background(discColor, in: Circle())
         .hitSlop(vertical: 6, horizontal: 6)
@@ -1071,7 +1081,7 @@ struct PermissionCard: View {
 
   private func syncOpen() { if startOpen { showMore = true } }
 
-  private var isPlan: Bool { permission.kind == .switchMode && !(permission.text ?? "").isEmpty && permission.diff == nil }
+  private var isPlan: Bool { permission.isPlanApproval }
 
   private var file: DiffFile? { permission.diff.map { ACPDiffAdapter.file(for: $0, relativeTo: cwd) } }
 
@@ -1331,6 +1341,9 @@ private struct PlanPreview: View {
 
 extension ChatPermission: Identifiable {
   var id: ACPID { requestId }
+
+  /// A mode switch that carries a plan's text: the agent asking to leave plan mode.
+  var isPlanApproval: Bool { kind == .switchMode && !(text ?? "").isEmpty && diff == nil }
 }
 
 private struct PermissionReviewSheet: View {
@@ -1349,7 +1362,7 @@ private struct PermissionReviewSheet: View {
         }
       }
       .background(TetherColors.background)
-      .navigationTitle(permission.title)
+      .navigationTitle(permission.isPlanApproval ? "Plan" : permission.title)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }.withoutGlass() }
     }

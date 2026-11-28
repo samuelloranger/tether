@@ -26,16 +26,16 @@ public struct ChromePalette: Hashable, Sendable {
   public static let tether = ChromePalette(
     background: 0x000000, surface: 0x141414, surfaceHover: 0x1A1A1A, raised: 0x202020,
     input: 0x0A0A0A, border: 0x2A2A2A, text: 0xF2F2F2, textSecondary: 0xABABAB,
-    textFaint: 0x8D8D8D, placeholder: 0x5E5E5E, accent: 0x7C8CF8, onAccent: 0x000000,
-    success: 0x6EE7A8, warning: 0xF2B34C, danger: 0xFF7050, onDanger: 0x1A0A07, well: 0x1E1E2E
+    textFaint: 0x8D8D8D, placeholder: 0x808080, accent: 0x7C8CF8, onAccent: 0x000000,
+    success: 0x6EE7A8, warning: 0xF2B34C, danger: 0xFF7050, onDanger: 0x1A0A07, well: 0x000000
   )
 
-  /// Aurora light.
+  /// Tether's light look: the same neutral greys, inverted, with the accent darkened for white.
   public static let tetherLight = ChromePalette(
-    background: 0xF1F1F6, surface: 0xFFFFFF, surfaceHover: 0xF7F7FB, raised: 0xE9E9F2,
-    input: 0xFFFFFF, border: 0xDCDCE6, text: 0x14141B, textSecondary: 0x5C5C6C,
-    textFaint: 0x8A8A9C, placeholder: 0xA3A3B3, accent: 0x4353D0, onAccent: 0xFFFFFF,
-    success: 0x1C7A4F, warning: 0x8A5A00, danger: 0xC4381C, onDanger: 0xFFFFFF, well: 0xFBFBFD
+    background: 0xF2F2F2, surface: 0xFFFFFF, surfaceHover: 0xF7F7F7, raised: 0xEBEBEB,
+    input: 0xFFFFFF, border: 0xDDDDDD, text: 0x141414, textSecondary: 0x5C5C5C,
+    textFaint: 0x6A6A6A, placeholder: 0x737373, accent: 0x4353D0, onAccent: 0xFFFFFF,
+    success: 0x1C7A4F, warning: 0x8A5A00, danger: 0xC4381C, onDanger: 0xFFFFFF, well: 0xFBFBFB
   )
 
   public static func derive(_ theme: TerminalTheme) -> ChromePalette {

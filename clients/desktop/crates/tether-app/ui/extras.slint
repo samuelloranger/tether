@@ -35,7 +35,7 @@ export global PaletteVm {
 
 // Covers everything under the header, tab strip included, so the tab it shows cannot change underneath it.
 export component HistoryOverlay inherits Rectangle {
-    in property <color> well: #1e1e2e;
+    in property <color> well: #000000;
     background: root.well;
     // Set by a Linger where it is used, so it fades out as well as in.
     in property <bool> shown: true;

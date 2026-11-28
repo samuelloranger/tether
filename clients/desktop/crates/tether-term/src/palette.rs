@@ -77,7 +77,7 @@ mod tests {
         let t = theme_named("tether");
         assert_eq!(theme_color(t, 1), 0xF38BA8);
         assert_eq!(theme_color(t, 256), 0xCCCCCC);
-        assert_eq!(theme_color(t, 257), 0x1E1E2E);
+        assert_eq!(theme_color(t, 257), 0x000000);
         assert_eq!(theme_color(t, 258), 0xFFFFFF);
     }
 

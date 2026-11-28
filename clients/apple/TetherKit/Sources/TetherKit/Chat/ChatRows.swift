@@ -121,7 +121,9 @@ struct ChatDividerRow: View {
   var body: some View {
     HStack(spacing: 10) {
       Rectangle().fill(TetherColors.border).frame(height: 0.5)
-      Text(text).font(.chat(.caption)).foregroundStyle(TetherColors.textFaint).fixedSize()
+      // Priority, not fixedSize: at accessibility sizes the label wraps instead of widening the transcript.
+      Text(text).font(.chat(.caption)).foregroundStyle(TetherColors.textFaint)
+        .multilineTextAlignment(.center).layoutPriority(1)
       Rectangle().fill(TetherColors.border).frame(height: 0.5)
     }
     .padding(.vertical, 4)
@@ -196,7 +198,7 @@ struct CompactionRow: View {
                 .font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textFaint)
             }
           }
-          .fixedSize()
+          .multilineTextAlignment(.center).layoutPriority(1)
           Rectangle().fill(TetherColors.border).frame(height: 0.5)
         }
         .padding(.vertical, 4)

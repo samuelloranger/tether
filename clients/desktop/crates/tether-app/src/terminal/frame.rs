@@ -254,7 +254,7 @@ mod frame_tests {
             Some(FrameJob::Clear {
                 width: 640,
                 height: 400,
-                background: 0x1E1E2E
+                background: 0x000000
             })
         ));
     }
@@ -280,8 +280,8 @@ mod frame_tests {
         let job = m.frame_job().unwrap();
         let img = render_job(&mut tether_term::Rasterizer::new(), &job);
         assert_eq!((img.width, img.height), (800, 600));
-        assert_eq!(img.pixel(0, 0), [0x1E, 0x1E, 0x2E, 0xFF]);
-        assert_eq!(img.pixel(799, 599), [0x1E, 0x1E, 0x2E, 0xFF]);
+        assert_eq!(img.pixel(0, 0), [0, 0, 0, 0xFF]);
+        assert_eq!(img.pixel(799, 599), [0, 0, 0, 0xFF]);
     }
 
     #[test]

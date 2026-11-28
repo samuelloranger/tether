@@ -1278,7 +1278,7 @@ public struct ChatFixtureRoot: View {
           probeLastRow: mode == "send-long" || mode == "send-long-top" || mode.hasPrefix("open-"))
       }
     }
-      .tint(TetherColors.accent)
+      .tint(TetherColors.textPrimary)
       .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
       .sheet(isPresented: .constant(["new-chat-access", "continue-delete", "agent-update", "agent-host-old"].contains(mode))) { ChatFixture.newChatSheet(mode) }
       .sheet(isPresented: .constant(mode == "mcp-add")) {

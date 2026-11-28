@@ -19,7 +19,7 @@ struct ChatFolder: Equatable, Sendable {
     case "denied": return "You don't have permission to open this folder."
     case "invalid": return "Enter an absolute path or a path starting with ~/."
     case "create_failed": return "Couldn't create this folder. Check the parent folder and its permissions."
-    default: return "Couldn't check the folder on the host. Try again."
+    default: return "Couldn't check the folder on the host."
     }
   }
 

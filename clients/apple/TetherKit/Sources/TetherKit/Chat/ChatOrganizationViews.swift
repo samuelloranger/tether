@@ -59,7 +59,7 @@ struct ChatBranchSheet: View {
     }
     .onAppear { title = sourceTitle + " · alternative"; prompt = point.prompt }
     .interactiveDismissDisabled(creating)
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
   }
 }
 
@@ -232,7 +232,7 @@ private struct ChatQuotaDetailView: View {
     }
     .frame(idealWidth: 310, idealHeight: subscription.usage?.monthly == nil ? 290 : 360)
     .background(TetherColors.surface)
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
   }
 
   private func window(_ label: String, _ raw: ChatQuotaWindow?, now: Date) -> some View {

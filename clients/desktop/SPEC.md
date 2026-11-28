@@ -2,7 +2,7 @@
 
 Date: 2026-10-05
 
-A native desktop client for Windows and Linux, for the same hosts the iOS app already talks to. One Rust and Slint codebase, one window, built and released together. It is a port of Home, terminal appearance, and file send. Where the two systems differ, the text says so: a statement without an OS name holds on both, and the Windows-only and Linux-only facts are labelled. The quoted UI copy says "this PC" on both. The visual source of truth stays `DESIGN.md`: for the default Tether theme that is night chrome, periwinkle accent, terminal well `#1E1E2E`; every colour follows the chosen terminal theme.
+A native desktop client for Windows and Linux, for the same hosts the iOS app already talks to. One Rust and Slint codebase, one window, built and released together. It is a port of Home, terminal appearance, and file send. Where the two systems differ, the text says so: a statement without an OS name holds on both, and the Windows-only and Linux-only facts are labelled. The quoted UI copy says "this PC" on both. The visual source of truth stays `DESIGN.md`: for the default Tether theme that is true-black neutral chrome, the periwinkle accent kept for controls and selection, terminal well `#000000`; every colour follows the chosen terminal theme.
 
 The screen map is `design-preview/index.html`, next to this file. Open it in a browser.
 
@@ -39,7 +39,7 @@ Opening a machine replaces Home with the terminal. Back returns to Home and drop
 
 Destructive confirms (remove a machine, delete a key, kill a session) are dialogs. Every other form is a page in the window, with Back. Esc is Back on every page except the terminal, where Esc belongs to the PTY.
 
-Tether (night) is the default theme. The terminal colour scheme colours the whole window, and a light theme gives light chrome. Tether Light is Aurora light.
+Tether (night) is the default theme. The terminal colour scheme colours the whole window, and a light theme gives light chrome. Tether Light is the same neutral greys on a light base.
 
 ## Home
 
@@ -233,7 +233,7 @@ The lamp follows the iOS connection lamp, not the agent state words, which carry
 
 Colours come from the chosen theme's chrome palette; the table shows the Tether theme.
 
-The grid fills the rest of the window. Its background is the active theme's background, which for Tether is `#1E1E2E`. Padding around the grid is the padding setting. The grid is bottom-anchored. A full repaint of the cell buffer, not a row diff, coalesced to at most one frame per display refresh. The grid itself does not animate, and padding does not animate: a resizing grid would report sizes the PTY then has to honor. A window drag-resize redraws the grid locally at once and sends the PTY resize only once the size settles (about 150 ms quiet), the same split iOS uses to avoid a SIGWINCH storm.
+The grid fills the rest of the window. Its background is the active theme's background, which for Tether is `#000000`. Padding around the grid is the padding setting. The grid is bottom-anchored. A full repaint of the cell buffer, not a row diff, coalesced to at most one frame per display refresh. The grid itself does not animate, and padding does not animate: a resizing grid would report sizes the PTY then has to honor. A window drag-resize redraws the grid locally at once and sends the PTY resize only once the size settles (about 150 ms quiet), the same split iOS uses to avoid a SIGWINCH storm.
 
 ### Input
 

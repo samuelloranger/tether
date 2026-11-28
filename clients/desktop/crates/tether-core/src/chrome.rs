@@ -36,35 +36,35 @@ pub const TETHER: ChromePalette = ChromePalette {
     text: 0xF2F2F2,
     text_secondary: 0xABABAB,
     text_faint: 0x8D8D8D,
-    placeholder: 0x5E5E5E,
+    placeholder: 0x808080,
     accent: 0x7C8CF8,
     on_accent: 0x000000,
     success: 0x6EE7A8,
     warning: 0xF2B34C,
     danger: 0xFF7050,
     on_danger: 0x1A0A07,
-    well: 0x1E1E2E,
+    well: 0x000000,
 };
 
-/// Aurora light.
+/// Tether's light look: the same neutral greys, inverted, with the accent darkened for white.
 pub const TETHER_LIGHT: ChromePalette = ChromePalette {
-    background: 0xF1F1F6,
+    background: 0xF2F2F2,
     surface: 0xFFFFFF,
-    surface_hover: 0xF7F7FB,
-    raised: 0xE9E9F2,
+    surface_hover: 0xF7F7F7,
+    raised: 0xEBEBEB,
     input: 0xFFFFFF,
-    border: 0xDCDCE6,
-    text: 0x14141B,
-    text_secondary: 0x5C5C6C,
-    text_faint: 0x8A8A9C,
-    placeholder: 0xA3A3B3,
+    border: 0xDDDDDD,
+    text: 0x141414,
+    text_secondary: 0x5C5C5C,
+    text_faint: 0x6A6A6A,
+    placeholder: 0x737373,
     accent: 0x4353D0,
     on_accent: 0xFFFFFF,
     success: 0x1C7A4F,
     warning: 0x8A5A00,
     danger: 0xC4381C,
     on_danger: 0xFFFFFF,
-    well: 0xFBFBFD,
+    well: 0xFBFBFB,
 };
 
 impl TerminalTheme {
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn tether_and_tether_light_are_aurora() {
+    fn tether_and_tether_light_are_the_hand_set_palettes() {
         assert_eq!(theme_named("tether").chrome(), TETHER);
         assert_eq!(theme_named("tether-light").chrome(), TETHER_LIGHT);
         assert_eq!(TETHER.accent, 0x7C8CF8);

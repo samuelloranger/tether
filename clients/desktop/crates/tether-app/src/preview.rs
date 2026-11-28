@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn padding_shows_the_theme_background() {
         let img = Preview::new().render(&prefs(), 1.0, true);
-        assert_eq!(img.pixel(0, 0), [0x1E, 0x1E, 0x2E, 255]);
+        assert_eq!(img.pixel(0, 0), [0, 0, 0, 255]);
         let mut latte = prefs();
         latte.scheme = "catppuccin-latte".into();
         assert_eq!(

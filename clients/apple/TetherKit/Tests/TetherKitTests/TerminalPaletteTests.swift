@@ -50,7 +50,7 @@ final class TerminalPaletteTests: XCTestCase {
   }
 
   func test_background_matches_the_app_chrome() {
-    XCTAssertEqual(TerminalPalette.background, 0xFF1E_1E2E)
+    XCTAssertEqual(TerminalPalette.background, 0xFF00_0000)
     XCTAssertEqual(TerminalPalette.foreground, 0xFFCC_CCCC)
   }
 }
