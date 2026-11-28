@@ -40,9 +40,14 @@ struct ChatListView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .topBarLeading) {
-        Button(action: onClose) { Label("Home", systemImage: "chevron.backward") }
-          .accessibilityIdentifier("chatListHome")
+        Button(action: onClose) {
+          Image(systemName: "chevron.backward").font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(TetherColors.textPrimary)
+        }
+        .accessibilityLabel("Home")
+        .accessibilityIdentifier("chatListHome")
       }
+      .withoutGlass()
     }
     .refreshable { await model.refresh() }
     .task { await model.refresh() }
@@ -63,9 +68,9 @@ struct ChatListView: View {
   }
 
   private func sectionHeader(_ text: String) -> some View {
-    Text(text).font(.system(size: 12, weight: .semibold)).tracking(0.6)
+    Text(text).font(.system(size: 12, weight: .semibold))
       .foregroundStyle(TetherColors.textSecondary)
-      .textCase(.uppercase)
+      .textCase(nil)
   }
 
   private var newChatRow: some View {
@@ -115,7 +120,8 @@ struct ChatListView: View {
         Label("Couldn't list chats", systemImage: "exclamationmark.triangle")
           .font(.chat(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.warning)
         Text(message).font(.chat(.footnote)).foregroundStyle(TetherColors.textSecondary)
-        Button("Try again") { Task { await model.refresh() } }.font(.chat(.footnote).weight(.semibold))
+        Button("Retry") { Task { await model.refresh() } }
+          .font(.chat(.footnote).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
       }
       .themedRow()
     default:
@@ -140,22 +146,14 @@ private struct ChatListRow: View {
   let agent: ChatAgentProfile?
 
   private var status: String { chat.isRunning ? "Running" : "Ended" }
-  private var agentTag: String? { ChatFormat.agentLabel(spawn: chat.spawn) ?? (agent == nil ? "Agent" : nil) }
+  private var agentName: String? { ChatFormat.agentLabel(spawn: chat.spawn) ?? (agent == nil ? "Agent" : nil) }
 
   var body: some View {
     HStack(spacing: 12) {
-      ChatAgentMark(agent: agent, size: 18)
+      ChatAgentMark(agent: agent, size: 18).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 3) {
-        HStack(spacing: 6) {
-          Text(chat.title).font(.chat(.body).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
-            .lineLimit(1)
-          if let agentTag {
-            Text(agentTag).font(.chat(.caption2).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
-              .padding(.horizontal, 6).padding(.vertical, 1)
-              .background(TetherColors.textPrimary.opacity(0.06), in: Capsule())
-              .fixedSize()
-          }
-        }
+        Text(chat.title).font(.chat(.body).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
+          .lineLimit(1)
         if let parent = ChatFormat.parentPath(chat.cwd) {
           Text(parent).font(.caption.monospaced()).foregroundStyle(TetherColors.textFaint)
             .lineLimit(1).truncationMode(.middle)
@@ -163,7 +161,7 @@ private struct ChatListRow: View {
       }
       Spacer(minLength: 8)
       VStack(alignment: .trailing, spacing: 4) {
-        statusPill
+        statusWord
         Text(chat.created, format: .relative(presentation: .named))
           .font(.chat(.caption2)).foregroundStyle(TetherColors.textFaint)
       }
@@ -173,20 +171,17 @@ private struct ChatListRow: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(chat.title), \(status.lowercased()), started \(chat.created.formatted(.relative(presentation: .named)))"
+      "\(chat.title), \([agentName, status.lowercased()].compactMap { $0 }.joined(separator: ", ")), started \(chat.created.formatted(.relative(presentation: .named)))"
     )
     .accessibilityHint("Opens this chat")
   }
 
-  private var statusPill: some View {
-    let tint = chat.isRunning ? TetherColors.success : TetherColors.textFaint
-    return HStack(spacing: 5) {
-      Circle().fill(tint).frame(width: 6, height: 6)
-      Text(status).font(.chat(.caption2).weight(.semibold)).foregroundStyle(chat.isRunning ? tint : TetherColors.textSecondary)
+  private var statusWord: some View {
+    HStack(spacing: 5) {
+      if chat.isRunning { Circle().fill(TetherColors.textSecondary).frame(width: 6, height: 6) }
+      Text(status).font(.chat(.caption2))
     }
-    .padding(.horizontal, 9)
-    .frame(height: 24)
-    .background(tint.opacity(chat.isRunning ? 0.14 : 0.10), in: Capsule())
+    .foregroundStyle(TetherColors.textSecondary)
     .accessibilityHidden(true)
   }
 }
