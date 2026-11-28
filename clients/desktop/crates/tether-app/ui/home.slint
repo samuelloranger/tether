@@ -53,10 +53,8 @@ component MachineCardView inherits Rectangle {
         spacing: 8px;
         HorizontalLayout {
             spacing: 8px;
-            VerticalLayout { alignment: center; Lamp { dim: true; } }
             Text { text: root.card.name; font-size: 16px; font-weight: 650; color: Tokens.text; vertical-alignment: center; overflow: elide; }
             Rectangle { horizontal-stretch: 1; }
-            VerticalLayout { alignment: center; Pill { text: "saved"; } }
         }
         HorizontalLayout {
             spacing: 6px;

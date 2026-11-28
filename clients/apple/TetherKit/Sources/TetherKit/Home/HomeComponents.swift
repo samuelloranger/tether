@@ -56,25 +56,22 @@ struct MachineCardView: View {
     // sizes, so they stack there instead.
     let detailLayout = DynamicTypeLayout.detailLayout(
       for: dynamicTypeSize, stackedSpacing: 2, inlineSpacing: 6)
-    return VStack(alignment: .leading, spacing: 0) {
+    let actionLayout: AnyLayout = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+      : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+    return VStack(alignment: .leading, spacing: 6) {
       Button(action: onOpen) {
-        VStack(alignment: .leading, spacing: 8) {
-          HStack(spacing: 10) {
-            Circle().fill(TetherColors.textFaint).frame(width: 8, height: 8).opacity(0.6)
-            Text(profile.name).font(.app(.headline))
-              .foregroundStyle(TetherColors.textPrimary)
-            Spacer()
-            Text("saved").font(.app(.caption2).weight(.medium))
-              .padding(.horizontal, 8).padding(.vertical, 3)
-              .foregroundStyle(TetherColors.textSecondary)
-              .background(TetherColors.surfaceRaised, in: Capsule())
-          }
+        VStack(alignment: .leading, spacing: 2) {
+          Text(profile.name).font(.app(.headline))
+            .foregroundStyle(TetherColors.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
           detailLayout {
             Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
             Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
           }
           .font(.caption.monospaced())
           .foregroundStyle(TetherColors.textSecondary)
+          .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -84,17 +81,13 @@ struct MachineCardView: View {
       .accessibilityLabel("\(profile.name), \(profile.username) at \(profile.host) port \(profile.port), \(authLabel)")
       .accessibilityHint("Opens a terminal on this machine")
 
-      Rectangle().fill(TetherColors.border).frame(height: 0.5)
-        .padding(.top, 12).padding(.bottom, 8)
-        .accessibilityHidden(true)
-
-      HStack(alignment: .center, spacing: 8) {
+      actionLayout {
         if let onChat {
           Button(action: onChat) {
             Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
               .font(.app(.caption).weight(.semibold))
               .padding(.horizontal, 12)
-              .frame(height: 28)
+              .frame(minHeight: 28)
               .background(TetherColors.surfaceRaised, in: Capsule())
               .foregroundStyle(TetherColors.textPrimary)
               .hitSlop(vertical: 8, horizontal: 4)
@@ -103,14 +96,14 @@ struct MachineCardView: View {
           .accessibilityIdentifier("homeChat_\(profile.name)")
           .accessibilityLabel("Chat with an agent on \(profile.name)")
         }
-        Spacer(minLength: 0)
+        if !DynamicTypeLayout.stacksVertically(for: dynamicTypeSize) { Spacer(minLength: 0) }
         Button(action: onOpen) {
           HStack(spacing: 4) {
             Text("Open").font(.app(.subheadline).weight(.semibold))
             Image(systemName: "chevron.right").font(.app(.caption2).weight(.semibold))
           }
           .foregroundStyle(TetherColors.textPrimary)
-          .frame(height: 28)
+          .frame(minHeight: 28)
           .hitSlop(vertical: 8, horizontal: 8)
         }
         .buttonStyle(TetherPressStyle())
@@ -119,7 +112,7 @@ struct MachineCardView: View {
         .accessibilityHint("Opens a terminal on this machine")
       }
     }
-    .padding(.horizontal, 14).padding(.top, 13).padding(.bottom, 8)
+    .padding(.horizontal, 14).padding(.vertical, 10)
     .tetherCard()
     .macHoverHighlight()
   }
