@@ -17,6 +17,7 @@ public struct SSHTerminalView: View {
   @State private var focused = false
   @State private var accessory = TerminalAccessoryModel()
   @State private var drawerOpen = false
+  @State private var containerWidth: CGFloat = 0
   /// Opening the drawer takes the keyboard; closing it hands it back.
   @State private var focusedBeforeDrawer = false
   /// Live horizontal drag on the drawer, `nil` when no finger is on it.
@@ -100,7 +101,7 @@ public struct SSHTerminalView: View {
           .id(content.viewID)
       }
       if drawerProgress > 0 {
-        Color.black.opacity(0.5 * min(drawerProgress, 1)).ignoresSafeArea()
+        Color.black.opacity(0.6 * min(drawerProgress, 1)).ignoresSafeArea()
           .onTapGesture { setDrawer(open: false) }
           .transition(.opacity)
         drawer
@@ -111,6 +112,13 @@ public struct SSHTerminalView: View {
           // A drag mounts the panel outside an animation, so it appears exactly
           // under the finger; the button mounts it inside one, and it slides.
           .transition(TetherMotion.drawerTransition(reduceMotion: reduceMotion))
+      }
+    }
+    .background {
+      GeometryReader { proxy in
+        Color.clear
+          .onAppear { containerWidth = proxy.size.width }
+          .onChange(of: proxy.size.width) { containerWidth = $1 }
       }
     }
     .overlay(alignment: .bottom) {
@@ -550,8 +558,11 @@ public struct SSHTerminalView: View {
       .macPlainMenu()
       .accessibilityIdentifier("sshTerminalOverflow")
       .accessibilityLabel("More terminal actions")
+      .help("More terminal actions")
     }
     .foregroundStyle(TetherColors.textPrimary)
+    // Behind the open drawer the header's controls recede instead of reading as a second set.
+    .opacity(1 - 0.6 * min(drawerProgress, 1))
     .animation(TetherMotion.ui(TetherMotion.arrive, reduceMotion: reduceMotion), value: controller.status)
     .padding(.horizontal, 10).padding(.vertical, 6)
     // Up under the status bar too, or the strip there shows the terminal's colour.
@@ -590,6 +601,7 @@ public struct SSHTerminalView: View {
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier(id)
     .accessibilityLabel(label)
+    .help(label)
   }
 
   private var drawer: some View {
@@ -705,6 +717,7 @@ public struct SSHTerminalView: View {
       }
       .buttonStyle(TetherPressStyle())
       .accessibilityLabel("New chat in \(group.title)")
+      .help("New chat in \(group.title)")
       .accessibilityIdentifier("projectNewChat_\(group.title)")
     }
     .opacity(group.rows.isEmpty ? 0.55 : 1)
@@ -734,44 +747,60 @@ public struct SSHTerminalView: View {
     return statusLabel
   }
 
+  @ViewBuilder private var drawerHeaderActions: some View {
+    Button {
+      setDrawer(open: false)
+      onHome()
+    } label: {
+      Text("Switch").font(.app(.footnote).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
+        .lineLimit(1).fixedSize()
+        .padding(.horizontal, 6).frame(minHeight: max(44, tapTarget)).contentShape(Rectangle())
+    }
+    .buttonStyle(TetherPressStyle())
+    .accessibilityIdentifier("sshDrawerHome")
+    .accessibilityLabel("Switch machine")
+    .help("Switch machine")
+    Button { showSettings = true } label: {
+      Image(systemName: "gearshape").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
+        .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
+    }
+    .buttonStyle(TetherPressStyle())
+    .accessibilityIdentifier("sshDrawerSettings")
+    .accessibilityLabel("Settings")
+    .help("Settings")
+    Menu {
+      Button(action: startNewTerminal) { Label("New terminal", systemImage: "terminal") }
+        .accessibilityIdentifier("sshNewTerminal")
+      Button { newChatMode = .new; showNewChat = true } label: { Label("New chat…", systemImage: "bubble.left") }
+        .accessibilityIdentifier("sshNewChat")
+      Button { newChatMode = .resume; showNewChat = true } label: {
+        Label("Continue a chat…", systemImage: "arrow.counterclockwise")
+      }
+      .accessibilityIdentifier("sshContinueChat")
+    } label: {
+      Image(systemName: "plus").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
+        .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
+    }
+    .accessibilityIdentifier("sshNewSessionAdd")
+    .accessibilityLabel("New terminal or chat")
+    .help("New terminal or chat")
+  }
+
   private func drawerHeader(terminals: Int, chats: Int) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack(spacing: 8) {
+    let stacked = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+    let titleRow: AnyLayout = stacked
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+      : AnyLayout(HStackLayout(spacing: 8))
+    return VStack(alignment: .leading, spacing: 0) {
+      titleRow {
         Text(controller.title).font(.app(.subheadline).weight(.semibold))
-          .foregroundStyle(TetherColors.textPrimary).lineLimit(1)
-        Spacer(minLength: 4)
-        Button {
-          setDrawer(open: false)
-          onHome()
-        } label: {
-          Text("Switch").font(.app(.footnote).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
-            .padding(.horizontal, 6).frame(minHeight: max(44, tapTarget)).contentShape(Rectangle())
+          .foregroundStyle(TetherColors.textPrimary).lineLimit(stacked ? 2 : 1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, stacked ? 8 : 0)
+        HStack(spacing: 8) {
+          if stacked { Spacer(minLength: 0) }
+          drawerHeaderActions
         }
-        .buttonStyle(TetherPressStyle())
-        .accessibilityIdentifier("sshDrawerHome")
-        .accessibilityLabel("Switch machine")
-        Button { showSettings = true } label: {
-          Image(systemName: "gearshape").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textSecondary)
-            .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
-        }
-        .buttonStyle(TetherPressStyle())
-        .accessibilityIdentifier("sshDrawerSettings")
-        .accessibilityLabel("Settings")
-        Menu {
-          Button(action: startNewTerminal) { Label("New terminal", systemImage: "terminal") }
-            .accessibilityIdentifier("sshNewTerminal")
-          Button { newChatMode = .new; showNewChat = true } label: { Label("New chat…", systemImage: "bubble.left") }
-            .accessibilityIdentifier("sshNewChat")
-          Button { newChatMode = .resume; showNewChat = true } label: {
-            Label("Continue a chat…", systemImage: "arrow.counterclockwise")
-          }
-          .accessibilityIdentifier("sshContinueChat")
-        } label: {
-          Image(systemName: "plus").font(.app(.body).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
-            .frame(width: max(44, tapTarget), height: max(44, tapTarget)).contentShape(Rectangle())
-        }
-        .accessibilityIdentifier("sshNewSessionAdd")
-        .accessibilityLabel("New terminal or chat")
       }
       HStack(alignment: .firstTextBaseline, spacing: 5) {
         Circle().fill(lampColor).frame(width: 6, height: 6).accessibilityHidden(true)
@@ -808,7 +837,7 @@ public struct SSHTerminalView: View {
       main()
       Button(action: onKill) {
         Image(systemName: killSymbol).font(.app(.footnote).weight(.semibold))
-          .foregroundStyle(TetherColors.textFaint.opacity(0.6))
+          .foregroundStyle(TetherColors.textFaint)
           .frame(width: 44, height: 44).contentShape(Rectangle())
       }
       .buttonStyle(TetherPressStyle())
@@ -816,6 +845,7 @@ public struct SSHTerminalView: View {
       .accessibilityIdentifier(killID)
       .accessibilityLabel(killLabel)
       .accessibilityHint("Asks to confirm first")
+      .help(killLabel)
     }
     .padding(.horizontal, 12).padding(.vertical, 8)
     .modifier(DrawerRowChrome(selected: selected))
@@ -838,11 +868,6 @@ public struct SSHTerminalView: View {
         openSession(session.name)
       } label: {
         HStack(alignment: .top, spacing: 10) {
-          // The dot repeats what the label already says, so it can go when text
-          // needs the room; "attached" is never carried by colour alone.
-          Circle().fill(isCurrent ? TetherColors.textPrimary : TetherColors.textFaint.opacity(0.55))
-            .frame(width: lampSize, height: lampSize)
-            .frame(width: glyphSlot).padding(.top, 4)
           VStack(alignment: .leading, spacing: 2) {
             Text(session.name).font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.textPrimary)
               .lineLimit(1)
@@ -1172,7 +1197,11 @@ public struct SSHTerminalView: View {
     .accessibilityHidden(true)
   }
 
-  private var panelWidth: CGFloat { min(max(drawerWidth, 320), 390) }
+  /// At accessibility sizes the panel takes the screen minus a strip of scrim to tap shut.
+  private var panelWidth: CGFloat {
+    if dynamicTypeSize.isAccessibilitySize, containerWidth > 0 { return max(320, containerWidth - 44) }
+    return min(max(drawerWidth, 320), 390)
+  }
 
   /// Where the panel sits right now: the live drag if there is one, otherwise
   /// the settled state.
