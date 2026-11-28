@@ -67,6 +67,8 @@ struct MachineCardView: View {
             .fixedSize(horizontal: false, vertical: true)
           detailLayout {
             Text(verbatim: "\(profile.username)@\(profile.host):\(profile.port)")
+              .lineLimit(DynamicTypeLayout.stacksVertically(for: dynamicTypeSize) ? 1 : nil)
+              .minimumScaleFactor(DynamicTypeLayout.stacksVertically(for: dynamicTypeSize) ? 0.5 : 1)
             Text(verbatim: "· \(authLabel)").foregroundStyle(TetherColors.textFaint)
           }
           .font(.caption.monospaced())

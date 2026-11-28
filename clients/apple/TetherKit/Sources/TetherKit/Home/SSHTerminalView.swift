@@ -664,6 +664,9 @@ public struct SSHTerminalView: View {
         ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title) {
           Task { await controller.refreshPlanUsage() }
         }
+        // Its fixed-width quota columns would otherwise widen the whole panel past the screen edge.
+        .frame(maxWidth: panelWidth)
+        .clipped()
       }
       if !showingArchive {
         Button { showingArchive = true } label: {
