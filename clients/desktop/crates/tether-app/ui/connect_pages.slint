@@ -68,7 +68,7 @@ component BlockPage inherits Rectangle {
 export component HostKeyRefusedPage inherits BlockPage {
     heading: "This host's key changed";
     Text {
-        text: "Tether refuses to connect. If the host was reinstalled or its key rotated on purpose, remove the saved key for this machine in its settings and connect again. Otherwise don't connect.";
+        text: "The key this host sent doesn't match the one Tether saved on the first connection, so it won't connect. If you didn't reinstall the host or change its key, someone may be intercepting the connection.";
         font-size: 13px;
         color: Tokens.text-secondary;
         wrap: word-wrap;

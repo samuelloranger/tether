@@ -1392,7 +1392,7 @@ public struct SSHTerminalView: View {
   private func hostKeyMismatchDetail(_ mismatch: (expected: String, got: String)) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("This host's key changed").font(.app(.headline)).foregroundStyle(TetherColors.textPrimary)
-      Text("Tether refuses to connect. If the host was reinstalled or its key rotated on purpose, remove the saved key for this machine in its settings and connect again. Otherwise don't connect.")
+      Text("The key this host sent doesn't match the one Tether saved on the first connection, so it won't connect. If you didn't reinstall the host or change its key, someone may be intercepting the connection.")
         .font(.app(.footnote)).foregroundStyle(TetherColors.textSecondary)
       fingerprintRow("Expected", mismatch.expected)
       fingerprintRow("Received", mismatch.got)
