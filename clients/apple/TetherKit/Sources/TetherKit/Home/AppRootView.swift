@@ -56,7 +56,7 @@ public struct AppRootView: View {
     .animation(TetherMotion.ui(TetherMotion.overlay, reduceMotion: reduceMotion), value: terminalOpen || chat != nil)
     .preferredColorScheme(preferences.colorScheme)
     // Here, not on the app's root: a theme change then redraws this view, not the scene.
-    .tint(TetherColors.accent)
+    .tint(TetherColors.textPrimary)
     // Text without a font of its own (form rows, labels) follows the picked app font.
     .font(.app(.body))
     .onOpenURL { handle($0) }

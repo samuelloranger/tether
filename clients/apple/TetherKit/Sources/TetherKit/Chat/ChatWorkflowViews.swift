@@ -100,7 +100,7 @@ struct ChatWorkflowSheet: View {
       HStack(spacing: 6) {
         runGlyph(run)
         Text(ChatWorkflowText.statusWord(run)).font(.chat(.footnote).weight(.semibold))
-          .foregroundStyle(run.isRunning ? TetherColors.accent : TetherColors.textSecondary)
+          .foregroundStyle(TetherColors.textSecondary)
         Text("\(run.doneCount)/\(run.totalCount) agents").font(.chat(.footnote).monospacedDigit())
           .foregroundStyle(TetherColors.textFaint)
         Spacer(minLength: 0)

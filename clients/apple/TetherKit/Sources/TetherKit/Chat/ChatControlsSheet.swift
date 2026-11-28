@@ -237,8 +237,8 @@ struct ChatControlsSheet: View {
   }
 
   private func sectionTitle(_ text: String) -> some View {
-    Text(text.uppercased()).font(.chat(.caption2).weight(.semibold)).tracking(0.6)
-      .foregroundStyle(TetherColors.textFaint).padding(.horizontal, 4)
+    Text(text).font(.chat(.caption2).weight(.semibold))
+      .foregroundStyle(TetherColors.textSecondary).padding(.horizontal, 4)
       .accessibilityAddTraits(.isHeader)
   }
 }

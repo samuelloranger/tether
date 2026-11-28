@@ -60,7 +60,7 @@ public struct DrawerFixtureRoot: View {
 
   public var body: some View {
     SSHTerminalView(controller: controller, preferences: preferences, onHome: {})
-      .tint(TetherColors.accent)
+      .tint(TetherColors.textPrimary)
       .preferredColorScheme(ChromeTheme.shared.isLight ? .light : .dark)
   }
 }

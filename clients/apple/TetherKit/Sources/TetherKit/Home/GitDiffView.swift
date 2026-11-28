@@ -163,20 +163,18 @@ struct GitDiffView: View {
   private func prStateBadge(_ state: PRState) -> some View {
     switch state {
     case .open:
-      badgeLabel("Open", tint: TetherColors.success)
+      badgeLabel("Open")
     case .merged:
-      badgeLabel("Merged", tint: TetherColors.accent)
+      badgeLabel("Merged")
     case .closed:
-      badgeLabel("Closed", tint: TetherColors.textFaint)
+      badgeLabel("Closed")
     }
   }
 
-  private func badgeLabel(_ text: String, tint: Color) -> some View {
-    Text(text.uppercased())
-      .font(.app(.caption2).weight(.bold))
-      .foregroundStyle(tint)
-      .padding(.horizontal, 7).padding(.vertical, 3)
-      .background(tint.opacity(0.15), in: Capsule())
+  private func badgeLabel(_ text: String) -> some View {
+    Text(text)
+      .font(.app(.caption2).weight(.semibold))
+      .foregroundStyle(TetherColors.textSecondary)
   }
 
   private var workspacePayload: SSHTerminalController.GitWorkspacePayload {
