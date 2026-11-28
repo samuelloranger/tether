@@ -65,6 +65,9 @@ public struct SSHTerminalView: View {
   /// The drawer holds text, so it grows with it — but never past the screen.
   @ScaledMetric(relativeTo: .body) private var drawerWidth: CGFloat = 280
   @ScaledMetric(relativeTo: .title3) private var tapTarget: CGFloat = 40
+  /// Four scaled targets plus the title are wider than a phone at accessibility sizes, and an oversize
+  /// header widens the whole screen (the drawer slides off its left edge).
+  private var headerTapTarget: CGFloat { min(tapTarget, 52) }
   @ScaledMetric(relativeTo: .caption2) private var lampSize: CGFloat = 9
   @ScaledMetric(relativeTo: .caption2) private var glyphSlot: CGFloat = 14
 
@@ -553,7 +556,7 @@ public struct SSHTerminalView: View {
         .macMenuIcons()
       } label: {
         Image(systemName: "ellipsis").font(.app(.title3).weight(.semibold))
-          .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
+          .frame(width: headerTapTarget, height: headerTapTarget).contentShape(Rectangle())
       }
       .macPlainMenu()
       .accessibilityIdentifier("sshTerminalOverflow")
@@ -596,7 +599,7 @@ public struct SSHTerminalView: View {
   private func headerButton(_ icon: String, id: String, label: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       Image(systemName: icon).font(.app(.title3).weight(.semibold))
-        .frame(width: tapTarget, height: tapTarget).contentShape(Rectangle())
+        .frame(width: headerTapTarget, height: headerTapTarget).contentShape(Rectangle())
     }
     .buttonStyle(TetherPressStyle())
     .accessibilityIdentifier(id)
