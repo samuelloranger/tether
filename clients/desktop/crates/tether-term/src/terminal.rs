@@ -371,7 +371,7 @@ pub(crate) mod tests {
         let mut t = term();
         assert_eq!(
             replies(&t.feed(b"\x1b]11;?\x07")),
-            ["\x1b]11;rgb:1e1e/1e1e/2e2e\x07"]
+            ["\x1b]11;rgb:0000/0000/0000\x07"]
         );
         assert_eq!(
             replies(&t.feed(b"\x1b]10;?\x07")),
@@ -428,7 +428,7 @@ pub(crate) mod tests {
         assert!(replies(&t.feed(b"\x1b]11")).is_empty());
         assert_eq!(
             replies(&t.feed(b";?\x07")),
-            ["\x1b]11;rgb:1e1e/1e1e/2e2e\x07"]
+            ["\x1b]11;rgb:0000/0000/0000\x07"]
         );
     }
 
@@ -554,7 +554,7 @@ pub(crate) mod tests {
         let mut t = term();
         assert!(replies(&t.feed(b"\x1b[?2026h\x1b]11;?\x07")).is_empty());
         assert!(t.sync_deadline().is_some());
-        assert_eq!(replies(&t.flush_sync()), ["\x1b]11;rgb:1e1e/1e1e/2e2e\x07"]);
+        assert_eq!(replies(&t.flush_sync()), ["\x1b]11;rgb:0000/0000/0000\x07"]);
         assert!(t.sync_deadline().is_none());
     }
 

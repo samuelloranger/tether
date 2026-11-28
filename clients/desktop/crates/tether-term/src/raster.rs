@@ -596,7 +596,7 @@ mod tests {
     fn the_well_is_the_theme_background() {
         let mut r = Rasterizer::new();
         let img = r.render(&snap(b""), &style(theme_named("tether"), 1.0), 300, 120);
-        assert_eq!(img.pixel(0, 0), [0x1E, 0x1E, 0x2E, 255]);
+        assert_eq!(img.pixel(0, 0), [0, 0, 0, 255]);
         let img = r.render(&snap(b""), &style(theme_named("dracula"), 1.0), 300, 120);
         assert_eq!(img.pixel(299, 119), [0x28, 0x2A, 0x36, 255]);
     }

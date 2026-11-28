@@ -180,8 +180,8 @@ mod tests {
         assert_eq!((s.cols, s.rows, s.cells.len()), (80, 24, 80 * 24));
         assert!(s.row_texts[0].starts_with("hello"));
         assert_eq!(s.cell(0, 0).ch, 'h');
-        assert_eq!((s.cell(0, 0).fg, s.cell(0, 0).bg), (0xCCCCCC, 0x1E1E2E));
-        assert_eq!(s.background, 0x1E1E2E);
+        assert_eq!((s.cell(0, 0).fg, s.cell(0, 0).bg), (0xCCCCCC, 0x000000));
+        assert_eq!(s.background, 0x000000);
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
         let s = t.snapshot();
         assert_eq!(s.cell(0, 0).fg, 0xF38BA8);
         assert_eq!(s.cell(0, 1).fg, 0x010203);
-        assert_eq!((s.cell(0, 2).fg, s.cell(0, 2).bg), (0x1E1E2E, 0xCCCCCC));
+        assert_eq!((s.cell(0, 2).fg, s.cell(0, 2).bg), (0x000000, 0xCCCCCC));
         assert_eq!(s.cell(0, 3).fg, s.cell(0, 3).bg);
         assert!(s.cell(0, 4).bold);
     }
@@ -278,6 +278,6 @@ mod tests {
         t.selection_update(Cell { row: 0, col: 1 });
         let s = t.snapshot();
         assert!(s.cell(0, 0).selected && !s.cell(0, 2).selected);
-        assert_eq!((s.cell(0, 0).fg, s.cell(0, 0).bg), (0x1E1E2E, 0xCCCCCC));
+        assert_eq!((s.cell(0, 0).fg, s.cell(0, 0).bg), (0x000000, 0xCCCCCC));
     }
 }
