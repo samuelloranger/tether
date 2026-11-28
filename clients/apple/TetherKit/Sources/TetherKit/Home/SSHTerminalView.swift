@@ -616,6 +616,34 @@ public struct SSHTerminalView: View {
     let archived = chatRows.filter(\.archived)
     let groups = ChatOrganization.groups(chatRows, saved: controller.projects)
     let attention = ChatOrganization.attention(chatRows)
+    let stacksFooter = DynamicTypeLayout.stacksVertically(for: dynamicTypeSize)
+    let footer = VStack(spacing: 0) {
+      if let archivedChat {
+        HStack {
+          Text("Chat archived").font(.app(.caption))
+          Spacer()
+          Button("Undo") { updateChat(archivedChat, patch: ["archived": false]); self.archivedChat = nil }
+            .font(.app(.caption).weight(.semibold)).frame(minHeight: 44)
+        }.padding(.horizontal, 16).background(TetherColors.surfaceRaised)
+      }
+      if !controller.planUsage.subscriptions.isEmpty {
+        Divider().overlay(TetherColors.border)
+        ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title) {
+          Task { await controller.refreshPlanUsage() }
+        }
+        // Its fixed-width quota columns would otherwise widen the whole panel past the screen edge.
+        .frame(maxWidth: panelWidth)
+        .clipped()
+      }
+      if !showingArchive {
+        Button { showingArchive = true } label: {
+          HStack { Label("Archived chats", systemImage: "archivebox"); Spacer(); Text("\(archived.count)") }
+            .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
+        }
+        .padding(.horizontal, 12)
+        .accessibilityIdentifier("drawerArchive")
+      }
+    }
     return VStack(alignment: .leading, spacing: 0) {
       drawerHeader(terminals: sessions.count, chats: visible.count)
       Divider().overlay(TetherColors.border)
@@ -650,32 +678,10 @@ public struct SSHTerminalView: View {
           }
         }
         .padding(.horizontal, 12).padding(.bottom, 12)
+        // At accessibility sizes the footer scrolls with the list; pinned, it squeezed the list to nothing.
+        if stacksFooter { footer }
       }
-      if let archivedChat {
-        HStack {
-          Text("Chat archived").font(.app(.caption))
-          Spacer()
-          Button("Undo") { updateChat(archivedChat, patch: ["archived": false]); self.archivedChat = nil }
-            .font(.app(.caption).weight(.semibold)).frame(minHeight: 44)
-        }.padding(.horizontal, 16).background(TetherColors.surfaceRaised)
-      }
-      if !controller.planUsage.subscriptions.isEmpty {
-        Divider().overlay(TetherColors.border)
-        ChatPlanUsageView(usage: controller.planUsage, loading: controller.planUsageLoading, host: controller.title) {
-          Task { await controller.refreshPlanUsage() }
-        }
-        // Its fixed-width quota columns would otherwise widen the whole panel past the screen edge.
-        .frame(maxWidth: panelWidth)
-        .clipped()
-      }
-      if !showingArchive {
-        Button { showingArchive = true } label: {
-          HStack { Label("Archived chats", systemImage: "archivebox"); Spacer(); Text("\(archived.count)") }
-            .font(.app(.caption)).foregroundStyle(TetherColors.textSecondary).frame(minHeight: 44)
-        }
-        .padding(.horizontal, 12)
-        .accessibilityIdentifier("drawerArchive")
-      }
+      if !stacksFooter { footer }
     }
     .frame(maxHeight: .infinity, alignment: .top)
     .background(TetherColors.background.ignoresSafeArea())
