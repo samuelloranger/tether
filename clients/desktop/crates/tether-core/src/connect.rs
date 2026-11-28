@@ -70,7 +70,7 @@ const NO_AGENT: &str =
 impl ConnectError {
     pub fn sentence(&self) -> String {
         match self {
-            ConnectError::HostKeyChanged { .. } => "Host key changed — refused.".into(),
+            ConnectError::HostKeyChanged { .. } => "This host's key changed".into(),
             ConnectError::AuthRejected => {
                 "Authentication failed. Check the key or password.".into()
             }
