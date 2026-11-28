@@ -1354,7 +1354,7 @@ public struct SSHTerminalView: View {
   @ViewBuilder
   private var statusOverlay: some View {
     if let copy = SSHTerminalController.connectionCopy(
-      status: controller.status, reachability: controller.reachability
+      status: controller.status, reachability: controller.reachability, refusedHostKey: controller.refusedHostKey
     ) {
       VStack(spacing: 12) {
         switch copy.indicator {
@@ -1389,7 +1389,7 @@ public struct SSHTerminalView: View {
     }
   }
 
-  private func hostKeyMismatchDetail(_ mismatch: (expected: String, got: String)) -> some View {
+  private func hostKeyMismatchDetail(_ mismatch: SSHTerminalController.HostKeyRefusal) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("This host's key changed").font(.app(.headline)).foregroundStyle(TetherColors.textPrimary)
       Text("The key this host sent doesn't match the one Tether saved on the first connection, so it won't connect. If you didn't reinstall the host or change its key, someone may be intercepting the connection.")

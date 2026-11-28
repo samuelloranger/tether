@@ -423,12 +423,14 @@ A drop is a socket error, or two missed keepalive replies. A mismatch on redial 
 
 This page uses Home chrome. The session never opened, so there is no terminal well.
 
-> Host key changed — refused.
+> **This host's key changed**
+>
+> The key this host sent doesn't match the one Tether saved on the first connection, so it won't connect. If you didn't reinstall the host or change its key, someone may be intercepting the connection.
 >
 > Expected
 > `aa:bb:…`
 >
-> Got
+> Received
 > `11:22:…`
 
 Both fingerprints are selectable for copying. The only action is **Back to Home**.

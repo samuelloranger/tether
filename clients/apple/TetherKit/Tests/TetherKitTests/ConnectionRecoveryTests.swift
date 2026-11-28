@@ -52,12 +52,13 @@ final class ConnectionRecoveryTests: XCTestCase {
   }
 
   func test_a_host_key_mismatch_offers_no_retry_and_keeps_both_fingerprints() {
-    let message = HostKeyMismatchMessage.text(expected: "SHA256:aaa", got: "SHA256:bbb")
-    let copy = SSHTerminalController.connectionCopy(status: .failed(message), reachability: usable)
-    XCTAssertEqual(copy?.hostKeyMismatch?.expected, "SHA256:aaa")
-    XCTAssertEqual(copy?.hostKeyMismatch?.got, "SHA256:bbb")
+    let refusal = SSHTerminalController.HostKeyRefusal(expected: "SHA256:aaa", got: "SHA256:bbb")
+    let message = SSHConnectError.hostKeyMismatch(expected: "SHA256:aaa", got: "SHA256:bbb").errorDescription ?? ""
+    let copy = SSHTerminalController.connectionCopy(status: .failed(message), reachability: usable, refusedHostKey: refusal)
+    XCTAssertEqual(copy?.hostKeyMismatch, refusal)
     XCTAssertEqual(copy?.offersRetry, false)
-    XCTAssertEqual(SSHConnectError.hostKeyMismatch(expected: "SHA256:aaa", got: "SHA256:bbb").errorDescription, message)
+    // Any other failure keeps Retry.
+    XCTAssertEqual(SSHTerminalController.connectionCopy(status: .failed("Connection reset"), reachability: usable)?.offersRetry, true)
   }
 
   func test_ssh_failure_while_offline_still_keeps_the_host_key_error() {
