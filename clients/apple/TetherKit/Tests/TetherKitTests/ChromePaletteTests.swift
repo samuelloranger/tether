@@ -32,11 +32,11 @@ final class ChromePaletteTests: XCTestCase {
     }
   }
 
-  func test_tether_and_tether_light_are_aurora() {
+  func test_tether_and_tether_light_are_the_hand_set_palettes() {
     XCTAssertEqual(TerminalTheme.tether.chrome, .tether)
     XCTAssertEqual(TerminalTheme.tetherLight.chrome, .tetherLight)
     XCTAssertEqual(ChromePalette.tether.background, 0x000000)
-    XCTAssertEqual(ChromePalette.tether.well, 0x1E1E2E)
+    XCTAssertEqual(ChromePalette.tether.well, 0x000000)
     XCTAssertEqual(ChromePalette.tetherLight.accent, 0x4353D0)
     XCTAssertEqual(TerminalTheme.named("gone").chrome, .tether)
   }

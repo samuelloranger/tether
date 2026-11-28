@@ -28,7 +28,7 @@ public enum TetherColors {
 
   public static var heatCool: Color { accent }
 
-  /// Behind the terminal grid. Tether's is `#1E1E2E` in `#000000` chrome; for any other
+  /// Behind the terminal grid. Tether's is the `#000000` chrome itself; for any other
   /// theme it is the background itself.
   public static var well: Color { color(\.well) }
 
