@@ -40,7 +40,7 @@ struct ChatCardView: View {
       }
       VStack(alignment: .leading, spacing: 3) {
         Text(card.source).font(.chat(.caption))
-        Text("Fetched \(card.fetchedAt)").font(.chat(.caption2))
+        Text("Fetched \(Self.fetchedLabel(card.fetchedAt))").font(.chat(.caption2))
       }
       .foregroundStyle(TetherColors.textFaint).textSelection(.enabled)
       if card.supported && card.kind != "image" {
@@ -102,6 +102,13 @@ struct ChatCardView: View {
     }
   }
 
+  /// The viewer's own clock: the stamp carries the fetch's offset, which means little to the reader.
+  static func fetchedLabel(_ stamp: String) -> String {
+    let parser = ISO8601DateFormatter()
+    guard let date = parser.date(from: stamp) else { return stamp }
+    return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+  }
+
   private func hourLabel(_ stamp: String) -> String {
     let parser = ISO8601DateFormatter()
     guard let date = parser.date(from: stamp) else { return stamp }
@@ -134,7 +141,7 @@ struct ChatCardView: View {
         } label: {
           VStack(alignment: .leading, spacing: 3) {
             Text(container.name).font(.chat(.subheadline).weight(.medium)).foregroundStyle(TetherColors.textPrimary)
-            Text("\(container.state) · \(container.health ?? "Health unavailable")")
+            Text("\(container.state) · \(container.health ?? "health unavailable")")
               .font(.chat(.caption)).foregroundStyle(container.health == "unhealthy" ? TetherColors.warning : TetherColors.textSecondary)
           }
         }.tint(TetherColors.textSecondary)
