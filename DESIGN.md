@@ -39,7 +39,7 @@ Chrome: system sans (platform UI). Mono only inside the terminal grid and code/d
 
 ## Geometry
 
-Soft, consistent radii (cards and sheets ~12, controls ~9–11), hairline borders, no shadows or glass. Status reads as a word beside a dot, not a pill badge. Section labels are sentence case in the UI font, never tracked caps. Status text uses the UI font; monospace is for paths, commands, keys and addresses. The utility key bar is a flat row; an armed Ctrl is a solid text-colour fill.
+Soft, consistent radii (cards and sheets ~12, controls ~9–11), hairline borders, no shadows or glass. Status reads as a word beside a dot, not a pill badge. Section labels are sentence case in the UI font, never tracked caps. Status text uses the UI font; monospace is for paths, commands, keys and addresses. The utility key bar is a flat row; an armed Ctrl is a solid accent fill (it is a toggle).
 
 ## Surfaces
 

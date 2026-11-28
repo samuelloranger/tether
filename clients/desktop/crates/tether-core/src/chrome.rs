@@ -46,7 +46,7 @@ pub const TETHER: ChromePalette = ChromePalette {
     well: 0x000000,
 };
 
-/// Aurora light.
+/// Tether's light look: the same neutral greys, inverted, with the accent darkened for white.
 pub const TETHER_LIGHT: ChromePalette = ChromePalette {
     background: 0xF2F2F2,
     surface: 0xFFFFFF,
