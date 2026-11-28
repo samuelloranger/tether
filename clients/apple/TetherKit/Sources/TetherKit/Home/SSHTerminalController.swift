@@ -81,6 +81,16 @@ public final class SSHTerminalController {
     public var indicator: Indicator
     /// The header lamp's one word for the same state.
     public var shortLabel: String
+    /// Set for a refused host key; a mismatch is refused on every attempt, so it never offers Retry.
+    var hostKeyMismatch: (expected: String, got: String)?
+
+    var offersRetry: Bool { indicator.offersRetry && hostKeyMismatch == nil }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.message == rhs.message && lhs.indicator == rhs.indicator && lhs.shortLabel == rhs.shortLabel
+        && lhs.hostKeyMismatch?.expected == rhs.hostKeyMismatch?.expected
+        && lhs.hostKeyMismatch?.got == rhs.hostKeyMismatch?.got
+    }
   }
 
   /// Why a dial is being asked for. Everything automatic passes through the
@@ -1138,7 +1148,8 @@ public final class SSHTerminalController {
       return ConnectionCopy(message: "Connecting…", indicator: .spinner, shortLabel: "connecting")
     case let .failed(message):
       return ConnectionCopy(
-        message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error")
+        message: message, indicator: .error(symbol: "exclamationmark.triangle"), shortLabel: "error",
+        hostKeyMismatch: HostKeyMismatchMessage.parse(message))
     case .disconnected:
       // On a dead path the session is waiting for the network, not the host.
       switch reachability?.availability {

@@ -1316,9 +1316,13 @@ public struct SSHTerminalView: View {
         case let .error(symbol):
           Image(systemName: symbol).font(.app(.largeTitle)).foregroundStyle(TetherColors.danger)
         }
-        Text(copy.message).font(.footnote.monospaced())
-          .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
-        if copy.indicator.offersRetry {
+        if let mismatch = copy.hostKeyMismatch {
+          hostKeyMismatchDetail(mismatch)
+        } else {
+          Text(copy.message).font(.app(.footnote))
+            .foregroundStyle(TetherColors.textSecondary).multilineTextAlignment(.center)
+        }
+        if copy.offersRetry {
           Button("Retry") { Task { await controller.connect(trigger: .manual) } }
             .font(.app(.subheadline).weight(.semibold)).foregroundStyle(TetherColors.background)
             .padding(.horizontal, 20).padding(.vertical, 10)
@@ -1333,6 +1337,27 @@ public struct SSHTerminalView: View {
       .accessibilityElement(children: .contain)
       .accessibilityLabel(copy.message)
       .accessibilityIdentifier("sshTerminalStatus")
+    }
+  }
+
+  private func hostKeyMismatchDetail(_ mismatch: (expected: String, got: String)) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("This host's key changed").font(.app(.headline)).foregroundStyle(TetherColors.textPrimary)
+      Text("Tether refuses to connect. If the host was reinstalled or its key rotated on purpose, remove the saved key for this machine in its settings and connect again. Otherwise don't connect.")
+        .font(.app(.footnote)).foregroundStyle(TetherColors.textSecondary)
+      fingerprintRow("Expected", mismatch.expected)
+      fingerprintRow("Received", mismatch.got)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .contain)
+  }
+
+  private func fingerprintRow(_ label: String, _ value: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(label).font(.app(.caption).weight(.medium)).foregroundStyle(TetherColors.textSecondary)
+      Text(value).font(.footnote.monospaced())
+        .foregroundStyle(TetherColors.textPrimary).textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 

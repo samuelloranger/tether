@@ -40,6 +40,22 @@ struct SSHConnectionConfig: Equatable, Sendable {
   var rows: Int = 24
 }
 
+/// The mismatch travels as the failure's text; the one place that writes it also reads it back,
+/// so the terminal overlay can lay out the two fingerprints and withhold Retry.
+enum HostKeyMismatchMessage {
+  private static let head = "Host key changed — refused.\nExpected "
+  private static let sep = "\nGot "
+
+  static func text(expected: String, got: String) -> String { head + expected + sep + got }
+
+  static func parse(_ message: String) -> (expected: String, got: String)? {
+    guard message.hasPrefix(head) else { return nil }
+    let rest = message.dropFirst(head.count)
+    guard let range = rest.range(of: sep) else { return nil }
+    return (String(rest[..<range.lowerBound]), String(rest[range.upperBound...]))
+  }
+}
+
 enum SSHConnectError: Error, Equatable, LocalizedError {
   case hostKeyMismatch(expected: String, got: String)
   case auth(SSHAuthError)
@@ -50,7 +66,7 @@ enum SSHConnectError: Error, Equatable, LocalizedError {
   var errorDescription: String? {
     switch self {
     case let .hostKeyMismatch(expected, got):
-      return "Host key changed — refused.\nExpected \(expected)\nGot \(got)"
+      return HostKeyMismatchMessage.text(expected: expected, got: got)
     case let .auth(error):
       guard case let .allFailed(detail) = error, let detail, !detail.isEmpty else {
         return "Authentication failed. Check the key or password."
